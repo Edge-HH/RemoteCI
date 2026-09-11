@@ -131,11 +131,13 @@ jobs:
           "$apksigner" verify --print-certs "RemoteCI.Watch-${version}.apk"
           mkdir previous-watch
           # 不使用 GitHub 的“latest”快捷入口：当历史 Release 全是预发布时，该入口会返回 404。
-          # 当前 Release 尚未创建，因此列表中的首个非草稿项就是上一已发布版本。
+          # Release 页面可能先创建当前标签对应的空 Release；必须排除当前标签，
+          # 才能下载真正上一版 APK 并校验签名证书是否延续。
           previous_tag="$(
             gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
               --json tagName,isDraft \
-              --jq '[.[] | select(.isDraft == false)][0].tagName'
+              --jq '.[] | select(.isDraft == false) | .tagName' \
+              | bash .github/scripts/select-previous-release-tag.sh "$GITHUB_REF_NAME"
           )"
           test -n "$previous_tag" || {
             echo "::error::找不到可用于校验签名的上一已发布版本"
