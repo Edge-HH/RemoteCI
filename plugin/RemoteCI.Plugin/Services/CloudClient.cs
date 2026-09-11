@@ -319,7 +319,7 @@ public sealed class CloudClient : IDisposable
                     return;
                 }
                 stream.Write(buffer, 0, result.Count);
-                if (stream.Length > 256 * 1024) throw new InvalidDataException("云端消息超过 256 KiB");
+                if (stream.Length > VoiceMessageRequest.MaxEnvelopeBytes) throw new InvalidDataException("云端消息过大");
             } while (!result.EndOfMessage);
 
             await HandleMessageAsync(Encoding.UTF8.GetString(stream.ToArray()), ct);

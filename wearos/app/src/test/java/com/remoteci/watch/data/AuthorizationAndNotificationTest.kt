@@ -12,6 +12,23 @@ import kotlin.test.assertTrue
 
 class AuthorizationAndNotificationTest {
     @Test
+    fun `voice requires explicit capability from both server and plugin`() {
+        assertFalse(Protocol.CAP_VOICE_MESSAGE_SEND in Protocol.BASELINE_CAPABILITIES)
+        assertFalse(Protocol.CAP_VOICE_MESSAGE_SEND in effectiveCapabilities(CapabilitiesSync(
+            server = PeerCapabilities(capabilities = Protocol.CURRENT_CAPABILITIES.toList()),
+            plugin = PeerCapabilities(capabilities = Protocol.BASELINE_CAPABILITIES.toList()),
+        )))
+        assertTrue(Protocol.CAP_VOICE_MESSAGE_SEND in effectiveCapabilities(CapabilitiesSync(
+            server = PeerCapabilities(capabilities = Protocol.CURRENT_CAPABILITIES.toList()),
+            plugin = PeerCapabilities(capabilities = Protocol.CURRENT_CAPABILITIES.toList()),
+        )))
+        val command = Json.decodeFromString<CommandMessage>("""{"command":9,"voiceMessage":{"format":"pcm_s16le_16000_mono","audioBase64":"AAA="}}""")
+        assertEquals(Protocol.CMD_SEND_VOICE_MESSAGE, command.command)
+        assertEquals("AAA=", command.voiceMessage?.audioBase64)
+        assertEquals(0, Protocol.PERMISSION_SEND_VOICE_MESSAGES and Protocol.PERMISSION_SEND_NOTIFICATIONS)
+    }
+
+    @Test
     fun `effective capabilities require watch server and plugin support`() {
         val effective = effectiveCapabilities(
             CapabilitiesSync(

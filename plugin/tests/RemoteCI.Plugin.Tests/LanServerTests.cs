@@ -13,6 +13,52 @@ namespace RemoteCI.Plugin.Tests;
 
 public sealed class LanServerTests
 {
+    [Theory]
+    [InlineData(UserPermissions.SendVoiceMessages, false, true)]
+    [InlineData(UserPermissions.SendNotifications, false, false)]
+    [InlineData(UserPermissions.SendVoiceMessages, true, false)]
+    public async Task VoiceMessage_LanRequiresIndependentPermissionAndFreshMirror(
+        UserPermissions permissions, bool stale, bool allowed)
+    {
+        var (mirror, sessionId, secret) = CreateFreshMirror(
+            stale ? DateTimeOffset.UtcNow.AddDays(-2) : DateTimeOffset.UtcNow, permissions);
+        CommandMessage? received = null;
+        var server = CreateServer(mirror, commandHandler: command =>
+        {
+            received = command;
+            return Task.FromResult(new CommandResult { Success = true, Code = CommandResultCodes.Ok });
+        });
+        var socket = new FakeSocket();
+        server.OnOpened(socket);
+        var challenge = ConvertPayload<AuthChallenge>(ParseEnvelope(socket.Sent[0]).Payload);
+        await server.OnMessageAsync(socket, SerializeEnvelope(new Envelope
+        {
+            Type = Protocol.MessageTypeAuthProof, Payload = BuildValidProof(challenge, sessionId, secret),
+        }));
+        var request = Envelope.Command(new CommandMessage
+        {
+            Command = CommandKind.SendVoiceMessage,
+            VoiceMessage = new() { AudioBase64 = Convert.ToBase64String(new byte[VoiceMessageRequest.MaxBytes]) },
+            RequestedBy = new UserProfile { DisplayName = "伪造发送人", Permissions = UserPermissions.All },
+        });
+        await server.OnMessageAsync(socket, SerializeEnvelope(request));
+        var reply = ParseEnvelope(socket.Sent[^1]);
+        var result = ConvertPayload<CommandResult>(reply.Payload);
+        Assert.Equal(request.MessageId, reply.ReplyToMessageId);
+        Assert.Equal(allowed, result.Success);
+        if (allowed)
+        {
+            Assert.Equal("管理员", received!.RequestedBy!.DisplayName);
+            Assert.True(VoiceMessageRequest.TryDecode(received.VoiceMessage, out var audio));
+            Assert.Equal(VoiceMessageRequest.MaxBytes, audio.Length);
+        }
+        else
+        {
+            Assert.Null(received);
+            Assert.Equal(CommandResultCodes.Forbidden, result.Code);
+        }
+    }
+
     [Fact]
     public void OnOpened_BootstrapPathSendsCloudBootstrapAndCloses()
     {
@@ -256,7 +302,8 @@ public sealed class LanServerTests
         NullLogger<LanServer>.Instance,
         commandHandler: commandHandler);
 
-    private static (AccountMirror Mirror, Guid SessionId, string Secret) CreateFreshMirror(DateTimeOffset? generatedAt = null)
+    private static (AccountMirror Mirror, Guid SessionId, string Secret) CreateFreshMirror(
+        DateTimeOffset? generatedAt = null, UserPermissions permissions = UserPermissions.All)
     {
         var secret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
         var verifier = SHA256.HashData(Encoding.UTF8.GetBytes(secret));
@@ -273,8 +320,8 @@ public sealed class LanServerTests
                 Id = userId,
                 Username = "admin",
                 DisplayName = "管理员",
-                Role = UserRole.Admin,
-                EffectivePermissions = UserPermissions.All,
+                Role = permissions == UserPermissions.All ? UserRole.Admin : UserRole.User,
+                EffectivePermissions = permissions | UserPermissions.ViewCurrentCourse,
                 Enabled = true,
                 Version = 1,
             }],

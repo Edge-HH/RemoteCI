@@ -474,7 +474,7 @@ public sealed partial class IdentityCoordinator(
             Version = accountVersion,
             ServerInstanceId = InstanceId,
             ServerVersion = AppVersion.Version,
-            ServerCapabilities = RemoteCiCapabilities.Baseline.ToList(),
+            ServerCapabilities = RemoteCiCapabilities.Current.ToList(),
             GeneratedAt = now,
             Accounts = accounts,
             Sessions = sessions,

@@ -31,6 +31,7 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
     private readonly TextBlock _connectionError;
     private readonly TextBlock _connectionTestHint;
     private readonly TextBlock _hint;
+    private readonly ToggleSwitch _showDeveloperSettingsToggle;
 
     public RemoteCiSettingsPage(PluginSettings settings, RemoteCiService? service = null)
     {
@@ -40,6 +41,12 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
         _portBox = new TextBox { Text = settings.LanServerPort.ToString(), Watermark = "端口（默认 8765）" };
         _cloudUrlBox = new TextBox { Text = settings.CloudServerUrl, Watermark = "云端地址，如 https://nas:8080" };
         _pairCodeBox = new TextBox { Text = settings.PluginPairCode, Watermark = "WebUI 生成的一次性插件配对码" };
+        _showDeveloperSettingsToggle = new ToggleSwitch
+        {
+            IsChecked = settings.ShowDeveloperSettingsMenu,
+            OnContent = "开",
+            OffContent = "关",
+        };
 
         // 明文 HTTP 会把配对码、密码与课表数据暴露给同网段任何设备，必须醒目提示。
         _httpWarning = new TextBlock
@@ -117,6 +124,29 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
                     Spacing = 6,
                     Children = { new TextBlock { Text = "一次性插件配对码" }, _pairCodeBox },
                 },
+                new Grid
+                {
+                    ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+                    ColumnSpacing = 12,
+                    Children =
+                    {
+                        new StackPanel
+                        {
+                            Spacing = 2,
+                            Children =
+                            {
+                                new TextBlock { Text = "显示开发者设置菜单" },
+                                new TextBlock
+                                {
+                                    Text = "开发者功能用于诊断和测试，修改后需重启 ClassIsland。",
+                                    Opacity = 0.7,
+                                    TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                                },
+                            },
+                        },
+                        new Border { Child = _showDeveloperSettingsToggle, [Grid.ColumnProperty] = 1 },
+                    },
+                },
                 saveButton,
                 _pushScheduleButton,
                 _hint,
@@ -175,6 +205,7 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
             ? "http://localhost:8080"
             : urlText;
         _settings.PluginPairCode = _pairCodeBox.Text?.Trim() ?? string.Empty;
+        _settings.ShowDeveloperSettingsMenu = _showDeveloperSettingsToggle.IsChecked == true;
         // 属性变更已由 Plugin.cs 的 PropertyChanged 订阅自动落盘，无需重复写 Settings.json。
 
         _hint.Text = "已保存。服务器地址与端口在重启 ClassIsland 后生效；配对码保存后可点击“测试服务器连接”立即尝试配对。";

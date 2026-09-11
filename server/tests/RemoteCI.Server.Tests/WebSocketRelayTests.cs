@@ -19,6 +19,51 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     public WebSocketRelayTests(TestWebApplicationFactory factory) => _factory = factory;
 
     [Fact]
+    public async Task VoiceMessage_RelaysFullMinuteWithAuthenticatedSenderAndCorrelatedReply()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
+        await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>().PrimaryPluginSupports(RemoteCiCapabilities.VoiceMessageSend));
+        using var watch = await ConnectWatchAsync();
+        var audio = new byte[VoiceMessageRequest.MaxBytes];
+        new Random(42).NextBytes(audio);
+        var request = Envelope.Command(new CommandMessage
+        {
+            Command = CommandKind.SendVoiceMessage,
+            VoiceMessage = new() { AudioBase64 = Convert.ToBase64String(audio) },
+            RequestedBy = new UserProfile { DisplayName = "伪造发送人", Permissions = UserPermissions.All },
+        });
+        await SendAsync(watch, request);
+        var forwarded = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
+        var command = ConvertPayload<CommandMessage>(forwarded.Payload);
+        Assert.True(VoiceMessageRequest.TryDecode(command.VoiceMessage, out var received));
+        Assert.Equal(audio, received);
+        Assert.NotEqual("伪造发送人", command.RequestedBy!.DisplayName);
+        Assert.Equal(TestWebApplicationFactory.AdminUsername, command.RequestedBy.Username);
+        await SendAsync(plugin, new Envelope
+        {
+            Type = Protocol.MessageTypeCommandResult, ReplyToMessageId = forwarded.MessageId,
+            Payload = new CommandResult { Success = true, Code = CommandResultCodes.Ok },
+        });
+        var reply = await ReceiveEnvelopeAsync(watch, Protocol.MessageTypeCommandResult);
+        Assert.Equal(request.MessageId, reply.ReplyToMessageId);
+        Assert.True(ConvertPayload<CommandResult>(reply.Payload).Success);
+    }
+
+    [Fact]
+    public async Task VoiceMessage_RejectsMalformedAudioBeforeForwarding()
+    {
+        using var watch = await ConnectWatchAsync();
+        await SendAsync(watch, Envelope.Command(new CommandMessage
+        {
+            Command = CommandKind.SendVoiceMessage, VoiceMessage = new() { AudioBase64 = "AAA" },
+        }));
+        var result = await ReceivePayloadAsync<CommandResult>(watch, Protocol.MessageTypeCommandResult);
+        Assert.Equal(CommandResultCodes.InvalidRequest, result.Code);
+    }
+
+    [Fact]
     public async Task WatchAuthentication_ReportsConnectedServerVersion()
     {
         using var watch = await ConnectWatchAsync();
@@ -648,8 +693,15 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         while (true)
         {
             var buffer = new byte[256 * 1024];
-            var result = await socket.ReceiveAsync(buffer, timeout.Token);
-            var json = Encoding.UTF8.GetString(buffer, 0, result.Count);
+            using var message = new MemoryStream();
+            WebSocketReceiveResult result;
+            do
+            {
+                result = await socket.ReceiveAsync(buffer, timeout.Token);
+                Assert.NotEqual(WebSocketMessageType.Close, result.MessageType);
+                message.Write(buffer, 0, result.Count);
+            } while (!result.EndOfMessage);
+            var json = Encoding.UTF8.GetString(message.ToArray());
             var envelope = JsonSerializer.Deserialize<Envelope>(json, JsonDefaults.Options)!;
             if (envelope.Type == expectedType) return envelope;
         }

@@ -1543,6 +1543,59 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.True(admin.AccessToken.Length > 0);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task VoicePermission_IsIndependentInRestAndWebUi(bool voiceGranted)
+    {
+        var username = voiceGranted ? "voice.only" : "notice.only";
+        var admin = await _factory.LoginAsync();
+        var create = await _client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post, "/api/users", admin.AccessToken,
+            new CreateUserRequest
+            {
+                Username = username, DisplayName = "语音权限测试", Password = "Voice-Password-2026",
+                GrantedPermissions = UserPermissions.AccessWebUi |
+                    (voiceGranted ? UserPermissions.SendVoiceMessages : UserPermissions.SendNotifications),
+            }));
+        create.EnsureSuccessStatusCode();
+        var auth = await LoginAsync(username, "Voice-Password-2026");
+        var response = await _client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post, "/api/commands", auth.AccessToken,
+            new CommandMessage { Command = CommandKind.SendVoiceMessage, VoiceMessage = new() { AudioBase64 = "AAA=" } }));
+        Assert.Equal(voiceGranted ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.Forbidden, response.StatusCode);
+        using var browser = CreateBrowserClient();
+        await LoginWebUiAsync(browser, username, "Voice-Password-2026");
+        var html = await browser.GetStringAsync("/Control");
+        Assert.Equal(voiceGranted, html.Contains("data-voice-form"));
+        Assert.Equal(!voiceGranted, html.Contains("id=\"send-notification\""));
+        // 二进制上传仍受 Razor 防伪保护，不能通过跨站请求触发教室播放。
+        using var missingToken = new ByteArrayContent([0, 0]);
+        missingToken.Headers.ContentType = new("application/octet-stream");
+        Assert.Equal(HttpStatusCode.BadRequest, (await browser.PostAsync("/Control?handler=VoiceMessage", missingToken)).StatusCode);
+        var token = Regex.Match(html, "name=\"__RequestVerificationToken\"[^>]+value=\"([^\"]+)\"").Groups[1].Value;
+        using var upload = new HttpRequestMessage(HttpMethod.Post, "/Control?handler=VoiceMessage") { Content = new ByteArrayContent([0, 0]) };
+        upload.Headers.Add("X-CSRF-TOKEN", WebUtility.HtmlDecode(token));
+        upload.Content.Headers.ContentType = new("application/octet-stream");
+        var uploaded = await browser.SendAsync(upload);
+        if (voiceGranted)
+        {
+            uploaded.EnsureSuccessStatusCode();
+            Assert.Equal(CommandResultCodes.PluginOffline, (await uploaded.Content.ReadFromJsonAsync<CommandResult>())!.Code);
+        }
+        else Assert.Equal(HttpStatusCode.Redirect, uploaded.StatusCode);
+    }
+
+    [Fact]
+    public async Task VoicePermissionAppearsInUserAndRoleAssignmentForms()
+    {
+        using var browser = CreateBrowserClient();
+        await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
+        var html = await browser.GetStringAsync("/Users");
+        Assert.Contains("Create.SendVoiceMessages", html);
+        Assert.Contains("Edit.SendVoiceMessages", html);
+        Assert.Contains("RoleEdit.SendVoiceMessages", html);
+        Assert.Equal(UserPermissions.SendVoiceMessages, new RemoteCI.Server.Pages.UsersModel.UserInput { SendVoiceMessages = true }.Grants);
+    }
+
     private HttpClient CreateBrowserClient() => _factory.CreateClient(new WebApplicationFactoryClientOptions
     {
         AllowAutoRedirect = false,

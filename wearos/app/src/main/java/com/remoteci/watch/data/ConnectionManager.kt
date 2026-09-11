@@ -94,6 +94,31 @@ object ConnectionManager {
     val settings = MutableStateFlow<SettingsSync?>(null)
     val events = MutableSharedFlow<ClassEvent>(extraBufferCapacity = 32)
     val lastCommandResult = MutableStateFlow<CommandResult?>(null)
+    private val voiceReplies = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<CommandResult>>()
+
+    /** 语音体积较大，在后台编码，并只接受本条消息的回执；断线时不自动重发。 */
+    suspend fun sendVoiceMessage(audio: ByteArray): CommandResult = withContext(Dispatchers.IO) {
+        if (currentUser.value?.has(Protocol.PERMISSION_SEND_VOICE_MESSAGES) != true)
+            return@withContext CommandResult(false, "FORBIDDEN", "没有发送语音权限")
+        if (!supports(Protocol.CAP_VOICE_MESSAGE_SEND))
+            return@withContext CommandResult(false, "CAPABILITY_UNSUPPORTED", "请更新服务端和插件以支持语音")
+        if (audio.isEmpty() || audio.size > 16000 * 2 * 60 || audio.size % 2 != 0)
+            return@withContext CommandResult(false, "INVALID_REQUEST", "录音无效或超过 60 秒")
+        val id = newMessageId()
+        val reply = kotlinx.coroutines.CompletableDeferred<CommandResult>()
+        voiceReplies[id] = reply
+        try {
+            val command = CommandMessage(command = Protocol.CMD_SEND_VOICE_MESSAGE,
+                voiceMessage = VoiceMessageRequest(audioBase64 = android.util.Base64.encodeToString(audio, android.util.Base64.NO_WRAP)))
+            val envelope = Envelope(type = Protocol.TYPE_COMMAND, messageId = id,
+                payload = json.encodeToJsonElement(CommandMessage.serializer(), command))
+            if (webSocket?.send(json.encodeToString(Envelope.serializer(), envelope)) != true)
+                return@withContext CommandResult(false, "OFFLINE", "连接已断开，语音未发送")
+            withTimeout(20_000) { reply.await() }
+        } catch (_: TimeoutCancellationException) {
+            CommandResult(false, "COMMAND_TIMEOUT", "未收到回执，请确认课表端是否已播放后再重试")
+        } finally { voiceReplies.remove(id) }
+    }
     val schedulePullState = MutableStateFlow<SchedulePullState>(SchedulePullState.Idle)
     /** 网络发现或成功直连后产生的本地设置更新，由界面层持久化。 */
     val discoveredSettings = MutableSharedFlow<WatchSettings>(extraBufferCapacity = 1)
@@ -671,7 +696,10 @@ object ConnectionManager {
             null
         }
         Protocol.TYPE_COMMAND_RESULT -> {
-            decodePayload(envelope.payload, CommandResult.serializer())?.let { lastCommandResult.value = it }
+            decodePayload(envelope.payload, CommandResult.serializer())?.let {
+                lastCommandResult.value = it
+                envelope.replyToMessageId?.let { id -> voiceReplies[id]?.complete(it) }
+            }
             null
         }
         else -> null
@@ -680,7 +708,7 @@ object ConnectionManager {
     private fun sendCapabilitiesReport(socket: WebSocket) {
         val report = PeerCapabilities(
             softwareVersion = BuildConfig.VERSION_NAME,
-            capabilities = Protocol.BASELINE_CAPABILITIES.toList(),
+            capabilities = Protocol.CURRENT_CAPABILITIES.toList(),
         )
         socket.send(
             json.encodeToString(
@@ -785,7 +813,7 @@ object ConnectionManager {
 }
 
 internal fun effectiveCapabilities(sync: CapabilitiesSync): Set<String> =
-    Protocol.BASELINE_CAPABILITIES
+    Protocol.CURRENT_CAPABILITIES
         .intersect(sync.server.capabilities.toSet())
         .intersect(sync.plugin?.capabilities?.toSet() ?: emptySet())
 

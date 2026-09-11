@@ -13,6 +13,12 @@ namespace RemoteCI.Plugin.Services;
     "显示管理员从 RemoteCI 手表或 WebUI 发送的通知")]
 public sealed class RemoteNotificationProvider : NotificationProviderBase<NotificationSettings>
 {
+    public async Task ShowVoiceMessageNotificationAsync(string title) =>
+        await Dispatcher.UIThread.InvokeAsync(() => ShowNotification(BuildVoiceMessageNotification(Settings, title)));
+
+    internal static NotificationRequest BuildVoiceMessageNotification(NotificationSettings settings, string title) =>
+        BuildNotificationRequest(settings, title, string.Empty, true, false, false);
+
     public async Task ShowRemoteNotificationAsync(
         string title,
         string message,
@@ -46,7 +52,8 @@ public sealed class RemoteNotificationProvider : NotificationProviderBase<Notifi
                 x.Duration = TimeSpan.FromSeconds(4);
                 x.IsSpeechEnabled = isSpeechEnabled;
             }),
-            OverlayContent = NotificationContent.CreateSimpleTextContent(message, factory: x =>
+            // ClassIsland 以 null 跳过正文阶段；空文本内容仍会显示一个空白正文区域。
+            OverlayContent = string.IsNullOrWhiteSpace(message) ? null : NotificationContent.CreateSimpleTextContent(message, factory: x =>
             {
                 x.Duration = TimeSpan.FromSeconds(8);
                 x.IsSpeechEnabled = isSpeechEnabled;

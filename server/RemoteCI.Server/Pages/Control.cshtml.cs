@@ -37,6 +37,7 @@ public sealed class ControlModel(
     public IReadOnlyList<ExtensionControlItem> Extensions { get; private set; } = [];
     public bool CanTeacherComing => Permissions.HasFlag(UserPermissions.TeacherComing) && Supports(RemoteCiCapabilities.TeacherComing);
     public bool CanSendNotifications => Permissions.HasFlag(UserPermissions.SendNotifications) && Supports(RemoteCiCapabilities.NotificationSend);
+    public bool CanSendVoiceMessages => Permissions.HasFlag(UserPermissions.SendVoiceMessages) && Supports(RemoteCiCapabilities.VoiceMessageSend);
     public bool CanClearNotifications => Permissions.HasFlag(UserPermissions.SendNotifications) && Supports(RemoteCiCapabilities.NotificationClear);
     public bool CanControlMainMenu => Permissions.HasFlag(UserPermissions.MainMenuControl) && Supports(RemoteCiCapabilities.MainMenuVisibility);
     public bool CanControlPower => Permissions.HasFlag(UserPermissions.PowerControl) && Supports(RemoteCiCapabilities.PowerControl);
@@ -55,6 +56,30 @@ public sealed class ControlModel(
         if (await RequireAsync(UserPermissions.TeacherComing) is { } denied) return denied;
         return RedirectWithResult(await SendAsync(
             new CommandMessage { Command = CommandKind.TeacherComing }, ct));
+    }
+
+    public async Task<IActionResult> OnPostVoiceMessageAsync(CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.SendVoiceMessages) is { } denied) return denied;
+        // 原始 PCM 请求不经过表单文件缓存，不在服务器临时目录保留录音。
+        if (Request.ContentType != "application/octet-stream" || Request.ContentLength is > VoiceMessageRequest.MaxBytes)
+            return new JsonResult(CommandResult.Failure(CommandResultCodes.InvalidRequest, "语音格式无效或超过 60 秒"));
+        using var audio = new MemoryStream();
+        var buffer = new byte[16 * 1024];
+        int count;
+        while ((count = await Request.Body.ReadAsync(buffer, ct)) > 0)
+        {
+            if (audio.Length + count > VoiceMessageRequest.MaxBytes)
+                return new JsonResult(CommandResult.Failure(CommandResultCodes.InvalidRequest, "语音不能超过 60 秒"));
+            audio.Write(buffer, 0, count);
+        }
+        if (audio.Length < 2 || audio.Length % 2 != 0)
+            return new JsonResult(CommandResult.Failure(CommandResultCodes.InvalidRequest, "没有有效录音，请重新录制"));
+        return new JsonResult(await SendAsync(new CommandMessage
+        {
+            Command = CommandKind.SendVoiceMessage,
+            VoiceMessage = new VoiceMessageRequest { AudioBase64 = Convert.ToBase64String(audio.ToArray()) },
+        }, ct));
     }
 
     public async Task<IActionResult> OnPostNotificationAsync(CancellationToken ct)
@@ -245,7 +270,7 @@ public sealed class ControlModel(
             Permissions,
             store.GetLatestExtensions() ?? [],
             ct);
-        return !CanTeacherComing && !CanSendNotifications && !CanClearNotifications && !CanControlMainMenu &&
+        return !CanTeacherComing && !CanSendNotifications && !CanSendVoiceMessages && !CanClearNotifications && !CanControlMainMenu &&
             !CanControlPower && !CanControlVolume && !CanUseExtensions
             ? RedirectToPage("/Denied")
             : null;

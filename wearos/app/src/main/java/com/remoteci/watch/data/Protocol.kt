@@ -47,6 +47,7 @@ object Protocol {
     const val CMD_VOLUME = 6
     const val CMD_RUN_EXTENSION = 7
     const val CMD_TEACHER_COMING = 8
+    const val CMD_SEND_VOICE_MESSAGE = 9
     const val POWER_SHUTDOWN = 1
     const val POWER_RESTART = 2
     const val POWER_SLEEP = 3
@@ -71,6 +72,7 @@ object Protocol {
     const val PERMISSION_TEACHER_COMING = 64
     const val PERMISSION_RUN_EXTENSIONS = 128
     const val PERMISSION_MAIN_MENU_CONTROL = 256
+    const val PERMISSION_SEND_VOICE_MESSAGES = 512
 
     const val SCHEDULE_SOURCE_PLUGIN = 1
     const val SCHEDULE_SOURCE_WEB_UI = 2
@@ -88,6 +90,7 @@ object Protocol {
     const val CAP_SCHEDULE_PULL = "schedule.pull"
     const val CAP_SCHEDULE_CHANGE = "schedule.change"
     const val CAP_NOTIFICATION_SEND = "notification.send"
+    const val CAP_VOICE_MESSAGE_SEND = "voice-message.send"
     const val CAP_NOTIFICATION_CLEAR = "notification.clear"
     const val CAP_TEACHER_COMING = "teacher-coming"
     const val CAP_MAIN_MENU_VISIBILITY = "main-menu.visibility"
@@ -108,6 +111,7 @@ object Protocol {
         CAP_VOLUME_CONTROL,
         CAP_EXTENSIONS_RUN,
     )
+    val CURRENT_CAPABILITIES = BASELINE_CAPABILITIES + CAP_VOICE_MESSAGE_SEND
 }
 
 @Serializable
@@ -272,11 +276,18 @@ data class CommandMessage(
     val command: Int,
     @SerialName("scheduleChange") val scheduleChange: ScheduleChangeRequest? = null,
     val notification: NotificationRequest? = null,
+    @SerialName("voiceMessage") val voiceMessage: VoiceMessageRequest? = null,
     @SerialName("mainMenuVisible") val mainMenuVisible: Boolean? = null,
     @SerialName("powerAction") val powerAction: Int? = null,
     val volume: VolumeControlRequest? = null,
     @SerialName("extensionId") val extensionId: String? = null,
     @SerialName("extensionArgs") val extensionArgs: Map<String, String?>? = null,
+)
+
+@Serializable
+data class VoiceMessageRequest(
+    val format: String = "pcm_s16le_16000_mono",
+    @SerialName("audioBase64") val audioBase64: String,
 )
 
 @Serializable

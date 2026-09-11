@@ -76,7 +76,7 @@ public sealed class PeerRegistry(
     /// <summary>管理员状态页使用的连接级诊断，不包含令牌或凭据。</summary>
     public IReadOnlyList<PeerCapabilityDiagnostic> GetCapabilityDiagnostics()
     {
-        var server = RemoteCiCapabilities.Baseline.ToHashSet(StringComparer.Ordinal);
+        var server = RemoteCiCapabilities.Current.ToHashSet(StringComparer.Ordinal);
         var primary = PrimaryPlugin();
         var primaryCapabilities = primary is null
             ? new HashSet<string>(StringComparer.Ordinal)
@@ -309,6 +309,8 @@ public sealed class PeerRegistry(
     public async Task<CommandResult> SendCommandAndWaitAsync(
         CommandMessage command, TimeSpan timeout, CancellationToken ct = default)
     {
+        if (command.Command == CommandKind.SendVoiceMessage && !VoiceMessageRequest.TryDecode(command.VoiceMessage, out _))
+            return CommandResult.Failure(CommandResultCodes.InvalidRequest, "语音格式无效或超过 60 秒");
         if (!HasPlugin) return CommandResult.Failure(CommandResultCodes.PluginOffline, "插件未在线，操作未执行");
         if (RemoteCiCapabilities.Required(command.Command) is { } capability &&
             !PrimaryPluginSupports(capability))

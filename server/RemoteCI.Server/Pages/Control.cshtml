@@ -16,6 +16,25 @@
 </div>
 
 <div class="control-grid">
+    @if (Model.CanSendVoiceMessages)
+    {
+        <section class="panel control-card control-card-full" id="voice-message">
+            <div class="control-card-head">
+                <span class="feature-icon"><i class="bi bi-mic" aria-hidden="true"></i></span>
+                <div><h2>语音消息</h2><p class="muted">录制并试听后发送，ClassIsland 会自动播放。每条最长 60 秒。</p></div>
+            </div>
+            <form method="post" asp-page-handler="VoiceMessage" class="stack" data-voice-form data-worklet-url="@Url.Content("~/voice-recorder-worklet.js")">
+                <div class="control-actions">
+                    <button type="button" data-voice-record disabled="@(!Model.PluginOnline)">开始录音</button>
+                    <button type="button" class="ghost" data-voice-stop disabled>停止录音</button>
+                    <button type="button" class="ghost" data-voice-discard disabled>丢弃</button>
+                    <button type="submit" data-voice-send disabled>发送语音</button>
+                </div>
+                <audio controls data-voice-preview hidden aria-label="试听语音"></audio>
+                <p class="control-note" data-voice-status role="status">需要允许麦克风权限；浏览器录音需要 HTTPS 或 localhost。</p>
+            </form>
+        </section>
+    }
     @if (Model.CanTeacherComing)
     {
         <section class="panel control-card" id="teacher-coming">

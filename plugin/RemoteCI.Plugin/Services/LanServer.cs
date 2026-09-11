@@ -158,6 +158,11 @@ public sealed class LanServer : IDisposable
 
     internal async Task OnMessageAsync(IWebSocketConnection socket, string message)
     {
+        if (System.Text.Encoding.UTF8.GetByteCount(message) > VoiceMessageRequest.MaxEnvelopeBytes)
+        {
+            socket.Close();
+            return;
+        }
         if (!_clients.TryGetValue(socket.ConnectionInfo.Id, out var client)) return;
         // 同一条连接的消息串行处理，避免命令并发执行与回执乱序。
         try

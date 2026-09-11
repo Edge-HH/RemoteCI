@@ -66,6 +66,7 @@ public class Plugin : PluginBase
         services.AddSingleton<IStateSource, StateSourceAdapter>();
         services.AddSingleton<ScheduleCatalog>();
         services.AddSingleton<ClassIslandHostControlService>();
+        services.AddSingleton<VoiceMessagePlayer>();
         services.AddSingleton<CommandHandler>();
         services.AddSingleton<ClassIslandNotificationBridge>();
         services.AddSingleton<StateCollector>();
@@ -75,7 +76,9 @@ public class Plugin : PluginBase
         services.AddSingleton<IRemoteCiExtensionRegistry, RemoteCiExtensionRegistry>();
         services.AddNotificationProvider<RemoteNotificationProvider>();
         services.AddSettingsPage<RemoteCiSettingsPage>();
-        services.AddSettingsPage<RemoteCiDeveloperSettingsPage>();
+        // 设置页注册表在 ClassIsland 启动时构建，因此开关保存后需重启才会改变菜单。
+        if (ShouldRegisterDeveloperSettingsPage(Settings))
+            services.AddSettingsPage<RemoteCiDeveloperSettingsPage>();
 
         var app = AppBase.Current;
         app.AppStarted += (_, _) =>
@@ -102,4 +105,7 @@ public class Plugin : PluginBase
         };
         app.AppStopping += (_, _) => _service?.Stop();
     }
+
+    internal static bool ShouldRegisterDeveloperSettingsPage(PluginSettings settings) =>
+        settings.ShowDeveloperSettingsMenu;
 }

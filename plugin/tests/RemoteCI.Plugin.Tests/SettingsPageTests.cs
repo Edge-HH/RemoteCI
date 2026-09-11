@@ -36,6 +36,20 @@ public sealed class SettingsPageTests
     }
 
     [Fact]
+    public void DeveloperSettingsMenu_IsHiddenByDefaultAndCanBeEnabled()
+    {
+        var settings = new PluginSettings();
+        var page = new RemoteCiSettingsPage(settings);
+
+        Assert.False(settings.ShowDeveloperSettingsMenu);
+        Assert.False(Plugin.ShouldRegisterDeveloperSettingsPage(settings));
+        Assert.Contains("显示开发者设置菜单", TextLabels(page.Content));
+
+        settings.ShowDeveloperSettingsMenu = true;
+        Assert.True(Plugin.ShouldRegisterDeveloperSettingsPage(settings));
+    }
+
+    [Fact]
     public void ConnectionStatusText_ShowsCurrentServerState()
     {
         var status = new CloudConnectionStatus(
@@ -75,6 +89,19 @@ public sealed class SettingsPageTests
 
         Assert.Contains("启用云端中转", CheckBoxLabels(page.Content));
         Assert.Contains("启用局域网直连服务", CheckBoxLabels(page.Content));
+    }
+
+    [Fact]
+    public void DeveloperSettings_ExposesRealVoiceReceiveTest()
+    {
+        var page = new RemoteCiDeveloperSettingsPage(new PluginSettings());
+        var command = RemoteCiDeveloperSettingsPage.CreateTestVoiceCommand();
+
+        Assert.Contains("测试接收语音", ButtonLabels(page.Content));
+        Assert.Equal(CommandKind.SendVoiceMessage, command.Command);
+        Assert.True(command.RequestedBy!.Permissions.HasFlag(UserPermissions.SendVoiceMessages));
+        Assert.True(VoiceMessageRequest.TryDecode(command.VoiceMessage, out var audio));
+        Assert.Equal(VoiceMessageRequest.SampleRate * sizeof(short) * 2, audio.Length);
     }
 
     [Theory]
@@ -123,6 +150,23 @@ public sealed class SettingsPageTests
         {
             if (node is CheckBox { Content: not null } checkBox)
                 labels.Add(checkBox.Content.ToString()!);
+            if (node is ContentControl contentControl) Visit(contentControl.Content);
+            if (node is Panel panel)
+            {
+                foreach (var child in panel.Children) Visit(child);
+            }
+        }
+    }
+
+    private static IReadOnlyList<string> TextLabels(object? root)
+    {
+        var labels = new List<string>();
+        Visit(root);
+        return labels;
+
+        void Visit(object? node)
+        {
+            if (node is TextBlock { Text: not null } textBlock) labels.Add(textBlock.Text);
             if (node is ContentControl contentControl) Visit(contentControl.Content);
             if (node is Panel panel)
             {

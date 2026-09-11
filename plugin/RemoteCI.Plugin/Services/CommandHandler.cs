@@ -18,6 +18,7 @@ public sealed class CommandHandler
     private readonly ClassIslandHostControlService _hostControl;
     private readonly ILogger _logger;
     private readonly ExtensionCommandRouter _extensionRouter;
+    private readonly VoiceMessagePlayer _voiceMessages;
 
     public CommandHandler(
         ScheduleCatalog schedules,
@@ -26,7 +27,8 @@ public sealed class CommandHandler
         ClassIslandHostControlService hostControl,
         IEnumerable<IHostedService> hostedServices,
         IRemoteCiExtensionRegistry extensions,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        VoiceMessagePlayer? voiceMessages = null)
     {
         _schedules = schedules;
         _scheduleBackend = scheduleBackend;
@@ -35,6 +37,7 @@ public sealed class CommandHandler
         _notifications = hostedServices.OfType<RemoteNotificationProvider>().Single();
         _logger = loggerFactory.CreateLogger<CommandHandler>();
         _extensionRouter = new ExtensionCommandRouter(extensions, loggerFactory);
+        _voiceMessages = voiceMessages ?? new VoiceMessagePlayer();
     }
 
     public event Action<ClassEvent>? NotificationSent;
@@ -43,6 +46,7 @@ public sealed class CommandHandler
 
     /// <summary>插件停止时取消尚未执行的睡眠/休眠电源操作。</summary>
     public void CancelPendingPowerActions() => _hostControl.CancelPendingPowerActions();
+    public void StopVoiceMessage() => _voiceMessages.Stop();
 
     public async Task<CommandResult> HandleAsync(CommandMessage command)
     {
@@ -63,6 +67,8 @@ public sealed class CommandHandler
                 CommandKind.ChangeSchedule => await HandleScheduleChangeAsync(command.ScheduleChange),
                 CommandKind.SendNotification => await HandleNotificationAsync(
                     command.Notification,
+                    GetNotificationSenderName(command.RequestedBy)),
+                CommandKind.SendVoiceMessage => await HandleVoiceMessageAsync(command.VoiceMessage,
                     GetNotificationSenderName(command.RequestedBy)),
                 CommandKind.ClearNotifications => await HandleClearNotificationsAsync(),
                 CommandKind.TeacherComing => await HandleTeacherComingAsync(),
@@ -130,6 +136,23 @@ public sealed class CommandHandler
             Message = message,
         });
         return Success("通知已在 ClassIsland 显示并广播到在线手表");
+    }
+
+    private async Task<CommandResult> HandleVoiceMessageAsync(VoiceMessageRequest? request, string senderName)
+    {
+        if (!VoiceMessageRequest.TryDecode(request, out var audio))
+            return CommandResult.Failure(CommandResultCodes.InvalidRequest, "语音格式无效或超过 60 秒");
+        var title = $"来自{senderName}的语音消息";
+        var result = await Dispatcher.UIThread.InvokeAsync(() => _voiceMessages.Play(audio, title));
+        if (!result.Success) return result;
+        try
+        {
+            // 语音自行播放，通知不叠加提示音或文字朗读。
+            await _notifications.ShowVoiceMessageNotificationAsync(title);
+        }
+        catch { _voiceMessages.Stop(); throw; }
+        NotificationSent?.Invoke(new ClassEvent { Event = ClassEventKind.Custom, Subject = title, Message = string.Empty });
+        return result;
     }
 
     private async Task<CommandResult> HandleClearNotificationsAsync()

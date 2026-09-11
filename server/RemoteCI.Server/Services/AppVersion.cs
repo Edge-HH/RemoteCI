@@ -14,6 +14,6 @@ public static class AppVersion
     public static PeerCapabilities Capabilities() => new()
     {
         SoftwareVersion = Version,
-        Capabilities = RemoteCiCapabilities.Baseline,
+        Capabilities = RemoteCiCapabilities.Current,
     };
 }

@@ -15,6 +15,10 @@ public sealed class CommandMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public NotificationRequest? Notification { get; set; }
 
+    [JsonPropertyName("voiceMessage")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public VoiceMessageRequest? VoiceMessage { get; set; }
+
     [JsonPropertyName("mainMenuVisible")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? MainMenuVisible { get; set; }

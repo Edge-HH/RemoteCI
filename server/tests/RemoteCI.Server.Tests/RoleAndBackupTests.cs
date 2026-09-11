@@ -14,6 +14,24 @@ public sealed class RoleAndBackupTests : IClassFixture<TestWebApplicationFactory
     public RoleAndBackupTests(TestWebApplicationFactory factory) => _factory = factory;
 
     [Fact]
+    public async Task VoiceRolePermissionPersistsAndCanBeRevokedWithoutGrantingNotifications()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var roles = scope.ServiceProvider.GetRequiredService<AccountRoleService>();
+        var identities = scope.ServiceProvider.GetRequiredService<IdentityCoordinator>();
+        var role = await roles.CreateAsync("Voice Sender", UserPermissions.SendVoiceMessages);
+        var user = await identities.CreateUserAsync(new CreateUserRequest
+        {
+            Username = "role.voice", DisplayName = "Voice Sender", Password = "Voice-Role-2026", RoleId = role.Id,
+        });
+        Assert.True(user.EffectivePermissions.HasFlag(UserPermissions.SendVoiceMessages));
+        Assert.False(user.EffectivePermissions.HasFlag(UserPermissions.SendNotifications));
+        await roles.UpdateAsync(role.Id, role.Name, UserPermissions.None);
+        var refreshed = await identities.GetProfileAsync(user.Id);
+        Assert.False(refreshed!.Permissions.HasFlag(UserPermissions.SendVoiceMessages));
+    }
+
+    [Fact]
     public async Task CustomRoleDefaultsCombineWithPersonalGrants()
     {
         using var scope = _factory.Services.CreateScope();

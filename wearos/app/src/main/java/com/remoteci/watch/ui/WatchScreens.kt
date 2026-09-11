@@ -592,6 +592,7 @@ internal fun ControlScreen(
     resultText: String?,
     onTeacherComing: () -> Unit,
     onOpenNotification: () -> Unit,
+    onOpenVoiceMessage: () -> Unit,
     onClearNotifications: () -> Unit,
     onToggleMainMenu: () -> Unit,
     onOpenVolume: () -> Unit,
@@ -607,6 +608,8 @@ internal fun ControlScreen(
     val canControlVolume = user?.has(Protocol.PERMISSION_POWER_CONTROL) == true && Protocol.CAP_VOLUME_CONTROL in capabilities
     if (canTeacherComing) item { ActionButton(stringResource(R.string.teacher_coming), Icons.Rounded.School, true, onTeacherComing) }
     if (canNotify) item { ActionButton(stringResource(R.string.send_notification), Icons.Rounded.EditNotifications, true, onOpenNotification) }
+    if (user?.has(Protocol.PERMISSION_SEND_VOICE_MESSAGES) == true && Protocol.CAP_VOICE_MESSAGE_SEND in capabilities)
+        item { ActionButton("发送语音", Icons.Rounded.EditNotifications, true, onOpenVoiceMessage) }
     if (canClearNotifications && shouldShowClearNotifications(snapshot)) item {
         ActionButton(stringResource(R.string.clear_notifications), Icons.Rounded.NotificationsOff, true, onClearNotifications)
     }
@@ -1126,7 +1129,7 @@ internal fun NotificationSettingsScreen(
 }
 
 @Composable
-private fun WatchList(
+internal fun WatchList(
     title: String,
     showTitle: Boolean = true,
     content: androidx.wear.compose.foundation.lazy.ScalingLazyListScope.() -> Unit,
@@ -1160,7 +1163,7 @@ private fun WatchSurface(content: @Composable BoxScope.(Dp) -> Unit) {
 }
 
 @Composable
-private fun ActionButton(
+internal fun ActionButton(
     label: String,
     icon: ImageVector?,
     enabled: Boolean,
@@ -1196,7 +1199,8 @@ internal fun homeActionLabels(
         user?.has(Protocol.PERMISSION_POWER_CONTROL) == true &&
             (Protocol.CAP_POWER_CONTROL in capabilities || Protocol.CAP_VOLUME_CONTROL in capabilities) ||
         user?.has(Protocol.PERMISSION_MAIN_MENU_CONTROL) == true && Protocol.CAP_MAIN_MENU_VISIBILITY in capabilities ||
-        user?.has(Protocol.PERMISSION_RUN_EXTENSIONS) == true && Protocol.CAP_EXTENSIONS_RUN in capabilities) add("控制")
+        user?.has(Protocol.PERMISSION_RUN_EXTENSIONS) == true && Protocol.CAP_EXTENSIONS_RUN in capabilities ||
+        user?.has(Protocol.PERMISSION_SEND_VOICE_MESSAGES) == true && Protocol.CAP_VOICE_MESSAGE_SEND in capabilities) add("控制")
     add("设置")
 }
 

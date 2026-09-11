@@ -61,8 +61,9 @@ public enum UserPermissions
     TeacherComing = 1 << 6,
     RunExtensions = 1 << 7,
     MainMenuControl = 1 << 8,
+    SendVoiceMessages = 1 << 9,
     All = ViewCurrentCourse | AccessWebUi | ManageUsers | SendNotifications | ManageSchedule |
-          PowerControl | TeacherComing | RunExtensions | MainMenuControl,
+          PowerControl | TeacherComing | RunExtensions | MainMenuControl | SendVoiceMessages,
 }
 
 public static class RolePermissions
@@ -70,7 +71,7 @@ public static class RolePermissions
     /// <summary>可授予普通账号或自定义角色的权限集合。</summary>
     public const UserPermissions Assignable = UserPermissions.AccessWebUi | UserPermissions.ManageUsers |
         UserPermissions.SendNotifications | UserPermissions.ManageSchedule | UserPermissions.PowerControl |
-        UserPermissions.TeacherComing | UserPermissions.RunExtensions | UserPermissions.MainMenuControl;
+        UserPermissions.TeacherComing | UserPermissions.RunExtensions | UserPermissions.MainMenuControl | UserPermissions.SendVoiceMessages;
 
     public static UserPermissions Effective(
         UserRole role,
@@ -124,6 +125,7 @@ public enum CommandKind
     RunExtension = 7,
     /// <summary>显示“老师来了”强调提醒，等待 1 秒后由插件自动清除。</summary>
     TeacherComing = 8,
+    SendVoiceMessage = 9,
 }
 
 public enum PowerActionKind
@@ -140,6 +142,7 @@ public static class CommandPermissions
     {
         CommandKind.ChangeSchedule => UserPermissions.ManageSchedule,
         CommandKind.SendNotification or CommandKind.ClearNotifications => UserPermissions.SendNotifications,
+        CommandKind.SendVoiceMessage => UserPermissions.SendVoiceMessages,
         CommandKind.TeacherComing => UserPermissions.TeacherComing,
         CommandKind.SetMainMenuVisibility => UserPermissions.MainMenuControl,
         CommandKind.Power or CommandKind.Volume => UserPermissions.PowerControl,
@@ -155,6 +158,7 @@ public static class RemoteCiCapabilities
     public const string SchedulePull = "schedule.pull";
     public const string ScheduleChange = "schedule.change";
     public const string NotificationSend = "notification.send";
+    public const string VoiceMessageSend = "voice-message.send";
     public const string NotificationClear = "notification.clear";
     public const string TeacherComing = "teacher-coming";
     public const string MainMenuVisibility = "main-menu.visibility";
@@ -178,6 +182,9 @@ public static class RemoteCiCapabilities
         ExtensionsRun,
     ];
 
+    /// <summary>当前版本支持的能力；新能力不能加入旧端默认获得的 Baseline。</summary>
+    public static IReadOnlyList<string> Current { get; } = [.. Baseline, VoiceMessageSend];
+
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
     {
@@ -186,6 +193,7 @@ public static class RemoteCiCapabilities
         SchedulePull => "拉取课表",
         ScheduleChange => "修改课表",
         NotificationSend => "发送通知",
+        VoiceMessageSend => "发送语音消息",
         NotificationClear => "清除通知",
         TeacherComing => "老师来了",
         MainMenuVisibility => "控制主界面显示",
@@ -199,6 +207,7 @@ public static class RemoteCiCapabilities
     {
         CommandKind.ChangeSchedule => ScheduleChange,
         CommandKind.SendNotification => NotificationSend,
+        CommandKind.SendVoiceMessage => VoiceMessageSend,
         CommandKind.ClearNotifications => NotificationClear,
         CommandKind.TeacherComing => TeacherComing,
         CommandKind.SetMainMenuVisibility => MainMenuVisibility,

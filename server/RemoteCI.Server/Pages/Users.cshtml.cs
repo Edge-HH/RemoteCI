@@ -233,6 +233,7 @@ public sealed class UsersModel(UserManager<AppUser> users, IdentityCoordinator i
         public bool AccessWebUi { get; set; }
         public bool ManageUsers { get; set; }
         public bool SendNotifications { get; set; }
+        public bool SendVoiceMessages { get; set; }
         public bool TeacherComing { get; set; }
         public bool ManageSchedule { get; set; }
         public bool RunExtensions { get; set; }
@@ -241,6 +242,7 @@ public sealed class UsersModel(UserManager<AppUser> users, IdentityCoordinator i
         public UserPermissions Grants => (AccessWebUi ? UserPermissions.AccessWebUi : 0) |
             (ManageUsers ? UserPermissions.ManageUsers : 0) |
             (SendNotifications ? UserPermissions.SendNotifications : 0) |
+            (SendVoiceMessages ? UserPermissions.SendVoiceMessages : 0) |
             (TeacherComing ? UserPermissions.TeacherComing : 0) |
             (ManageSchedule ? UserPermissions.ManageSchedule : 0) |
             (RunExtensions ? UserPermissions.RunExtensions : 0) |

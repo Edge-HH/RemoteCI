@@ -15,6 +15,7 @@ public sealed class PluginSettings : INotifyPropertyChanged
     private string _cloudServerUrl = "http://localhost:8080";
     private string _pluginPairCode = string.Empty;
     private string? _cloudToken;
+    private bool _showDeveloperSettingsMenu;
 
     /// <summary>是否启用局域网直连服务（手表同 WiFi 直连插件）。</summary>
     public bool EnableLanServer
@@ -49,6 +50,13 @@ public sealed class PluginSettings : INotifyPropertyChanged
     {
         get => _pluginPairCode;
         set => SetField(ref _pluginPairCode, value);
+    }
+
+    /// <summary>是否在 ClassIsland 设置导航中注册 RemoteCI 开发者设置页；默认隐藏。</summary>
+    public bool ShowDeveloperSettingsMenu
+    {
+        get => _showDeveloperSettingsMenu;
+        set => SetField(ref _showDeveloperSettingsMenu, value);
     }
 
     /// <summary>云端配对后缓存的长期插件凭据。仅存内存；持久化由 CloudTokenStore 用 DPAPI 加密落盘。</summary>

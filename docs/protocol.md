@@ -19,8 +19,9 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | 64 | `TeacherComing` |
 | 128 | `RunExtensions` |
 | 256 | `MainMenuControl` |
+| 512 | `SendVoiceMessages`（发送语音） |
 
-管理员的有效权限固定为 511。普通用户固定包含值 1，其余权限来自服务端授权。权限设置界面将值 2 显示为“概览”；七日课表查看和手动拉取只要求账号已登录，值 16 保护换课和自动拉取设置。`TeacherComing` 单独保护“老师来了”，`SendNotifications` 只保护自定义通知与清除提醒，`RunExtensions` 是所有插件扩展的独立权限，`MainMenuControl` 保护主界面显隐，`PowerControl` 保护音量和 Windows 电源操作。
+管理员的有效权限固定为 1023。普通用户固定包含值 1，其余权限来自服务端授权。权限设置界面将值 2 显示为“概览”；七日课表查看和手动拉取只要求账号已登录，值 16 保护换课和自动拉取设置。`TeacherComing` 单独保护“老师来了”，`SendNotifications` 只保护自定义通知与清除提醒，`SendVoiceMessages` 独立保护语音消息，`RunExtensions` 是所有插件扩展的独立权限，`MainMenuControl` 保护主界面显隐，`PowerControl` 保护音量和 Windows 电源操作。
 
 账号密码只出现在第一次 HTTPS `POST /api/auth/login` 的请求内。响应包含 1 小时 `accessToken`、30 天 `deviceSessionId/deviceSecret` 和用户有效权限。`POST /api/auth/refresh` 会同时轮换访问令牌和设备密钥；旧值立即失效。
 
@@ -110,6 +111,26 @@ WebUI 的有效能力是“服务端 ∩ 当前主插件”，手表的有效能
 - `expectedRevision`：客户端读取当天课表时的修订号。
 
 插件发现修订号已变化时返回 `SCHEDULE_STALE` 和最新修订号，不覆盖别人刚完成的修改。
+
+## 语音消息
+
+新增命令 `SendVoiceMessage = 9`，要求权限 `SendVoiceMessages = 512` 和能力 `voice-message.send`。新能力仅列入当前版本能力列表，不能加入未声明能力的旧 V3 端默认获得的基础能力。
+
+```json
+{
+  "command": 9,
+  "voiceMessage": {
+    "format": "pcm_s16le_16000_mono",
+    "audioBase64": "AAA="
+  }
+}
+```
+
+音频为 16 kHz、16 位有符号小端、单声道 PCM，最多 60 秒（1,920,000 字节），不能为空或包含半个采样；`audioBase64` 使用标准 Base64。服务端和插件校验音频格式与大小，不接收音频 URL 或本地路径。WebSocket 信封接收上限为 16 MiB，覆盖 Base64 中 `+` 被 JSON 转义成 `\u002B` 的最坏情况；解码后仍受上述音频上限约束。
+
+WebUI 通过 `POST /Control?handler=VoiceMessage` 上传 `application/octet-stream` 原始 PCM，携带 Cookie 和 `X-CSRF-TOKEN` 防伪头；服务端在内存中转为同一命令并等待插件回执。手表通过已认证的云端或局域网 WebSocket 发送。所有接入端覆盖 `requestedBy`，插件使用认证账号的 `displayName` 生成“来自xxx的语音消息”，不受文本通知署名开关影响。
+
+Windows 插件自动播放录音，并显示上述 ClassIsland 通知：强调特效开启、通知音效关闭、朗读关闭（仍遵循宿主全局提醒限制）。底部浮窗上滑出现，拖动标题可移动；顶部显示发送人和总时长，中间使用 ClassIsland 原生 Slider 拖动播放位置，底部三个无底色的 ClassIsland Fluent 图标分开放置，分别用于暂停/继续、后退 5 秒和关闭，关闭图标使用系统危险色，播完后可重新播放。浮窗使用宿主 Fluent 浮层背景、描边、圆角、深浅色主题和 UI 字体；点击浮窗外部也会关闭并停止播放。关闭或插件停止时立即释放音频资源。已有浮窗时返回 `BUSY`，不排队、不打断现有语音；离线不缓存重发。成功回执表示播放器已启动，不表示整条语音已经播放完毕。音频不写入文件或通知历史，广播事件仅包含发送人提示。
 
 ## REST API
 

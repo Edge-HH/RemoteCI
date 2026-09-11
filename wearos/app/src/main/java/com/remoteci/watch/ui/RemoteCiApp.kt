@@ -40,6 +40,7 @@ private enum class Screen {
     SubjectPicker,
     Control,
     Notification,
+    VoiceMessage,
     ExtensionForm,
     Power,
     Volume,
@@ -160,7 +161,11 @@ fun RemoteCiApp(context: Context) {
         if (user != null && !user.has(Protocol.PERMISSION_POWER_CONTROL) &&
             screen in listOf(Screen.Power, Screen.Volume))
             screen = Screen.Home
+        if ((user == null || !user.has(Protocol.PERMISSION_SEND_VOICE_MESSAGES) ||
+                Protocol.CAP_VOICE_MESSAGE_SEND !in availableCapabilities) && screen == Screen.VoiceMessage)
+            screen = Screen.Home
         if (user != null && !user.has(Protocol.PERMISSION_SEND_NOTIFICATIONS) &&
+            !user.has(Protocol.PERMISSION_SEND_VOICE_MESSAGES) &&
             !user.has(Protocol.PERMISSION_POWER_CONTROL) &&
             !user.has(Protocol.PERMISSION_MAIN_MENU_CONTROL) &&
             !user.has(Protocol.PERMISSION_TEACHER_COMING) &&
@@ -191,6 +196,7 @@ fun RemoteCiApp(context: Context) {
             }
             Screen.ScheduleDatePicker -> Screen.ScheduleOverview
             Screen.Notification -> Screen.Control
+            Screen.VoiceMessage -> Screen.Control
             Screen.ExtensionForm -> Screen.Control
             Screen.Power -> Screen.Control
             Screen.Volume -> Screen.Control
@@ -367,6 +373,7 @@ fun RemoteCiApp(context: Context) {
                 },
                 onTeacherComing = ConnectionManager::teacherComing,
                 onOpenNotification = { screen = Screen.Notification },
+                onOpenVoiceMessage = { screen = Screen.VoiceMessage },
                 onClearNotifications = ConnectionManager::clearNotifications,
                 onToggleMainMenu = {
                     ConnectionManager.setMainMenuVisible(!(displayedSnapshot?.isMainMenuVisible ?: true))
@@ -417,6 +424,12 @@ fun RemoteCiApp(context: Context) {
             available = displayedSnapshot?.isVolumeControlAvailable == true,
             onVolumeChange = ConnectionManager::setVolume,
             onMutedChange = ConnectionManager::setMuted,
+            onBack = { screen = Screen.Control },
+        )
+
+        Screen.VoiceMessage -> VoiceMessageScreen(
+            connectionReady = connectionState is ConnectionManager.State.LanConnected ||
+                connectionState is ConnectionManager.State.CloudConnected,
             onBack = { screen = Screen.Control },
         )
 

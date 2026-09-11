@@ -24,6 +24,11 @@ jobs:
         run: dotnet build RemoteCI.slnx -c Release
       - name: 测试
         run: dotnet test RemoteCI.slnx -c Release --no-build
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: 验证浏览器语音采集
+        run: node --test server/tests/voice-message.test.mjs
       - name: 验证发布标签解析
         shell: bash
         run: |

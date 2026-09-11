@@ -20,6 +20,7 @@
     var controlMenuActive = currentPage is "/Control" or "/Notifications";
     var showControlMenu = permissions.HasFlag(UserPermissions.TeacherComing) ||
         permissions.HasFlag(UserPermissions.SendNotifications) ||
+        permissions.HasFlag(UserPermissions.SendVoiceMessages) ||
         permissions.HasFlag(UserPermissions.PowerControl) ||
         permissions.HasFlag(UserPermissions.MainMenuControl) ||
         permissions.HasFlag(UserPermissions.RunExtensions);
@@ -100,5 +101,6 @@
         </main>
     }
     <script src="~/app.js" asp-append-version="true" defer></script>
+    <script src="~/voice-message.js" asp-append-version="true" defer></script>
 </body>
 </html>

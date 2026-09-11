@@ -132,6 +132,7 @@ public sealed class RemoteCiService : IDisposable
         _notificationBridge.Stop();
         _cts?.Cancel();
         _commandHandler.CancelPendingPowerActions();
+        _commandHandler.StopVoiceMessage();
         if (_cloudClient is { } cloudClient)
         {
             // Dispose 会发布最终的“已停止”状态，先保留转发订阅供设置页刷新。

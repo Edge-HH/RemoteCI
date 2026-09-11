@@ -9,7 +9,7 @@ namespace RemoteCI.Server;
 
 public static class WebSocketHub
 {
-    private const int ReceiveBufferSize = 256 * 1024;
+    private const int ReceiveBufferSize = VoiceMessageRequest.MaxEnvelopeBytes;
 
     public static async Task HandleAsync(
         HttpContext context,
@@ -453,9 +453,11 @@ public static class WebSocketHub
         var required = CommandPermissions.Required(command.Command);
         if (required == UserPermissions.None)
             return new CommandError(CommandResultCodes.InvalidRequest, "未知命令");
-        return user.Permissions.HasFlag(required)
-            ? null
-            : new CommandError(CommandResultCodes.Forbidden, "权限不足");
+        if (!user.Permissions.HasFlag(required))
+            return new CommandError(CommandResultCodes.Forbidden, "权限不足");
+        if (command.Command == CommandKind.SendVoiceMessage && !VoiceMessageRequest.TryDecode(command.VoiceMessage, out _))
+            return new CommandError(CommandResultCodes.InvalidRequest, "语音格式无效或超过 60 秒");
+        return null;
     }
 
     private static CommandError? GetExtensionValidationError(
