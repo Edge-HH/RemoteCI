@@ -44,7 +44,7 @@
     <!-- NAudio.Wasapi：通过 Windows Core Audio 读取和控制默认播放设备的主音量。 -->
     <PackageReference Include="NAudio.Wasapi" Version="2.3.0" />
     <!-- DPAPI（Windows 数据保护接口）：加密插件长期凭据；非 Windows 时按明文回退。 -->
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.11" />
   </ItemGroup>
 
   <ItemGroup>
