@@ -11,7 +11,7 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>RemoteCI.Plugin</AssemblyName>
     <!-- 软件版本与协议版本独立，Release 工作流会用标签覆盖此默认值。 -->
-    <Version>3.2.1.2</Version>
+    <Version>3.2.1.3</Version>
     <!-- CIPX target 会压缩整个 OutputPath；将 publish 输出移出该目录，避免二次打包时嵌套 publish/。 -->
     <PublishDir>$(BaseOutputPath)publish/$(Configuration)/$(TargetFramework)/</PublishDir>
   </PropertyGroup>

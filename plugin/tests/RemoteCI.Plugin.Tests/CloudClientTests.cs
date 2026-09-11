@@ -146,7 +146,7 @@ public sealed class CloudClientTests
                 .First(value => value.Type == Protocol.MessageTypePeerCapabilities);
             var report = JsonSerializer.Deserialize<PeerCapabilities>(
                 JsonSerializer.Serialize(envelope.Payload), JsonDefaults.Options)!;
-            Assert.Equal("3.2.1.2", report.SoftwareVersion);
+            Assert.Equal("3.2.1.3", report.SoftwareVersion);
             Assert.Contains(RemoteCiCapabilities.ScheduleChange, report.Capabilities);
         }
         finally

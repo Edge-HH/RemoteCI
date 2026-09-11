@@ -34,7 +34,7 @@ dotnet build plugin/RemoteCI.Plugin -c Release -p:CreateCipx=true
 3. 本地运行上述构建与测试命令，确保通过。
 4. 功能或用户可见行为变化必须在 RemoteCI-Docs 仓库同步更新文档，并在 PR 中互相添加链接。
 5. 提交 Pull Request 到 `main`，填写模板中的检查清单，等待 CI 通过并完成审核。
-6. 发布稳定版本时由维护者推送四段纯数字标签（例如 `3.2.1.2`）；测试版本才使用 `v3.x.x-beta.y`。GitHub Actions 会自动构建并在同一个 Release 发布服务端、固定名插件包、手表 APK 与三种 fnOS FPK，其他标签会被拒绝。
+6. 发布稳定版本时由维护者推送四段纯数字标签（例如 `3.2.1.3`）；测试版本才使用 `v3.x.x-beta.y`。GitHub Actions 会自动构建并在同一个 Release 发布服务端、固定名插件包、手表 APK 与三种 fnOS FPK，其他标签会被拒绝。
 
 ## 安全漏洞
 

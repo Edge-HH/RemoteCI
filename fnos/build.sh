@@ -4,7 +4,7 @@
 # 用法：
 #   ./fnos/build.sh [版本] [fnpack 路径]
 #   REMOTECI_FPK_MODE=offline REMOTECI_FPK_ARCH=amd64 \
-#     REMOTECI_IMAGE_ARCHIVE=/path/to/remoteci-amd64.tar.gz ./fnos/build.sh 3.2.1.2
+#     REMOTECI_IMAGE_ARCHIVE=/path/to/remoteci-amd64.tar.gz ./fnos/build.sh 3.2.1.3
 #
 # 版本缺省从 REMOTECI_VERSION 或最近的 git tag 读取，均无时回退到
 # server/RemoteCI.Server/RemoteCI.Server.csproj 的 <Version>（本地默认版本唯一来源）。
