@@ -13,11 +13,15 @@ import java.time.LocalDate
 import java.time.LocalTime
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.Autorenew
 import androidx.compose.material.icons.rounded.BroadcastOnHome
+import androidx.compose.material.icons.rounded.Cached
+import androidx.compose.material.icons.rounded.Casino
 import androidx.compose.material.icons.rounded.EditNotifications
 import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.School
+import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.ui.unit.dp
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -453,6 +457,11 @@ class WatchScreensTest {
         assertEquals(Icons.Rounded.BroadcastOnHome, extensionIcon("broadcast_on_home"))
         assertEquals(Icons.Rounded.BroadcastOnHome, extensionIcon("Icons.Rounded.BroadcastOnHome"))
         assertEquals(Icons.Rounded.PowerSettingsNew, extensionIcon("power_settings_new"))
+        assertEquals(Icons.Rounded.Casino, extensionIcon("Casino"))
+        assertEquals(Icons.Rounded.Casino, extensionIcon("casino"))
+        assertEquals(Icons.Rounded.Shuffle, extensionIcon("shuffle"))
+        assertEquals(Icons.Rounded.Autorenew, extensionIcon("autorenew"))
+        assertEquals(Icons.Rounded.Cached, extensionIcon("cached"))
     }
 
     @Test

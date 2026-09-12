@@ -20,13 +20,16 @@ import androidx.compose.material.icons.rounded.AcUnit
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.Air
 import androidx.compose.material.icons.rounded.Alarm
+import androidx.compose.material.icons.rounded.Autorenew
 import androidx.compose.material.icons.rounded.BatterySaver
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.BroadcastOnHome
+import androidx.compose.material.icons.rounded.Cached
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.Cancel
+import androidx.compose.material.icons.rounded.Casino
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.CastConnected
 import androidx.compose.material.icons.rounded.CastForEducation
@@ -81,6 +84,7 @@ import androidx.compose.material.icons.rounded.SensorDoor
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SettingsPower
 import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SmartDisplay
 import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material.icons.rounded.Speaker
@@ -279,4 +283,10 @@ private val EXTENSION_ICONS: Map<String, ImageVector> = mapOf(
     "fitnesscenter" to Icons.Rounded.FitnessCenter,
     "restaurant" to Icons.Rounded.Restaurant,
     "donotdisturb" to Icons.Rounded.DoNotDisturb,
+
+    // 随机与刷新
+    "shuffle" to Icons.Rounded.Shuffle,
+    "casino" to Icons.Rounded.Casino,
+    "autorenew" to Icons.Rounded.Autorenew,
+    "cached" to Icons.Rounded.Cached,
 )
