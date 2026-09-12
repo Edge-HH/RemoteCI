@@ -12,6 +12,11 @@ import com.remoteci.watch.data.UserProfile
 import java.time.LocalDate
 import java.time.LocalTime
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.BroadcastOnHome
+import androidx.compose.material.icons.rounded.EditNotifications
+import androidx.compose.material.icons.rounded.NotificationsOff
+import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.ui.unit.dp
 import kotlin.test.Test
@@ -440,11 +445,36 @@ class WatchScreensTest {
     }
 
     @Test
-    fun `extension icon maps whitelist and falls back for unknown names`() {
+    fun `extension icon resolves material names regardless of spelling style`() {
+        // 大小写、下划线、空格和 Icons.Rounded 前缀都归一化到同一个图标。
         assertEquals(Icons.Rounded.School, extensionIcon("school"))
         assertEquals(Icons.Rounded.School, extensionIcon(" School "))
+        assertEquals(Icons.Rounded.BroadcastOnHome, extensionIcon("BroadcastOnHome"))
+        assertEquals(Icons.Rounded.BroadcastOnHome, extensionIcon("broadcast_on_home"))
+        assertEquals(Icons.Rounded.BroadcastOnHome, extensionIcon("Icons.Rounded.BroadcastOnHome"))
+        assertEquals(Icons.Rounded.PowerSettingsNew, extensionIcon("power_settings_new"))
+    }
+
+    @Test
+    fun `extension icon falls back to plain text for unknown or empty names`() {
         assertNull(extensionIcon("unknown-icon"))
+        assertNull(extensionIcon(""))
+        assertNull(extensionIcon("   "))
         assertNull(extensionIcon(null))
+    }
+
+    @Test
+    fun `extension icon keeps legacy aliases ahead of same named material icons`() {
+        // 历史别名语义与 Material 同名图标不同，必须保持不变以免已有插件外观变化。
+        assertEquals(Icons.Rounded.EditNotifications, extensionIcon("notification"))
+        assertEquals(Icons.Rounded.EditNotifications, extensionIcon("notifications"))
+        assertEquals(Icons.Rounded.EditNotifications, extensionIcon("message"))
+        assertEquals(Icons.Rounded.NotificationsOff, extensionIcon("clear"))
+        assertEquals(Icons.Rounded.NotificationsOff, extensionIcon("clear_notifications"))
+        assertEquals(Icons.Rounded.PowerSettingsNew, extensionIcon("power"))
+        assertEquals(Icons.Rounded.PowerSettingsNew, extensionIcon("poweroff"))
+        assertEquals(Icons.AutoMirrored.Rounded.VolumeUp, extensionIcon("volume"))
+        assertEquals(Icons.AutoMirrored.Rounded.VolumeUp, extensionIcon("volumeup"))
     }
 
     @Test

@@ -95,6 +95,8 @@ WebUI 的有效能力是“服务端 ∩ 当前主插件”，手表的有效能
 
 `extensions_sync` 的载荷是其他 ClassIsland 插件通过 RemoteCI 注册的扩展功能列表；云端服务端和插件局域网服务都会缓存最近一次清单，并在手表完成认证后主动补发。命令值 7 为 `RunExtension`，命令值 8 为 `TeacherComing`；后者由插件完成显示“老师来了”、等待 1 秒和清除提醒的完整流程。通过 `extensionId` 指定目标扩展，`extensionArgs` 携带参数字典（值统一为字符串）。扩展调用必须同时通过独立的 `RunExtensions` 权限和管理员为该扩展设置的启用/普通账号开放策略；`RequiredPermission` 只作为旧扩展兼容字段传输，不再关联通知、电源等权限。账号的 `allowedExtensionIds` 与 `visibleExtensionIds` 随认证状态和 `account_sync` 下发，后者只控制自己的手表入口。未注册、缺少必填参数或权限不足时分别返回 `INVALID_REQUEST` / `FORBIDDEN`，执行异常统一返回 `INTERNAL_ERROR`。
 
+扩展清单的 `icon` 为可选 Material 图标名，由手表端白名单解析（不区分大小写，忽略下划线、连字符、空格与 `Icons.Rounded.` 前缀）；未命中白名单或缺失时手表按钮回退为纯文字，服务端与 WebUI 不解析该字段。
+
 状态快照中的 `isVolumeControlAvailable`、`volumePercent` 和 `isMuted` 分别表示默认播放设备是否可控、当前主音量百分比和静音状态，手表必须以这些真实状态刷新音量页。
 
 状态快照中的 `currentTimeLayoutItem` 使用插件本地时间（如 `16:30-17:10 语文`），并携带 `timeZoneOffsetMinutes`（插件本地时区相对 UTC 的偏移分钟数，东八区为 480）。手表端以快照的 `generatedAt`（UTC）加该偏移推算“插件本地当前时间”，再计算课程进度环，避免两端时区不一致时进度环显示为空。旧版插件不携带 `timeZoneOffsetMinutes` 时，手表回退到自身本地时间，行为与旧版一致。

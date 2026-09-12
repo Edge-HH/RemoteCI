@@ -42,7 +42,7 @@ public sealed class ExtensionDefinition
     [JsonPropertyName("displayName")]
     public string DisplayName { get; set; } = string.Empty;
 
-    /// <summary>可选 Material 图标名；手表端命中白名单时显示图标，否则纯文字。</summary>
+    /// <summary>可选 Material 图标名；手表端命中白名单时显示图标，否则纯文字。白名单见文档站「接入扩展 - 扩展图标名」。</summary>
     [JsonPropertyName("icon")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Icon { get; set; }

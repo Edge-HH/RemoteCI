@@ -18,7 +18,7 @@ public interface IRemoteCiExtension
     /// <summary>兼容旧扩展的声明字段；当前调用统一使用 RunExtensions 权限。</summary>
     UserPermissions RequiredPermission { get; }
 
-    /// <summary>可选 Material 图标名；未知或缺失时手表回退为纯文字。</summary>
+    /// <summary>可选 Material 图标名，取值见文档站「接入扩展 - 扩展图标名」；未知或缺失时手表回退为纯文字。</summary>
     string? Icon { get; }
 
     /// <summary>可选参数表单描述；为空时手表点击后直接执行，否则先进入参数页面。</summary>

@@ -657,24 +657,6 @@ internal fun visibleExtensionsFor(
     extensions: List<ExtensionDefinition>,
 ): List<ExtensionDefinition> = extensions.filter { user?.showsOnWatch(it) == true }
 
-/** Material 图标名白名单映射；未知或缺失时返回 null，界面回退为纯文字。 */
-internal fun extensionIcon(icon: String?): ImageVector? = when (icon?.trim()?.lowercase()) {
-    "school" -> Icons.Rounded.School
-    "notification", "notifications", "message" -> Icons.Rounded.EditNotifications
-    "volume", "volumeup" -> Icons.AutoMirrored.Rounded.VolumeUp
-    "power", "poweroff" -> Icons.Rounded.PowerSettingsNew
-    "settings", "gear" -> Icons.Rounded.Settings
-    "update", "systemupdate" -> Icons.Rounded.SystemUpdate
-    "download" -> Icons.Rounded.Download
-    "restart", "reboot" -> Icons.Rounded.RestartAlt
-    "swap", "exchange" -> Icons.Rounded.SwapHoriz
-    "wifi", "connect" -> Icons.Rounded.Wifi
-    "visibility", "show" -> Icons.Rounded.Visibility
-    "hide", "hidden" -> Icons.Rounded.VisibilityOff
-    "clear", "clearnotifications" -> Icons.Rounded.NotificationsOff
-    else -> null
-}
-
 /** 按参数 schema 生成初始表单值；switch 默认 false，其余使用注册的默认值。 */
 internal fun defaultExtensionArgs(extension: ExtensionDefinition): Map<String, String?> =
     extension.parameters.associate { param ->
