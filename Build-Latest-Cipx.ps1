@@ -93,7 +93,15 @@ try {
         throw "?????????????? CIPX ???"
     }
 
-    Copy-Item -LiteralPath $generatedPackage -Destination $OutputPath -Force
+    # 当输出位置就是构建产物本身时，Copy-Item 会报“不能用自身覆盖自身”，此时跳过复制。
+    $isSameFile = [string]::Equals(
+        [IO.Path]::GetFullPath($OutputPath),
+        [IO.Path]::GetFullPath($generatedPackage),
+        [StringComparison]::OrdinalIgnoreCase)
+    if (-not $isSameFile) {
+        Copy-Item -LiteralPath $generatedPackage -Destination $OutputPath -Force
+    }
+
     $hash = (Get-FileHash -LiteralPath $OutputPath -Algorithm SHA256).Hash
 
     Show-ResultMessage `

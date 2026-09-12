@@ -17,8 +17,11 @@ public interface IProfileWriteOperations
 
 public sealed class ProfileWriteAdapter(IProfileService profiles) : IProfileWriteOperations
 {
-    public IReadOnlyDictionary<Guid, Subject> Subjects => profiles.Profile.Subjects;
-    public IReadOnlyDictionary<Guid, ClassPlan> ClassPlans => profiles.Profile.ClassPlans;
+    // 同 ScheduleBackendAdapter：这两个字典的返回类型在 ClassIsland 2.2 中已更换实现类。
+    public IReadOnlyDictionary<Guid, Subject> Subjects =>
+        HostApiCompat.ReadProperty<IReadOnlyDictionary<Guid, Subject>>(profiles.Profile, "Subjects");
+    public IReadOnlyDictionary<Guid, ClassPlan> ClassPlans =>
+        HostApiCompat.ReadProperty<IReadOnlyDictionary<Guid, ClassPlan>>(profiles.Profile, "ClassPlans");
     public Guid? CreateTempClassPlan(Guid sourcePlanId, DateTime? enableDateTime = null) =>
         profiles.CreateTempClassPlan(sourcePlanId, enableDateTime: enableDateTime);
     public void SaveProfile() => profiles.SaveProfile();

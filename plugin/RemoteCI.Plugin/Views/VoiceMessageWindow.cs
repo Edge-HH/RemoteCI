@@ -4,7 +4,6 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
-using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using Avalonia.Threading;
 using ClassIsland.Core.Controls;
@@ -45,11 +44,12 @@ internal sealed class VoiceMessageWindow : Window
         ShowInTaskbar = false;
         ShowActivated = false;
         Topmost = true;
-        SystemDecorations = SystemDecorations.None;
+        // Avalonia 12 把装饰枚举改名为 WindowDecorations，改用兼容层设置无装饰窗口。
+        HostApiCompat.RemoveWindowDecorations(this);
         Background = Brushes.Transparent;
         TransparencyLevelHint = [WindowTransparencyLevel.AcrylicBlur, WindowTransparencyLevel.Transparent];
-        this.Bind(FontFamilyProperty, new DynamicResourceExtension("ContentControlThemeFontFamily"));
-        this.Bind(ForegroundProperty, new DynamicResourceExtension("TextFillColorPrimaryBrush"));
+        HostApiCompat.BindDynamicResource(this, FontFamilyProperty, "ContentControlThemeFontFamily");
+        HostApiCompat.BindDynamicResource(this, ForegroundProperty, "TextFillColorPrimaryBrush");
         // Fluent Slider 默认在 20 高的滑块上下各预留 15，紧凑高度下会裁掉滑块底部。
         // 仅缩小本浮窗内的模板留白，继续使用宿主原生 Slider 控件及交互样式。
         _progressBar.Resources["SliderPreContentMargin"] = new GridLength(5);
@@ -73,7 +73,7 @@ internal sealed class VoiceMessageWindow : Window
         _pause = CreateIconButton(_pauseIcon, "暂停");
         var rewind = CreateIconButton(new FluentIcon("\uEE91", 30), "后退 5 秒");
         var close = CreateIconButton(new FluentIcon("\uE671", 30), "关闭");
-        close.Bind(ForegroundProperty, new DynamicResourceExtension("SystemFillColorCriticalBrush"));
+        HostApiCompat.BindDynamicResource(close, ForegroundProperty, "SystemFillColorCriticalBrush");
         _pause.Click += (_, _) => TryPlaybackAction(TogglePlayback);
         rewind.Click += (_, _) =>
         {
@@ -211,7 +211,9 @@ internal sealed class VoiceMessageWindow : Window
 
     private void SetPauseButton(bool playing)
     {
-        _pauseIcon.Glyph = playing ? PauseGlyph : PlayGlyph;
+        // Glyph 由 FluentAvalonia 的图标基类声明，该基类在新宿主中改名为 FAFontIcon，
+        // 直接绑定会抛 MissingMethodException，这里按属性名写入图标字形。
+        HostApiCompat.WriteProperty(_pauseIcon, "Glyph", playing ? PauseGlyph : PlayGlyph);
         ToolTip.SetTip(_pause, playing ? "暂停" : "播放");
     }
 
@@ -227,7 +229,7 @@ internal sealed class VoiceMessageWindow : Window
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
         };
-        button.Bind(ThemeProperty, new DynamicResourceExtension("TransparentButton"));
+        HostApiCompat.BindDynamicResource(button, ThemeProperty, "TransparentButton");
         ToolTip.SetTip(button, tooltip);
         return button;
     }

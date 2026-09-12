@@ -145,7 +145,7 @@ public sealed class LanServerTests
         Assert.Equal(UserPermissions.All, state.User?.Permissions);
         var capabilities = ConvertPayload<CapabilitiesSync>(ParseEnvelope(socket.Sent[
             types.FindIndex(type => type == Protocol.MessageTypeCapabilitiesSync)]).Payload);
-        Assert.Equal("3.2.1.3", capabilities.Plugin?.SoftwareVersion);
+        Assert.Equal("3.2.1.4", capabilities.Plugin?.SoftwareVersion);
         Assert.Contains(RemoteCiCapabilities.ScheduleChange, capabilities.Server.Capabilities);
     }
 

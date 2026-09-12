@@ -15,6 +15,9 @@ public interface IScheduleBackend
 
 public sealed class ScheduleBackendAdapter(ILessonsService lessons, IProfileService profiles) : IScheduleBackend
 {
-    public IReadOnlyDictionary<Guid, Subject> Subjects => profiles.Profile.Subjects;
+    // ClassIsland 2.2 把 Subjects 的返回类型从 ObservableDictionary 换成 ObservableOrderedDictionary，
+    // 两者都实现 IReadOnlyDictionary，这里按接口反射读取以同时兼容新旧宿主。
+    public IReadOnlyDictionary<Guid, Subject> Subjects =>
+        HostApiCompat.ReadProperty<IReadOnlyDictionary<Guid, Subject>>(profiles.Profile, "Subjects");
     public ClassPlan? GetClassPlan(DateTime date, out Guid? planId) => lessons.GetClassPlanByDate(date, out planId);
 }

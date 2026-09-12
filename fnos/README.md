@@ -29,15 +29,15 @@
 
    ```bash
    bash fnos/build.sh          # 使用最近 git tag
-   bash fnos/build.sh 3.2.1.3  # 指定稳定版本
+   bash fnos/build.sh 3.2.1.4  # 指定稳定版本
    ```
 
 3. 构建单架构离线包时，先用 `docker save` 导出带有正式版本标签的镜像，再指定模式、架构和归档路径：
 
    ```bash
-   docker pull --platform linux/amd64 ghcr.io/edge-hh/remoteci:3.2.1.3
-   docker save ghcr.io/edge-hh/remoteci:3.2.1.3 | gzip -1 > remoteci-amd64.tar.gz
-   REMOTECI_VERSION=3.2.1.3 \
+   docker pull --platform linux/amd64 ghcr.io/edge-hh/remoteci:3.2.1.4
+   docker save ghcr.io/edge-hh/remoteci:3.2.1.4 | gzip -1 > remoteci-amd64.tar.gz
+   REMOTECI_VERSION=3.2.1.4 \
      REMOTECI_FPK_MODE=offline \
      REMOTECI_FPK_ARCH=amd64 \
      REMOTECI_IMAGE_ARCHIVE=remoteci-amd64.tar.gz \
@@ -56,7 +56,7 @@
 
 离线包体积取决于对应版本镜像的压缩结果，表中数值用于下载选择，不是固定上限。
 
-GitHub Actions 的 `release.yml` 会在推送四段稳定标签（如 `3.2.1.3`）或保留的 Beta 标签（如 `v3.2.2-beta.1`）时构建并验证多架构镜像，生成以上三个 FPK，再附加到同一个 GitHub Release。稳定标签同时用于 ClassIsland 插件市场；Beta 仅供测试，不进入市场。当前不向飞牛应用商店提交安装包。
+GitHub Actions 的 `release.yml` 会在推送四段稳定标签（如 `3.2.1.4`）或保留的 Beta 标签（如 `v3.2.2-beta.1`）时构建并验证多架构镜像，生成以上三个 FPK，再附加到同一个 GitHub Release。稳定标签同时用于 ClassIsland 插件市场；Beta 仅供测试，不进入市场。当前不向飞牛应用商店提交安装包。
 
 ## 安装与更新
 

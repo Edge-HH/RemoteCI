@@ -1,7 +1,7 @@
 import java.util.Properties
 
 // 软件版本与协议版本独立，Release 工作流会用标签覆盖此默认值。
-val releaseVersion = providers.gradleProperty("releaseVersion").orNull ?: "3.2.1.3"
+val releaseVersion = providers.gradleProperty("releaseVersion").orNull ?: "3.2.1.4"
 
 // Android versionCode 必须是正整数且 Beta 版本也要严格排在同核心版本的稳定版之前。
 // 版本槽位为 major*100000000 + minor*1000000 + patch*10000 + revision*1000，
