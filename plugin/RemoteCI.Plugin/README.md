@@ -24,4 +24,4 @@
 
 插件不会保存学生密码；远程操作会按服务端配置的账号权限进行校验。
 
-更多部署与使用说明请查看 [RemoteCI 项目文档](https://github.com/Edge-HH/RemoteCI#文档)。
+更多部署与使用说明请查看 [RemoteCI 项目文档](https://edge-hh.github.io/RemoteCI-Docs/)。
