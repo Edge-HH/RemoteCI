@@ -45,6 +45,8 @@
    ```
 
 `REMOTECI_FPK_ARCH` 支持 `amd64` 和 `arm64`；脚本会校验 docker-save 归档中的标签、架构和 Image ID，拒绝错误镜像。
+飞牛应用中心把 Intel/AMD 设备记为 `x86`、把 ARM64 设备记为 `arm`，这与 Docker 的 `amd64`/`arm64` 是同一 64 位架构，不是 32 位。
+`x86_64-offline` 包接受 `x86`/`x86_64`/`amd64`，`arm64-offline` 包接受 `arm`/`arm64`/`aarch64`；当前不提供 i386 32 位离线包。
 
 每个 GitHub Release 发布三种产物：
 

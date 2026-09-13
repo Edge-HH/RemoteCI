@@ -67,11 +67,11 @@ if [ -n "${TRIM_APPVER:-}" ] && [ "$IMAGE_TAG" != "ghcr.io/edge-hh/remoteci:$TRI
   fail "镜像版本与应用版本 $TRIM_APPVER 不一致"
 fi
 
+# shellcheck source=fnos/cmd/arch_compat
+. "$SCRIPT_DIR/arch_compat"
 SYSTEM_ARCH="${TRIM_SYS_ARCH:-$(uname -m)}"
-case "$IMAGE_ARCH:$SYSTEM_ARCH" in
-  amd64:x86_64|amd64:amd64|arm64:aarch64|arm64:arm64) ;;
-  *) fail "安装包架构 $IMAGE_ARCH 与设备架构 $SYSTEM_ARCH 不匹配" ;;
-esac
+remoteci_image_arch_compatible "$IMAGE_ARCH" "$SYSTEM_ARCH" \
+  || fail "安装包架构 $IMAGE_ARCH 与设备架构 $SYSTEM_ARCH 不匹配"
 
 command -v docker >/dev/null 2>&1 || fail "设备未安装 Docker"
 CURRENT_ID="$(docker image inspect --format '{{.Id}}' "$IMAGE_TAG" 2>/dev/null || true)"

@@ -48,6 +48,7 @@ def main() -> None:
         assert manifest["appname"] == "remoteci"
         assert manifest["version"] == version
         assert manifest["platform"] == expected_platform
+        assert "cmd/arch_compat" in package_names
         app_tgz = read_member(package, "app.tgz")
         outer_metadata = read_member(package, "cmd/offline-image.env") if mode == "offline" else None
 

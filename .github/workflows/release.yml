@@ -283,6 +283,7 @@ jobs:
             REMOTECI_IMAGE_ARCHIVE="artifacts/fnos-images/remoteci-${version}-arm64.tar.gz" \
             bash fnos/build.sh
 
+          bash fnos/tests/test-arch-compat.sh
           python3 fnos/tests/verify-package.py "artifacts/release/RemoteCI-${version}.fpk" "$version" online all
           python3 fnos/tests/verify-package.py \
             "artifacts/release/RemoteCI-${version}-fnos-x86_64-offline.fpk" "$version" offline amd64

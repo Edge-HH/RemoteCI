@@ -120,6 +120,7 @@ Content Root；源码修改后请直接停止旧进程并重新构建、启动�
 `REMOTECI_RUNTIME=fnos` 识别运行环境。“系统更新”面板提示由 fnOS 应用中心管理，
 不从容器内检查、下载或安装 fpk。GitHub Release 同时提供在线多架构包和 x86_64/ARM64
 单架构离线包；升级时下载合适的新版本 FPK，并在应用中心手动安装。
+飞牛把 Intel/AMD NAS 标成 `x86` 时仍应使用 `x86_64-offline` 包，不要寻找 32 位安装包。
 fpk 工程的构建与发布流程见 [fnos/README.md](../fnos/README.md)。
 
 ### 7.2 插件更新
