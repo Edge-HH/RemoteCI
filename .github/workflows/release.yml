@@ -305,23 +305,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: server-linux-x64
           path: artifacts/server-linux-x64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: server-win-x64
           path: artifacts/server-win-x64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: plugin-cipx
           path: artifacts/plugin-cipx
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: watch-apk
           path: artifacts/watch-apk
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: fnos-fpk
           path: artifacts/fnos-fpk
