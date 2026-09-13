@@ -39,7 +39,7 @@ jobs:
           cd ..
           # 同名校验和文件随包发布；服务端更新前按此校验完整性。
           sha256sum "RemoteCI.Server-${version}-${{ matrix.rid }}.zip" > "RemoteCI.Server-${version}-${{ matrix.rid }}.zip.sha256"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: server-${{ matrix.rid }}
           path: |
@@ -75,7 +75,7 @@ jobs:
               -ChecksumPath checksums.md \
               -ExpectedVersion "$version"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: plugin-cipx
           path: |
@@ -159,7 +159,7 @@ jobs:
             echo "::error::当前 APK 与上一正式版签名证书不一致，拒绝发布"
             exit 1
           }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: watch-apk
           path: RemoteCI.Watch-*.apk
@@ -294,7 +294,7 @@ jobs:
             "artifacts/release/RemoteCI-${version}-fnos-x86_64-offline.fpk" \
             "artifacts/release/RemoteCI-${version}-fnos-arm64-offline.fpk" \
             "$version"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: fnos-fpk
           path: artifacts/release/RemoteCI-*.fpk
