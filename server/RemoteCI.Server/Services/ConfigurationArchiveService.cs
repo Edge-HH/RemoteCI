@@ -38,7 +38,12 @@ public sealed class ConfigurationArchiveService(
         var metadata = await db.SystemMetadata.AsNoTracking().SingleAsync(x => x.Id == 1, ct);
         var backup = await db.BackupConfigurations.AsNoTracking().SingleAsync(x => x.Id == 1, ct);
         return new ConfigurationSnapshot(2, DateTimeOffset.UtcNow, roles, users, plugins,
-            new MetadataSnapshot(metadata.AccountVersion, metadata.ForceSenderInTitle, metadata.SchedulePullIntervalMinutes),
+            new MetadataSnapshot(
+                metadata.AccountVersion,
+                metadata.ForceSenderInTitle,
+                metadata.SchedulePullIntervalMinutes,
+                metadata.VisitorAccessEnabled,
+                metadata.AutoEnterVisitorPage),
             new BackupSettingsSnapshot(backup.Enabled, backup.Cadence, backup.TimeOfDay, backup.DayOfWeek, backup.MaxBackups),
             state.GetLatestSchedule(), extensionPolicies, extensionPreferences);
     }
@@ -109,7 +114,11 @@ public sealed class ConfigurationArchiveService(
         db.ExtensionPolicies.AddRange((snapshot.ExtensionPolicies ?? []).Select(x => new ExtensionPolicy { ExtensionId=x.ExtensionId, Enabled=x.Enabled, AllowNonAdmin=x.AllowNonAdmin, UpdatedAt=x.UpdatedAt }));
         db.UserExtensionPreferences.AddRange((snapshot.ExtensionPreferences ?? []).Select(x => new UserExtensionPreference { UserId=x.UserId, ExtensionId=x.ExtensionId, ShowOnWatch=x.ShowOnWatch, UpdatedAt=x.UpdatedAt }));
         var metadata = await db.SystemMetadata.SingleAsync(x => x.Id == 1, ct);
-        metadata.AccountVersion = snapshot.Metadata.AccountVersion + 1; metadata.ForceSenderInTitle=snapshot.Metadata.ForceSenderInTitle; metadata.SchedulePullIntervalMinutes=snapshot.Metadata.SchedulePullIntervalMinutes;
+        metadata.AccountVersion = snapshot.Metadata.AccountVersion + 1;
+        metadata.ForceSenderInTitle = snapshot.Metadata.ForceSenderInTitle;
+        metadata.SchedulePullIntervalMinutes = snapshot.Metadata.SchedulePullIntervalMinutes;
+        metadata.VisitorAccessEnabled = snapshot.Metadata.VisitorAccessEnabled;
+        metadata.AutoEnterVisitorPage = snapshot.Metadata.VisitorAccessEnabled && snapshot.Metadata.AutoEnterVisitorPage;
         var backup = await db.BackupConfigurations.SingleAsync(x => x.Id == 1, ct);
         backup.Enabled=snapshot.Backup.Enabled; backup.Cadence=snapshot.Backup.Cadence; backup.TimeOfDay=snapshot.Backup.TimeOfDay; backup.DayOfWeek=snapshot.Backup.DayOfWeek; backup.MaxBackups=Math.Clamp(snapshot.Backup.MaxBackups,1,100); backup.LastScheduledAt=null; backup.LastSucceededAt=null; backup.LastError=null;
         await db.SaveChangesAsync(ct);
@@ -142,5 +151,10 @@ public sealed record UserSnapshot(Guid Id,string Username,string NormalizedUsern
 public sealed record PluginSnapshot(Guid Id,string Name,string TokenHash,bool Enabled,DateTimeOffset CreatedAt,DateTimeOffset LastSeenAt);
 public sealed record ExtensionPolicySnapshot(string ExtensionId,bool Enabled,bool AllowNonAdmin,DateTimeOffset UpdatedAt);
 public sealed record ExtensionPreferenceSnapshot(Guid UserId,string ExtensionId,bool ShowOnWatch,DateTimeOffset UpdatedAt);
-public sealed record MetadataSnapshot(long AccountVersion,bool ForceSenderInTitle,int SchedulePullIntervalMinutes);
+public sealed record MetadataSnapshot(
+    long AccountVersion,
+    bool ForceSenderInTitle,
+    int SchedulePullIntervalMinutes,
+    bool VisitorAccessEnabled = false,
+    bool AutoEnterVisitorPage = false);
 public sealed record BackupSettingsSnapshot(bool Enabled,BackupCadence Cadence,TimeSpan TimeOfDay,DayOfWeek DayOfWeek,int MaxBackups);

@@ -11,23 +11,41 @@ namespace RemoteCI.Server.Pages;
 public sealed class LoginModel(
     UserManager<AppUser> users,
     SignInManager<AppUser> signIn,
-    IdentityCoordinator identities) : PageModel
+    IdentityCoordinator identities,
+    VisitorAccessSettings visitorAccess) : PageModel
 {
     [BindProperty]
     public LoginInput Input { get; set; } = new();
+    public bool VisitorAccessEnabled { get; private set; }
 
-    public async Task<IActionResult> OnGetAsync()
+    public async Task<IActionResult> OnGetAsync(string? from, string? returnUrl, CancellationToken ct)
     {
         if (User.Identity?.IsAuthenticated == true && await users.GetUserAsync(User) is { } user)
         {
             var permissions = RolePermissions.Effective(user.Role, user.GrantedPermissions);
             return RedirectToPage(permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account");
         }
+
+        var visitor = await visitorAccess.GetAsync(ct);
+        VisitorAccessEnabled = visitor.Enabled;
+        if (visitor.Enabled && visitor.AutoEnter && ShouldAutoEnter(from, returnUrl))
+            return RedirectToPage("/Visitor");
         return Page();
     }
 
-    public async Task<IActionResult> OnPostAsync()
+    internal static bool ShouldAutoEnter(string? from, string? returnUrl)
     {
+        if (string.Equals(from, "visitor", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (string.IsNullOrWhiteSpace(returnUrl))
+            return true;
+        var path = returnUrl.Split('?', 2)[0].TrimEnd('/');
+        return path.Length == 0 || path.Equals("/Index", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public async Task<IActionResult> OnPostAsync(CancellationToken ct)
+    {
+        VisitorAccessEnabled = (await visitorAccess.GetAsync(ct)).Enabled;
         if (!ModelState.IsValid) return Page();
         var user = await users.FindByNameAsync(Input.Username.Trim());
         if (user is null || !user.Enabled)

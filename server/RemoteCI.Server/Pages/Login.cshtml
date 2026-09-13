@@ -12,4 +12,8 @@
         <label>密码<input asp-for="Input.Password" type="password" autocomplete="current-password" /></label>
         <button type="submit">登录</button>
     </form>
+    @if (Model.VisitorAccessEnabled)
+    {
+        <a class="login-guest" asp-page="/Visitor">仅查看</a>
+    }
 </section>

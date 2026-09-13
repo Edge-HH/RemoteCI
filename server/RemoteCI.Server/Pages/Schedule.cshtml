@@ -1,12 +1,12 @@
 @page
 @model ScheduleModel
-@{ ViewData["Title"] = "七日课表"; }
+@{ ViewData["Title"] = "课表"; }
 <div class="page-head"><div><p class="eyebrow">指定日期课表</p><h1>未来七日课表</h1></div><span class="status @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "已连接" : "插件离线")</span></div>
 @if (Model.CanPullSchedule)
 {
 <section class="panel schedule-pull-panel">
     <form method="post" asp-page-handler="Pull" class="schedule-pull-layout" data-schedule-pull-form>
-        <div class="schedule-pull-copy"><h2>从插件拉取课表</h2><p class="muted">立即连接在线插件重新生成当前七日课表；拉取成功后会强制覆盖服务端缓存。</p></div>
+        <div class="schedule-pull-copy"><h2>从插件拉取课表</h2><p class="muted">立即连接在线插件重新生成当前课表；拉取成功后会强制覆盖服务端缓存。</p></div>
         <button type="submit" class="schedule-pull-button" disabled="@(!Model.PluginOnline || Model.CurrentTask is not null)" data-schedule-pull-button>@(Model.CurrentTask is null ? "立即拉取课表" : "已有课表任务正在执行")</button>
         @if (Model.CurrentTask is { } task)
         {
@@ -21,16 +21,10 @@
 }
 @if (Model.Bundle is null)
 {
-    <div class="notice warning">插件尚未同步七日课表。</div>
+    <div class="notice warning">插件尚未同步课表。</div>
 }
 else
 {
-    var weekNames = new[] { "周日", "周一", "周二", "周三", "周四", "周五", "周六" };
-    var courseRows = Model.Bundle.Days
-        .SelectMany(day => day.Courses)
-        .GroupBy(course => course.Index)
-        .OrderBy(group => group.Key)
-        .ToList();
     var courseOptions = Model.Bundle.Days
         .Where(day => day.Enabled)
         .SelectMany(day => day.Courses
@@ -43,18 +37,7 @@ else
                 Label = $"{day.Date} · {course.Label} · {course.Subject}",
             }))
         .ToList();
-    <div class="schedule-table-wrap">
-        <table class="schedule-table">
-            <thead><tr><th scope="col" class="schedule-period-heading">节次</th>@foreach (var day in Model.Bundle.Days) { var dayTitle = DateTime.TryParse(day.Date, out var parsedDate) ? weekNames[(int)parsedDate.DayOfWeek] : day.Date; <th scope="col"><strong>@dayTitle</strong><small>@day.Date</small></th> }</tr></thead>
-            <tbody>
-            @foreach (var row in courseRows)
-            {
-                var rowLabel = row.Select(course => course.Label).FirstOrDefault(label => !string.IsNullOrWhiteSpace(label)) ?? $"第 {row.Key + 1} 节";
-                <tr><th scope="row" class="schedule-period-cell">@rowLabel</th>@foreach (var day in Model.Bundle.Days) { var course = day.Courses.FirstOrDefault(item => item.Index == row.Key); <td>@if (day.Enabled && course is not null && course.Enabled) { <div class="schedule-course-name" title="@course.Subject">@course.Subject</div><div class="schedule-course-time" title="@($"{course.StartTime}–{course.EndTime}")">@course.StartTime–@course.EndTime</div> } else { <span class="schedule-empty">—</span> }</td> }</tr>
-            }
-            </tbody>
-        </table>
-    </div>
+    <partial name="_ScheduleTable" model="Model.Bundle" />
     @if (Model.CanManageSchedule)
     {
     <section class="panel">

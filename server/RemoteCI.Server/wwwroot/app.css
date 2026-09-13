@@ -251,6 +251,12 @@ textarea { resize: vertical; }
 .login-card { width: 100%; padding: 34px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); }
 .login-logo { display: block; width: 54px; height: 54px; margin-bottom: 22px; }
 .login-card h1 { font-size: 30px; }
+.login-guest { display: block; margin-top: 18px; text-align: center; color: var(--muted); font-weight: 650; }
+.login-guest:hover { color: var(--accent); }
+.visitor-layout { min-height: 100vh; background: var(--bg); }
+.visitor-shell { width: min(100%,1500px); margin: 0 auto; padding: 24px 28px 46px; }
+.visitor-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 26px; }
+.visitor-head .button { flex: 0 0 auto; }
 
 @media (max-width: 1180px) {
     .metric-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
@@ -276,7 +282,7 @@ textarea { resize: vertical; }
     .app-search { width: min(100%,420px); }
     .topbar-actions .topbar-button:nth-child(3) { display: none; }
     .shell { padding: 22px 18px 38px; }
-    .dashboard-head, .page-head { flex-direction: column; }
+    .dashboard-head, .page-head, .visitor-head { flex-direction: column; }
     .dashboard-actions { justify-content: flex-start; }
     .form-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }

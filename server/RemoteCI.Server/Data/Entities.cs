@@ -44,6 +44,12 @@ public sealed class SystemMetadata
 
     /// <summary>服务端主动向插件拉取课表的间隔分钟数；0 表示关闭定时拉取。</summary>
     public int SchedulePullIntervalMinutes { get; set; }
+
+    /// <summary>启用后未登录访客可只读查看课表。</summary>
+    public bool VisitorAccessEnabled { get; set; }
+
+    /// <summary>启用访客功能时，访问 WebUI 落地页直接进入访客课表；关闭访客功能时无效。</summary>
+    public bool AutoEnterVisitorPage { get; set; }
 }
 
 public enum AccountRoleKind

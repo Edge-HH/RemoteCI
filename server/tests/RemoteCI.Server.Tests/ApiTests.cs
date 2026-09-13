@@ -383,6 +383,9 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var usersHtml = WebUtility.HtmlDecode(await browser.GetStringAsync("/Users"));
         Assert.Contains("角色配置", usersHtml);
         Assert.Contains("创建角色", usersHtml);
+        Assert.Contains("启用访客功能", usersHtml);
+        Assert.Contains("自动进入访客页", usersHtml);
+        Assert.Contains("data-visitor-access-form", usersHtml);
         Assert.Contains("""class="user-account-table role-summary-table""", usersHtml);
         Assert.Contains("""<dialog id="role-create-dialog""", usersHtml);
         var roleTableStart = usersHtml.IndexOf("""class="user-account-table role-summary-table""", StringComparison.Ordinal);

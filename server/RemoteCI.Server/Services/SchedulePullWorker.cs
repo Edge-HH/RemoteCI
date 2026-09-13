@@ -35,7 +35,7 @@ public sealed class SchedulePullWorker(
         _cadence.MarkAttempt(now);
         var status = await scheduleSync.StartAsync(ScheduleSyncSource.Automatic, ct);
         if (status.State == ScheduleSyncTaskState.Running)
-            logger.LogInformation("已按 {Interval} 分钟周期请求插件刷新七日课表", (int)interval);
+            logger.LogInformation("已按 {Interval} 分钟周期请求插件刷新课表", (int)interval);
         else if (status.State == ScheduleSyncTaskState.Busy)
             logger.LogInformation("已到课表拉取周期，但已有课表任务正在执行，本次自动拉取已跳过");
         else

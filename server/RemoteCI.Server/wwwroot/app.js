@@ -317,3 +317,15 @@ document.querySelectorAll("[data-backup-settings-form]").forEach(form => {
     cadence.addEventListener("change", syncBackupFields);
     syncBackupFields();
 });
+
+document.querySelectorAll("[data-visitor-access-form]").forEach(form => {
+    const enabled = form.querySelector("[data-visitor-enabled]");
+    const autoEnter = form.querySelector("[data-visitor-auto-enter]");
+    if (!enabled || !autoEnter) return;
+    const syncVisitorAccess = () => {
+        autoEnter.disabled = !enabled.checked;
+        if (!enabled.checked) autoEnter.checked = false;
+    };
+    enabled.addEventListener("change", syncVisitorAccess);
+    syncVisitorAccess();
+});

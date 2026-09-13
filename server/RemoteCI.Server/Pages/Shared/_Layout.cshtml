@@ -36,8 +36,16 @@
     <link rel="stylesheet" href="~/vendor/bootstrap-icons/font/bootstrap-icons.min.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/app.css" asp-append-version="true" />
 </head>
-<body class="@(current is null ? "auth-layout" : "app-layout")">
-    @if (current is not null)
+<body class="@(currentPage == "/Visitor" ? "visitor-layout" : current is null ? "auth-layout" : "app-layout")">
+    @if (currentPage == "/Visitor")
+    {
+        <main class="shell visitor-shell">
+            @if (TempData["Message"] is string visitorMessage) { <div class="flash">@visitorMessage</div> }
+            @if (TempData["Error"] is string visitorError) { <div class="flash error">@visitorError</div> }
+            @RenderBody()
+        </main>
+    }
+    else if (current is not null)
     {
         <aside class="sidebar" aria-label="主导航" data-sidebar>
             <a class="brand" href="@(permissions.HasFlag(UserPermissions.AccessWebUi) ? Url.Page("/Index") : Url.Page("/Account"))">
@@ -49,7 +57,7 @@
                 {
                     <a class="@NavClass("/Index")" aria-current="@CurrentPage("/Index")" asp-page="/Index" data-search-label="概览 仪表盘 课堂状态"><i class="bi bi-grid" aria-hidden="true"></i><span>概览</span></a>
                 }
-                <a class="@NavClass("/Schedule")" aria-current="@CurrentPage("/Schedule")" asp-page="/Schedule" data-search-label="七日课表 换课 课程安排"><i class="bi bi-calendar-week" aria-hidden="true"></i><span>课表</span></a>
+                <a class="@NavClass("/Schedule")" aria-current="@CurrentPage("/Schedule")" asp-page="/Schedule" data-search-label="课表 换课 课程安排"><i class="bi bi-calendar-week" aria-hidden="true"></i><span>课表</span></a>
                 @if (showControlMenu)
                 {
                     <a class="@(controlMenuActive ? "nav-link active" : "nav-link")" aria-current="@(controlMenuActive ? "page" : null)" asp-page="/Control" data-search-label="控制 老师来了 发送通知 清除通知 主界面 音量 电源 扩展"><i class="bi bi-toggles" aria-hidden="true"></i><span>控制</span></a>

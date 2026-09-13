@@ -75,13 +75,18 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.AccessDeniedPath = "/Denied";
 });
 builder.Services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
-builder.Services.AddRazorPages(options => options.Conventions.AllowAnonymousToPage("/Login"));
+builder.Services.AddRazorPages(options =>
+{
+    options.Conventions.AllowAnonymousToPage("/Login");
+    options.Conventions.AllowAnonymousToPage("/Visitor");
+});
 builder.Services.AddScoped<IdentityCoordinator>();
 builder.Services.AddScoped<AccountRoleService>();
 builder.Services.AddScoped<ExtensionPolicyService>();
 builder.Services.AddScoped<AuthorizationSyncService>();
 builder.Services.AddScoped<ConfigurationArchiveService>();
 builder.Services.AddScoped<SchedulePullSettings>();
+builder.Services.AddScoped<VisitorAccessSettings>();
 builder.Services.AddSingleton<IStateStore, StateStore>();
 builder.Services.AddSingleton<PeerRegistry>();
 builder.Services.AddSingleton<ScheduleSyncTaskTracker>();
@@ -252,7 +257,7 @@ app.MapGet("/api/schedule", async (HttpContext ctx, IdentityCoordinator identiti
     if (await AuthorizeAsync(ctx, identities, ct) is null) return Unauthorized();
     return store.GetLatestSchedule() is { } schedule
         ? Results.Ok(schedule)
-        : Results.Json(Error(ApiErrorCodes.NotFound, "尚无七日课表"), statusCode: StatusCodes.Status404NotFound);
+        : Results.Json(Error(ApiErrorCodes.NotFound, "尚无课表"), statusCode: StatusCodes.Status404NotFound);
 });
 
 app.MapPost("/api/commands", async (

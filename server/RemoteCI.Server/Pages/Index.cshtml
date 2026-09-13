@@ -95,7 +95,7 @@
             </article>
             <article>
                 <span class="activity-icon"><i class="bi bi-calendar-check" aria-hidden="true"></i></span>
-                <div><strong>@(Model.Schedule is null ? "尚无七日课表" : "七日课表已同步")</strong><small>@(Model.Schedule?.GeneratedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "连接插件后可立即拉取")</small></div><span>课表</span>
+                <div><strong>@(Model.Schedule is null ? "尚无课表" : "课表已同步")</strong><small>@(Model.Schedule?.GeneratedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "连接插件后可立即拉取")</small></div><span>课表</span>
             </article>
             <article>
                 <span class="activity-icon"><i class="bi bi-smartwatch" aria-hidden="true"></i></span>
@@ -116,8 +116,8 @@
         <div class="task-table">
             @if (Model.Permissions.HasFlag(UserPermissions.ManageSchedule) && Model.Supports(RemoteCiCapabilities.ScheduleChange))
             {
-                <a asp-page="/Schedule" data-search-label="七日课表 换课 同步课表">
-                    <span class="task-main"><i class="bi bi-calendar-week" aria-hidden="true"></i><span><strong>七日课表</strong><small>查看、拉取并调整未来七天课程</small></span></span>
+                <a asp-page="/Schedule" data-search-label="课表 换课 同步课表">
+                    <span class="task-main"><i class="bi bi-calendar-week" aria-hidden="true"></i><span><strong>课表</strong><small>查看、拉取并调整未来七天课程</small></span></span>
                     <span class="task-owner">课程管理</span><span class="task-status healthy">可用</span><i class="bi bi-arrow-right" aria-hidden="true"></i>
                 </a>
             }
