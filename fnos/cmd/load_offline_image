@@ -47,6 +47,23 @@ find_app_archive() {
   return 1
 }
 
+find_writable_temp_root() {
+  local candidate
+  # install_init 早于应用数据目录创建，TRIM_PKGTMP 此时可能尚不存在且不可创建。
+  # 安装包解压目录由应用中心预先准备；若它不可写，再使用系统临时目录。
+  for candidate in \
+    "${TRIM_PKGINST_TEMP_DIR:-}" \
+    "${TMPDIR:-}" \
+    /tmp; do
+    [ -n "$candidate" ] || continue
+    if [ -d "$candidate" ] && [ -w "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # 在线 FPK 不带该文件，仍沿用应用中心从 GHCR 拉取镜像的标准流程。
 [ -f "$METADATA_FILE" ] || exit 0
 
@@ -86,8 +103,7 @@ tar -tzf "$APP_ARCHIVE" "$ARCHIVE_MEMBER" >/dev/null 2>&1 || fail "app.tgz 缺�
 tar -xOzf "$APP_ARCHIVE" "$APP_METADATA_MEMBER" 2>/dev/null | cmp -s - "$METADATA_FILE" \
   || fail "app.tgz 中的镜像元数据不一致"
 
-TEMP_ROOT="${TRIM_PKGTMP:-${TMPDIR:-/tmp}}"
-mkdir -p "$TEMP_ROOT" || fail "无法创建安装临时目录 $TEMP_ROOT"
+TEMP_ROOT="$(find_writable_temp_root)" || fail "找不到可写的安装临时目录"
 TEMP_ARCHIVE="$(mktemp "$TEMP_ROOT/remoteci-image.XXXXXX.tar.gz")" \
   || fail "无法创建镜像临时文件"
 LOAD_OUTPUT="$(mktemp "$TEMP_ROOT/remoteci-docker-load.XXXXXX.log")" \

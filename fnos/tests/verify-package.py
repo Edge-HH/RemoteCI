@@ -49,6 +49,8 @@ def main() -> None:
         assert manifest["version"] == version
         assert manifest["platform"] == expected_platform
         assert "cmd/arch_compat" in package_names
+        privilege = json.loads(read_member(package, "config/privilege"))
+        assert privilege["defaults"]["run-as"] == "root"
         app_tgz = read_member(package, "app.tgz")
         outer_metadata = read_member(package, "cmd/offline-image.env") if mode == "offline" else None
 
