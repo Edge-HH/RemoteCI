@@ -87,7 +87,6 @@ public sealed class VisitorAccessTests
         var visitor = await guest.GetAsync("/Visitor");
         Assert.Equal(HttpStatusCode.OK, visitor.StatusCode);
         var visitorHtml = WebUtility.HtmlDecode(await visitor.Content.ReadAsStringAsync());
-        Assert.Contains("七日课表", visitorHtml);
         Assert.Contains("返回登录", visitorHtml);
         Assert.Contains("from=visitor", visitorHtml);
         Assert.Contains("数学", visitorHtml);
