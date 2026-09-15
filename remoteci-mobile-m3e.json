@@ -1,0 +1,120 @@
+{
+  "title": "RemoteCI Mobile",
+  "brief": "将 RemoteCI 的设备控制、实时查看、任务协作和人员管理浓缩到手机端。面向值班管理员：先看到风险，再用一次明确操作完成处置。",
+  "frame": "phone",
+  "platform": "android",
+  "paletteKey": "teal",
+  "theme": { "dark": true, "bothModes": true, "contrast": "standard", "shape": "rounded", "font": "robotoFlex", "emphasized": true, "motion": "expressive" },
+  "frames": [
+    { "id": "devices", "name": "设备总览", "x": 0, "y": 0, "note": "按状态展示已配对设备；管理员可快速进入单台设备的控制面板。", "bg": "surface" },
+    { "id": "device-control", "name": "设备控制", "x": 492, "y": 0, "note": "单台设备的实时状态、远程操作与维护入口；高风险操作需要二次确认。", "bg": "surface" },
+    { "id": "live-view", "name": "实时监看", "x": 984, "y": 0, "note": "查看设备的实时画面和近期日志；远程输入始终显示连接状态。", "bg": "surface" },
+    { "id": "jobs", "name": "任务与告警", "x": 0, "y": 972, "note": "集中查看构建任务、部署进度和需要值班员处理的告警。", "bg": "surface" },
+    { "id": "team", "name": "团队与权限", "x": 492, "y": 972, "note": "管理成员、角色和设备访问范围；邀请与权限变更可追溯。", "bg": "surface" }
+  ],
+  "groups": [
+    { "id": "devices-bar-group", "x": 0, "y": 0, "axis": "x", "items": [
+      { "id": "devices-bar", "kind": "topAppBar", "label": "设备", "icon": "menu", "icon2": "notifications", "variant": "filled", "actions": { "icon": { "to": "team", "transition": "slide" } } }
+    ] },
+    { "id": "devices-search-group", "x": 16, "y": 104, "axis": "x", "items": [
+      { "id": "devices-search", "kind": "searchBar", "label": "搜索设备、标签或负责人", "icon": "search", "icon2": "tune", "variant": "filled" }
+    ] },
+    { "id": "devices-filter-group", "x": 16, "y": 176, "axis": "x", "items": [
+      { "id": "filter-all", "kind": "chip", "label": "全部 24", "icon": null, "variant": "filled", "checked": true },
+      { "id": "filter-online", "kind": "chip", "label": "在线 18", "icon": "wifi", "variant": "filled" },
+      { "id": "filter-alert", "kind": "chip", "label": "需处理 3", "icon": "warning", "variant": "filled" }
+    ] },
+    { "id": "devices-list-group", "x": 16, "y": 232, "axis": "y", "items": [
+      { "id": "device-build-01", "kind": "listItem", "label": "build-agent-01", "supporting": "在线 · Windows · 构建中 72%", "icon": "computer", "icon2": "chevron_right", "variant": "filled", "action": { "to": "device-control", "transition": "slide" } },
+      { "id": "device-deploy-03", "kind": "listItem", "label": "deploy-node-03", "supporting": "在线 · Linux · 正在部署", "icon": "dns", "icon2": "chevron_right", "variant": "filled", "action": { "to": "device-control", "transition": "slide" } },
+      { "id": "device-lab-07", "kind": "listItem", "label": "lab-phone-07", "supporting": "告警 · Android · 9 分钟未响应", "icon": "smartphone", "icon2": "warning", "variant": "filled", "action": { "to": "device-control", "transition": "slide" } },
+      { "id": "device-mac-02", "kind": "listItem", "label": "mac-runner-02", "supporting": "离线 · 上次在线 26 分钟前", "icon": "laptop_mac", "icon2": "chevron_right", "variant": "filled", "action": { "to": "device-control", "transition": "slide" } }
+    ] },
+    { "id": "devices-nav-group", "x": 0, "y": 788, "axis": "x", "items": [
+      { "id": "devices-nav", "kind": "bottomNav", "label": "", "icon": null, "variant": "filled", "tabs": [ { "icon": "devices", "label": "设备" }, { "icon": "visibility", "label": "监看" }, { "icon": "assignment", "label": "任务" }, { "icon": "group", "label": "团队" } ], "selected": 0, "actions": { "tab:1": { "to": "live-view", "transition": "fade" }, "tab:2": { "to": "jobs", "transition": "fade" }, "tab:3": { "to": "team", "transition": "fade" } } }
+    ] },
+
+    { "id": "control-bar-group", "x": 492, "y": 0, "axis": "x", "items": [
+      { "id": "control-bar", "kind": "topAppBar", "label": "build-agent-01", "icon": "arrow_back", "icon2": "more_vert", "variant": "filled", "actions": { "icon": { "to": "back", "transition": "slide" } } }
+    ] },
+    { "id": "control-status-group", "x": 508, "y": 104, "axis": "x", "items": [
+      { "id": "control-status", "kind": "card", "label": "在线 · 运行正常", "supporting": "Windows 11 · CPU 48% · 内存 61%\n当前任务：release/3.2.1.5", "icon": "check_circle", "variant": "filled", "fill": "primaryContainer", "size": 380, "size2": 156, "noImage": true, "action": { "to": "live-view", "transition": "expand" } }
+    ] },
+    { "id": "control-heading-group", "x": 508, "y": 282, "axis": "x", "items": [
+      { "id": "control-heading", "kind": "text", "label": "远程控制", "icon": null, "variant": "filled", "size": 20, "bold": true }
+    ] },
+    { "id": "control-actions-group", "x": 508, "y": 322, "axis": "x", "items": [
+      { "id": "control-view", "kind": "button", "label": "查看画面", "icon": "visibility", "variant": "filled", "size": 182, "action": { "to": "live-view", "transition": "expand" } },
+      { "id": "control-terminal", "kind": "button", "label": "终端", "icon": "terminal", "variant": "tonal", "size": 182, "note": "打开受审计的远程终端会话。" }
+    ] },
+    { "id": "control-maintenance-group", "x": 508, "y": 394, "axis": "x", "items": [
+      { "id": "control-restart", "kind": "button", "label": "重启设备", "icon": "restart_alt", "variant": "outlined", "size": 182, "note": "请求二次确认后重启，并记录操作者与原因。" },
+      { "id": "control-lock", "kind": "button", "label": "锁定会话", "icon": "lock", "variant": "outlined", "size": 182, "note": "立即中止远程输入，保留查看权限。" }
+    ] },
+    { "id": "control-info-group", "x": 508, "y": 482, "axis": "y", "items": [
+      { "id": "control-job", "kind": "listItem", "label": "正在运行的任务", "supporting": "发布 RemoteCI 3.2.1.5 · 预计 6 分钟", "icon": "play_circle", "icon2": "chevron_right", "variant": "filled", "action": { "to": "jobs", "transition": "slide" } },
+      { "id": "control-members", "kind": "listItem", "label": "设备访问者", "supporting": "5 人有控制权限", "icon": "group", "icon2": "chevron_right", "variant": "filled", "action": { "to": "team", "transition": "slide" } }
+    ] },
+
+    { "id": "live-bar-group", "x": 984, "y": 0, "axis": "x", "items": [
+      { "id": "live-bar", "kind": "topAppBar", "label": "实时监看", "icon": "arrow_back", "icon2": "fullscreen", "variant": "filled", "actions": { "icon": { "to": "back", "transition": "slide" } } }
+    ] },
+    { "id": "live-device-group", "x": 1000, "y": 96, "axis": "x", "items": [
+      { "id": "live-device", "kind": "select", "label": "build-agent-01", "icon": "computer", "variant": "outlined", "tabs": [ { "label": "build-agent-01" }, { "label": "deploy-node-03" }, { "label": "lab-phone-07" } ], "selected": 0 }
+    ] },
+    { "id": "live-camera-group", "x": 1000, "y": 176, "axis": "x", "items": [
+      { "id": "live-camera", "kind": "camera", "label": "", "icon": null, "variant": "filled", "size": 380, "size2": 300, "note": "设备桌面的低延迟画面；顶部状态常驻显示远程会话是否可输入。" }
+    ] },
+    { "id": "live-toolbar-group", "x": 1082, "y": 500, "axis": "x", "items": [
+      { "id": "live-toolbar", "kind": "toolbar", "label": "", "icon": null, "variant": "tonal", "tabs": [ { "icon": "mouse" }, { "icon": "keyboard" }, { "icon": "content_copy" }, { "icon": "mic" } ], "note": "提供远程鼠标、键盘、剪贴板和语音消息入口。" }
+    ] },
+    { "id": "live-log-group", "x": 1000, "y": 592, "axis": "y", "items": [
+      { "id": "live-connected", "kind": "listItem", "label": "远程输入已连接", "supporting": "操作者：杨天明 · 受审计", "icon": "verified_user", "icon2": "check_circle", "variant": "filled" },
+      { "id": "live-log", "kind": "listItem", "label": "最近事件", "supporting": "14:32 构建任务开始", "icon": "history", "icon2": "chevron_right", "variant": "filled", "action": { "to": "jobs", "transition": "slide" } }
+    ] },
+    { "id": "live-nav-group", "x": 984, "y": 788, "axis": "x", "items": [
+      { "id": "live-nav", "kind": "bottomNav", "label": "", "icon": null, "variant": "filled", "tabs": [ { "icon": "devices", "label": "设备" }, { "icon": "visibility", "label": "监看" }, { "icon": "assignment", "label": "任务" }, { "icon": "group", "label": "团队" } ], "selected": 1, "actions": { "tab:0": { "to": "devices", "transition": "fade" }, "tab:2": { "to": "jobs", "transition": "fade" }, "tab:3": { "to": "team", "transition": "fade" } } }
+    ] },
+
+    { "id": "jobs-bar-group", "x": 0, "y": 972, "axis": "x", "items": [
+      { "id": "jobs-bar", "kind": "topAppBar", "label": "任务与告警", "icon": "menu", "icon2": "filter_list", "variant": "filled" }
+    ] },
+    { "id": "jobs-tabs-group", "x": 0, "y": 1060, "axis": "x", "items": [
+      { "id": "jobs-tabs", "kind": "tabs", "label": "", "icon": null, "variant": "filled", "tabs": [ { "label": "进行中 4" }, { "label": "告警 3" }, { "label": "已完成" } ], "selected": 0 }
+    ] },
+    { "id": "jobs-progress-group", "x": 16, "y": 1120, "axis": "x", "items": [
+      { "id": "jobs-progress", "kind": "linearProgress", "label": "", "icon": null, "variant": "filled", "value": 72, "wavy": true, "trackThickness": 8, "note": "release/3.2.1.5 的构建进度为 72%。" }
+    ] },
+    { "id": "jobs-list-group", "x": 16, "y": 1160, "axis": "y", "items": [
+      { "id": "job-release", "kind": "listItem", "label": "发布 RemoteCI 3.2.1.5", "supporting": "build-agent-01 · 进行中 · 72%", "icon": "rocket_launch", "icon2": "chevron_right", "variant": "filled", "action": { "to": "device-control", "transition": "slide" } },
+      { "id": "alert-phone", "kind": "listItem", "label": "lab-phone-07 未响应", "supporting": "9 分钟前 · 需要确认设备状态", "icon": "warning", "icon2": "chevron_right", "variant": "filled", "action": { "to": "device-control", "transition": "slide" } },
+      { "id": "job-deploy", "kind": "listItem", "label": "部署生产环境", "supporting": "deploy-node-03 · 等待审批", "icon": "cloud_upload", "icon2": "chevron_right", "variant": "filled", "action": { "to": "team", "transition": "slide" } },
+      { "id": "job-test", "kind": "listItem", "label": "Wear OS 单元测试", "supporting": "mac-runner-02 · 已失败", "icon": "error", "icon2": "chevron_right", "variant": "filled" }
+    ] },
+    { "id": "jobs-nav-group", "x": 0, "y": 1760, "axis": "x", "items": [
+      { "id": "jobs-nav", "kind": "bottomNav", "label": "", "icon": null, "variant": "filled", "tabs": [ { "icon": "devices", "label": "设备" }, { "icon": "visibility", "label": "监看" }, { "icon": "assignment", "label": "任务" }, { "icon": "group", "label": "团队" } ], "selected": 2, "actions": { "tab:0": { "to": "devices", "transition": "fade" }, "tab:1": { "to": "live-view", "transition": "fade" }, "tab:3": { "to": "team", "transition": "fade" } } }
+    ] },
+
+    { "id": "team-bar-group", "x": 492, "y": 972, "axis": "x", "items": [
+      { "id": "team-bar", "kind": "topAppBar", "label": "团队与权限", "icon": "menu", "icon2": "person_add", "variant": "filled", "note": "邀请新成员，邀请链接仅在设定时间内有效。" }
+    ] },
+    { "id": "team-summary-group", "x": 508, "y": 1076, "axis": "x", "items": [
+      { "id": "team-summary", "kind": "card", "label": "12 位成员 · 24 台设备", "supporting": "3 位管理员 · 4 个访问组\n所有权限变更均记录在审计日志中。", "icon": "admin_panel_settings", "variant": "filled", "fill": "secondaryContainer", "size": 380, "size2": 144, "noImage": true }
+    ] },
+    { "id": "team-heading-group", "x": 508, "y": 1242, "axis": "x", "items": [
+      { "id": "team-heading", "kind": "text", "label": "成员", "icon": null, "variant": "filled", "size": 20, "bold": true }
+    ] },
+    { "id": "team-list-group", "x": 508, "y": 1280, "axis": "y", "items": [
+      { "id": "member-yang", "kind": "listItem", "label": "杨天明", "supporting": "所有者 · 全部设备 · 最近在线", "icon": "account_circle", "icon2": "chevron_right", "variant": "filled" },
+      { "id": "member-li", "kind": "listItem", "label": "李明", "supporting": "管理员 · 发布环境", "icon": "account_circle", "icon2": "chevron_right", "variant": "filled" },
+      { "id": "member-chen", "kind": "listItem", "label": "陈晓", "supporting": "开发者 · 测试设备组", "icon": "account_circle", "icon2": "chevron_right", "variant": "filled" },
+      { "id": "member-pending", "kind": "listItem", "label": "待接受邀请", "supporting": "王宁 · 访客 · 还剩 18 小时", "icon": "mail", "icon2": "more_vert", "variant": "filled" }
+    ] },
+    { "id": "team-add-group", "x": 832, "y": 1656, "axis": "x", "items": [
+      { "id": "team-add", "kind": "fab", "label": "", "icon": "person_add", "variant": "filled", "size": 56, "note": "邀请成员并选择角色、设备组和邀请有效期。" }
+    ] },
+    { "id": "team-nav-group", "x": 492, "y": 1760, "axis": "x", "items": [
+      { "id": "team-nav", "kind": "bottomNav", "label": "", "icon": null, "variant": "filled", "tabs": [ { "icon": "devices", "label": "设备" }, { "icon": "visibility", "label": "监看" }, { "icon": "assignment", "label": "任务" }, { "icon": "group", "label": "团队" } ], "selected": 3, "actions": { "tab:0": { "to": "devices", "transition": "fade" }, "tab:1": { "to": "live-view", "transition": "fade" }, "tab:2": { "to": "jobs", "transition": "fade" } } }
+    ] }
+  ]
+}

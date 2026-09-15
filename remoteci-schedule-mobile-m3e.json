@@ -1,0 +1,100 @@
+{
+  "title": "RemoteCI 课表",
+  "brief": "把 RemoteCI WebUI 和手表端的课表、课堂状态、换课、提醒与快捷控制整合到手机。",
+  "frame": "phone",
+  "platform": "android",
+  "paletteKey": "blue",
+  "theme": { "dark": false, "bothModes": true, "contrast": "standard", "shape": "rounded", "font": "roboto", "emphasized": true, "motion": "expressive" },
+  "frames": [
+    { "id": "today", "name": "今日课堂", "x": 0, "y": 0, "note": "首页优先显示当前课程、下节课程和课堂倒计时；这是手表端首页信息的手机化版本。" },
+    { "id": "week", "name": "七日课表", "x": 492, "y": 0, "note": "查看从今天开始的七日课表，并可立即向 ClassIsland 拉取最新课表。" },
+    { "id": "change", "name": "调课", "x": 984, "y": 0, "note": "有换课权限时，可交换两节课或用指定课程替换目标节次。" },
+    { "id": "control", "name": "课堂控制", "x": 0, "y": 972, "note": "发送自定义提醒、老师来了、主界面显示和音量控制等 WebUI 与手表共有操作。" },
+    { "id": "watch", "name": "手表与提醒", "x": 492, "y": 972, "note": "管理已登录手表、查看连接状态，并设置需要同步到手表的提醒与扩展入口。" }
+  ],
+  "groups": [
+    { "id": "today-bar-group", "x": 0, "y": 0, "axis": "x", "items": [
+      { "id": "today-bar", "kind": "topAppBar", "label": "今日课堂", "icon": "menu", "icon2": "notifications", "variant": "filled" }
+    ] },
+    { "id": "today-current-group", "x": 16, "y": 104, "axis": "x", "items": [
+      { "id": "today-current", "kind": "card", "label": "正在上课 · 信息技术", "supporting": "第二节 09:00–09:45\n距离下课还有 18 分钟", "icon": "schedule", "variant": "filled", "fill": "primaryContainer", "size": 380, "size2": 168, "noImage": true, "action": { "to": "change", "transition": "expand" } }
+    ] },
+    { "id": "today-next-group", "x": 16, "y": 296, "axis": "y", "items": [
+      { "id": "today-next", "kind": "listItem", "label": "下一节 · 体育", "supporting": "第三节 10:05–10:50 · 操场", "icon": "directions_run", "icon2": "chevron_right", "variant": "filled", "action": { "to": "change", "transition": "slide" } },
+      { "id": "today-status", "kind": "listItem", "label": "ClassIsland 已连接", "supporting": "课表已于 08:02 同步", "icon": "cloud_done", "icon2": "check_circle", "variant": "filled" }
+    ] },
+    { "id": "today-actions-group", "x": 16, "y": 456, "axis": "x", "items": [
+      { "id": "today-schedule", "kind": "button", "label": "查看七日课表", "icon": "calendar_month", "variant": "filled", "size": 182, "action": { "to": "week", "transition": "slide" } },
+      { "id": "today-control", "kind": "button", "label": "课堂控制", "icon": "tune", "variant": "tonal", "size": 182, "action": { "to": "control", "transition": "slide" } }
+    ] },
+    { "id": "today-nav-group", "x": 0, "y": 788, "axis": "x", "items": [
+      { "id": "today-nav", "kind": "bottomNav", "label": "", "icon": null, "variant": "filled", "tabs": [{ "icon": "today", "label": "今天" }, { "icon": "calendar_month", "label": "课表" }, { "icon": "tune", "label": "控制" }, { "icon": "watch", "label": "手表" }], "selected": 0, "actions": { "tab:1": { "to": "week", "transition": "fade" }, "tab:2": { "to": "control", "transition": "fade" }, "tab:3": { "to": "watch", "transition": "fade" } } }
+    ] },
+    { "id": "week-bar-group", "x": 492, "y": 0, "axis": "x", "items": [
+      { "id": "week-bar", "kind": "topAppBar", "label": "七日课表", "icon": "arrow_back", "icon2": "refresh", "variant": "filled", "actions": { "icon": { "to": "back", "transition": "slide" } }, "note": "刷新会向在线 ClassIsland 插件请求最新课表；任务执行中时显示来源并禁止重复请求。" }
+    ] },
+    { "id": "week-tabs-group", "x": 492, "y": 88, "axis": "x", "items": [
+      { "id": "week-tabs", "kind": "tabs", "label": "", "icon": null, "variant": "filled", "tabs": [{ "label": "周一 15" }, { "label": "周二 16" }, { "label": "周三 17" }, { "label": "周四 18" }, { "label": "周五 19" }], "selected": 0 }
+    ] },
+    { "id": "week-list-group", "x": 508, "y": 160, "axis": "y", "items": [
+      { "id": "week-first", "kind": "listItem", "label": "第一节 · 数学", "supporting": "08:00–08:45 · 教学楼 301", "icon": "functions", "icon2": "chevron_right", "variant": "filled", "action": { "to": "change", "transition": "slide" } },
+      { "id": "week-second", "kind": "listItem", "label": "第二节 · 信息技术", "supporting": "09:00–09:45 · 机房", "icon": "computer", "icon2": "chevron_right", "variant": "filled", "action": { "to": "change", "transition": "slide" } },
+      { "id": "week-third", "kind": "listItem", "label": "第三节 · 体育", "supporting": "10:05–10:50 · 操场", "icon": "directions_run", "icon2": "chevron_right", "variant": "filled", "action": { "to": "change", "transition": "slide" } },
+      { "id": "week-fourth", "kind": "listItem", "label": "第四节 · 英语", "supporting": "11:00–11:45 · 教学楼 204", "icon": "translate", "icon2": "chevron_right", "variant": "filled", "action": { "to": "change", "transition": "slide" } }
+    ] },
+    { "id": "week-pull-group", "x": 508, "y": 504, "axis": "x", "items": [
+      { "id": "week-pull", "kind": "button", "label": "立即拉取课表", "icon": "sync", "variant": "outlined", "size": 380, "note": "请求插件重新生成并同步七日课表；插件离线时立即提示失败，不排队。" }
+    ] },
+    { "id": "week-nav-group", "x": 492, "y": 788, "axis": "x", "items": [
+      { "id": "week-nav", "kind": "bottomNav", "label": "", "icon": null, "variant": "filled", "tabs": [{ "icon": "today", "label": "今天" }, { "icon": "calendar_month", "label": "课表" }, { "icon": "tune", "label": "控制" }, { "icon": "watch", "label": "手表" }], "selected": 1, "actions": { "tab:0": { "to": "today", "transition": "fade" }, "tab:2": { "to": "control", "transition": "fade" }, "tab:3": { "to": "watch", "transition": "fade" } } }
+    ] },
+    { "id": "change-bar-group", "x": 984, "y": 0, "axis": "x", "items": [
+      { "id": "change-bar", "kind": "topAppBar", "label": "调课", "icon": "arrow_back", "icon2": "help", "variant": "filled", "actions": { "icon": { "to": "back", "transition": "slide" } } }
+    ] },
+    { "id": "change-mode-group", "x": 1000, "y": 104, "axis": "x", "items": [
+      { "id": "change-mode", "kind": "select", "label": "交换课程", "supporting": "选择操作方式", "icon": "swap_horiz", "variant": "outlined", "tabs": [{ "label": "交换课程" }, { "label": "替换课程" }], "selected": 0 }
+    ] },
+    { "id": "change-date-group", "x": 1000, "y": 184, "axis": "x", "items": [
+      { "id": "change-date", "kind": "select", "label": "2026 年 9 月 15 日 · 周一", "supporting": "目标日期", "icon": "calendar_today", "variant": "outlined", "tabs": [{ "label": "2026 年 9 月 15 日 · 周一" }, { "label": "2026 年 9 月 16 日 · 周二" }], "selected": 0 }
+    ] },
+    { "id": "change-classes-group", "x": 1000, "y": 272, "axis": "y", "items": [
+      { "id": "change-source", "kind": "listItem", "label": "源课程 · 第二节 信息技术", "supporting": "09:00–09:45 · 机房", "icon": "drag_indicator", "icon2": "edit", "variant": "filled" },
+      { "id": "change-target", "kind": "listItem", "label": "目标课程 · 第三节 体育", "supporting": "10:05–10:50 · 操场", "icon": "drag_indicator", "icon2": "edit", "variant": "filled" }
+    ] },
+    { "id": "change-submit-group", "x": 1000, "y": 440, "axis": "x", "items": [
+      { "id": "change-submit", "kind": "button", "label": "提交修改", "icon": "check", "variant": "filled", "size": 380, "note": "提交前校验当前课表修订号；成功后刷新课表并同步在线手表。" }
+    ] },
+    { "id": "control-bar-group", "x": 0, "y": 972, "axis": "x", "items": [
+      { "id": "control-bar", "kind": "topAppBar", "label": "课堂控制", "icon": "menu", "icon2": "more_vert", "variant": "filled" }
+    ] },
+    { "id": "control-quick-group", "x": 16, "y": 1088, "axis": "x", "items": [
+      { "id": "control-teacher", "kind": "button", "label": "老师来了", "icon": "campaign", "variant": "filled", "size": 182, "note": "触发 ClassIsland 的老师来了流程：显示提醒、一秒后清除。" },
+      { "id": "control-menu", "kind": "button", "label": "显示主界面", "icon": "visibility", "variant": "tonal", "size": 182 }
+    ] },
+    { "id": "control-notification-group", "x": 16, "y": 1172, "axis": "x", "items": [
+      { "id": "control-notification", "kind": "card", "label": "发送自定义提醒", "supporting": "向 ClassIsland 发送标题与正文，也同步给在线手表。", "icon": "notifications_active", "variant": "filled", "size": 380, "size2": 136, "noImage": true }
+    ] },
+    { "id": "control-settings-group", "x": 16, "y": 1332, "axis": "y", "items": [
+      { "id": "control-sound", "kind": "switch", "label": "播放提醒音效", "icon": null, "variant": "filled", "checked": true, "size": 380 },
+      { "id": "control-speech", "kind": "switch", "label": "语音朗读提醒", "icon": null, "variant": "filled", "checked": false, "size": 380 },
+      { "id": "control-volume", "kind": "slider", "label": "", "icon": null, "variant": "filled", "value": 65, "note": "显示并调整 ClassIsland 主设备的可用音量。" }
+    ] },
+    { "id": "control-nav-group", "x": 0, "y": 1760, "axis": "x", "items": [
+      { "id": "control-nav", "kind": "bottomNav", "label": "", "icon": null, "variant": "filled", "tabs": [{ "icon": "today", "label": "今天" }, { "icon": "calendar_month", "label": "课表" }, { "icon": "tune", "label": "控制" }, { "icon": "watch", "label": "手表" }], "selected": 2, "actions": { "tab:0": { "to": "today", "transition": "fade" }, "tab:1": { "to": "week", "transition": "fade" }, "tab:3": { "to": "watch", "transition": "fade" } } }
+    ] },
+    { "id": "watch-bar-group", "x": 492, "y": 972, "axis": "x", "items": [
+      { "id": "watch-bar", "kind": "topAppBar", "label": "手表与提醒", "icon": "menu", "icon2": "settings", "variant": "filled" }
+    ] },
+    { "id": "watch-status-group", "x": 508, "y": 1088, "axis": "x", "items": [
+      { "id": "watch-status", "kind": "card", "label": "Galaxy Watch 已连接", "supporting": "最近同步：刚刚\n当前展示：今日课堂、课表、课堂控制", "icon": "watch", "variant": "filled", "fill": "secondaryContainer", "size": 380, "size2": 144, "noImage": true }
+    ] },
+    { "id": "watch-list-group", "x": 508, "y": 1256, "axis": "y", "items": [
+      { "id": "watch-notification", "kind": "listItem", "label": "提醒同步", "supporting": "课程、自动化和第三方插件提醒", "icon": "notifications", "switch": true, "checked": true, "variant": "filled" },
+      { "id": "watch-extensions", "kind": "listItem", "label": "手表快捷入口", "supporting": "老师来了、显示主界面等已授权功能", "icon": "apps", "icon2": "chevron_right", "variant": "filled", "action": { "to": "control", "transition": "slide" } },
+      { "id": "watch-pull", "kind": "listItem", "label": "从手表拉取课表", "supporting": "课表任务运行时会显示进度并防止重复操作", "icon": "sync", "icon2": "chevron_right", "variant": "filled", "action": { "to": "week", "transition": "slide" } }
+    ] },
+    { "id": "watch-nav-group", "x": 492, "y": 1760, "axis": "x", "items": [
+      { "id": "watch-nav", "kind": "bottomNav", "label": "", "icon": null, "variant": "filled", "tabs": [{ "icon": "today", "label": "今天" }, { "icon": "calendar_month", "label": "课表" }, { "icon": "tune", "label": "控制" }, { "icon": "watch", "label": "手表" }], "selected": 3, "actions": { "tab:0": { "to": "today", "transition": "fade" }, "tab:1": { "to": "week", "transition": "fade" }, "tab:2": { "to": "control", "transition": "fade" } } }
+    ] }
+  ]
+}
