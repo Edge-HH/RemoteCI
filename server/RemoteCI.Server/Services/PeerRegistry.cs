@@ -21,7 +21,8 @@ public sealed class PeerRegistry(
     private PluginProtocolMismatch? _latestPluginProtocolMismatch;
 
     public bool HasPlugin => !_pluginPeers.IsEmpty;
-    public int WatchCount => _watchPeers.Count;
+    public int WatchCount => _watchPeers.Values.Count(peer => peer.Principal.PeerRole == PeerRole.Watch);
+    public int MobileCount => _watchPeers.Values.Count(peer => peer.Principal.PeerRole == PeerRole.Mobile);
     public int PluginCount => _pluginPeers.Count;
     public PluginProtocolMismatch? LatestPluginProtocolMismatch =>
         Volatile.Read(ref _latestPluginProtocolMismatch);

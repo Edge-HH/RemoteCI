@@ -435,3 +435,26 @@ textarea { resize: vertical; }
 .account-row-actions form { display: inline-flex; margin: 0; }
 .account-row-actions .user-delete-button, .account-row-actions .user-edit-button { min-height: 36px; padding: 6px 14px; }
 @media (max-width: 700px) { .account-row-actions { width: 100%; } .account-row-actions form, .account-row-actions button { flex: 1; } }
+.mobile-login-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 1.5rem;
+    margin-bottom: 1.25rem;
+    padding: 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+}
+
+.mobile-login-copy h2 { margin: 0 0 .45rem; }
+.mobile-login-copy p { margin: 0; }
+.mobile-login-url { display: flex; align-items: center; gap: .6rem; margin-top: 1rem; }
+.mobile-login-url code { overflow-wrap: anywhere; }
+.mobile-login-qr { width: 10rem; height: 10rem; padding: .55rem; border-radius: 1rem; background: #fff; }
+.mobile-login-qr svg { display: block; width: 100%; height: 100%; }
+
+@media (max-width: 680px) {
+    .mobile-login-card { grid-template-columns: 1fr; }
+    .mobile-login-qr { justify-self: center; }
+}

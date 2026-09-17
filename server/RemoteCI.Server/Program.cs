@@ -415,11 +415,185 @@ app.MapGet("/api/admin/status", async (
         pluginOnline = peers.HasPlugin,
         pluginConnections = peers.PluginCount,
         watchConnections = peers.WatchCount,
+        mobileConnections = peers.MobileCount,
         accountCount = (await identities.ListUsersAsync(ct)).Count,
         latestStateAt = store.GetLatestSnapshot()?.GeneratedAt,
         latestScheduleAt = store.GetLatestSchedule()?.GeneratedAt,
         protocolVersion = Protocol.Version,
     });
+});
+
+
+app.MapGet("/api/roles", async (HttpContext ctx, IdentityCoordinator identities, AccountRoleService roles, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!HasPermission(principal, UserPermissions.ManageUsers)) return Forbidden();
+    return Results.Ok(await roles.ListAsync(ct));
+});
+app.MapPost("/api/roles", async (HttpContext ctx, CreateAccountRoleRequest request, AccountRoleService roles, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities: ctx.RequestServices.GetRequiredService<IdentityCoordinator>(), ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (MissingFields(request.Name) is { } bad) return bad;
+    try { return Results.Ok(await roles.CreateAsync(request.Name, request.DefaultPermissions, ct)); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+app.MapPut("/api/roles/{id:guid}", async (Guid id, HttpContext ctx, UpdateAccountRoleRequest request, AccountRoleService roles, AuthorizationSyncService authorizationSync, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, ctx.RequestServices.GetRequiredService<IdentityCoordinator>(), ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try
+    {
+        await roles.UpdateAsync(id, request.Name, request.DefaultPermissions, ct);
+        await authorizationSync.SyncAsync(ct);
+        return Results.NoContent();
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+app.MapDelete("/api/roles/{id:guid}", async (Guid id, HttpContext ctx, AccountRoleService roles, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, ctx.RequestServices.GetRequiredService<IdentityCoordinator>(), ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try { await roles.DeleteAsync(id, ct); return Results.NoContent(); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+app.MapGet("/api/visitor", async (HttpContext ctx, IdentityCoordinator identities, VisitorAccessSettings visitor, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!HasPermission(principal, UserPermissions.ManageUsers)) return Forbidden();
+    return Results.Ok(await visitor.GetAsync(ct));
+});
+app.MapPut("/api/visitor", async (VisitorAccessState body, HttpContext ctx, IdentityCoordinator identities, VisitorAccessSettings visitor, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!HasPermission(principal, UserPermissions.ManageUsers)) return Forbidden();
+    return Results.Ok(await visitor.SetAsync(body.Enabled, body.AutoEnter, ct));
+});
+app.MapGet("/api/settings/notifications", async (HttpContext ctx, IdentityCoordinator identities, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    return Results.Ok(new SettingsSync { ForceSenderInTitle = await identities.GetForceSenderInTitleAsync(ct) });
+});
+app.MapPut("/api/settings/notifications", async (SettingsSync body, HttpContext ctx, IdentityCoordinator identities, PeerRegistry peers, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!HasPermission(principal, UserPermissions.SendNotifications) && principal.User.Role != UserRole.Admin)
+        return Forbidden();
+    var updated = await identities.SetForceSenderInTitleAsync(body.ForceSenderInTitle, ct);
+    await peers.SendSettingsToWatchesAsync(updated, ct);
+    return Results.Ok(updated);
+});
+app.MapGet("/api/settings/schedule-pull", async (HttpContext ctx, IdentityCoordinator identities, SchedulePullSettings pull, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    return Results.Ok(new { intervalMinutes = (int)await pull.GetIntervalAsync(ct) });
+});
+app.MapPut("/api/settings/schedule-pull", async (HttpContext ctx, SchedulePullIntervalBody body, IdentityCoordinator identities, SchedulePullSettings pull, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!HasPermission(principal, UserPermissions.ManageSchedule)) return Forbidden();
+    var interval = Enum.IsDefined(typeof(SchedulePullInterval), body.IntervalMinutes)
+        ? (SchedulePullInterval)body.IntervalMinutes
+        : SchedulePullInterval.Disabled;
+    await pull.SetIntervalAsync(interval, ct);
+    return Results.Ok(new { intervalMinutes = (int)interval });
+});
+app.MapGet("/api/extensions", async (HttpContext ctx, IdentityCoordinator identities, ExtensionPolicyService policies, IStateStore store, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    var definitions = store.GetLatestExtensions() ?? [];
+    var items = await policies.ListForUserAsync(principal.User.Id, principal.User.Role, principal.User.Permissions, definitions, ct);
+    return Results.Ok(items.Select(item => new
+    {
+        id = item.Definition.Id,
+        displayName = item.Definition.DisplayName,
+        enabled = item.Enabled,
+        allowNonAdmin = item.AllowNonAdmin,
+        showOnWatch = item.ShowOnWatch,
+        canInvoke = item.CanInvoke,
+    }));
+});
+app.MapPut("/api/extensions/{id}", async (string id, ExtensionPolicyBody body, HttpContext ctx, IdentityCoordinator identities, ExtensionPolicyService policies, AuthorizationSyncService authorizationSync, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    try
+    {
+        if (principal.User.Role == UserRole.Admin)
+            await policies.UpdateAdminAsync(principal.User.Id, id, body.Enabled ?? true, body.AllowNonAdmin ?? false, body.ShowOnWatch ?? true, ct);
+        else
+            await policies.UpdatePersonalAsync(principal.User.Id, id, body.ShowOnWatch ?? true, ct);
+        await authorizationSync.SyncAsync(ct);
+        return Results.NoContent();
+    }
+    catch (Exception ex) { return Results.Json(Error(ApiErrorCodes.InvalidRequest, ex.Message), statusCode: 400); }
+});
+app.MapGet("/api/admin/system", async (HttpContext ctx, IdentityCoordinator identities, UpdateService updates, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    var development = ctx.RequestServices.GetRequiredService<IHostEnvironment>().IsDevelopment();
+    return Results.Ok(new
+    {
+        currentVersion = updates.CurrentVersion,
+        canSelfUpdate = UpdateService.CanSelfUpdate(development, UpdateService.IsFnosRuntime),
+        message = UpdateService.IsFnosRuntime ? UpdateService.FnosManagedMessage : "",
+    });
+});
+app.MapPost("/api/admin/updates/check", async (UpdateCheckBody body, HttpContext ctx, IdentityCoordinator identities, UpdateService updates, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    var channel = string.Equals(body.Channel, "beta", StringComparison.OrdinalIgnoreCase) ? UpdateChannel.Beta : UpdateChannel.Stable;
+    var release = await updates.FetchLatestReleaseAsync(channel, ct);
+    return Results.Ok(new { tag = release?.Tag, name = release?.Name });
+});
+app.MapGet("/api/admin/backups", async (HttpContext ctx, IdentityCoordinator identities, ConfigurationArchiveService archives, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    return Results.Ok(archives.ListBackups());
+});
+app.MapPost("/api/admin/backups", async (HttpContext ctx, IdentityCoordinator identities, ConfigurationArchiveService archives, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    await archives.CreateLocalBackupAsync("manual", ct);
+    return Results.NoContent();
+});
+app.MapDelete("/api/admin/backups/{name}", async (string name, HttpContext ctx, IdentityCoordinator identities, ConfigurationArchiveService archives, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try { archives.DeleteBackup(name); return Results.NoContent(); }
+    catch { return Results.Json(Error(ApiErrorCodes.NotFound, "备份不存在"), statusCode: 404); }
+});
+app.MapPost("/api/admin/backups/{name}/restore", async (string name, HttpContext ctx, IdentityCoordinator identities, ConfigurationArchiveService archives, PeerRegistry peers, IHostApplicationLifetime lifetime, IHostEnvironment environment, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    await archives.CreateLocalBackupAsync("preimport", ct);
+    await archives.ApplyAsync(archives.ParseLocalBackup(archives.ReadBackup(name)), ct);
+    await peers.DisconnectAllAsync(ct);
+    ApplicationRestartCoordinator.ScheduleRestart(lifetime, environment);
+    return Results.NoContent();
 });
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok", protocolVersion = Protocol.Version }));
@@ -467,5 +641,9 @@ static IResult OperationError(IdentityOperationException ex) => Results.Json(
         _ => StatusCodes.Status400BadRequest,
     });
 static ApiError Error(string code, string message) => new() { Code = code, Message = message };
+
+public sealed record SchedulePullIntervalBody(int IntervalMinutes);
+public sealed record ExtensionPolicyBody(bool? Enabled, bool? AllowNonAdmin, bool? ShowOnWatch);
+public sealed record UpdateCheckBody(string Channel, bool Force = false);
 
 public partial class Program;

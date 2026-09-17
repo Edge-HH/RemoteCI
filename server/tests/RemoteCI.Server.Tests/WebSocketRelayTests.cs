@@ -52,6 +52,34 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     }
 
     [Fact]
+    public async Task MobileCommand_RelaysToPluginAndReturnsCorrelatedReply()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
+        using var mobile = await ConnectMobileAsync();
+        await ReceivePayloadAsync<AuthState>(mobile, Protocol.MessageTypeAuthState);
+        var request = Envelope.Command(new CommandMessage
+        {
+            Command = CommandKind.TeacherComing,
+        });
+
+        await SendAsync(mobile, request);
+
+        var forwarded = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
+        Assert.Equal(CommandKind.TeacherComing, ConvertPayload<CommandMessage>(forwarded.Payload).Command);
+        await SendAsync(plugin, new Envelope
+        {
+            Type = Protocol.MessageTypeCommandResult,
+            ReplyToMessageId = forwarded.MessageId,
+            Payload = new CommandResult { Success = true, Code = CommandResultCodes.Ok },
+        });
+        var reply = await ReceiveEnvelopeAsync(mobile, Protocol.MessageTypeCommandResult);
+        Assert.Equal(request.MessageId, reply.ReplyToMessageId);
+        Assert.True(ConvertPayload<CommandResult>(reply.Payload).Success);
+        Assert.Equal(1, _factory.Services.GetRequiredService<PeerRegistry>().MobileCount);
+    }
+
+    [Fact]
     public async Task VoiceMessage_RejectsMalformedAudioBeforeForwarding()
     {
         using var watch = await ConnectWatchAsync();
@@ -644,11 +672,15 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         string password = TestWebApplicationFactory.AdminPassword) =>
         await ConnectAsync((await _factory.LoginAsync(username, password)).AccessToken);
 
-    private async Task<WebSocket> ConnectAsync(string token)
+    private async Task<WebSocket> ConnectMobileAsync() =>
+        await ConnectAsync((await _factory.LoginAsync()).AccessToken, "mobile");
+
+    private async Task<WebSocket> ConnectAsync(string token, string? clientKind = null)
     {
-        var client = _factory.Server.CreateWebSocketClient();
-        return await client.ConnectAsync(
-            new Uri(_factory.Server.BaseAddress, $"/ws?{Protocol.QueryToken}={Uri.EscapeDataString(token)}"),
+        var socketClient = _factory.Server.CreateWebSocketClient();
+        var clientQuery = string.IsNullOrWhiteSpace(clientKind) ? string.Empty : $"&client={Uri.EscapeDataString(clientKind)}";
+        return await socketClient.ConnectAsync(
+            new Uri(_factory.Server.BaseAddress, $"/ws?{Protocol.QueryToken}={Uri.EscapeDataString(token)}{clientQuery}"),
             CancellationToken.None);
     }
 

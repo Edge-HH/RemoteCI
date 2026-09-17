@@ -958,6 +958,9 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var overviewHtml = await browser.GetStringAsync("/");
         Assert.Contains("生成配对码", overviewHtml);
         Assert.Contains("重新检测连接", overviewHtml);
+        Assert.Contains("data-mobile-login-qr", overviewHtml);
+        Assert.Contains("手机扫码填写服务器地址", WebUtility.HtmlDecode(overviewHtml));
+        Assert.Contains(WebUtility.HtmlEncode(_factory.Server.BaseAddress.ToString().TrimEnd('/')), overviewHtml);
         Assert.DoesNotContain("去重试连接</a>", overviewHtml);
 
         var retry = await PostRazorFormAsync(browser, "/?handler=RetryConnection", overviewHtml);
@@ -1694,6 +1697,28 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             return JsonSerializer.Deserialize<T>(
                 JsonSerializer.Serialize(envelope.Payload), JsonDefaults.Options)!;
         }
+    }
+
+
+    [Fact]
+    public async Task MobileAdminApis_RolesAndVisitorRoundTrip()
+    {
+        var admin = await LoginViaAsync(_client, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
+        var roles = await _client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, "/api/roles", admin.AccessToken));
+        roles.EnsureSuccessStatusCode();
+        var visitor = await _client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, "/api/visitor", admin.AccessToken));
+        visitor.EnsureSuccessStatusCode();
+        var updated = await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Put, "/api/visitor", admin.AccessToken,
+            new VisitorAccessState(true, false)));
+        updated.EnsureSuccessStatusCode();
+        var state = await updated.Content.ReadFromJsonAsync<VisitorAccessState>();
+        Assert.True(state!.Enabled);
+        Assert.False(state.AutoEnter);
+        var reset = await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Put, "/api/visitor", admin.AccessToken,
+            new VisitorAccessState(false, false)));
+        reset.EnsureSuccessStatusCode();
     }
 
     private static async Task<AuthResponse> LoginViaAsync(HttpClient client, string username, string password)

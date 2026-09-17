@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using QRCoder;
 using RemoteCI.Server.Data;
 using RemoteCI.Server.Services;
 using RemoteCI.Shared;
@@ -18,6 +19,8 @@ public sealed class IndexModel(UserManager<AppUser> users, PeerRegistry peers, I
     public ClassStateSnapshot? Snapshot { get; private set; }
     public ScheduleBundle? Schedule { get; private set; }
     public string? PairCode { get; private set; }
+    public string MobileLoginUrl { get; private set; } = string.Empty;
+    public string MobileLoginQrSvg { get; private set; } = string.Empty;
     public IReadOnlyList<PluginCredentialInfo> PluginCredentials { get; private set; } = [];
     public IReadOnlyList<PeerCapabilityDiagnostic> CapabilityDiagnostics { get; private set; } = [];
     public PluginProtocolMismatch? PluginProtocolMismatch => peers.LatestPluginProtocolMismatch;
@@ -72,6 +75,10 @@ public sealed class IndexModel(UserManager<AppUser> users, PeerRegistry peers, I
 
     private async Task LoadAsync(CancellationToken ct)
     {
+        MobileLoginUrl = $"{Request.Scheme}://{Request.Host}{Request.PathBase}".TrimEnd('/');
+        using (var qrData = QRCodeGenerator.GenerateQrCode(MobileLoginUrl, QRCodeGenerator.ECCLevel.Q))
+        using (var renderer = new SvgQRCode(qrData))
+            MobileLoginQrSvg = renderer.GetGraphic(4);
         PluginOnline = peers.HasPlugin;
         WatchConnections = peers.WatchCount;
         AccountCount = (await identities.ListUsersAsync(ct)).Count;

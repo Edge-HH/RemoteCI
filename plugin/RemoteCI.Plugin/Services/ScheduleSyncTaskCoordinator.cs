@@ -96,6 +96,7 @@ public sealed class ScheduleSyncTaskCoordinator
         ScheduleSyncSource.Watch => "手表端拉取",
         ScheduleSyncSource.Automatic => "自动拉取",
         ScheduleSyncSource.Connection => "连接初始化拉取",
+        ScheduleSyncSource.Mobile => "手机端拉取",
         _ => "远端拉取",
     };
 }

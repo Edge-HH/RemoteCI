@@ -34,6 +34,9 @@ public static class WebSocketHub
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
         }
+        if (!principal.IsPlugin &&
+            string.Equals(context.Request.Query["client"], "mobile", StringComparison.OrdinalIgnoreCase))
+            principal = principal with { PeerRole = PeerRole.Mobile };
 
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
         var connectionId = registry.Register(socket, token, principal);
@@ -369,8 +372,11 @@ public static class WebSocketHub
                 return;
             case Protocol.MessageTypeSchedulePull:
                 var request = ConvertPayload<ScheduleSyncRequest>(envelope.Payload);
+                var source = request?.Source == ScheduleSyncSource.Mobile
+                    ? ScheduleSyncSource.Mobile
+                    : ScheduleSyncSource.Watch;
                 await session.ScheduleSync.StartAsync(
-                    ScheduleSyncSource.Watch,
+                    source,
                     session.CancellationToken,
                     request?.TaskId ?? envelope.MessageId);
                 return;
