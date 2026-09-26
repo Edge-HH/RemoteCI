@@ -1698,7 +1698,6 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         }
     }
 
-
     [Fact]
     public async Task MobileAdminApis_RolesAndVisitorRoundTrip()
     {
