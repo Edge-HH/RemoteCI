@@ -31,6 +31,7 @@ import kotlinx.coroutines.withContext
 
 private enum class Screen {
     Login,
+    ClassPicker,
     Home,
     ScheduleOverview,
     ScheduleDatePicker,
@@ -145,7 +146,10 @@ fun RemoteCiApp(context: Context) {
     }
     LaunchedEffect(currentUser, availableCapabilities) {
         val user = currentUser
-        if (user != null && screen == Screen.Login) screen = Screen.Home
+        if (user != null && screen == Screen.Login) {
+            // 多班级账号登录后先选班级；单班级账号直接进首页。
+            screen = if (ConnectionManager.classes.value.size > 1) Screen.ClassPicker else Screen.Home
+        }
         if (user != null && (!user.has(Protocol.PERMISSION_MANAGE_SCHEDULE) ||
                 Protocol.CAP_SCHEDULE_CHANGE !in availableCapabilities) &&
             screen in listOf(
@@ -239,6 +243,10 @@ fun RemoteCiApp(context: Context) {
                 },
             )
 
+            Screen.ClassPicker -> ClassPickerScreen(
+                onPicked = { screen = Screen.Home },
+            )
+
             Screen.Home -> {
                 val scheduleDate = displayedSnapshot?.scheduleDate ?: today.toString()
                 val scheduleDay = displayedSchedule?.days?.firstOrNull { it.date == scheduleDate }
@@ -279,6 +287,9 @@ fun RemoteCiApp(context: Context) {
                     onRetryConnection = {
                         if (ConnectionManager.hasSavedSession()) ConnectionManager.connect(settings) else screen = Screen.Login
                     },
+                    onSwitchClass = if (ConnectionManager.classes.value.size > 1) {
+                        { screen = Screen.ClassPicker }
+                    } else null,
                 )
             }
 

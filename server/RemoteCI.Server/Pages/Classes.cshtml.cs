@@ -25,9 +25,16 @@ public sealed class ClassesModel(
     public List<Guid> SelectedClassIds { get; set; } = [];
 
     [BindProperty]
+    public List<Guid> SelectedGroupIds { get; set; } = [];
+
+    [BindProperty]
     public string BatchOperation { get; set; } = string.Empty;
 
+    [BindProperty]
+    public string NewGroupName { get; set; } = string.Empty;
+
     public IReadOnlyList<ClassDetail> Classes { get; private set; } = [];
+    public IReadOnlyList<ClassGroupInfo> Groups { get; private set; } = [];
     public Dictionary<Guid, IReadOnlyList<ClassMemberInfo>> MembersByClass { get; private set; } = new();
     public IReadOnlyList<UserListItem> Accounts { get; private set; } = [];
     public IReadOnlyList<AccountRoleInfo> RoleDefinitions { get; private set; } = [];
@@ -145,7 +152,12 @@ public sealed class ClassesModel(
             return RedirectToPage();
         }
         var result = await classrooms.BatchAsync(
-            new BatchClassOperationRequest { ClassIds = SelectedClassIds, Operation = BatchOperation }, ct);
+            new BatchClassOperationRequest
+            {
+                ClassIds = SelectedClassIds,
+                GroupIds = SelectedGroupIds,
+                Operation = BatchOperation,
+            }, ct);
         var succeeded = result.Results.Count(x => x.Success);
         if (succeeded > 0)
         {
@@ -161,9 +173,77 @@ public sealed class ClassesModel(
         return RedirectToPage();
     }
 
+    public async Task<IActionResult> OnPostCreateGroupAsync(Guid? parentGroupId, CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
+        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        try
+        {
+            await classrooms.CreateGroupAsync(NewGroupName, parentGroupId, ct);
+            TempData["Message"] = "分组已创建。";
+        }
+        catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostRenameGroupAsync(Guid id, string name, Guid? parentGroupId, CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
+        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        try
+        {
+            await classrooms.RenameGroupAsync(id, name, parentGroupId, ct);
+            TempData["Message"] = "分组已更新。";
+        }
+        catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
+        return RedirectToPage();
+    }
+
+    /// <summary>整体替换一个分组包含的班级。</summary>
+    public async Task<IActionResult> OnPostSetGroupClassesAsync(Guid id, List<Guid> classIds, CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
+        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        try
+        {
+            await classrooms.SetGroupClassesAsync(id, classIds ?? [], ct);
+            TempData["Message"] = "分组成员班级已更新。";
+        }
+        catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
+        return RedirectToPage();
+    }
+
+    /// <summary>整体替换一个班级所属的分组（多归属）。</summary>
+    public async Task<IActionResult> OnPostSetClassGroupsAsync(Guid id, List<Guid> groupIds, CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
+        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        try
+        {
+            await classrooms.SetClassGroupsAsync(id, groupIds ?? [], ct);
+            TempData["Message"] = "班级分组已更新。";
+        }
+        catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostDeleteGroupAsync(Guid id, CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
+        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        try
+        {
+            await classrooms.DeleteGroupAsync(id, ct);
+            TempData["Message"] = "分组已删除，子分组上移一级，班级本身不受影响。";
+        }
+        catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
+        return RedirectToPage();
+    }
+
     private async Task LoadAsync(CancellationToken ct)
     {
         Classes = await classrooms.ListAsync(ct);
+        Groups = await classrooms.ListGroupsAsync(ct);
         Accounts = await identities.ListUsersAsync(ct);
         RoleDefinitions = await roleService.ListAsync(ct);
         foreach (var classroom in Classes)

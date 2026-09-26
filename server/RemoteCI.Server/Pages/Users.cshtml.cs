@@ -15,7 +15,9 @@ public sealed class UsersModel(
     IdentityCoordinator identities,
     AccountRoleService roleService,
     AuthorizationSyncService authorizationSync,
-    VisitorAccessSettings visitorAccess)
+    VisitorAccessSettings visitorAccess,
+    ClassroomService classrooms,
+    UserImportService importService)
     : WebPageModel(users)
 {
     [BindProperty]
@@ -26,6 +28,12 @@ public sealed class UsersModel(
     public IReadOnlyList<AccountRoleInfo> RoleDefinitions { get; private set; } = [];
     [BindProperty] public RoleInput RoleEdit { get; set; } = new();
     [BindProperty] public bool AutoEnterVisitorPage { get; set; }
+
+    // 批量导入：每行一个账号（用户名,显示名,密码），整批落入所选班级并使用所选角色预设。
+    [BindProperty] public string? ImportText { get; set; }
+    [BindProperty] public Guid? ImportClassId { get; set; }
+    [BindProperty] public Guid? ImportRoleId { get; set; }
+    public IReadOnlyList<ClassDetail> ImportClasses { get; private set; } = [];
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct) => await LoadAsync(ct);
 
@@ -161,6 +169,25 @@ public sealed class UsersModel(
         return RedirectToPage();
     }
 
+    public async Task<IActionResult> OnPostBatchImportAsync(CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
+        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        try
+        {
+            var result = await importService.ImportAsync(ImportText, ImportClassId, ImportRoleId, ct);
+            await authorizationSync.SyncAsync(ct);
+            TempData[result.Failures.Count == 0 ? "Message" : "Error"] = result.Failures.Count == 0
+                ? $"批量导入完成：创建 {result.Created} 个账号。"
+                : $"批量导入完成 {result.Created} 个，失败 {result.Failures.Count} 个：{string.Join("；", result.Failures.Take(5))}{(result.Failures.Count > 5 ? "…" : "")}";
+        }
+        catch (IdentityOperationException ex)
+        {
+            TempData["Error"] = ex.Message;
+        }
+        return RedirectToPage();
+    }
+
     public async Task<IActionResult> OnPostCreateRoleAsync(CancellationToken ct)
     {
         if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
@@ -193,6 +220,7 @@ public sealed class UsersModel(
         if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
         Accounts = await identities.ListUsersAsync(ct);
         RoleDefinitions = await roleService.ListAsync(ct);
+        ImportClasses = await classrooms.ListAsync(ct);
         AutoEnterVisitorPage = await visitorAccess.GetAutoEnterAsync(ct);
         return Page();
     }

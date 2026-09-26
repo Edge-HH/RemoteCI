@@ -139,6 +139,7 @@ data class CapabilitiesSync(
 
 @Serializable
 data class ClassStateSnapshot(
+    @SerialName("classId") val classId: String? = null,
     @SerialName("scheduleDate") val scheduleDate: String? = null,
     @SerialName("currentSubject") val currentSubject: String? = null,
     @SerialName("nextClassSubject") val nextClassSubject: String? = null,
@@ -166,6 +167,7 @@ data class ClassStateSnapshot(
 data class ScheduleSyncRequest(
     @SerialName("taskId") val taskId: String,
     val source: Int = Protocol.SCHEDULE_SOURCE_WATCH,
+    @SerialName("classId") val classId: String? = null,
 )
 
 @Serializable
@@ -181,6 +183,7 @@ data class ScheduleSyncStatus(
 
 @Serializable
 data class ScheduleBundle(
+    @SerialName("classId") val classId: String? = null,
     @SerialName("fromDate") val fromDate: String = "",
     @SerialName("generatedAt") val generatedAt: String? = null,
     val days: List<ScheduleDay> = emptyList(),
@@ -212,6 +215,7 @@ data class SubjectEntry(val id: String, val name: String)
 
 @Serializable
 data class ClassEvent(
+    @SerialName("classId") val classId: String? = null,
     val id: String = "",
     val event: Int,
     val subject: String? = null,
@@ -274,6 +278,7 @@ data class ConnectionBootstrapInfo(
 @Serializable
 data class CommandMessage(
     val command: Int,
+    @SerialName("classId") val classId: String? = null,
     @SerialName("scheduleChange") val scheduleChange: ScheduleChangeRequest? = null,
     val notification: NotificationRequest? = null,
     @SerialName("voiceMessage") val voiceMessage: VoiceMessageRequest? = null,
@@ -306,6 +311,7 @@ data class CommandResult(
 
 @Serializable
 data class ExtensionDefinition(
+    @SerialName("classId") val classId: String? = null,
     val id: String,
     @SerialName("displayName") val displayName: String,
     val icon: String? = null,
@@ -324,6 +330,19 @@ data class ExtensionParameter(
 )
 
 @Serializable
+data class ClassSummary(
+    val id: String = "",
+    val name: String = "",
+    @SerialName("roleName") val roleName: String? = null,
+    val permissions: Int? = null,
+    @SerialName("visitorEnabled") val visitorEnabled: Boolean = false,
+    @SerialName("groupName") val groupName: String? = null,
+) {
+    val effectivePermissions: Int
+        get() = permissions ?: Protocol.PERMISSION_VIEW_CURRENT
+}
+
+@Serializable
 data class UserProfile(
     val id: String = "",
     val username: String = "",
@@ -333,6 +352,7 @@ data class UserProfile(
     val permissions: Int = Protocol.PERMISSION_VIEW_CURRENT,
     @SerialName("allowedExtensionIds") val allowedExtensionIds: List<String>? = null,
     @SerialName("visibleExtensionIds") val visibleExtensionIds: List<String>? = null,
+    val classes: List<ClassSummary>? = null,
     val version: Long = 0,
 ) {
     val isAdmin: Boolean get() = role == Protocol.ROLE_ADMIN
@@ -358,11 +378,13 @@ data class RefreshSessionRequest(
 @Serializable
 data class AuthResponse(
     @SerialName("accessToken") val accessToken: String,
+    @SerialName("passwordPending") val passwordPending: Boolean? = null,
+    @SerialName("setupToken") val setupToken: String? = null,
     @SerialName("accessExpiresAt") val accessExpiresAt: String,
     @SerialName("deviceSessionId") val deviceSessionId: String,
     @SerialName("deviceSecret") val deviceSecret: String,
     @SerialName("deviceExpiresAt") val deviceExpiresAt: String,
-    val user: UserProfile,
+    val user: UserProfile = UserProfile(),
 )
 
 @Serializable

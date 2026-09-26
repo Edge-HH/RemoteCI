@@ -289,7 +289,7 @@ fun ExtensionsScreen(onBack: () -> Unit) {
     var selected by remember { mutableStateOf<ExtensionDefinition?>(null) }
     var args by remember { mutableStateOf<Map<String, String?>>(emptyMap()) }
     androidx.compose.runtime.LaunchedEffect(user) {
-        policies = runCatching { AdminApi.extensions() }.getOrDefault(emptyList())
+        policies = runCatching { AdminApi.extensions(ConnectionManager.currentClassId.value) }.getOrDefault(emptyList())
     }
     Column(Modifier.fillMaxSize()) {
         TopAppBar(title = { Text("扩展功能") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
@@ -322,7 +322,7 @@ fun ExtensionsScreen(onBack: () -> Unit) {
                     Switch(policy.enabled, {
                         scope.launch {
                             runCatching { AdminApi.updateExtensionPolicy(policy.id, ExtensionPolicyUpdate(enabled = it, allowNonAdmin = policy.allowNonAdmin, showOnWatch = policy.showOnWatch)) }
-                            policies = runCatching { AdminApi.extensions() }.getOrDefault(policies)
+                            policies = runCatching { AdminApi.extensions(ConnectionManager.currentClassId.value) }.getOrDefault(policies)
                         }
                     })
                 }

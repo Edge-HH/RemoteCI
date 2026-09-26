@@ -99,7 +99,12 @@
         send.disabled = record.disabled = discard.disabled = true;
         status.textContent = "正在发送，等待 ClassIsland 回执…";
         try {
-            const response = await fetch(form.action, {
+            // 批量页复用本脚本：把页面上勾选的广播目标（data-voice-query）附加到上传地址。
+            const action = new URL(form.action, window.location.origin);
+            document.querySelectorAll("input[data-voice-query]:checked").forEach(input => {
+                action.searchParams.append(input.name, input.value);
+            });
+            const response = await fetch(action, {
                 method: "POST", credentials: "same-origin",
                 headers: { "Content-Type": "application/octet-stream", "X-CSRF-TOKEN": form.querySelector('[name="__RequestVerificationToken"]').value },
                 body: pcm,

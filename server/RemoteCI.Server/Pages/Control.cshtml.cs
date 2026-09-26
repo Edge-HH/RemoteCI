@@ -16,7 +16,9 @@ public sealed class ControlModel(
     IStateStore store,
     IdentityCoordinator identities,
     ExtensionPolicyService extensionPolicies,
-    AuthorizationSyncService authorizationSync) : WebPageModel(users)
+    AuthorizationSyncService authorizationSync,
+    ClassBroadcastService broadcast,
+    ClassroomService classesService) : WebPageModel(users)
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(15);
 
@@ -32,6 +34,20 @@ public sealed class ControlModel(
     [BindProperty]
     public List<ExtensionInput> ExtensionInputs { get; set; } = [];
 
+    [BindProperty]
+    public NoticeInput BroadcastInput { get; set; } = new();
+
+    [BindProperty]
+    public string? ClassNameInput { get; set; }
+
+    [BindProperty]
+    public IFormFile? AvatarFile { get; set; }
+
+    public bool HasAvatar => CurrentClass?.HasAvatar == true;
+
+    [BindProperty]
+    public List<Guid> BroadcastClassIds { get; set; } = [];
+
     public bool PluginOnline => peers.HasPluginFor(CurrentClassId);
     public ClassStateSnapshot? Snapshot { get; private set; }
     public IReadOnlyList<ExtensionControlItem> Extensions { get; private set; } = [];
@@ -44,6 +60,12 @@ public sealed class ControlModel(
     public bool CanControlVolume => ClassPermissions.HasFlag(UserPermissions.PowerControl) && Supports(RemoteCiCapabilities.VolumeControl);
     public bool CanUseExtensions => ClassPermissions.HasFlag(UserPermissions.RunExtensions) && Supports(RemoteCiCapabilities.ExtensionsRun);
     public bool IsAdmin => CurrentUser.Role == UserRole.Admin;
+
+    /// <summary>广播面板的候选班级：当前用户有通知发送权限的班级（不含当前班——单班用上方表单即可）。</summary>
+    public IReadOnlyList<ClassSummary> BroadcastTargets { get; private set; } = [];
+
+    /// <summary>有至少两个可广播班级时才展示广播面板，单班级部署保持原有操作路径。</summary>
+    public bool ShowBroadcast => BroadcastTargets.Count >= 2;
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -269,12 +291,100 @@ public sealed class ControlModel(
         return RedirectToPage();
     }
 
+    // ---------- 班级设置（班名/头像）：系统管理员或本班班管理员 ----------
+
+    public async Task<IActionResult> OnPostClassInfoAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (!CanManageClassInfo) return RedirectToPage("/Denied");
+        if (string.IsNullOrWhiteSpace(ClassNameInput))
+        {
+            TempData["Error"] = "班名不能为空。";
+            return RedirectToPage();
+        }
+        try
+        {
+            await classesService.RenameClassAsync(CurrentClassId, ClassNameInput, ct);
+            TempData["Message"] = "班名已更新。";
+        }
+        catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostAvatarAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (!CanManageClassInfo) return RedirectToPage("/Denied");
+        var allowed = new[] { "image/png", "image/jpeg", "image/webp" };
+        if (AvatarFile is null || AvatarFile.Length is 0 or > 256 * 1024)
+        {
+            TempData["Error"] = "头像需为不超过 256KB 的图片。";
+            return RedirectToPage();
+        }
+        if (!allowed.Contains(AvatarFile.ContentType))
+        {
+            TempData["Error"] = "头像仅支持 PNG/JPEG/WebP。";
+            return RedirectToPage();
+        }
+        using var memory = new MemoryStream();
+        await AvatarFile.CopyToAsync(memory, ct);
+        await classesService.SetAvatarAsync(CurrentClassId, memory.ToArray(), AvatarFile.ContentType, ct);
+        TempData["Message"] = "班头像已更新。";
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostRemoveAvatarAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (!CanManageClassInfo) return RedirectToPage("/Denied");
+        await classesService.SetAvatarAsync(CurrentClassId, null, null, ct);
+        TempData["Message"] = "班头像已清除。";
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostBroadcastAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.SendNotifications) is { } classDenied) return classDenied;
+        if (BroadcastClassIds.Count == 0)
+        {
+            TempData["Error"] = "请先勾选要通知的班级。";
+            return RedirectToPage();
+        }
+
+        var result = await broadcast.BroadcastAsync(
+            new AuthPrincipal(PeerRole.Watch,
+                await identities.GetProfileAsync(CurrentUser.Id, ct),
+                null, null, null),
+            new BroadcastCommandRequest
+            {
+                Command = CommandKind.SendNotification,
+                Notification = new NotificationRequest
+                {
+                    Title = BroadcastInput.Title,
+                    Message = BroadcastInput.Message,
+                },
+                ClassIds = BroadcastClassIds,
+            }, ct);
+        var ok = result.Results.Count(x => x.Success);
+        var failures = result.Results.Where(x => !x.Success).ToList();
+        TempData[ok > 0 ? "Message" : "Error"] = failures.Count == 0
+            ? $"广播通知已发送到 {ok} 个班级。"
+            : $"广播完成 {ok} 个班级，{failures.Count} 个失败：{string.Join("；", failures.Select(x => x.Message))}";
+        return RedirectToPage();
+    }
+
     private async Task<IActionResult?> LoadAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
         Snapshot = store.GetLatestSnapshot(CurrentClassId);
         VolumeLevel = Snapshot?.VolumePercent ?? 0;
         if (CanSendNotifications) ForceSenderInTitle = await identities.GetForceSenderInTitleAsync();
+        // 广播候选：有通知权限的可访问班级，排除当前班级（当前班用上方单班表单）。
+        BroadcastTargets = AccessibleClasses
+            .Where(x => x.Id != CurrentClassId && x.Permissions?.HasFlag(UserPermissions.SendNotifications) == true)
+            .OrderBy(x => x.Name)
+            .ToList();
         Extensions = await extensionPolicies.ListForUserAsync(
             CurrentUser.Id,
             CurrentUser.Role,

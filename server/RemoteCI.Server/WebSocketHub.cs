@@ -316,6 +316,8 @@ public static class WebSocketHub
             case Protocol.MessageTypeStatePush:
                 if (ConvertPayload<ClassStateSnapshot>(envelope.Payload) is { } snapshot)
                 {
+                    // 负载携带班级标识，客户端据此区分多个班级的推送。
+                    snapshot.ClassId = classId;
                     session.Store.SaveSnapshot(classId, snapshot);
                     await session.Registry.SendSnapshotToWatchesAsync(classId, snapshot, ct);
                 }
@@ -323,6 +325,7 @@ public static class WebSocketHub
             case Protocol.MessageTypeScheduleSync:
                 if (ConvertPayload<ScheduleBundle>(envelope.Payload) is { } schedule)
                 {
+                    schedule.ClassId = classId;
                     session.Store.SaveSchedule(classId, schedule);
                     await session.Registry.SendScheduleToWatchesAsync(classId, schedule, ct);
                     await session.ScheduleSync.CompleteFromScheduleAsync(classId, ct);
@@ -331,6 +334,7 @@ public static class WebSocketHub
             case Protocol.MessageTypeEventNotify:
                 if (ConvertPayload<ClassEvent>(envelope.Payload) is { } value)
                 {
+                    value.ClassId = classId;
                     session.Store.SaveEvent(classId, value);
                     await session.Registry.SendEventToWatchesAsync(classId, value, ct);
                 }
@@ -338,6 +342,7 @@ public static class WebSocketHub
             case Protocol.MessageTypeExtensionsSync:
                 if (ConvertPayload<List<ExtensionDefinition>>(envelope.Payload) is { } extensions)
                 {
+                    foreach (var definition in extensions) definition.ClassId = classId;
                     var accessChanged = await session.ExtensionPolicies.EnsureRegisteredAsync(extensions, ct);
                     session.Store.SaveExtensions(classId, extensions);
                     if (accessChanged)

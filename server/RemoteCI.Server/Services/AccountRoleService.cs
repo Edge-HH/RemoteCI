@@ -72,6 +72,16 @@ public sealed class AccountRoleService(AppDbContext db)
         await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>按显示名或规范化名查找角色（批量导入按角色名引用）。</summary>
+    public async Task<AccountRole?> FindByNameAsync(string name, CancellationToken ct = default)
+    {
+        var trimmed = name?.Trim() ?? string.Empty;
+        if (trimmed.Length == 0) return null;
+        var normalized = trimmed.ToUpperInvariant();
+        return await db.AccountRoles.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Name == trimmed || x.NormalizedName == normalized, ct);
+    }
+
     private static string NormalizeName(string value)
     {
         var trimmed = value?.Trim() ?? string.Empty;

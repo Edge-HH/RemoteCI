@@ -34,6 +34,11 @@ public readonly record struct ExtensionId
 /// </summary>
 public sealed class ExtensionDefinition
 {
+    /// <summary>扩展归属班级；旧版服务端不下发该字段。</summary>
+    [JsonPropertyName("classId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? ClassId { get; set; }
+
     /// <summary>全局唯一扩展 Id，命令路由与去重都使用它；格式由 <see cref="ExtensionId"/> 统一约束。</summary>
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;

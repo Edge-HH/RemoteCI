@@ -63,8 +63,12 @@ object AdminApi {
     suspend fun setSchedulePull(intervalMinutes: Int): SchedulePullSetting =
         put("/api/settings/schedule-pull", SchedulePullSetting(intervalMinutes), SchedulePullSetting.serializer(), SchedulePullSetting.serializer())
 
-    suspend fun extensions(): List<ExtensionPolicyItem> =
-        get("/api/extensions", ListSerializer(ExtensionPolicyItem.serializer()))
+    suspend fun extensions(classId: String? = null): List<ExtensionPolicyItem> =
+        get(
+            if (classId == null) "/api/extensions"
+            else "/api/extensions?classId=${java.net.URLEncoder.encode(classId, Charsets.UTF_8.name())}",
+            ListSerializer(ExtensionPolicyItem.serializer()),
+        )
     suspend fun updateExtensionPolicy(id: String, body: ExtensionPolicyUpdate) {
         put("/api/extensions/${java.net.URLEncoder.encode(id, Charsets.UTF_8.name())}", body, ExtensionPolicyUpdate.serializer(), UnitSerializer)
     }

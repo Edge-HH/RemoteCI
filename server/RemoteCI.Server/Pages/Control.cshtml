@@ -48,6 +48,36 @@
         </section>
     }
 
+    @if (Model.CanManageClassInfo)
+    {
+    <section class="panel control-card control-card-full" id="class-info">
+        <div class="control-card-head">
+            <span class="feature-icon"><i class="bi bi-collection" aria-hidden="true"></i></span>
+            <div><h2>班级设置</h2><p class="muted">修改当前班级的名称与头像；头像会展示在选班页、访客页与客户端班级列表。</p></div>
+        </div>
+        <div class="class-info-body">
+            @if (Model.HasAvatar)
+            {
+                <img class="class-avatar" src="/api/classes/@Model.CurrentClassId/avatar" alt="班头像" />
+            }
+            <form method="post" asp-page-handler="ClassInfo" class="stack">
+                <label>班名<input asp-for="ClassNameInput" maxlength="40" placeholder="@Model.CurrentClass?.Name" /></label>
+                <button type="submit">保存班名</button>
+            </form>
+            <form method="post" asp-page-handler="Avatar" enctype="multipart/form-data" class="stack">
+                <label>班头像（PNG/JPEG/WebP，≤256KB）<input type="file" asp-for="AvatarFile" accept="image/png,image/jpeg,image/webp" /></label>
+                <button type="submit">上传头像</button>
+            </form>
+            @if (Model.HasAvatar)
+            {
+                <form method="post" asp-page-handler="RemoveAvatar">
+                    <button type="submit" class="ghost">清除头像</button>
+                </form>
+            }
+        </div>
+    </section>
+    }
+
     @if (Model.CanSendNotifications)
     {
         <section class="panel control-card control-card-full" id="send-notification">
@@ -69,6 +99,38 @@
                 </form>
             </div>
         </section>
+
+        @if (Model.ShowBroadcast)
+        {
+        <section class="panel control-card control-card-full" id="broadcast-notification">
+            <div class="panel-heading">
+                <div><h2>广播通知（集控）</h2><p class="muted">一次向多个班级同时发送通知；逐班校验权限并回报各班插件的执行结果。</p></div>
+            </div>
+            <form method="post" asp-page-handler="Broadcast" class="stack">
+                <label>标题<input asp-for="BroadcastInput.Title" maxlength="60" placeholder="RemoteCI 通知" /></label>
+                <label>正文<textarea asp-for="BroadcastInput.Message" maxlength="500" rows="3"></textarea></label>
+                <div class="broadcast-targets" aria-label="选择要通知的班级">
+                    @foreach (var target in Model.BroadcastTargets)
+                    {
+                        <label class="check">
+                            <input type="checkbox" name="BroadcastClassIds" value="@target.Id" />
+                            @target.Name
+                            @if (target.GroupNames is { Count: > 0 })
+                            {
+                                foreach (var groupName in target.GroupNames)
+                                {
+                                    <span class="group-name">@groupName</span>
+                                }
+                            }
+                        </label>
+                    }
+                </div>
+                <div>
+                    <button type="submit">广播到勾选的 @Model.BroadcastTargets.Count 个班级</button>
+                </div>
+            </form>
+        </section>
+        }
 
         @if (Model.CanClearNotifications)
         {

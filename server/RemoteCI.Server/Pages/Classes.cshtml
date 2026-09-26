@@ -5,7 +5,7 @@
 }
 <div class="page-head">
     <div>
-        <p class="eyebrow">班级与访客</p>
+        <p class="eyebrow">班级 · 分组 · 访客</p>
         <h1>班级管理</h1>
     </div>
 </div>
@@ -13,15 +13,89 @@
 <section class="panel">
     <h2>新建班级</h2>
     <p class="muted">每个班级对应一个教室端的 ClassIsland 插件与独立课表；创建后在概览页生成绑定该班级的配对码接入插件。</p>
-    <form method="post" asp-page-handler="Create" class="stack">
-        <label>班级名称<input asp-for="NewClassName" required maxlength="40" placeholder="例如：高一（1）班" /></label>
+    <form method="post" asp-page-handler="Create" class="compact-row">
+        <label class="stack">班级名称<input asp-for="NewClassName" required maxlength="40" placeholder="例如：高一（1）班" /></label>
         <button type="submit">创建班级</button>
     </form>
 </section>
 
 <section class="panel">
+    <h2>班级分组</h2>
+    <p class="muted">分组支持层级（如学校 → 年级 → 班级组），同一个班级可同时属于多个分组；批量操作与广播通知按组展开时包含全部子分组中的班级。</p>
+    <form method="post" asp-page-handler="CreateGroup" class="compact-row">
+        <label class="stack">分组名称<input asp-for="NewGroupName" required maxlength="40" placeholder="例如：高一年级" /></label>
+        <label class="stack">父分组
+            <select name="parentGroupId">
+                <option value="">（根分组）</option>
+                @foreach (var group in Model.Groups)
+                {
+                    <option value="@group.Id">@(string.Concat(Enumerable.Repeat("　", Math.Max(0, group.Depth - 1))) + group.Name)</option>
+                }
+            </select>
+        </label>
+        <button type="submit">创建分组</button>
+    </form>
+
+    @if (Model.Groups.Count > 0)
+    {
+        <div class="group-list">
+            @foreach (var group in Model.Groups)
+            {
+                <details class="group-item">
+                    <summary>
+                        <span class="group-name"><i class="bi bi-collection" aria-hidden="true"></i>@group.Name</span>
+                        @if (group.ParentId is not null)
+                        {
+                            <span class="muted">上级：@group.ParentName</span>
+                        }
+                        <span class="muted">直接班级 @group.ClassCount 个</span>
+                    </summary>
+                    <div class="group-editor">
+                        <form method="post" asp-page-handler="RenameGroup" class="inline-form">
+                            <input type="hidden" name="id" value="@group.Id" />
+                            <input type="text" name="name" value="@group.Name" required maxlength="40" aria-label="分组名称" />
+                            <label class="check" style="gap:4px">
+                                上级
+                                <select name="parentGroupId" aria-label="父分组">
+                                    <option value="">（根分组）</option>
+                                    @foreach (var candidate in Model.Groups.Where(x => x.Id != group.Id))
+                                    {
+                                        <option value="@candidate.Id" selected="@(candidate.Id == group.ParentId)">@(string.Concat(Enumerable.Repeat("　", Math.Max(0, candidate.Depth - 1))) + candidate.Name)</option>
+                                    }
+                                </select>
+                            </label>
+                            <button type="submit" class="ghost">保存</button>
+                        </form>
+                        <form method="post" asp-page-handler="DeleteGroup" class="inline-form">
+                            <input type="hidden" name="id" value="@group.Id" />
+                            <button type="submit" class="ghost">删除分组</button>
+                        </form>
+                        <form method="post" asp-page-handler="SetGroupClasses" class="stack">
+                            <input type="hidden" name="id" value="@group.Id" />
+                            <label>包含的班级（可多选）
+                                <select name="classIds" multiple size="@(Math.Min(6, Math.Max(2, Model.Classes.Count)))">
+                                    @foreach (var classroom in Model.Classes)
+                                    {
+                                        <option value="@classroom.Id" selected="@(classroom.GroupIds?.Contains(group.Id) == true)">@classroom.Name</option>
+                                    }
+                                </select>
+                            </label>
+                            <button type="submit" class="ghost">保存分组成员班级</button>
+                        </form>
+                    </div>
+                </details>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="batch-summary">还没有分组，创建后可以把班级划入分组。</div>
+    }
+</section>
+
+<section class="panel">
     <div class="panel-heading">
-        <div><h2>全部班级</h2><p class="muted">默认班级不可删除；删除班级会同时移除成员关系与插件凭据（需重新配对）。勾选班级后可批量开关访客功能或删除。</p></div>
+        <div><h2>全部班级</h2><p class="muted">默认班级不可删除；删除班级会同时移除成员关系与插件凭据（需重新配对）。勾选班级或按分组批量执行。</p></div>
     </div>
     @if (Model.Classes.Count == 0)
     {
@@ -37,7 +111,18 @@
                     <option value="delete">批量删除班级</option>
                 </select>
             </label>
-            <button type="submit">对勾选的班级执行</button>
+            @if (Model.Groups.Count > 0)
+            {
+                <label>按分组执行（可多选；展开包含子分组，与勾选的班级合并生效）
+                    <select asp-for="SelectedGroupIds" multiple size="@(Math.Min(4, Model.Groups.Count))">
+                        @foreach (var group in Model.Groups)
+                        {
+                            <option value="@group.Id">@(string.Concat(Enumerable.Repeat("　", Math.Max(0, group.Depth - 1))) + group.Name)（@group.ClassCount 个班级）</option>
+                        }
+                    </select>
+                </label>
+            }
+            <button type="submit">对勾选的班级/分组执行</button>
         </form>
         <div class="user-account-table-wrap">
             <table class="user-account-table">
@@ -45,6 +130,7 @@
                     <tr>
                         <th scope="col"><span class="visually-hidden">选择</span></th>
                         <th scope="col">班级</th>
+                        <th scope="col">分组</th>
                         <th scope="col">成员</th>
                         <th scope="col">插件</th>
                         <th scope="col">访客</th>
@@ -77,6 +163,19 @@
                                 </form>
                             }
                         </td>
+                        <td data-label="分组">
+                            @if (classroom.GroupNames is { Count: > 0 })
+                            {
+                                foreach (var groupName in classroom.GroupNames)
+                                {
+                                    <span class="group-name">@groupName</span>
+                                }
+                            }
+                            else
+                            {
+                                <span class="muted">未分组</span>
+                            }
+                        </td>
                         <td data-label="成员">@classroom.MemberCount</td>
                         <td data-label="插件">
                             @if (classroom.PluginCount > 0)
@@ -107,7 +206,7 @@
                     </tr>
                     <tr class="member-row">
                         <td></td>
-                        <td colspan="5">
+                        <td colspan="6">
                             <details>
                                 <summary>成员（@members.Count）</summary>
                                 <ul class="member-list">

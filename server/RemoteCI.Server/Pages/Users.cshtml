@@ -23,6 +23,32 @@
 @if (Model.CurrentUser.Role == UserRole.Admin)
 {
 <section class="panel">
+    <h2>批量导入人员</h2>
+    <p class="muted">每行一个账号，推荐格式：<code>ID,用户名,班级,角色,密码</code>（班级不存在会自动创建；角色按名称匹配角色预设；<b>密码可留空</b>，该账号首次登录时会被要求设置密码；也支持制表符分隔，# 开头的行忽略）。旧 3 列格式 <code>ID,用户名,密码</code> 仍可用，班级与角色取下方默认值。</p>
+    <form method="post" asp-page-handler="BatchImport" class="stack">
+        <label>账号清单<textarea asp-for="ImportText" rows="6" placeholder="zhang.san,张三,高一（1）班,学生,&#10;li.si,李四,高一（1）班,班管理员,Passw0rd-2026&#10;wang.wu,王五,高一（2）班,学生,"></textarea></label>
+        <label>默认班级（仅 3 列旧格式行使用）
+            <select asp-for="ImportClassId">
+                <option value="">（不导入 3 列旧格式行）</option>
+                @foreach (var classroom in Model.ImportClasses)
+                {
+                    <option value="@classroom.Id">@classroom.Name</option>
+                }
+            </select>
+        </label>
+        <label>默认角色（仅 3 列旧格式行使用）
+            <select asp-for="ImportRoleId">
+                @foreach (var role in Model.RoleDefinitions.Where(x => x.Kind != nameof(AccountRoleKind.Administrator)))
+                {
+                    <option value="@role.Id" selected="@(role.Id == AccountRole.StudentId)">@role.Name</option>
+                }
+            </select>
+        </label>
+        <button type="submit">批量导入</button>
+    </form>
+</section>
+
+<section class="panel">
     <div class="panel-heading">
         <div><h2>角色配置</h2><p class="muted">角色默认权限会统一应用到所有同角色账号。</p></div>
         <button type="button" data-user-edit-open="role-create-dialog" aria-controls="role-create-dialog">创建角色</button>

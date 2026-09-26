@@ -25,6 +25,9 @@ public abstract class WebPageModel(UserManager<AppUser> users) : PageModel
 
     public IReadOnlyList<ClassSummary> AccessibleClasses { get; private set; } = [];
 
+    /// <summary>当前用户是否可以管理当前班级的信息（班名/班头像）：系统管理员或本班班管理员。</summary>
+    public bool CanManageClassInfo { get; private set; }
+
     public Guid CurrentClassId => CurrentClass?.Id ?? Classroom.DefaultId;
 
     /// <summary>
@@ -51,6 +54,7 @@ public abstract class WebPageModel(UserManager<AppUser> users) : PageModel
         CurrentClass = AccessibleClasses.FirstOrDefault(x => x.Id == cookieClass) ?? AccessibleClasses.FirstOrDefault();
         // 没有任何可访问班级时退回默认班级占位，权限为 None，页面自然呈现无权限状态。
         ClassPermissions = CurrentClass?.Permissions ?? UserPermissions.None;
+        CanManageClassInfo = await access.IsClassAdminAsync(user.Id, user.Role, CurrentClassId, HttpContext.RequestAborted);
         return permission is not null && !Permissions.HasFlag(permission.Value)
             ? RedirectToPage("/Denied")
             : null;

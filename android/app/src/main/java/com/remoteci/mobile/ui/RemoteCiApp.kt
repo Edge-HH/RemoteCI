@@ -42,6 +42,7 @@ enum class HomeTab { Today, Schedule, Control, People }
 sealed interface Screen {
     data object Login : Screen
     data class Home(val tab: HomeTab = HomeTab.Today) : Screen
+    data object ClassPicker : Screen
     data class Swap(val date: String?, val index: Int?) : Screen
     data object Account : Screen
     data object Inbox : Screen
@@ -148,7 +149,14 @@ fun RemoteCiApp(appContext: android.content.Context) {
                         connection = connection,
                         snackbar = snackbar,
                         onSettings = { persist(it) },
-                        onLoggedIn = { goHome(HomeTab.Today) },
+                        onLoggedIn = {
+                            // 多班级账号登录后先选择进入的班级，单班级账号直接进首页。
+                            if (ConnectionManager.classes.value.size > 1) push(Screen.ClassPicker)
+                            else goHome(HomeTab.Today)
+                        },
+                    )
+                    Screen.ClassPicker -> ClassPickerScreen(
+                        onPicked = { goHome(HomeTab.Today) },
                     )
                     is Screen.Home -> HomeShell(
                         tab = screen.tab,

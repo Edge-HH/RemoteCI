@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -35,6 +36,8 @@ import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Today
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Surface
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -103,6 +106,10 @@ fun LoginScreen(
     var username by remember { mutableStateOf(settings.username) }
     var password by remember { mutableStateOf("") }
     var server by remember { mutableStateOf(settings.cloudServerUrl) }
+    val pendingSetup by ConnectionManager.pendingPasswordSetup.collectAsState()
+    var newPassword by remember { mutableStateOf("") }
+    var confirmNewPassword by remember { mutableStateOf("") }
+    var settingUp by remember { mutableStateOf(false) }
     val plugins by ConnectionManager.lanPlugins.collectAsState()
     val scanStatus by ConnectionManager.lanDiscoveryStatus.collectAsState()
     val scanning by ConnectionManager.lanDiscoveryScanning.collectAsState()
@@ -140,6 +147,64 @@ fun LoginScreen(
             )
             if (server.trim().startsWith("http://")) {
                 Text("当前是明文 HTTP，请确认网络可信。", color = MaterialTheme.colorScheme.error)
+            }
+            if (pendingSetup != null) {
+                // 首登设置密码：批量导入的账号首次登录时在这里补设密码。
+                Card {
+                    Column(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text("首次登录 · 设置密码", style = MaterialTheme.typography.titleMedium)
+                        OutlinedTextField(
+                            newPassword,
+                            { newPassword = it },
+                            label = { Text("新密码") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        )
+                        OutlinedTextField(
+                            confirmNewPassword,
+                            { confirmNewPassword = it },
+                            label = { Text("确认新密码") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(
+                                onClick = {
+                                    if (newPassword.length < 8) {
+                                        scope.launch { snackbar.showSnackbar("密码需为 8-128 个字符") }
+                                    } else if (newPassword != confirmNewPassword) {
+                                        scope.launch { snackbar.showSnackbar("两次输入的新密码不一致") }
+                                    } else {
+                                        settingUp = true
+                                        scope.launch {
+                                            val ok = runCatching {
+                                                ConnectionManager.setupInitialPassword(newPassword)
+                                            }.getOrElse { false }
+                                            settingUp = false
+                                            if (ok) {
+                                                password = newPassword
+                                                newPassword = ""
+                                                confirmNewPassword = ""
+                                                ConnectionManager.connect(settings.copy(username = pendingSetup!!.username), password)
+                                                snackbar.showSnackbar("密码已设置，正在登录")
+                                            } else {
+                                                snackbar.showSnackbar("设置失败，请重试或联系管理员")
+                                            }
+                                        }
+                                    }
+                                },
+                                enabled = !settingUp,
+                            ) { Text(if (settingUp) "正在保存…" else "保存密码并登录") }
+                        }
+                    }
+                }
             }
             Button(
                 onClick = {
@@ -182,6 +247,64 @@ fun LoginScreen(
     }
 }
 
+/** 登录后的班级选择页：多班级账号先选一个进入，进入后仍可在首页顶部随时切换。 */
+@Composable
+fun ClassPickerScreen(onPicked: () -> Unit) {
+    val classes by ConnectionManager.classes.collectAsState()
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+        ) {
+            Text("选择进入的班级", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                "该账号拥有多个班级的访问权限，进入后可随时在顶部切换。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            classes.forEach { classroom ->
+                Card(onClick = {
+                    ConnectionManager.switchClass(classroom.id)
+                    onPicked()
+                }) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(classroom.name, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            listOfNotNull(
+                                classroom.groupName,
+                                classroom.roleName,
+                                if (classroom.visitorEnabled) "访客开放" else null,
+                            ).joinToString(" · ").ifBlank { "班级" },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 首页顶部的班级切换行：仅在账号可访问多个班级时显示。 */
+@Composable
+private fun ClassSwitcherRow() {
+    val classes by ConnectionManager.classes.collectAsState()
+    val currentClassId by ConnectionManager.currentClassId.collectAsState()
+    if (classes.size <= 1) return
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        classes.forEach { classroom ->
+            FilterChip(
+                selected = classroom.id == currentClassId,
+                onClick = { ConnectionManager.switchClass(classroom.id) },
+                label = { Text(classroom.name) },
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeShell(
@@ -214,11 +337,14 @@ fun HomeShell(
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            when (tab) {
-                HomeTab.Today -> TodayScreen(snackbar, onOpen, onTab)
-                HomeTab.Schedule -> ScheduleScreen(embedded = true, snackbar = snackbar, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
-                HomeTab.Control -> ControlListScreen(embedded = true, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
-                HomeTab.People -> PeopleScreen(embedded = true, snackbar = snackbar, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
+            Column {
+                ClassSwitcherRow()
+                when (tab) {
+                    HomeTab.Today -> TodayScreen(snackbar, onOpen, onTab)
+                    HomeTab.Schedule -> ScheduleScreen(embedded = true, snackbar = snackbar, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
+                    HomeTab.Control -> ControlListScreen(embedded = true, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
+                    HomeTab.People -> PeopleScreen(embedded = true, snackbar = snackbar, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
+                }
             }
         }
     }

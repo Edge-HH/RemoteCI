@@ -79,6 +79,7 @@ builder.Services.AddRazorPages(options =>
 {
     options.Conventions.AllowAnonymousToPage("/Login");
     options.Conventions.AllowAnonymousToPage("/Visitor");
+    options.Conventions.AllowAnonymousToPage("/SetupPassword");
 });
 builder.Services.AddScoped<IdentityCoordinator>();
 builder.Services.AddScoped<AccountRoleService>();
@@ -88,6 +89,8 @@ builder.Services.AddScoped<ConfigurationArchiveService>();
 builder.Services.AddScoped<SchedulePullSettings>();
 builder.Services.AddScoped<VisitorAccessSettings>();
 builder.Services.AddScoped<ClassAccessService>();
+builder.Services.AddScoped<ClassBroadcastService>();
+builder.Services.AddScoped<UserImportService>();
 builder.Services.AddScoped(sp =>
 {
     // 插件在线数来自单例连接注册表；scoped 服务通过回调取数，避免直接依赖单例链。
@@ -179,7 +182,7 @@ app.MapPost("/api/plugin/pair", async (PairRequest request, IdentityCoordinator 
 app.MapPost("/api/auth/login", async (
     LoginRequest request, IdentityCoordinator identities, AuthorizationSyncService authorizationSync, CancellationToken ct) =>
 {
-    if (MissingFields(request.Username, request.Password) is { } bad) return bad;
+    if (MissingFields(request.Username) is { } bad) return bad;
     try
     {
         var response = await identities.LoginAsync(request, ct);
@@ -198,6 +201,20 @@ app.MapPost("/api/auth/refresh", async (
         var response = await identities.RefreshAsync(request, ct);
         await authorizationSync.SyncAsync(ct);
         return Results.Ok(response);
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+}).RequireRateLimiting("auth");
+
+// 首登设置密码：批量导入的待激活账号凭一次性令牌补设密码后即可正常登录。
+app.MapPost("/api/auth/setup-password", async (
+    SetupPasswordRequest request, IdentityCoordinator identities, AuthorizationSyncService authorizationSync, CancellationToken ct) =>
+{
+    if (MissingFields(request.Username, request.SetupToken, request.NewPassword) is { } bad) return bad;
+    try
+    {
+        await identities.SetupPasswordAsync(request, ct);
+        await authorizationSync.SyncAsync(ct);
+        return Results.NoContent();
     }
     catch (IdentityOperationException ex) { return OperationError(ex); }
 }).RequireRateLimiting("auth");
@@ -371,6 +388,22 @@ usersApi.MapPost("/{id:guid}/password", async (
     }
     catch (IdentityOperationException ex) { return OperationError(ex); }
 });
+// 批量导入人员：行格式 ID,用户名,班级,角色,密码（密码可空=待激活），逐行回报结果。
+usersApi.MapPost("/batch-import", async (
+    HttpContext ctx, BatchImportRequest request, IdentityCoordinator identities, UserImportService importService,
+    AuthorizationSyncService authorizationSync, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try
+    {
+        var result = await importService.ImportAsync(request.Text, request.DefaultClassId, request.DefaultRoleId, ct);
+        if (result.Created > 0) await authorizationSync.SyncAsync(ct);
+        return Results.Ok(result);
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
 usersApi.MapDelete("/{id:guid}", async (
     Guid id, HttpContext ctx, IdentityCoordinator identities, AuthorizationSyncService authorizationSync, CancellationToken ct) =>
 {
@@ -398,6 +431,83 @@ app.MapPost("/api/plugin/pairing-code", async (
     return HasPermission(principal, UserPermissions.ManageUsers)
         ? Results.Ok(new { pairCode = await identities.CreatePluginPairingCodeAsync(body?.ClassId ?? Classroom.DefaultId, ct) })
         : Forbidden();
+});
+
+// 班级分组：管理员组织班级（如按年级），批量操作与广播通知可按组展开。
+var groupApi = app.MapGroup("/api/class-groups");
+groupApi.MapGet("/", async (
+    HttpContext ctx, IdentityCoordinator identities, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    return Results.Ok(await classrooms.ListGroupsAsync(ct));
+});
+groupApi.MapPost("/", async (
+    HttpContext ctx, CreateClassGroupRequest request, IdentityCoordinator identities, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (MissingFields(request.Name) is { } bad) return bad;
+    try { return Results.Ok(await classrooms.CreateGroupAsync(request.Name, request.ParentId, ct)); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+groupApi.MapPut("/{id:guid}", async (
+    Guid id, HttpContext ctx, UpdateClassGroupRequest request, IdentityCoordinator identities, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (MissingFields(request.Name) is { } bad) return bad;
+    try { await classrooms.RenameGroupAsync(id, request.Name, request.ParentId, ct); return Results.NoContent(); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+// 整体替换一个分组包含的班级（仅直接归属）。
+groupApi.MapPut("/{id:guid}/classes", async (
+    Guid id, HttpContext ctx, UpdateGroupClassesRequest request, IdentityCoordinator identities, ClassroomService classrooms,
+    AuthorizationSyncService authorizationSync, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try
+    {
+        await classrooms.SetGroupClassesAsync(id, request.ClassIds, ct);
+        await authorizationSync.SyncAsync(ct);
+        return Results.NoContent();
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+groupApi.MapDelete("/{id:guid}", async (
+    Guid id, HttpContext ctx, IdentityCoordinator identities, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try { await classrooms.DeleteGroupAsync(id, ct); return Results.NoContent(); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+
+// 集控广播：一次向多个班级/分组发送通知、清除通知、电源或语音消息，逐班按班内权限鉴权并回报结果。
+app.MapPost("/api/commands/broadcast", async (
+    HttpContext ctx, BroadcastCommandRequest request, IdentityCoordinator identities,
+    ClassBroadcastService broadcast, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (request.ClassIds.Count == 0 && (request.GroupIds?.Count ?? 0) == 0)
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "请选择要操作的班级或分组"));
+    if (request.Command is CommandKind.SendNotification && request.Notification is null)
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "缺少通知内容"));
+    if (request.Command is CommandKind.SendVoiceMessage &&
+        !VoiceMessageRequest.TryDecode(request.VoiceMessage, out _))
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "语音格式无效或超过 60 秒"));
+    try
+    {
+        return Results.Ok(await broadcast.BroadcastAsync(principal, request, ct));
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
 });
 
 // 当前账号可访问的班级：客户端班级选择/切换的数据源。
@@ -462,6 +572,64 @@ classesApi.MapDelete("/{id:guid}", async (
     }
     catch (IdentityOperationException ex) { return OperationError(ex); }
 });
+// 班级信息：系统管理员或本班班管理员可改班名；头像小图直存数据库。
+classesApi.MapPut("/{id:guid}/info", async (
+    Guid id, HttpContext ctx, UpdateClassRequest request, IdentityCoordinator identities, ClassAccessService access,
+    ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!await access.IsClassAdminAsync(principal.User.Id, principal.User.Role, id, ct)) return Forbidden();
+    if (MissingFields(request.Name) is { } bad) return bad;
+    try
+    {
+        await classrooms.RenameClassAsync(id, request.Name, ct);
+        return Results.NoContent();
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+// 头像走原始字节上传（Bearer 客户端没有 antiforgery 令牌，不用 multipart 表单）。
+classesApi.MapPut("/{id:guid}/avatar", async (
+    Guid id, HttpContext ctx, IdentityCoordinator identities, ClassAccessService access,
+    ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!await access.IsClassAdminAsync(principal.User.Id, principal.User.Role, id, ct)) return Forbidden();
+    var contentType = ctx.Request.Headers["X-Avatar-Type"].ToString();
+    var allowed = new[] { "image/png", "image/jpeg", "image/webp" };
+    if (!allowed.Contains(contentType))
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "头像仅支持 PNG/JPEG/WebP"));
+    if (ctx.Request.ContentLength is null or 0 or > 256 * 1024)
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "头像需为不超过 256KB 的图片"));
+    using var memory = new MemoryStream();
+    await ctx.Request.Body.CopyToAsync(memory, ct);
+    await classrooms.SetAvatarAsync(id, memory.ToArray(), contentType, ct);
+    return Results.NoContent();
+});
+classesApi.MapDelete("/{id:guid}/avatar", async (
+    Guid id, HttpContext ctx, IdentityCoordinator identities, ClassAccessService access,
+    ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!await access.IsClassAdminAsync(principal.User.Id, principal.User.Role, id, ct)) return Forbidden();
+    await classrooms.SetAvatarAsync(id, null, null, ct);
+    return Results.NoContent();
+});
+// 头像属于班级公开信息（访客页也展示），无需鉴权；ETag 支持客户端缓存。
+app.MapGet("/api/classes/{id:guid}/avatar", async (
+    Guid id, HttpContext ctx, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var classroom = await classrooms.RequireAsync(id, ct);
+    if (classroom.Avatar is null) return Results.NotFound();
+    var etag = $"\"{classroom.AvatarUpdatedAt?.Ticks ?? 0:x}\"";
+    if (ctx.Request.Headers.IfNoneMatch == etag)
+        return Results.StatusCode(StatusCodes.Status304NotModified);
+    ctx.Response.Headers.ETag = etag;
+    return Results.File(classroom.Avatar, classroom.AvatarContentType ?? "image/png");
+});
+
 classesApi.MapPut("/{id:guid}/visitor", async (
     Guid id, HttpContext ctx, ClassVisitorRequest request, IdentityCoordinator identities, ClassroomService classrooms, CancellationToken ct) =>
 {
@@ -471,6 +639,20 @@ classesApi.MapPut("/{id:guid}/visitor", async (
     try
     {
         await classrooms.SetVisitorAccessAsync(id, request.Enabled, ct);
+        return Results.NoContent();
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+// 整体替换一个班级所属的分组（多归属）。
+classesApi.MapPut("/{id:guid}/groups", async (
+    Guid id, HttpContext ctx, UpdateClassGroupsRequest request, IdentityCoordinator identities, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try
+    {
+        await classrooms.SetClassGroupsAsync(id, request.GroupIds, ct);
         return Results.NoContent();
     }
     catch (IdentityOperationException ex) { return OperationError(ex); }
@@ -507,7 +689,12 @@ classesApi.MapPost("/batch", async (
     if (principal?.User is null) return Unauthorized();
     if (principal.User.Role != UserRole.Admin) return Forbidden();
     if (MissingFields(request.Operation) is { } bad) return bad;
-    var result = await classrooms.BatchAsync(request, ct);
+    BatchClassOperationResult result;
+    try
+    {
+        result = await classrooms.BatchAsync(request, ct);
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
     if (request.Operation.Trim().Equals("delete", StringComparison.OrdinalIgnoreCase) ||
         request.Operation.Trim().Equals("enablevisitor", StringComparison.OrdinalIgnoreCase) ||
         request.Operation.Trim().Equals("disablevisitor", StringComparison.OrdinalIgnoreCase))

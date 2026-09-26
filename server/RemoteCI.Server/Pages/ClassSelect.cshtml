@@ -1,0 +1,38 @@
+@page
+@model ClassSelectModel
+@{
+    ViewData["Title"] = "选择班级";
+}
+<div class="page-head">
+    <div>
+        <p class="eyebrow">多班级账号</p>
+        <h1>选择进入的班级</h1>
+    </div>
+</div>
+<p class="muted" style="margin-bottom:18px">该账号拥有多个班级的访问权限，选择一个进入；进入后可随时在页面右上角切换。</p>
+<div class="class-select-grid">
+    @foreach (var classroom in Model.AccessibleClasses)
+    {
+        <form method="post" asp-page-handler="SwitchClass" class="class-select-card">
+            <input type="hidden" name="classId" value="@classroom.Id" />
+            <input type="hidden" name="returnUrl" value="/Index" />
+            <button type="submit">
+                @if (classroom.HasAvatar == true)
+                {
+                    <img class="class-avatar" src="/api/classes/@classroom.Id/avatar" alt="" />
+                }
+                <strong>@classroom.Name</strong>
+                <span>
+                    @if (classroom.GroupNames is { Count: > 0 })
+                    {
+                        foreach (var groupName in classroom.GroupNames)
+                        {
+                            <span class="group-name">@groupName</span>
+                        }
+                    }
+                </span>
+                <small>@classroom.RoleName · 访客功能@(classroom.VisitorEnabled ? "已开放" : "未开放")</small>
+            </button>
+        </form>
+    }
+</div>

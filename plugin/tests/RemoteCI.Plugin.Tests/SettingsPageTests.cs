@@ -60,7 +60,16 @@ public sealed class SettingsPageTests
 
         Assert.Equal(
             "服务器状态：连接失败，将在 5 秒后自动重试",
-            RemoteCiSettingsPage.ConnectionStatusText(status));
+            RemoteCiSettingsPage.ConnectionStatusText(status, null));
+        Assert.Equal(
+            "服务器状态：已连接 · 所属班级：高一（1）班",
+            RemoteCiSettingsPage.ConnectionStatusText(
+                new CloudConnectionStatus(
+                    CloudConnectionState.Connected,
+                    "已连接",
+                    null,
+                    DateTimeOffset.UtcNow),
+                "高一（1）班"));
     }
 
     [Fact]

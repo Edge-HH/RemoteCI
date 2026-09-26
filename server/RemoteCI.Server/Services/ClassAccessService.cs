@@ -19,7 +19,9 @@ public sealed class ClassAccessService(AppDbContext db)
         if (role == UserRole.Admin)
         {
             // SQLite 不支持 DateTimeOffset 排序的 SQL 翻译；班级数量极少，取回后内存排序。
-            var all = await db.Classrooms.AsNoTracking().ToListAsync(ct);
+            var all = await db.Classrooms
+                .Include(x => x.GroupAssignments).ThenInclude(a => a.Group)
+                .AsNoTracking().ToListAsync(ct);
             return all.OrderBy(x => x.CreatedAt).Select(x => new ClassSummary
             {
                 Id = x.Id,
@@ -27,6 +29,8 @@ public sealed class ClassAccessService(AppDbContext db)
                 RoleName = "管理员",
                 Permissions = UserPermissions.All,
                 VisitorEnabled = x.VisitorAccessEnabled,
+                GroupNames = x.GroupAssignments.Select(a => a.Group.Name).ToList(),
+                HasAvatar = x.Avatar != null,
             }).ToList();
         }
 
@@ -34,7 +38,17 @@ public sealed class ClassAccessService(AppDbContext db)
             .Where(x => x.UserId == userId)
             .Join(db.Classrooms, x => x.ClassroomId, y => y.Id, (x, y) => new { Membership = x, Classroom = y })
             .Join(db.AccountRoles, x => x.Membership.RoleDefinitionId, y => y.Id,
-                (x, y) => new { x.Classroom.Id, x.Classroom.Name, x.Classroom.VisitorAccessEnabled, x.Classroom.CreatedAt, RoleName = y.Name, RoleDefaults = y.DefaultPermissions })
+                (x, y) => new
+                {
+                    x.Classroom.Id,
+                    x.Classroom.Name,
+                    x.Classroom.VisitorAccessEnabled,
+                    x.Classroom.CreatedAt,
+                    x.Classroom.Avatar,
+                    GroupNames = x.Classroom.GroupAssignments.Select(a => a.Group.Name).ToList(),
+                    RoleName = y.Name,
+                    RoleDefaults = y.DefaultPermissions,
+                })
             .ToListAsync(ct);
         return memberships.OrderBy(x => x.CreatedAt).Select(x => new ClassSummary
         {
@@ -43,6 +57,8 @@ public sealed class ClassAccessService(AppDbContext db)
             RoleName = x.RoleName,
             Permissions = EffectiveForMembership(role, x.RoleDefaults, granted),
             VisitorEnabled = x.VisitorAccessEnabled,
+            GroupNames = x.GroupNames,
+            HasAvatar = x.Avatar != null,
         }).ToList();
     }
 
@@ -78,6 +94,17 @@ public sealed class ClassAccessService(AppDbContext db)
         role == UserRole.Admin
             ? db.Classrooms.AnyAsync(x => x.Id == classId, ct)
             : db.ClassMemberships.AnyAsync(x => x.UserId == userId && x.ClassroomId == classId, ct);
+
+    /// <summary>
+    /// 是否可以管理班级信息（班名/班头像）：系统管理员，或该班级中班内角色为“班管理员”的成员。
+    /// </summary>
+    public Task<bool> IsClassAdminAsync(Guid userId, UserRole role, Guid classId, CancellationToken ct = default) =>
+        role == UserRole.Admin
+            ? Task.FromResult(true)
+            : db.ClassMemberships.AsNoTracking()
+                .Where(x => x.UserId == userId && x.ClassroomId == classId)
+                .Join(db.AccountRoles, x => x.RoleDefinitionId, y => y.Id, (x, y) => y.Kind)
+                .AnyAsync(kind => kind == AccountRoleKind.ClassAdministrator, ct);
 
     /// <summary>解析用户未显式选择班级时的默认班级：第一个可访问班级；没有可访问班级返回 null。</summary>
     public async Task<Guid?> ResolveDefaultClassIdAsync(Guid userId, UserRole role, CancellationToken ct = default)

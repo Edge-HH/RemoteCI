@@ -65,9 +65,47 @@ public sealed class Classroom
 
     /// <summary>启用后未登录访客可只读查看本班课表。</summary>
     public bool VisitorAccessEnabled { get; set; }
+
+    /// <summary>班级头像（小尺寸图片，≤256KB）；null 表示未设置。</summary>
+    public byte[]? Avatar { get; set; }
+    public string? AvatarContentType { get; set; }
+    public DateTimeOffset? AvatarUpdatedAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public ICollection<ClassMembership> Memberships { get; set; } = [];
+    public ICollection<ClassGroupAssignment> GroupAssignments { get; set; } = [];
+}
+
+/// <summary>
+/// 班级分组：管理员组织班级的维度（如年级、校区），支持父子层级；
+/// 批量操作与广播通知按组展开时包含全部子分组中的班级。一个班级可属于多个分组。
+/// </summary>
+public sealed class ClassGroup
+{
+    /// <summary>分组最大层级深度：根为 1，超出后不能再建子分组。</summary>
+    public const int MaxDepth = 4;
+
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>父分组；null 表示根分组。</summary>
+    public Guid? ParentId { get; set; }
+    public ClassGroup? Parent { get; set; }
+    public ICollection<ClassGroup> Children { get; set; } = [];
+    public ICollection<ClassGroupAssignment> Assignments { get; set; } = [];
+
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>班级与分组的多对多归属；一个班级可同时属于多个分组。</summary>
+public sealed class ClassGroupAssignment
+{
+    public Guid GroupId { get; set; }
+    public ClassGroup Group { get; set; } = null!;
+    public Guid ClassroomId { get; set; }
+    public Classroom Classroom { get; set; } = null!;
 }
 
 /// <summary>用户在某个班级中的成员关系与班内角色；一个用户可属于多个班级。</summary>

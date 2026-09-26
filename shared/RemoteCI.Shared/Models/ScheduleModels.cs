@@ -65,6 +65,11 @@ public sealed class ScheduleBundle
     [JsonPropertyName("generatedAt")]
     public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    /// <summary>课表归属班级；旧版服务端不下发该字段。</summary>
+    [JsonPropertyName("classId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? ClassId { get; set; }
+
     [JsonPropertyName("days")]
     public List<ScheduleDay> Days { get; set; } = [];
 

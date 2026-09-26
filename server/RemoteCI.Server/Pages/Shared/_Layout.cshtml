@@ -86,14 +86,21 @@
                 {
                     <a class="@(controlMenuActive ? "nav-link active" : "nav-link")" aria-current="@(controlMenuActive ? "page" : null)" asp-page="/Control" data-search-label="控制 老师来了 发送通知 清除通知 主界面 音量 电源 扩展"><i class="bi bi-toggles" aria-hidden="true"></i><span>控制</span></a>
                 }
-                @if (permissions.HasFlag(UserPermissions.ManageUsers))
+                @* 管理员专属管理器与“选中班级的操作”用分割线分区：上面是当前班级的操作，下面是全局管理。 *@
+                @if (permissions.HasFlag(UserPermissions.ManageUsers) || current.Role == UserRole.Admin)
                 {
-                    <a class="@NavClass("/Users")" aria-current="@CurrentPage("/Users")" asp-page="/Users" data-search-label="人员权限 用户 账号管理"><i class="bi bi-people" aria-hidden="true"></i><span>人员权限</span></a>
-                }
-                @if (current.Role == UserRole.Admin)
-                {
-                    <a class="@NavClass("/Classes")" aria-current="@CurrentPage("/Classes")" asp-page="/Classes" data-search-label="班级管理 班级 成员 访客"><i class="bi bi-collection" aria-hidden="true"></i><span>班级管理</span></a>
-                    <a class="@NavClass("/SystemConfig")" aria-current="@CurrentPage("/SystemConfig")" asp-page="/SystemConfig" data-search-label="系统配置 系统更新 服务端维护"><i class="bi bi-sliders" aria-hidden="true"></i><span>系统配置</span></a>
+                    <hr class="nav-divider" role="separator" aria-label="管理员功能区" />
+                    @if (permissions.HasFlag(UserPermissions.ManageUsers))
+                    {
+                        <a class="@NavClass("/Users")" aria-current="@CurrentPage("/Users")" asp-page="/Users" data-search-label="人员权限 用户 账号管理 批量导入"><i class="bi bi-people" aria-hidden="true"></i><span>人员权限</span></a>
+                    }
+                    @if (current.Role == UserRole.Admin)
+                    {
+                        <a class="@NavClass("/BatchControl")" aria-current="@CurrentPage("/BatchControl")" asp-page="/BatchControl" data-search-label="批量控制 广播 通知 开关机 电源 语音"><i class="bi bi-broadcast" aria-hidden="true"></i><span>批量控制</span></a>
+                        <a class="@NavClass("/Classes")" aria-current="@CurrentPage("/Classes")" asp-page="/Classes" data-search-label="班级管理 班级 分组 成员 访客"><i class="bi bi-collection" aria-hidden="true"></i><span>班级管理</span></a>
+                        <a class="@NavClass("/SystemConfig")" aria-current="@CurrentPage("/SystemConfig")" asp-page="/SystemConfig" data-search-label="系统配置 系统更新 服务端维护"><i class="bi bi-sliders" aria-hidden="true"></i><span>系统配置</span></a>
+                    }
+                    <hr class="nav-divider" role="separator" aria-label="个人功能区" />
                 }
                 <a class="@NavClass("/Account")" aria-current="@CurrentPage("/Account")" asp-page="/Account" data-search-label="个人账号 密码 设备 会话"><i class="bi bi-person" aria-hidden="true"></i><span>个人账号</span></a>
             </nav>

@@ -30,6 +30,7 @@ public sealed class ConfigurationArchiveService(
         var users = await db.Users.AsNoTracking().Select(x => new UserSnapshot(
             x.Id, x.UserName!, x.NormalizedUserName!, x.DisplayName, x.PasswordHash!, x.SecurityStamp!, x.ConcurrencyStamp!,
             x.Role, x.RoleDefinitionId, x.GrantedPermissions, x.Enabled, x.Version, x.UpdatedAt)).ToListAsync(ct);
+        var groups = await db.ClassGroups.AsNoTracking().Select(x => new GroupSnapshot(x.Id, x.Name, x.ParentId, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
         var classrooms = await db.Classrooms.AsNoTracking().Select(x => new ClassroomSnapshot(x.Id, x.Name, x.VisitorAccessEnabled, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
         var memberships = await db.ClassMemberships.AsNoTracking().Select(x => new MembershipSnapshot(x.UserId, x.ClassroomId, x.RoleDefinitionId)).ToListAsync(ct);
         var plugins = await db.PluginCredentials.AsNoTracking().Select(x => new PluginSnapshot(x.Id, x.Name, x.TokenHash, x.Enabled, x.CreatedAt, x.LastSeenAt, x.ClassroomId)).ToListAsync(ct);
@@ -47,7 +48,7 @@ public sealed class ConfigurationArchiveService(
                 AutoEnterVisitorPage: metadata.AutoEnterVisitorPage),
             new BackupSettingsSnapshot(backup.Enabled, backup.Cadence, backup.TimeOfDay, backup.DayOfWeek, backup.MaxBackups),
             state.GetLatestSchedule(Classroom.DefaultId), extensionPolicies, extensionPreferences,
-            classrooms, memberships);
+            classrooms, memberships, groups);
     }
 
     public async Task<BackupFileInfo> CreateLocalBackupAsync(string source, CancellationToken ct = default)
@@ -110,6 +111,7 @@ public sealed class ConfigurationArchiveService(
         await db.PluginCredentials.ExecuteDeleteAsync(ct);
         await db.ClassMemberships.ExecuteDeleteAsync(ct);
         await db.Classrooms.ExecuteDeleteAsync(ct);
+        await db.ClassGroups.ExecuteDeleteAsync(ct);
         db.ChangeTracker.Clear();
         db.AccountRoles.AddRange(snapshot.Roles.Select(x => new AccountRole { Id=x.Id, Name=x.Name, NormalizedName=x.Name.Trim().ToUpperInvariant(), Kind=x.Kind, DefaultPermissions=UpgradeImportedPermissions(snapshot.Version, x.DefaultPermissions), CreatedAt=x.CreatedAt, UpdatedAt=x.UpdatedAt }));
         await db.SaveChangesAsync(ct);
@@ -122,6 +124,21 @@ public sealed class ConfigurationArchiveService(
                 Classroom.DefaultId, "默认班级",
                 snapshot.Metadata.VisitorAccessEnabled, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
         }
+        var groups = (snapshot.ClassGroups ?? []).ToList();
+        // 分组支持层级：父分组必须先插入（按快照内推算的深度排序）。
+        var byId = groups.ToDictionary(x => x.Id, x => x);
+        int DepthOf(GroupSnapshot g)
+        {
+            var depth = 1;
+            var parent = g.ParentId;
+            while (parent is { } current && byId.TryGetValue(current, out var found))
+            {
+                depth++;
+                parent = found.ParentId;
+            }
+            return depth;
+        }
+        db.ClassGroups.AddRange(groups.OrderBy(DepthOf).Select(x => new ClassGroup { Id=x.Id, Name=x.Name, ParentId=x.ParentId, CreatedAt=x.CreatedAt, UpdatedAt=x.UpdatedAt }));
         db.Classrooms.AddRange(classrooms.Select(x => new Classroom { Id=x.Id, Name=x.Name, VisitorAccessEnabled=x.VisitorAccessEnabled, CreatedAt=x.CreatedAt, UpdatedAt=x.UpdatedAt }));
         var memberships = (snapshot.Memberships ?? []).ToList();
         if (snapshot.Memberships is null)
@@ -167,10 +184,11 @@ public sealed class ConfigurationArchiveService(
 }
 
 public sealed record BackupFileInfo(string Name, DateTimeOffset CreatedAt, long Size, string Source);
-public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null, List<ClassroomSnapshot>? Classrooms = null, List<MembershipSnapshot>? Memberships = null);
+public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null, List<ClassroomSnapshot>? Classrooms = null, List<MembershipSnapshot>? Memberships = null, List<GroupSnapshot>? ClassGroups = null);
 public sealed record RoleSnapshot(Guid Id,string Name,AccountRoleKind Kind,UserPermissions DefaultPermissions,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);
 public sealed record UserSnapshot(Guid Id,string Username,string NormalizedUsername,string DisplayName,string PasswordHash,string SecurityStamp,string ConcurrencyStamp,UserRole Role,Guid RoleId,UserPermissions GrantedPermissions,bool Enabled,long Version,DateTimeOffset UpdatedAt);
 public sealed record ClassroomSnapshot(Guid Id,string Name,bool VisitorAccessEnabled,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);
+public sealed record GroupSnapshot(Guid Id,string Name,Guid? ParentId,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);
 public sealed record MembershipSnapshot(Guid UserId,Guid ClassroomId,Guid RoleDefinitionId);
 public sealed record PluginSnapshot(Guid Id,string Name,string TokenHash,bool Enabled,DateTimeOffset CreatedAt,DateTimeOffset LastSeenAt,Guid? ClassroomId = null);
 public sealed record ExtensionPolicySnapshot(string ExtensionId,bool Enabled,bool AllowNonAdmin,DateTimeOffset UpdatedAt);

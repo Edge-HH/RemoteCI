@@ -26,6 +26,9 @@ public sealed partial class IdentityCoordinator(
     /// <summary>插件配对码有效期：遗忘在聊天记录/页面上的配对码不能永久可用。</summary>
     private static readonly TimeSpan PairCodeLifetime = TimeSpan.FromMinutes(30);
 
+    /// <summary>首登设置密码令牌有效期：过期后需重新走一次空密码登录获取新令牌。</summary>
+    private static readonly TimeSpan PasswordSetupTokenLifetime = TimeSpan.FromMinutes(15);
+
     /// <summary>
     /// 当前服务端进程实例标识，随授权镜像下发。服务端重启或数据库重建后变化，
     /// 供插件在镜像版本号回退时识别实例变化并强制覆盖，避免旧镜像永久滞留。
@@ -179,6 +182,9 @@ public sealed partial class IdentityCoordinator(
             await users.CheckPasswordAsync(TimingUser(), request.Password);
             throw new IdentityOperationException(ApiErrorCodes.Unauthorized, "ID 或密码错误");
         }
+        // 批量导入且未设密码的账号：首次登录（空密码）下发一次性设置令牌，设置密码后重新登录。
+        if (user.PasswordPending && string.IsNullOrEmpty(request.Password))
+            return await BeginPasswordSetupAsync(user, ct);
         if (await users.IsLockedOutAsync(user))
             throw new IdentityOperationException(ApiErrorCodes.Unauthorized, "失败次数过多，账号已临时锁定，请稍后再试");
         if (!await users.CheckPasswordAsync(user, request.Password))
@@ -189,6 +195,46 @@ public sealed partial class IdentityCoordinator(
         }
         await users.ResetAccessFailedCountAsync(user);
         return await CreateOrRotateSessionAsync(user, request.DeviceName, null, ct);
+    }
+
+    /// <summary>为首登账号生成一次性密码设置令牌（15 分钟有效，只保存 SHA-256 摘要）。</summary>
+    public async Task<AuthResponse> BeginPasswordSetupAsync(AppUser user, CancellationToken ct = default)
+    {
+        var token = CreateSecret(32);
+        user.SetupTokenHash = Hash(token);
+        user.SetupTokenExpiresAt = DateTimeOffset.UtcNow + PasswordSetupTokenLifetime;
+        user.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return new AuthResponse { PasswordPending = true, SetupToken = token };
+    }
+
+    /// <summary>首登设置密码：校验一次性令牌与有效期，补设密码后账号立即恢复正常登录。</summary>
+    public async Task SetupPasswordAsync(SetupPasswordRequest request, CancellationToken ct = default)
+    {
+        var user = await users.FindByNameAsync(request.Username.Trim());
+        var now = DateTimeOffset.UtcNow;
+        var invalid = user is null
+            || !user.PasswordPending
+            || user.SetupTokenHash is null
+            || user.SetupTokenExpiresAt is not { } expires
+            || expires <= now
+            || !FixedEquals(user.SetupTokenHash, Hash(request.SetupToken));
+        if (invalid)
+        {
+            // 恒定时间：对无效请求也执行一次等成本哈希校验，避免枚举可设置密码的账号。
+            await users.CheckPasswordAsync(TimingUser(), request.NewPassword);
+            throw new IdentityOperationException(ApiErrorCodes.Unauthorized, "设置链接无效或已过期，请重新登录");
+        }
+        ValidatePassword(request.NewPassword);
+        var target = user!;
+        EnsureIdentitySucceeded(await users.AddPasswordAsync(target, request.NewPassword));
+        target.PasswordPending = false;
+        target.SetupTokenHash = null;
+        target.SetupTokenExpiresAt = null;
+        target.UpdatedAt = now;
+        target.Version = await NextVersionAsync(ct);
+        EnsureIdentitySucceeded(await users.UpdateAsync(target));
+        await users.UpdateSecurityStampAsync(target);
     }
 
     public async Task<AuthResponse> RefreshAsync(RefreshSessionRequest request, CancellationToken ct = default)
@@ -360,6 +406,8 @@ public sealed partial class IdentityCoordinator(
         ValidateUserInput(request.Username, request.DisplayName, request.Password, request.Role);
         var role = await ResolveRoleAsync(request.RoleId, request.Role, ct);
         var protocolRole = role.Kind == AccountRoleKind.Administrator ? UserRole.Admin : UserRole.User;
+        // 密码留空 = 批量导入待激活账号：首次登录时强制设置密码。
+        var hasPassword = !string.IsNullOrWhiteSpace(request.Password);
         var user = new AppUser
         {
             Id = Guid.NewGuid(),
@@ -369,10 +417,13 @@ public sealed partial class IdentityCoordinator(
             RoleDefinitionId = role.Id,
             GrantedPermissions = NormalizeGrants(protocolRole, request.GrantedPermissions),
             Enabled = true,
+            PasswordPending = !hasPassword,
             UpdatedAt = DateTimeOffset.UtcNow,
         };
         user.Version = await NextVersionAsync(ct);
-        EnsureIdentitySucceeded(await users.CreateAsync(user, request.Password));
+        EnsureIdentitySucceeded(hasPassword
+            ? await users.CreateAsync(user, request.Password)
+            : await users.CreateAsync(user));
         db.ClassMemberships.Add(new ClassMembership
         {
             UserId = user.Id,
@@ -564,6 +615,10 @@ public sealed partial class IdentityCoordinator(
                 Verifier = x.VerifierHash,
                 ExpiresAt = x.ExpiresAt,
             }).ToList();
+        var className = await db.Classrooms.AsNoTracking()
+            .Where(x => x.Id == classId)
+            .Select(x => x.Name)
+            .SingleOrDefaultAsync(ct);
         return new AccountSync
         {
             Version = accountVersion,
@@ -571,6 +626,7 @@ public sealed partial class IdentityCoordinator(
             ServerVersion = AppVersion.Version,
             ServerCapabilities = RemoteCiCapabilities.Current.ToList(),
             GeneratedAt = now,
+            ClassName = className,
             Accounts = syncedAccounts,
             Sessions = sessions,
         };
@@ -771,7 +827,8 @@ public sealed partial class IdentityCoordinator(
         if (string.IsNullOrWhiteSpace(username) || !UsernameRegex().IsMatch(username.Trim()))
             throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "ID 需为 3-32 位字母、数字、点、下划线或短横线");
         ValidateDisplayName(displayName);
-        ValidatePassword(password);
+        // 密码留空表示批量导入待激活账号（首次登录强制设置密码）。
+        if (!string.IsNullOrWhiteSpace(password)) ValidatePassword(password);
         ValidateRole(role);
     }
 

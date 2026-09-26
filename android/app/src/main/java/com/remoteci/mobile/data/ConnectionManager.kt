@@ -92,6 +92,11 @@ object ConnectionManager {
     /** 本机、服务端与当前主插件共同支持的功能；旧 V3 端缺少声明时按基础能力回退。 */
     val availableCapabilities = MutableStateFlow(Protocol.BASELINE_CAPABILITIES)
     val currentUser = MutableStateFlow<UserProfile?>(null)
+    /** 首登设置密码挑战：批量导入且未设密码的账号空密码登录时下发，界面据此展示设置表单。 */
+    val pendingPasswordSetup = MutableStateFlow<PasswordSetupChallenge?>(null)
+    /** 账号可访问的班级与当前选中班级；单班级部署列表只有一个元素，界面据此隐藏切换器。 */
+    val classes = MutableStateFlow<List<ClassSummary>>(emptyList())
+    val currentClassId = MutableStateFlow<String?>(null)
     val snapshot = MutableStateFlow<ClassStateSnapshot?>(null)
     val schedule = MutableStateFlow<ScheduleBundle?>(null)
     val extensions = MutableStateFlow<List<ExtensionDefinition>>(emptyList())
@@ -102,7 +107,7 @@ object ConnectionManager {
 
     /** 语音体积较大，在后台编码，并只接受本条消息的回执；断线时不自动重发。 */
     suspend fun sendVoiceMessage(audio: ByteArray): CommandResult = withContext(Dispatchers.IO) {
-        if (currentUser.value?.has(Protocol.PERMISSION_SEND_VOICE_MESSAGES) != true)
+        if (!hasClassPermission(Protocol.PERMISSION_SEND_VOICE_MESSAGES))
             return@withContext CommandResult(false, "FORBIDDEN", "没有发送语音权限")
         if (!supports(Protocol.CAP_VOICE_MESSAGE_SEND))
             return@withContext CommandResult(false, "CAPABILITY_UNSUPPORTED", "请更新服务端和插件以支持语音")
@@ -113,6 +118,7 @@ object ConnectionManager {
         voiceReplies[id] = reply
         try {
             val command = CommandMessage(command = Protocol.CMD_SEND_VOICE_MESSAGE,
+                classId = currentClassId.value,
                 voiceMessage = VoiceMessageRequest(audioBase64 = android.util.Base64.encodeToString(audio, android.util.Base64.NO_WRAP)))
             val envelope = Envelope(type = Protocol.TYPE_COMMAND, messageId = id,
                 payload = json.encodeToJsonElement(CommandMessage.serializer(), command))
@@ -149,6 +155,35 @@ object ConnectionManager {
     fun restBaseUrl(): String? = desiredSettings?.cloudServerUrl?.trim()?.trimEnd('/')
 
     fun supports(capability: String): Boolean = capability in availableCapabilities.value
+
+    /** 统一写入用户档案：同时刷新班级列表；已选班级失效时回退到第一个可访问班级。 */
+    private fun applyUserProfile(user: UserProfile?) {
+        currentUser.value = user
+        val accessible = user?.classes.orEmpty()
+        classes.value = accessible
+        val selected = currentClassId.value
+        currentClassId.value =
+            if (selected != null && accessible.any { it.id == selected }) selected
+            else accessible.firstOrNull()?.id
+    }
+
+    /** 班级内的有效权限；服务端未下发班级信息（旧服务端）时回退到全局权限。 */
+    fun hasClassPermission(permission: Int): Boolean {
+        val classContext = classes.value.firstOrNull { it.id == currentClassId.value }
+        val effective = classContext?.effectivePermissions ?: currentUser.value?.permissions ?: 0
+        return effective and permission == permission
+    }
+
+    /** 切换当前班级：清空旧班数据并立即拉取新班课表，之后的命令都会路由到新班级。 */
+    fun switchClass(classId: String) {
+        if (classes.value.none { it.id == classId }) return
+        if (currentClassId.value == classId) return
+        currentClassId.value = classId
+        snapshot.value = null
+        schedule.value = null
+        extensions.value = emptyList()
+        if (state.value == State.LanConnected || state.value == State.CloudConnected) requestSchedulePull()
+    }
 
     fun scanLanPlugins() {
         discoveryJob?.cancel()
@@ -237,6 +272,7 @@ object ConnectionManager {
         state.value = State.Connecting
         serverVersion.value = null
         lastCommandResult.value = null
+        pendingPasswordSetup.value = null
         extensions.value = emptyList()
         // 重新连接后以服务端下发的设置快照为准，未同步前 UI 按默认开启处理。
         this@ConnectionManager.settings.value = null
@@ -245,7 +281,14 @@ object ConnectionManager {
         activeJob = scope.launch {
             try {
                 if (plan.bootstrapCloudAuthentication) {
-                    val auth = loginCloud(settings, password!!)
+                    val auth = loginCloud(settings, password ?: "")
+                    if (auth.passwordPending == true) {
+                        // 待激活账号：展示首登设置密码表单，设置成功后由界面重新登录。
+                        pendingPasswordSetup.value =
+                            PasswordSetupChallenge(settings.username.trim(), auth.setupToken.orEmpty())
+                        state.value = State.Error("首次登录，请设置新密码")
+                        return@launch
+                    }
                     persist(auth)
                     // 即使随后优先走局域网 WebSocket，WebUI 管理 API 仍需要云端访问令牌。
                     // 令牌不能只在 connectCloud() 中保存，否则“局域网已连接”时所有管理页都会报未登录。
@@ -301,11 +344,11 @@ object ConnectionManager {
             } catch (_: AuthenticationException) {
                 state.value = State.Error("用户名或密码错误")
                 serverVersion.value = null
-                currentUser.value = null
+                applyUserProfile(null)
             } catch (_: MissingSessionException) {
                 state.value = State.Error("请先使用账号密码登录")
                 serverVersion.value = null
-                currentUser.value = null
+                applyUserProfile(null)
             } catch (error: CancellationException) {
                 // 旧连接任务被新连接取消：直接透出，不得用旧任务的取消异常
                 // 覆盖新任务刚写入的 Connecting 状态或清空用户信息。
@@ -317,7 +360,7 @@ object ConnectionManager {
                 }
                 serverVersion.value = null
                 // 登录虽成功但连接已失败，残留的用户信息会让界面误判为“在线”。
-                currentUser.value = null
+                applyUserProfile(null)
             }
         }
     }
@@ -334,7 +377,7 @@ object ConnectionManager {
         webSocket = null
         serverVersion.value = null
         accessToken = null
-        if (clearUser) currentUser.value = null
+        if (clearUser) applyUserProfile(null)
         extensions.value = emptyList()
         this@ConnectionManager.settings.value = null
         state.value = State.Idle
@@ -380,7 +423,7 @@ object ConnectionManager {
         }
 
         lastCommandResult.value = null
-        val envelope = schedulePullEnvelope()
+        val envelope = schedulePullEnvelope(currentClassId.value)
         schedulePullState.value = SchedulePullState.Pulling("正在连接插件…")
         if (!socket.send(encodeEnvelope(envelope))) {
                 schedulePullState.value = SchedulePullState.Error("发送拉取请求失败，请重试")
@@ -478,7 +521,8 @@ object ConnectionManager {
     }
 
     private fun sendCommand(command: CommandMessage, requiredPermission: Int) {
-        if (currentUser.value?.has(requiredPermission) != true) {
+        // 权限按当前班级计算（班管理员只在所属班级有管理权限），命令随班级路由。
+        if (!hasClassPermission(requiredPermission)) {
             lastCommandResult.value = CommandResult(false, "FORBIDDEN", "权限不足")
             return
         }
@@ -487,7 +531,10 @@ object ConnectionManager {
             Envelope(
                 type = Protocol.TYPE_COMMAND,
                 messageId = newMessageId(),
-                payload = json.encodeToJsonElement(CommandMessage.serializer(), command),
+                payload = json.encodeToJsonElement(
+                    CommandMessage.serializer(),
+                    command.copy(classId = command.classId ?: currentClassId.value),
+                ),
             ),
         )
     }
@@ -519,6 +566,33 @@ object ConnectionManager {
             return true
         }
         return false
+    }
+
+    /**
+     * 首登设置密码：凭空密码登录下发的一次性令牌补设密码。
+     * 成功后清除挑战并返回，界面应携带新密码重新登录。
+     */
+    suspend fun setupInitialPassword(newPassword: String): Boolean {
+        val challenge = pendingPasswordSetup.value ?: return false
+        return withContext(Dispatchers.IO) {
+            val body = json.encodeToString(
+                SetupPasswordRequest(
+                    username = challenge.username,
+                    setupToken = challenge.setupToken,
+                    newPassword = newPassword,
+                ),
+            )
+            val request = Request.Builder()
+                .url("${restBaseUrl()!!}/api/auth/setup-password")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
+            okHttp.newCall(request).execute().use { response ->
+                if (response.code == 401) throw AuthenticationException()
+                if (!response.isSuccessful) throw IOException("设置密码失败（HTTP ${response.code}）")
+                pendingPasswordSetup.value = null
+                true
+            }
+        }
     }
 
     private suspend fun connectCloud(settings: WatchSettings, auth: AuthResponse, attempt: Int) {
@@ -582,7 +656,7 @@ object ConnectionManager {
                 deviceExpiresAt = auth.deviceExpiresAt,
             ),
         )
-        currentUser.value = auth.user
+        applyUserProfile(auth.user)
     }
 
     private suspend fun connectWebSocket(
@@ -699,20 +773,25 @@ object ConnectionManager {
 
     private fun handleEnvelope(envelope: Envelope): AuthState? = when (envelope.type) {
         Protocol.TYPE_AUTH_STATE -> decodePayload(envelope.payload, AuthState.serializer())?.also { auth ->
-            currentUser.value = if (auth.authenticated) auth.user else null
+            applyUserProfile(if (auth.authenticated) auth.user else null)
             serverVersion.value = if (auth.authenticated) auth.serverVersion else null
             if (!auth.authenticated) state.value = State.Error(auth.error ?: "登录已失效")
         }
         Protocol.TYPE_STATE_PUSH -> {
-            decodePayload(envelope.payload, ClassStateSnapshot.serializer())?.let { snapshot.value = it }
+            decodePayload(envelope.payload, ClassStateSnapshot.serializer())?.let { incoming ->
+                // 多班级：只接受当前班级（或旧服务端不带班级标识）的推送。
+                if (incoming.classId == null || incoming.classId == currentClassId.value) snapshot.value = incoming
+            }
             null
         }
         Protocol.TYPE_SCHEDULE_SYNC -> {
-            decodePayload(envelope.payload, ScheduleBundle.serializer())?.let {
-                schedule.value = it
-                // 兼容未实现状态消息的旧插件：收到新课表本身也可作为成功终态。
-                if (schedulePullState.value is SchedulePullState.Pulling)
-                    finishSchedulePull(SchedulePullState.Success("课表拉取完成，已使用插件最新课表"))
+            decodePayload(envelope.payload, ScheduleBundle.serializer())?.let { incoming ->
+                if (incoming.classId == null || incoming.classId == currentClassId.value) {
+                    schedule.value = incoming
+                    // 兼容未实现状态消息的旧插件：收到新课表本身也可作为成功终态。
+                    if (schedulePullState.value is SchedulePullState.Pulling)
+                        finishSchedulePull(SchedulePullState.Success("课表拉取完成，已使用插件最新课表"))
+                }
             }
             null
         }
@@ -721,8 +800,11 @@ object ConnectionManager {
             null
         }
         Protocol.TYPE_EXTENSIONS_SYNC -> {
-            decodePayload(envelope.payload, ListSerializer(ExtensionDefinition.serializer()))
-                ?.let { extensions.value = it }
+            decodePayload(envelope.payload, ListSerializer(ExtensionDefinition.serializer()))?.let { incoming ->
+                if (incoming.firstOrNull()?.classId == null ||
+                    incoming.firstOrNull()?.classId == currentClassId.value
+                ) extensions.value = incoming
+            }
             null
         }
         Protocol.TYPE_SETTINGS_SYNC -> {
@@ -740,7 +822,9 @@ object ConnectionManager {
             null
         }
         Protocol.TYPE_EVENT_NOTIFY -> {
-            decodePayload(envelope.payload, ClassEvent.serializer())?.let { events.tryEmit(it) }
+            decodePayload(envelope.payload, ClassEvent.serializer())?.let { incoming ->
+                if (incoming.classId == null || incoming.classId == currentClassId.value) events.tryEmit(incoming)
+            }
             null
         }
         Protocol.TYPE_COMMAND_RESULT -> {
@@ -995,14 +1079,14 @@ internal fun planConnection(settings: WatchSettings, password: String?): Connect
     allowCloudFallback = settings.cloudConnectionEnabled,
 )
 
-internal fun schedulePullEnvelope(): Envelope {
+internal fun schedulePullEnvelope(classId: String? = null): Envelope {
     val taskId = UUID.randomUUID().toString().replace("-", "")
     return Envelope(
         type = Protocol.TYPE_SCHEDULE_PULL,
         messageId = taskId,
         payload = protocolJson.encodeToJsonElement(
             ScheduleSyncRequest.serializer(),
-            ScheduleSyncRequest(taskId = taskId, source = Protocol.SCHEDULE_SOURCE_MOBILE),
+            ScheduleSyncRequest(taskId = taskId, source = Protocol.SCHEDULE_SOURCE_MOBILE, classId = classId),
         ),
     )
 }

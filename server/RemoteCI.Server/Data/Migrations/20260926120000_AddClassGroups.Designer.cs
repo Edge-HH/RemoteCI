@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using RemoteCI.Server.Data;
 
@@ -10,11 +11,13 @@ using RemoteCI.Server.Data;
 namespace RemoteCI.Server.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260926120000_AddClassGroups")]
+    partial class AddClassGroups
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
-#pragma warning disable 612, 618
+            #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.11");
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", b =>
@@ -227,9 +230,6 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Property<string>("PasswordHash")
                         .HasColumnType("TEXT");
 
-                    b.Property<bool>("PasswordPending")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("PhoneNumber")
                         .HasColumnType("TEXT");
 
@@ -243,13 +243,6 @@ namespace RemoteCI.Server.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SecurityStamp")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("SetupTokenExpiresAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string?>("SetupTokenHash")
-                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("TwoFactorEnabled")
@@ -331,35 +324,15 @@ namespace RemoteCI.Server.Data.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("ParentId")
-                        .HasColumnType("TEXT");
-
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ParentId");
-
                     b.HasIndex("Name")
                         .IsUnique();
 
                     b.ToTable("ClassGroups");
-                });
-
-            modelBuilder.Entity("RemoteCI.Server.Data.ClassGroupAssignment", b =>
-                {
-                    b.Property<Guid>("GroupId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("ClassroomId")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("GroupId", "ClassroomId");
-
-                    b.HasIndex("ClassroomId");
-
-                    b.ToTable("ClassGroupAssignments");
                 });
 
             modelBuilder.Entity("RemoteCI.Server.Data.ClassMembership", b =>
@@ -388,17 +361,10 @@ namespace RemoteCI.Server.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<byte[]?>("Avatar")
-                        .HasColumnType("BLOB");
-
-                    b.Property<string?>("AvatarContentType")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("AvatarUpdatedAt")
-                        .HasColumnType("TEXT");
-
                     b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("GroupId")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Name")
@@ -413,6 +379,8 @@ namespace RemoteCI.Server.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("GroupId");
 
                     b.HasIndex("Name")
                         .IsUnique();
@@ -663,35 +631,6 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Navigation("RoleDefinition");
                 });
 
-            modelBuilder.Entity("RemoteCI.Server.Data.ClassGroup", b =>
-                {
-                    b.HasOne("RemoteCI.Server.Data.ClassGroup", "Parent")
-                        .WithMany("Children")
-                        .HasForeignKey("ParentId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.Navigation("Parent");
-                });
-
-            modelBuilder.Entity("RemoteCI.Server.Data.ClassGroupAssignment", b =>
-                {
-                    b.HasOne("RemoteCI.Server.Data.ClassGroup", "Group")
-                        .WithMany("Assignments")
-                        .HasForeignKey("GroupId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("RemoteCI.Server.Data.Classroom", "Classroom")
-                        .WithMany("GroupAssignments")
-                        .HasForeignKey("ClassroomId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Classroom");
-
-                    b.Navigation("Group");
-                });
-
             modelBuilder.Entity("RemoteCI.Server.Data.ClassMembership", b =>
                 {
                     b.HasOne("RemoteCI.Server.Data.Classroom", "Classroom")
@@ -717,6 +656,16 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Navigation("RoleDefinition");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.Classroom", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.ClassGroup", "Group")
+                        .WithMany("Classrooms")
+                        .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Group");
                 });
 
             modelBuilder.Entity("RemoteCI.Server.Data.DeviceSession", b =>
@@ -759,16 +708,12 @@ namespace RemoteCI.Server.Data.Migrations
 
             modelBuilder.Entity("RemoteCI.Server.Data.ClassGroup", b =>
                 {
-                    b.Navigation("Assignments");
-
-                    b.Navigation("Children");
-
-                    b.Navigation("Parent");
+                    b.Navigation("Classrooms");
                 });
 
             modelBuilder.Entity("RemoteCI.Server.Data.Classroom", b =>
                 {
-                    b.Navigation("GroupAssignments");
+                    b.Navigation("Group");
 
                     b.Navigation("Memberships");
                 });
