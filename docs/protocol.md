@@ -23,7 +23,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 管理员的有效权限固定为 1023。普通用户固定包含值 1，其余权限来自服务端授权。权限设置界面将值 2 显示为“概览”；七日课表查看和手动拉取只要求账号已登录，值 16 保护换课和自动拉取设置。`TeacherComing` 单独保护“老师来了”，`SendNotifications` 只保护自定义通知与清除提醒，`SendVoiceMessages` 独立保护语音消息，`RunExtensions` 是所有插件扩展的独立权限，`MainMenuControl` 保护主界面显隐，`PowerControl` 保护音量和 Windows 电源操作。
 
-账号密码只出现在第一次 HTTPS `POST /api/auth/login` 的请求内。响应包含 1 小时 `accessToken`、30 天 `deviceSessionId/deviceSecret` 和用户有效权限。`POST /api/auth/refresh` 会同时轮换访问令牌和设备密钥；旧值立即失效。
+账号密码只出现在第一次 `POST /api/auth/login` 的请求内。生产环境必须使用 HTTPS；Android 手机端为兼容尚未配置 TLS 的现有部署，允许用户在持续显示风险提示的情况下明确连接 HTTP 云服务器。响应包含 1 小时 `accessToken`、30 天 `deviceSessionId/deviceSecret` 和用户有效权限。`POST /api/auth/refresh` 会同时轮换访问令牌和设备密钥；旧值立即失效。
 
 ## 局域网挑战认证
 
@@ -55,7 +55,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | `capabilities_sync` | 服务端/插件 → 手表 | 服务端能力和当前主插件能力快照 |
 | `state_push` | 插件 → 服务端/手表 | 高频当前课程、提醒播放、主界面显隐与可用电源状态，不含完整课表 |
 | `schedule_sync` | 插件 → 服务端/手表 | 今天起七天的日期、课程、科目清单和每日修订号 |
-| `schedule_pull` | 服务端/手表 → 插件 | 只读请求，载荷可含 `{taskId, source, requestedAt}`，要求插件立即重新生成并推送七日课表 |
+| `schedule_pull` | 服务端/手表/手机 → 插件 | 只读请求，载荷可含 `{taskId, source, requestedAt}`，要求插件立即重新生成并推送七日课表；手机端 `source` 为 6 |
 | `schedule_sync_status` | 插件 → 服务端/手表 | 全局课表任务状态：Running、Completed、Failed 或 Busy，以及任务来源和占用任务 ID |
 | `extensions_sync` | 插件 → 服务端/手表 | 扩展功能清单（id、displayName、icon、requiredPermission、parameters） |
 | `event_notify` | 插件 → 服务端/手表 | 上课、下课、放学、课表变更、自定义消息、ClassIsland 自动化或第三方插件通知 |
@@ -144,10 +144,14 @@ Windows 插件自动播放录音，并显示上述 ClassIsland 通知：强调�
 - `GET/DELETE /api/me/sessions`
 - `GET /api/state`、`GET /api/schedule`
 - `POST /api/commands`
-- `GET/POST/PUT/DELETE /api/users`
+- `GET/POST/PUT/DELETE /api/users`、`/api/roles`、`/api/visitor`
 - `POST /api/users/{id}/password`
 - `POST /api/plugin/pairing-code`
 - `GET /api/admin/status`
+- `GET/POST/PUT/DELETE /api/roles`、`GET/PUT /api/visitor`
+- `GET/PUT /api/settings/notifications`、`GET/PUT /api/settings/schedule-pull`
+- `GET/PUT /api/extensions`
+- `GET /api/admin/system`、`POST /api/admin/updates/check`、`GET/POST/DELETE /api/admin/backups`
 
 REST 手表请求使用 `Authorization: Bearer <accessToken>`。Razor WebUI 使用 HttpOnly、SameSite Cookie 和表单防伪令牌，不把令牌放入浏览器存储。
 

@@ -1,0 +1,256 @@
+@page
+@model ClassesModel
+@{
+    ViewData["Title"] = "班级管理";
+}
+<div class="page-head">
+    <div>
+        <p class="eyebrow">班级 · 分组 · 访客</p>
+        <h1>班级管理</h1>
+    </div>
+</div>
+
+<section class="panel">
+    <h2>新建班级</h2>
+    <p class="muted">每个班级对应一个教室端的 ClassIsland 插件与独立课表；创建后在概览页生成绑定该班级的配对码接入插件。</p>
+    <form method="post" asp-page-handler="Create" class="compact-row">
+        <label class="stack">班级名称<input asp-for="NewClassName" required maxlength="40" placeholder="例如：高一（1）班" /></label>
+        <button type="submit">创建班级</button>
+    </form>
+</section>
+
+<section class="panel">
+    <h2>班级分组</h2>
+    <p class="muted">分组支持层级（如学校 → 年级 → 班级组），同一个班级可同时属于多个分组；批量操作与广播通知按组展开时包含全部子分组中的班级。</p>
+    <form method="post" asp-page-handler="CreateGroup" class="compact-row">
+        <label class="stack">分组名称<input asp-for="NewGroupName" required maxlength="40" placeholder="例如：高一年级" /></label>
+        <label class="stack">父分组
+            <select name="parentGroupId">
+                <option value="">（根分组）</option>
+                @foreach (var group in Model.Groups)
+                {
+                    <option value="@group.Id">@(string.Concat(Enumerable.Repeat("　", Math.Max(0, group.Depth - 1))) + group.Name)</option>
+                }
+            </select>
+        </label>
+        <button type="submit">创建分组</button>
+    </form>
+
+    @if (Model.Groups.Count > 0)
+    {
+        <div class="group-list">
+            @foreach (var group in Model.Groups)
+            {
+                <details class="group-item">
+                    <summary>
+                        <span class="group-name"><i class="bi bi-collection" aria-hidden="true"></i>@group.Name</span>
+                        @if (group.ParentId is not null)
+                        {
+                            <span class="muted">上级：@group.ParentName</span>
+                        }
+                        <span class="muted">直接班级 @group.ClassCount 个</span>
+                    </summary>
+                    <div class="group-editor">
+                        <form method="post" asp-page-handler="RenameGroup" class="inline-form">
+                            <input type="hidden" name="id" value="@group.Id" />
+                            <input type="text" name="name" value="@group.Name" required maxlength="40" aria-label="分组名称" />
+                            <label class="check" style="gap:4px">
+                                上级
+                                <select name="parentGroupId" aria-label="父分组">
+                                    <option value="">（根分组）</option>
+                                    @foreach (var candidate in Model.Groups.Where(x => x.Id != group.Id))
+                                    {
+                                        <option value="@candidate.Id" selected="@(candidate.Id == group.ParentId)">@(string.Concat(Enumerable.Repeat("　", Math.Max(0, candidate.Depth - 1))) + candidate.Name)</option>
+                                    }
+                                </select>
+                            </label>
+                            <button type="submit" class="ghost">保存</button>
+                        </form>
+                        <form method="post" asp-page-handler="DeleteGroup" class="inline-form">
+                            <input type="hidden" name="id" value="@group.Id" />
+                            <button type="submit" class="ghost">删除分组</button>
+                        </form>
+                        <form method="post" asp-page-handler="SetGroupClasses" class="stack">
+                            <input type="hidden" name="id" value="@group.Id" />
+                            <label>包含的班级（可多选）
+                                <select name="classIds" multiple size="@(Math.Min(6, Math.Max(2, Model.Classes.Count)))">
+                                    @foreach (var classroom in Model.Classes)
+                                    {
+                                        <option value="@classroom.Id" selected="@(classroom.GroupIds?.Contains(group.Id) == true)">@classroom.Name</option>
+                                    }
+                                </select>
+                            </label>
+                            <button type="submit" class="ghost">保存分组成员班级</button>
+                        </form>
+                    </div>
+                </details>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="batch-summary">还没有分组，创建后可以把班级划入分组。</div>
+    }
+</section>
+
+<section class="panel">
+    <div class="panel-heading">
+        <div><h2>全部班级</h2><p class="muted">默认班级不可删除；删除班级会同时移除成员关系与插件凭据（需重新配对）。勾选班级或按分组批量执行。</p></div>
+    </div>
+    @if (Model.Classes.Count == 0)
+    {
+        <div class="notice warning">还没有班级。</div>
+    }
+    else
+    {
+        <form id="batch-form" method="post" asp-page-handler="Batch" class="stack">
+            <label>批量操作
+                <select asp-for="BatchOperation" required>
+                    <option value="enableVisitor">批量开启访客功能</option>
+                    <option value="disableVisitor">批量关闭访客功能</option>
+                    <option value="delete">批量删除班级</option>
+                </select>
+            </label>
+            @if (Model.Groups.Count > 0)
+            {
+                <label>按分组执行（可多选；展开包含子分组，与勾选的班级合并生效）
+                    <select asp-for="SelectedGroupIds" multiple size="@(Math.Min(4, Model.Groups.Count))">
+                        @foreach (var group in Model.Groups)
+                        {
+                            <option value="@group.Id">@(string.Concat(Enumerable.Repeat("　", Math.Max(0, group.Depth - 1))) + group.Name)（@group.ClassCount 个班级）</option>
+                        }
+                    </select>
+                </label>
+            }
+            <button type="submit">对勾选的班级/分组执行</button>
+        </form>
+        <div class="user-account-table-wrap">
+            <table class="user-account-table">
+                <thead>
+                    <tr>
+                        <th scope="col"><span class="visually-hidden">选择</span></th>
+                        <th scope="col">班级</th>
+                        <th scope="col">分组</th>
+                        <th scope="col">成员</th>
+                        <th scope="col">插件</th>
+                        <th scope="col">访客</th>
+                        <th scope="col"><span class="visually-hidden">操作</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var classroom in Model.Classes)
+                {
+                    var members = Model.MembersByClass.GetValueOrDefault(classroom.Id, Array.Empty<ClassMemberInfo>());
+                    <tr>
+                        <td data-label="选择">
+                            @if (classroom.Id != Classroom.DefaultId)
+                            {
+                                <input type="checkbox" name="SelectedClassIds" value="@classroom.Id" form="batch-form" aria-label="选择 @classroom.Name" />
+                            }
+                            else
+                            {
+                                <span class="muted" title="默认班级不可删除">默认</span>
+                            }
+                        </td>
+                        <td data-label="班级">
+                            <strong>@classroom.Name</strong>
+                            @if (classroom.Id != Classroom.DefaultId)
+                            {
+                                <form method="post" asp-page-handler="Rename" class="inline-form">
+                                    <input type="hidden" name="id" value="@classroom.Id" />
+                                    <input type="text" name="name" required maxlength="40" placeholder="新名称" aria-label="@classroom.Name 的新名称" />
+                                    <button type="submit" class="ghost">改名</button>
+                                </form>
+                            }
+                        </td>
+                        <td data-label="分组">
+                            @if (classroom.GroupNames is { Count: > 0 })
+                            {
+                                foreach (var groupName in classroom.GroupNames)
+                                {
+                                    <span class="group-name">@groupName</span>
+                                }
+                            }
+                            else
+                            {
+                                <span class="muted">未分组</span>
+                            }
+                        </td>
+                        <td data-label="成员">@classroom.MemberCount</td>
+                        <td data-label="插件">
+                            @if (classroom.PluginCount > 0)
+                            {
+                                <span title="插件在线">在线</span>
+                            }
+                            else
+                            {
+                                <span class="muted" title="插件离线">离线</span>
+                            }
+                        </td>
+                        <td data-label="访客">
+                            <form method="post" asp-page-handler="ToggleVisitor" class="inline-form">
+                                <input type="hidden" name="id" value="@classroom.Id" />
+                                <input type="hidden" name="enabled" value="@(classroom.VisitorEnabled ? "false" : "true")" />
+                                <button type="submit" class="ghost">@(classroom.VisitorEnabled ? "关闭" : "开启")</button>
+                            </form>
+                        </td>
+                        <td data-label="操作">
+                            @if (classroom.Id != Classroom.DefaultId)
+                            {
+                                <form method="post" asp-page-handler="Delete" class="inline-form">
+                                    <input type="hidden" name="id" value="@classroom.Id" />
+                                    <button type="submit" class="ghost">删除</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                    <tr class="member-row">
+                        <td></td>
+                        <td colspan="6">
+                            <details>
+                                <summary>成员（@members.Count）</summary>
+                                <ul class="member-list">
+                                    @foreach (var member in members)
+                                    {
+                                        <li>
+                                            <span>@member.DisplayName（@member.Username）· @member.RoleName</span>
+                                            <form method="post" asp-page-handler="RemoveMember" class="inline-form">
+                                                <input type="hidden" name="id" value="@classroom.Id" />
+                                                <input type="hidden" name="userId" value="@member.UserId" />
+                                                <button type="submit" class="ghost">移出</button>
+                                            </form>
+                                        </li>
+                                    }
+                                    @if (members.Count == 0)
+                                    {
+                                        <li class="muted">暂无成员。</li>
+                                    }
+                                </ul>
+                                @if (Model.Accounts.Any(x => x.Enabled && members.All(m => m.UserId != x.Id)))
+                                {
+                                    <form method="post" asp-page-handler="AddMember" class="inline-form">
+                                        <input type="hidden" name="id" value="@classroom.Id" />
+                                        <select name="userId" required aria-label="选择用户">
+                                            @foreach (var account in Model.Accounts.Where(x => x.Enabled && members.All(m => m.UserId != x.Id)))
+                                            {
+                                                <option value="@account.Id">@account.DisplayName（@account.Username）</option>
+                                            }
+                                        </select>
+                                        <select name="roleId" required aria-label="选择角色">
+                                            @foreach (var role in Model.RoleDefinitions.Where(x => x.Kind != nameof(AccountRoleKind.Administrator)))
+                                            {
+                                                <option value="@role.Id">@role.Name</option>
+                                            }
+                                        </select>
+                                        <button type="submit">添加成员</button>
+                                    </form>
+                                }
+                            </details>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>

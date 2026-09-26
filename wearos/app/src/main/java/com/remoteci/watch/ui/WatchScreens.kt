@@ -41,17 +41,21 @@ import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.School
+import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -226,6 +230,7 @@ internal fun HomeScreen(
     onOpenNotification: () -> Unit,
     onOpenSettings: () -> Unit,
     onRetryConnection: () -> Unit,
+    onSwitchClass: (() -> Unit)? = null,
 ) {
     var now by remember(snapshot?.generatedAt, snapshot?.timeZoneOffsetMinutes) {
         mutableStateOf(pluginLocalNow(snapshot?.generatedAt, snapshot?.timeZoneOffsetMinutes, 0L, 0L))
@@ -271,6 +276,7 @@ internal fun HomeScreen(
                         onOpenScheduleChange = onOpenScheduleChange,
                         onOpenNotification = onOpenNotification,
                         onOpenSettings = onOpenSettings,
+                        onSwitchClass = onSwitchClass,
                     )
                 }
             }
@@ -414,14 +420,20 @@ private fun HomeMenuPage(
     onOpenScheduleChange: () -> Unit,
     onOpenNotification: () -> Unit,
     onOpenSettings: () -> Unit,
+    onSwitchClass: (() -> Unit)? = null,
 ) {
-    val actions = homeActionLabels(user, capabilities).map { label ->
-        when (label) {
-            "课表" -> HomeAction(label, Icons.AutoMirrored.Rounded.List, onOpenScheduleOverview)
-            "换课" -> HomeAction(label, Icons.Rounded.SwapHoriz, onOpenScheduleChange)
-            "控制" -> HomeAction(label, Icons.Rounded.Wifi, onOpenNotification)
-            else -> HomeAction(label, Icons.Rounded.Settings, onOpenSettings)
+    val actions = buildList {
+        if (onSwitchClass != null) {
+            add(HomeAction("切换班级", Icons.Rounded.Group, onSwitchClass))
         }
+        homeActionLabels(user, capabilities).map { label ->
+            when (label) {
+                "课表" -> HomeAction(label, Icons.AutoMirrored.Rounded.List, onOpenScheduleOverview)
+                "换课" -> HomeAction(label, Icons.Rounded.SwapHoriz, onOpenScheduleChange)
+                "控制" -> HomeAction(label, Icons.Rounded.Wifi, onOpenNotification)
+                else -> HomeAction(label, Icons.Rounded.Settings, onOpenSettings)
+            }
+        }.forEach { add(it) }
     }
     // 首页菜单不显示“菜单”标题，让选项直接占满一屏，避免旋转翻页后还要滚动。
     WatchList(title = stringResource(R.string.home_menu_title), showTitle = false) {
@@ -1478,4 +1490,35 @@ internal fun pluginToday(
         runCatching { OffsetDateTime.parse(raw).toInstant().atOffset(offset).toLocalDateTime() }.getOrNull()
     } ?: LocalDateTime.now(offset)
     return base.plusNanos((nowElapsedMs - baseElapsedMs) * 1_000_000L).toLocalDate()
+}
+
+/** 登录后的班级选择屏：多班级账号先选一个进入，进入后可再次进入本屏切换。 */
+@Composable
+internal fun ClassPickerScreen(onPicked: () -> Unit) {
+    val classes by ConnectionManager.classes.collectAsState()
+    val currentClassId by ConnectionManager.currentClassId.collectAsState()
+    Column(
+        modifier = Modifier.fillMaxSize().padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("选择班级", style = MaterialTheme.typography.titleMedium)
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            classes.forEach { classroom ->
+                val selected = classroom.id == currentClassId
+                Text(
+                    text = (if (selected) "● " else "○ ") + classroom.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            ConnectionManager.switchClass(classroom.id)
+                            onPicked()
+                        }
+                        .padding(vertical = 6.dp),
+                )
+            }
+        }
+    }
 }

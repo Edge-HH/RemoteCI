@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using RemoteCI.Server.Data;
 using RemoteCI.Server.Pages;
 using RemoteCI.Server.Services;
 using RemoteCI.Shared;
@@ -39,13 +40,14 @@ public sealed class VisitorAccessTests
 
         await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
         var usersHtml = await browser.GetStringAsync("/Users");
-        Assert.Contains("启用访客功能", usersHtml);
         Assert.Contains("自动进入访客页", usersHtml);
-        Assert.Contains("disabled", Regex.Match(usersHtml, "data-visitor-auto-enter[^>]*>").Value);
 
-        var saved = await PostRazorFormAsync(browser, "/Users?handler=VisitorAccess", usersHtml, new Dictionary<string, string>
+        // 访客开关按班级配置：在班级管理页开启默认班级的访客功能。
+        var classesHtml = await browser.GetStringAsync("/Classes");
+        var saved = await PostRazorFormAsync(browser, "/Classes?handler=ToggleVisitor", classesHtml, new Dictionary<string, string>
         {
-            ["VisitorAccessEnabled"] = "true",
+            ["id"] = Classroom.DefaultId.ToString(),
+            ["enabled"] = "true",
         });
         Assert.Equal(HttpStatusCode.Redirect, saved.StatusCode);
 
@@ -53,11 +55,10 @@ public sealed class VisitorAccessTests
         var guestLogin = WebUtility.HtmlDecode(await guest.GetStringAsync("/Login"));
         Assert.Contains("仅查看", guestLogin);
         Assert.Contains("class=\"login-guest\"", guestLogin);
-        Assert.DoesNotContain("自动进入访客页", guestLogin);
 
         using (var scope = factory.Services.CreateScope())
         {
-            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(new ScheduleBundle
+            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(Classroom.DefaultId, new ScheduleBundle
             {
                 FromDate = "2026-09-13",
                 Days =
@@ -98,29 +99,118 @@ public sealed class VisitorAccessTests
     }
 
     [Fact]
-    public async Task AutoEnter_RequiresVisitorAccessAndCanReturnToLogin()
+    public async Task VisitorPage_CanSwitchBetweenVisitorEnabledClasses()
     {
         await using var factory = new TestWebApplicationFactory();
         using var admin = CreateBrowser(factory);
         await LoginWebUiAsync(admin, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
+
+        Guid otherClassId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var classrooms = scope.ServiceProvider.GetRequiredService<ClassroomService>();
+            otherClassId = (await classrooms.CreateAsync("高二（2）班")).Id;
+            await classrooms.SetVisitorAccessAsync(Classroom.DefaultId, true);
+            await classrooms.SetVisitorAccessAsync(otherClassId, true);
+            // 只给默认班级和“高二（2）班”注入可区分的课表。
+            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(Classroom.DefaultId, new ScheduleBundle
+            {
+                FromDate = "2026-09-13",
+                Days = [new ScheduleDay { Date = "2026-09-14", Revision = "v-a", Enabled = true, Courses = [new CourseEntry { Index = 0, Subject = "语文", StartTime = "08:00", EndTime = "08:45", Enabled = true }] }],
+            });
+            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(otherClassId, new ScheduleBundle
+            {
+                FromDate = "2026-09-13",
+                Days = [new ScheduleDay { Date = "2026-09-14", Revision = "v-b", Enabled = true, Courses = [new CourseEntry { Index = 0, Subject = "化学", StartTime = "09:00", EndTime = "09:45", Enabled = true }] }],
+            });
+            // 未开放访客的班级不应出现在访客页。
+            await classrooms.CreateAsync("高一（3）班");
+        }
+
+        using var guest = CreateBrowser(factory);
+        var landing = await guest.GetAsync("/Visitor");
+        Assert.Equal(HttpStatusCode.OK, landing.StatusCode);
+        var landingHtml = WebUtility.HtmlDecode(await landing.Content.ReadAsStringAsync());
+        // 默认展示第一个开放班级的课表，且两个开放班级都可选，未开放班级不可见。
+        Assert.Contains("语文", landingHtml);
+        Assert.Contains("高二（2）班", landingHtml);
+        Assert.DoesNotContain("高一（3）班", landingHtml);
+
+        var other = await guest.GetAsync($"/Visitor?class={otherClassId}");
+        Assert.Equal(HttpStatusCode.OK, other.StatusCode);
+        var otherHtml = WebUtility.HtmlDecode(await other.Content.ReadAsStringAsync());
+        Assert.Contains("化学", otherHtml);
+    }
+
+    [Fact]
+    public async Task VisitorPage_RedirectsToLoginWhenNoClassEnabled()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var guest = CreateBrowser(factory);
+        var response = await guest.GetAsync("/Visitor");
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal("/Login", response.Headers.Location?.OriginalString);
+    }
+
+    [Fact]
+    public async Task LoginPage_OffersRememberMeAndUsesPersistentCookieWhenSelected()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var browser = CreateBrowser(factory);
+
+        var loginHtml = WebUtility.HtmlDecode(await browser.GetStringAsync("/Login"));
+        Assert.Contains("name=\"Input.RememberMe\"", loginHtml);
+        Assert.Contains("保持登录", loginHtml);
+
+        var token = Regex.Match(
+            loginHtml,
+            "<input[^>]+name=\"__RequestVerificationToken\"[^>]+value=\"([^\"]+)\"",
+            RegexOptions.IgnoreCase);
+        Assert.True(token.Success, "登录页必须包含 CSRF 令牌");
+        using var response = await browser.PostAsync("/Login", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["Input.Username"] = TestWebApplicationFactory.AdminUsername,
+            ["Input.Password"] = TestWebApplicationFactory.AdminPassword,
+            ["Input.RememberMe"] = "true",
+            ["__RequestVerificationToken"] = WebUtility.HtmlDecode(token.Groups[1].Value),
+        }));
+
+        Assert.Equal(HttpStatusCode.SeeOther, response.StatusCode);
+        var cookies = response.Headers.GetValues("Set-Cookie");
+        Assert.Contains(cookies, cookie => cookie.Contains("RemoteCI.Web=", StringComparison.Ordinal));
+        Assert.Contains(cookies, cookie => cookie.Contains("expires=", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task AutoEnter_RequiresVisitorClassAndCanReturnToLogin()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var admin = CreateBrowser(factory);
+        await LoginWebUiAsync(admin, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
+        // 没有任何班级开放访客时，即使保存了自动进入意图也不会真正进入访客页。
         var usersHtml = await admin.GetStringAsync("/Users");
-        var rejected = await PostRazorFormAsync(admin, "/Users?handler=VisitorAccess", usersHtml, new Dictionary<string, string>
+        var saved = await PostRazorFormAsync(admin, "/Users?handler=VisitorAccess", usersHtml, new Dictionary<string, string>
         {
             ["AutoEnterVisitorPage"] = "true",
         });
-        Assert.Equal(HttpStatusCode.Redirect, rejected.StatusCode);
+        Assert.Equal(HttpStatusCode.Redirect, saved.StatusCode);
         using (var scope = factory.Services.CreateScope())
         {
-            var state = await scope.ServiceProvider.GetRequiredService<VisitorAccessSettings>().GetAsync();
-            Assert.False(state.Enabled);
-            Assert.False(state.AutoEnter);
+            var settings = scope.ServiceProvider.GetRequiredService<VisitorAccessSettings>();
+            Assert.False(await settings.AnyVisitorClassEnabledAsync());
+        }
+        using (var guestBefore = CreateBrowser(factory))
+        {
+            var stay = await guestBefore.GetAsync("/Login");
+            Assert.Equal(HttpStatusCode.OK, stay.StatusCode);
         }
 
-        usersHtml = await admin.GetStringAsync("/Users");
-        var enabled = await PostRazorFormAsync(admin, "/Users?handler=VisitorAccess", usersHtml, new Dictionary<string, string>
+        // 开放默认班级访客功能后，保存的自动进入意图立即生效。
+        var classesHtml = await admin.GetStringAsync("/Classes");
+        var enabled = await PostRazorFormAsync(admin, "/Classes?handler=ToggleVisitor", classesHtml, new Dictionary<string, string>
         {
-            ["VisitorAccessEnabled"] = "true",
-            ["AutoEnterVisitorPage"] = "true",
+            ["id"] = Classroom.DefaultId.ToString(),
+            ["enabled"] = "true",
         });
         Assert.Equal(HttpStatusCode.Redirect, enabled.StatusCode);
 
@@ -133,9 +223,9 @@ public sealed class VisitorAccessTests
         Assert.Equal("/Visitor", home.Headers.Location?.OriginalString);
         var protectedPage = await guest.GetAsync("/Login?ReturnUrl=%2FUsers");
         Assert.Equal(HttpStatusCode.OK, protectedPage.StatusCode);
-        var stay = await guest.GetAsync("/Login?from=visitor");
-        Assert.Equal(HttpStatusCode.OK, stay.StatusCode);
-        var stayHtml = WebUtility.HtmlDecode(await stay.Content.ReadAsStringAsync());
+        var stay2 = await guest.GetAsync("/Login?from=visitor");
+        Assert.Equal(HttpStatusCode.OK, stay2.StatusCode);
+        var stayHtml = WebUtility.HtmlDecode(await stay2.Content.ReadAsStringAsync());
         Assert.Contains("仅查看", stayHtml);
         Assert.Contains("登录你的账号", stayHtml);
     }
@@ -147,19 +237,25 @@ public sealed class VisitorAccessTests
         _ = await factory.LoginAsync();
         using (var scope = factory.Services.CreateScope())
         {
+            await scope.ServiceProvider.GetRequiredService<ClassroomService>()
+                .SetVisitorAccessAsync(Classroom.DefaultId, true);
             await scope.ServiceProvider.GetRequiredService<VisitorAccessSettings>()
-                .SetAsync(true, true);
+                .SetAutoEnterAsync(true);
             var snapshot = await scope.ServiceProvider.GetRequiredService<ConfigurationArchiveService>().CaptureAsync();
-            Assert.True(snapshot.Metadata.VisitorAccessEnabled);
+            Assert.Equal(3, snapshot.Version);
+            Assert.NotNull(snapshot.Classrooms);
+            Assert.Contains(snapshot.Classrooms!, x => x.Id == Classroom.DefaultId && x.VisitorAccessEnabled);
             Assert.True(snapshot.Metadata.AutoEnterVisitorPage);
-            await scope.ServiceProvider.GetRequiredService<VisitorAccessSettings>().SetAsync(false, false);
+            await scope.ServiceProvider.GetRequiredService<ClassroomService>()
+                .SetVisitorAccessAsync(Classroom.DefaultId, false);
+            await scope.ServiceProvider.GetRequiredService<VisitorAccessSettings>()
+                .SetAutoEnterAsync(false);
             await scope.ServiceProvider.GetRequiredService<ConfigurationArchiveService>().ApplyAsync(snapshot);
         }
 
         using var verify = factory.Services.CreateScope();
-        var restored = await verify.ServiceProvider.GetRequiredService<VisitorAccessSettings>().GetAsync();
-        Assert.True(restored.Enabled);
-        Assert.True(restored.AutoEnter);
+        Assert.True(await verify.ServiceProvider.GetRequiredService<VisitorAccessSettings>().AnyVisitorClassEnabledAsync());
+        Assert.True(await verify.ServiceProvider.GetRequiredService<VisitorAccessSettings>().GetAutoEnterAsync());
 
         var legacy = JsonSerializer.Deserialize<MetadataSnapshot>(
             """{"accountVersion":3,"forceSenderInTitle":true,"schedulePullIntervalMinutes":15}""",
@@ -190,7 +286,7 @@ public sealed class VisitorAccessTests
             ["Input.Password"] = password,
             ["__RequestVerificationToken"] = WebUtility.HtmlDecode(match.Groups[1].Value),
         }));
-        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal(HttpStatusCode.SeeOther, response.StatusCode);
     }
 
     private static async Task<HttpResponseMessage> PostRazorFormAsync(

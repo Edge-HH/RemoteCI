@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using QRCoder;
 using RemoteCI.Server.Data;
 using RemoteCI.Server.Services;
 using RemoteCI.Shared;
@@ -12,18 +13,20 @@ namespace RemoteCI.Server.Pages;
 public sealed class IndexModel(UserManager<AppUser> users, PeerRegistry peers, IStateStore state, IdentityCoordinator identities)
     : WebPageModel(users)
 {
-    public bool PluginOnline { get; private set; }
+    public bool PluginOnline => peers.HasPluginFor(CurrentClassId);
     public int WatchConnections { get; private set; }
     public int AccountCount { get; private set; }
     public ClassStateSnapshot? Snapshot { get; private set; }
     public ScheduleBundle? Schedule { get; private set; }
     public string? PairCode { get; private set; }
+    public string MobileLoginUrl { get; private set; } = string.Empty;
+    public string MobileLoginQrSvg { get; private set; } = string.Empty;
     public IReadOnlyList<PluginCredentialInfo> PluginCredentials { get; private set; } = [];
     public IReadOnlyList<PeerCapabilityDiagnostic> CapabilityDiagnostics { get; private set; } = [];
     public PluginProtocolMismatch? PluginProtocolMismatch => peers.LatestPluginProtocolMismatch;
     public bool IsAdmin => CurrentUser.Role == UserRole.Admin;
     public string ServerVersion => AppVersion.Version;
-    public bool Supports(string capability) => !PluginOnline || peers.PrimaryPluginSupports(capability);
+    public bool Supports(string capability) => !PluginOnline || peers.PrimaryPluginSupports(CurrentClassId, capability);
     public string FormatCapabilities(IReadOnlyList<string> capabilities) => string.Join(
         "、", capabilities.Select(capability => $"{capability}（{RemoteCiCapabilities.ChineseName(capability)}）"));
 
@@ -55,7 +58,9 @@ public sealed class IndexModel(UserManager<AppUser> users, PeerRegistry peers, I
     public async Task<IActionResult> OnPostRetryConnectionAsync(CancellationToken ct)
     {
         if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        var connected = await peers.SendAccountSyncToPluginsAsync(await identities.CreateSyncAsync(ct), ct);
+        // 面向当前班级的连接检测：定向重新下发该班的授权镜像。
+        var sync = await identities.CreateSyncAsync(CurrentClassId, ct);
+        var connected = await peers.SendToPluginAsync(CurrentClassId, Envelope.AccountSync(sync), ct);
         TempData[connected ? "Message" : "Error"] = connected
             ? "插件连接检测成功，账号与权限已重新同步。"
             : "插件仍未连接，ClassIsland 插件会每 5 秒自动重试，请检查插件设置与服务地址。";
@@ -65,18 +70,22 @@ public sealed class IndexModel(UserManager<AppUser> users, PeerRegistry peers, I
     public async Task<IActionResult> OnPostPairCodeAsync(CancellationToken ct)
     {
         if (await RequireAsync(UserPermissions.AccessWebUi | UserPermissions.ManageUsers) is { } denied) return denied;
-        PairCode = await identities.CreatePluginPairingCodeAsync(ct);
+        // 配对码绑定当前班级；插件配对后归属该班，只能收发该班的命令与数据。
+        PairCode = await identities.CreatePluginPairingCodeAsync(CurrentClassId, ct);
         await LoadAsync(ct);
         return Page();
     }
 
     private async Task LoadAsync(CancellationToken ct)
     {
-        PluginOnline = peers.HasPlugin;
+        MobileLoginUrl = $"{Request.Scheme}://{Request.Host}{Request.PathBase}".TrimEnd('/');
+        using (var qrData = QRCodeGenerator.GenerateQrCode(MobileLoginUrl, QRCodeGenerator.ECCLevel.Q))
+        using (var renderer = new SvgQRCode(qrData))
+            MobileLoginQrSvg = renderer.GetGraphic(4);
         WatchConnections = peers.WatchCount;
         AccountCount = (await identities.ListUsersAsync(ct)).Count;
-        Snapshot = state.GetLatestSnapshot();
-        Schedule = state.GetLatestSchedule();
+        Snapshot = state.GetLatestSnapshot(CurrentClassId);
+        Schedule = state.GetLatestSchedule(CurrentClassId);
         if (CurrentUser.Role == UserRole.Admin)
         {
             PluginCredentials = await identities.ListPluginCredentialsAsync(ct);

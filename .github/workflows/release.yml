@@ -164,6 +164,56 @@ jobs:
           name: watch-apk
           path: RemoteCI.Watch-*.apk
 
+
+  build-android:
+    name: Phone APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Prepare signing key
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for name in ANDROID_KEYSTORE_B64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::missing $name"
+              exit 1
+            fi
+          done
+          mkdir -p android/keystore
+          echo "$ANDROID_KEYSTORE_B64" | base64 -d > android/keystore/remoteci-release.jks
+          {
+            echo "storeFile=keystore/remoteci-release.jks"
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "keyPassword=$ANDROID_KEY_PASSWORD"
+          } > android/keystore.properties
+      - name: Build Release APK
+        working-directory: android
+        run: |
+          source ../.github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
+          grep -Fq 'const val VERSION = 3' app/src/main/java/com/remoteci/mobile/data/Protocol.kt
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease -PreleaseVersion="$version" --console=plain
+          grep -Fq "\"versionName\": \"$version\"" app/build/outputs/apk/release/output-metadata.json
+      - name: Rename APK
+        run: |
+          source .github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
+          cp android/app/build/outputs/apk/release/app-release.apk "RemoteCI.Mobile-${version}.apk"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          "$apksigner" verify --print-certs "RemoteCI.Mobile-${version}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-apk
+          path: RemoteCI.Mobile-*.apk
+
   build-fnos:
     name: fnOS 应用 (镜像 + fpk)
     runs-on: ubuntu-latest
@@ -301,7 +351,7 @@ jobs:
 
   release:
     name: 创建 GitHub Release
-    needs: [build-server, build-plugin, build-wearos, build-fnos]
+    needs: [build-server, build-plugin, build-wearos, build-android, build-fnos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -323,6 +373,10 @@ jobs:
           path: artifacts/watch-apk
       - uses: actions/download-artifact@v4
         with:
+          name: mobile-apk
+          path: artifacts/mobile-apk
+      - uses: actions/download-artifact@v4
+        with:
           name: fnos-fpk
           path: artifacts/fnos-fpk
       - name: 校验发布产物版本一致
@@ -334,6 +388,7 @@ jobs:
           test -f artifacts/plugin-cipx/checksums.md
           test -f artifacts/plugin-cipx/remoteci.plugin.yml
           test -f "artifacts/watch-apk/RemoteCI.Watch-${version}.apk"
+          test -f "artifacts/mobile-apk/RemoteCI.Mobile-${version}.apk"
           test -f "artifacts/fnos-fpk/RemoteCI-${version}.fpk"
           test -f "artifacts/fnos-fpk/RemoteCI-${version}-fnos-x86_64-offline.fpk"
           test -f "artifacts/fnos-fpk/RemoteCI-${version}-fnos-arm64-offline.fpk"
@@ -348,6 +403,7 @@ jobs:
             artifacts/plugin-cipx/checksums.md
             artifacts/plugin-cipx/remoteci.plugin.yml
             artifacts/watch-apk/**
+            artifacts/mobile-apk/**
             artifacts/fnos-fpk/**
           body_path: artifacts/plugin-cipx/checksums.md
           generate_release_notes: true

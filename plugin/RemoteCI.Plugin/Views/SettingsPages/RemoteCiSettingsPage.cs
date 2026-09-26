@@ -250,8 +250,14 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
     private void OnCloudConnectionStatusChanged(CloudConnectionStatus status) =>
         Dispatcher.UIThread.Post(() => ApplyCloudConnectionStatus(status));
 
-    internal static string ConnectionStatusText(CloudConnectionStatus status) =>
-        $"服务器状态：{status.Summary}";
+    internal string ConnectionStatusText(CloudConnectionStatus status) =>
+        ConnectionStatusText(status, _service?.CurrentClassName);
+
+    internal static string ConnectionStatusText(CloudConnectionStatus status, string? className)
+    {
+        var baseText = $"服务器状态：{status.Summary}";
+        return string.IsNullOrWhiteSpace(className) ? baseText : $"{baseText} · 所属班级：{className}";
+    }
 
     private void ApplyCloudConnectionStatus(CloudConnectionStatus status)
     {

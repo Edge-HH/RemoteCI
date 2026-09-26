@@ -435,3 +435,112 @@ textarea { resize: vertical; }
 .account-row-actions form { display: inline-flex; margin: 0; }
 .account-row-actions .user-delete-button, .account-row-actions .user-edit-button { min-height: 36px; padding: 6px 14px; }
 @media (max-width: 700px) { .account-row-actions { width: 100%; } .account-row-actions form, .account-row-actions button { flex: 1; } }
+.mobile-login-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 1.5rem;
+    margin-bottom: 1.25rem;
+    padding: 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+}
+
+.mobile-login-copy h2 { margin: 0 0 .45rem; }
+.mobile-login-copy p { margin: 0; }
+.mobile-login-url { display: flex; align-items: center; gap: .6rem; margin-top: 1rem; }
+.mobile-login-url code { overflow-wrap: anywhere; }
+.mobile-login-qr { width: 10rem; height: 10rem; padding: .55rem; border-radius: 1rem; background: #fff; }
+.mobile-login-qr svg { display: block; width: 100%; height: 100%; }
+
+@media (max-width: 680px) {
+    .mobile-login-card { grid-template-columns: 1fr; }
+    .mobile-login-qr { justify-self: center; }
+}
+
+
+/* ---------- 多班级：切换器 / 班级芯片 / 分组 / 成员 / 广播 ---------- */
+.class-switcher { display: flex; min-height: 42px; max-width: 220px; flex: 0 1 auto; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.class-switcher i { color: var(--muted); font-size: 13px; }
+.class-switcher select { min-height: 34px; width: auto; min-width: 120px; max-width: 150px; padding: 0 6px; border: 0; background: transparent; color: var(--text); font-weight: 700; text-overflow: ellipsis; }
+.class-switcher select:focus { outline: none; }
+.class-switcher.current { color: var(--text); font-weight: 700; }
+.class-switcher.current span { font-size: 13px; }
+
+.class-switcher-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.class-chip { display: inline-flex; min-height: 38px; align-items: center; padding: 0 15px; border: 1px solid var(--line); border-radius: 19px; background: var(--surface); color: var(--text); font-weight: 700; transition: background .18s ease, border-color .18s ease, color .18s ease; }
+.class-chip:hover { border-color: var(--accent); color: var(--accent); }
+.class-chip.active { border-color: var(--accent); background: var(--accent); color: #fff; }
+
+.group-name { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 12px; background: var(--accent-faint); color: var(--accent-strong); font-size: 12px; font-weight: 750; }
+.group-name i { font-size: 12px; }
+.member-row td { padding: 6px 16px 10px; background: var(--surface-soft); }
+.member-list { margin: 0 0 10px; padding: 0; list-style: none; }
+.member-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.member-list li:last-child { border-bottom: 0; }
+.inline-form { display: flex; align-items: center; gap: 8px; }
+.inline-form input[type="text"], .inline-form select { min-height: 36px; width: auto; flex: 0 1 auto; }
+.inline-form button { min-height: 36px; padding: 0 12px; font-size: 13px; }
+.batch-summary { margin: 0 0 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); color: var(--muted); font-size: 13px; }
+.broadcast-targets { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; margin: 12px 0; }
+.broadcast-targets .check { flex-wrap: nowrap; align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); white-space: nowrap; }
+.broadcast-targets .check > * { white-space: nowrap; }
+.broadcast-targets .check:has(input:checked) { border-color: var(--accent); background: var(--accent-faint); }
+.broadcast-targets .check .group-name { padding: 2px 8px; font-size: 11px; }
+.broadcast-targets .check .muted { font-size: 12px; }
+.broadcast-group-label { grid-column: 1 / -1; margin: 6px 0 0; color: var(--muted); font-size: 12px; font-weight: 750; letter-spacing: .06em; }
+.broadcast-result { margin: 10px 0 0; padding: 0; list-style: none; font-size: 13px; }
+.broadcast-result li { display: flex; gap: 8px; padding: 4px 0; }
+.broadcast-result li i { flex: 0 0 16px; }
+.broadcast-result .ok { color: var(--success); }
+.broadcast-result .bad { color: var(--danger); }
+
+/* ---------- 紧凑表单 / 复选框可见 / 分组层级 / 班头像 ---------- */
+.stack > button, .stack > a.button { justify-self: start; }
+.stack > .inline-form { justify-self: start; }
+.user-account-table input[type="checkbox"],
+.broadcast-targets input[type="checkbox"],
+input[type="checkbox"][form] { width: 18px; height: 18px; min-height: 0; padding: 0; accent-color: var(--accent); cursor: pointer; }
+
+.group-list { display: grid; gap: 10px; margin-top: 14px; }
+.group-item { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.group-item > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer; list-style: none; }
+.group-item > summary::-webkit-details-marker { display: none; }
+.group-item > summary::before { content: "▸  "; color: var(--muted); }
+.group-item[open] > summary::before { content: "▾  "; }
+.group-editor { display: grid; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--line); }
+.group-editor .inline-form { flex-wrap: wrap; }
+.group-editor .stack { gap: 10px; }
+.group-editor select[multiple] { min-height: 0; }
+
+.class-avatar { width: 64px; height: 64px; border-radius: 12px; object-fit: cover; border: 1px solid var(--line); }
+.class-avatar.small { width: 22px; height: 22px; border-radius: 50%; border: 0; vertical-align: -6px; margin-right: 4px; }
+.class-chip { display: inline-flex; align-items: center; }
+.class-info-body { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.class-info-body form.stack { min-width: min(320px, 100%); }
+
+/* ---------- 导航分区与登录后选班 ---------- */
+.nav-divider { margin: 6px 18px; border: 0; border-top: 1px solid var(--line); }
+.class-select-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.class-select-card button { display: grid; width: 100%; gap: 6px; align-items: start; justify-items: start; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); text-align: left; cursor: pointer; transition: border-color .18s ease, background .18s ease, transform .18s ease; }
+.class-select-card button:hover { border-color: var(--accent); background: var(--accent-faint); transform: translateY(-2px); }
+.class-select-card strong { font-size: 17px; }
+.class-select-card small { color: var(--muted); }
+
+/* ---------- 紧凑创建行 ---------- */
+.compact-row { display: grid; grid-template-columns: minmax(200px, 1fr) auto; gap: 10px; align-items: end; }
+.compact-row .stack { gap: 4px; }
+
+/* ---------- 重叠修复：顶栏窄屏 / 表格内嵌表单 ---------- */
+.topbar { flex-wrap: nowrap; overflow-x: auto; }
+.topbar .app-search { flex: 1 1 auto; min-width: 0; }
+.user-account-table td form.inline-form { min-width: 0; }
+.user-account-table td form.inline-form input[type="text"] { width: 130px; }
+.user-account-table td form.inline-form select { max-width: 160px; }
+@media (max-width: 680px) {
+    .class-switcher { max-width: 150px; }
+    .class-switcher select { max-width: 100px; }
+    .class-info-body { flex-direction: column; }
+    .compact-row { grid-template-columns: 1fr; }
+}

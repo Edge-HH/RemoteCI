@@ -44,6 +44,32 @@ public sealed class AuthResponse
 
     [JsonPropertyName("user")]
     public UserProfile User { get; set; } = new();
+
+    /// <summary>
+    /// 批量导入且未设置密码的账号首次登录时为 true：AccessToken 为空，
+    /// 客户端应改走 /api/auth/setup-password 设置密码后重新登录。
+    /// </summary>
+    [JsonPropertyName("passwordPending")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? PasswordPending { get; set; }
+
+    /// <summary>一次性密码设置令牌，15 分钟有效；仅 passwordPending 为 true 时返回。</summary>
+    [JsonPropertyName("setupToken")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SetupToken { get; set; }
+}
+
+/// <summary>首登设置密码请求：凭登录时下发的一次性令牌补设密码。</summary>
+public sealed class SetupPasswordRequest
+{
+    [JsonPropertyName("username")]
+    public string Username { get; set; } = string.Empty;
+
+    [JsonPropertyName("setupToken")]
+    public string SetupToken { get; set; } = string.Empty;
+
+    [JsonPropertyName("newPassword")]
+    public string NewPassword { get; set; } = string.Empty;
 }
 
 public sealed class UserProfile : UserProfileLike
@@ -89,8 +115,33 @@ public sealed class UserProfile : UserProfileLike
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? VisibleExtensionIds { get; set; }
 
+    /// <summary>该账号可访问的班级列表；null 表示旧版服务端未下发班级信息。</summary>
+    [JsonPropertyName("classes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ClassSummary>? Classes { get; set; }
+
     [JsonPropertyName("version")]
     public long Version { get; set; }
+
+    /// <summary>
+    /// 以指定权限位生成身份副本：命令的 RequestedBy 必须携带目标班级的有效权限，
+    /// 插件端只信任消息内的权限位，局域网直连与云端路径保持一致。
+    /// </summary>
+    public UserProfile WithPermissions(UserPermissions permissions) => new()
+    {
+        Id = Id,
+        Username = Username,
+        DisplayName = DisplayName,
+        Role = Role,
+        RoleId = RoleId,
+        RoleName = RoleName,
+        GrantedPermissions = GrantedPermissions,
+        Permissions = permissions,
+        AllowedExtensionIds = AllowedExtensionIds,
+        VisibleExtensionIds = VisibleExtensionIds,
+        Classes = Classes,
+        Version = Version,
+    };
 }
 
 public sealed class AuthChallenge
@@ -168,6 +219,11 @@ public sealed class AccountSync
 
     [JsonPropertyName("generatedAt")]
     public DateTimeOffset GeneratedAt { get; set; }
+
+    /// <summary>镜像目标班级名称；旧版服务端不下发该字段。</summary>
+    [JsonPropertyName("className")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ClassName { get; set; }
 
     [JsonPropertyName("accounts")]
     public List<SyncedAccount> Accounts { get; set; } = [];

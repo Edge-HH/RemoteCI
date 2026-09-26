@@ -13,6 +13,11 @@ public sealed class ScheduleSyncRequest
     [JsonPropertyName("requestedAt")]
     public DateTimeOffset RequestedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    /// <summary>任务目标班级；缺省表示单班级部署的默认班级。</summary>
+    [JsonPropertyName("classId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? ClassId { get; set; }
+
     public static ScheduleSyncRequest Create(ScheduleSyncSource source, string? taskId = null) => new()
     {
         TaskId = string.IsNullOrWhiteSpace(taskId) ? Guid.NewGuid().ToString("N") : taskId,
@@ -45,6 +50,11 @@ public sealed class ScheduleSyncStatus
     [JsonPropertyName("activeTaskId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ActiveTaskId { get; set; }
+
+    /// <summary>任务归属班级；旧版服务端不下发该字段。</summary>
+    [JsonPropertyName("classId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? ClassId { get; set; }
 }
 
 public sealed class ScheduleBundle
@@ -54,6 +64,11 @@ public sealed class ScheduleBundle
 
     [JsonPropertyName("generatedAt")]
     public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>课表归属班级；旧版服务端不下发该字段。</summary>
+    [JsonPropertyName("classId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? ClassId { get; set; }
 
     [JsonPropertyName("days")]
     public List<ScheduleDay> Days { get; set; } = [];

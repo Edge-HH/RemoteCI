@@ -13,16 +13,41 @@
 
 <section class="panel">
     <h2>访客访问</h2>
-    <p class="muted">启用后，登录页会出现「仅查看」，未登录访客只能浏览课表。自动进入访客页默认关闭，且仅在启用访客功能时可开启。</p>
-    <form method="post" asp-page-handler="VisitorAccess" class="stack" data-visitor-access-form>
-        <label class="check"><input asp-for="VisitorAccessEnabled" data-visitor-enabled /> 启用访客功能</label>
-        <label class="check"><input asp-for="AutoEnterVisitorPage" data-visitor-auto-enter disabled="@(!Model.VisitorAccessEnabled)" /> 自动进入访客页</label>
+    <p class="muted">在<a asp-page="/Classes">班级管理</a>中逐班开启访客功能后，登录页会出现「仅查看」，未登录访客只能浏览开放班级的课表。自动进入访客页默认关闭，且仅在存在开放访客的班级时可开启。</p>
+    <form method="post" asp-page-handler="VisitorAccess" class="stack">
+        <label class="check"><input asp-for="AutoEnterVisitorPage" /> 自动进入访客页</label>
         <button type="submit">保存访客设置</button>
     </form>
 </section>
 
 @if (Model.CurrentUser.Role == UserRole.Admin)
 {
+<section class="panel">
+    <h2>批量导入人员</h2>
+    <p class="muted">每行一个账号，推荐格式：<code>ID,用户名,班级,角色,密码</code>（班级不存在会自动创建；角色按名称匹配角色预设；<b>密码可留空</b>，该账号首次登录时会被要求设置密码；也支持制表符分隔，# 开头的行忽略）。旧 3 列格式 <code>ID,用户名,密码</code> 仍可用，班级与角色取下方默认值。</p>
+    <form method="post" asp-page-handler="BatchImport" class="stack">
+        <label>账号清单<textarea asp-for="ImportText" rows="6" placeholder="zhang.san,张三,高一（1）班,学生,&#10;li.si,李四,高一（1）班,班管理员,Passw0rd-2026&#10;wang.wu,王五,高一（2）班,学生,"></textarea></label>
+        <label>默认班级（仅 3 列旧格式行使用）
+            <select asp-for="ImportClassId">
+                <option value="">（不导入 3 列旧格式行）</option>
+                @foreach (var classroom in Model.ImportClasses)
+                {
+                    <option value="@classroom.Id">@classroom.Name</option>
+                }
+            </select>
+        </label>
+        <label>默认角色（仅 3 列旧格式行使用）
+            <select asp-for="ImportRoleId">
+                @foreach (var role in Model.RoleDefinitions.Where(x => x.Kind != nameof(AccountRoleKind.Administrator)))
+                {
+                    <option value="@role.Id" selected="@(role.Id == AccountRole.StudentId)">@role.Name</option>
+                }
+            </select>
+        </label>
+        <button type="submit">批量导入</button>
+    </form>
+</section>
+
 <section class="panel">
     <div class="panel-heading">
         <div><h2>角色配置</h2><p class="muted">角色默认权限会统一应用到所有同角色账号。</p></div>

@@ -79,6 +79,7 @@ builder.Services.AddRazorPages(options =>
 {
     options.Conventions.AllowAnonymousToPage("/Login");
     options.Conventions.AllowAnonymousToPage("/Visitor");
+    options.Conventions.AllowAnonymousToPage("/SetupPassword");
 });
 builder.Services.AddScoped<IdentityCoordinator>();
 builder.Services.AddScoped<AccountRoleService>();
@@ -87,6 +88,17 @@ builder.Services.AddScoped<AuthorizationSyncService>();
 builder.Services.AddScoped<ConfigurationArchiveService>();
 builder.Services.AddScoped<SchedulePullSettings>();
 builder.Services.AddScoped<VisitorAccessSettings>();
+builder.Services.AddScoped<ClassAccessService>();
+builder.Services.AddScoped<ClassBroadcastService>();
+builder.Services.AddScoped<UserImportService>();
+builder.Services.AddScoped(sp =>
+{
+    // 插件在线数来自单例连接注册表；scoped 服务通过回调取数，避免直接依赖单例链。
+    var service = new ClassroomService(sp.GetRequiredService<AppDbContext>());
+    var registry = sp.GetRequiredService<PeerRegistry>();
+    service.OnlinePluginCounter = classId => registry.GetOnlinePluginConnections().Count(x => x.ClassId == classId);
+    return service;
+});
 builder.Services.AddSingleton<IStateStore, StateStore>();
 builder.Services.AddSingleton<PeerRegistry>();
 builder.Services.AddSingleton<ScheduleSyncTaskTracker>();
@@ -154,6 +166,7 @@ app.Map("/ws", async context =>
         context.RequestServices.GetRequiredService<ExtensionPolicyService>(),
         context.RequestServices.GetRequiredService<AuthorizationSyncService>(),
         context.RequestServices.GetRequiredService<ScheduleSyncService>(),
+        context.RequestServices.GetRequiredService<ClassAccessService>(),
         logger);
 });
 
@@ -169,7 +182,7 @@ app.MapPost("/api/plugin/pair", async (PairRequest request, IdentityCoordinator 
 app.MapPost("/api/auth/login", async (
     LoginRequest request, IdentityCoordinator identities, AuthorizationSyncService authorizationSync, CancellationToken ct) =>
 {
-    if (MissingFields(request.Username, request.Password) is { } bad) return bad;
+    if (MissingFields(request.Username) is { } bad) return bad;
     try
     {
         var response = await identities.LoginAsync(request, ct);
@@ -188,6 +201,20 @@ app.MapPost("/api/auth/refresh", async (
         var response = await identities.RefreshAsync(request, ct);
         await authorizationSync.SyncAsync(ct);
         return Results.Ok(response);
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+}).RequireRateLimiting("auth");
+
+// 首登设置密码：批量导入的待激活账号凭一次性令牌补设密码后即可正常登录。
+app.MapPost("/api/auth/setup-password", async (
+    SetupPasswordRequest request, IdentityCoordinator identities, AuthorizationSyncService authorizationSync, CancellationToken ct) =>
+{
+    if (MissingFields(request.Username, request.SetupToken, request.NewPassword) is { } bad) return bad;
+    try
+    {
+        await identities.SetupPasswordAsync(request, ct);
+        await authorizationSync.SyncAsync(ct);
+        return Results.NoContent();
     }
     catch (IdentityOperationException ex) { return OperationError(ex); }
 }).RequireRateLimiting("auth");
@@ -244,45 +271,56 @@ app.MapDelete("/api/me/sessions/{id:guid}", async (
     catch (IdentityOperationException ex) { return OperationError(ex); }
 });
 
-app.MapGet("/api/state", async (HttpContext ctx, IdentityCoordinator identities, IStateStore store, CancellationToken ct) =>
+app.MapGet("/api/state", async (
+    HttpContext ctx, Guid? classId, IdentityCoordinator identities, ClassAccessService access, IStateStore store, CancellationToken ct) =>
 {
-    if (await AuthorizeAsync(ctx, identities, ct) is null) return Unauthorized();
-    return store.GetLatestSnapshot() is { } snapshot
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (await ResolveClassAsync(principal, classId, access, ct) is not { } target) return Forbidden();
+    return store.GetLatestSnapshot(target) is { } snapshot
         ? Results.Ok(snapshot)
         : Results.Json(Error(ApiErrorCodes.NotFound, "尚无课程状态"), statusCode: StatusCodes.Status404NotFound);
 });
 
-app.MapGet("/api/schedule", async (HttpContext ctx, IdentityCoordinator identities, IStateStore store, CancellationToken ct) =>
+app.MapGet("/api/schedule", async (
+    HttpContext ctx, Guid? classId, IdentityCoordinator identities, ClassAccessService access, IStateStore store, CancellationToken ct) =>
 {
-    if (await AuthorizeAsync(ctx, identities, ct) is null) return Unauthorized();
-    return store.GetLatestSchedule() is { } schedule
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (await ResolveClassAsync(principal, classId, access, ct) is not { } target) return Forbidden();
+    return store.GetLatestSchedule(target) is { } schedule
         ? Results.Ok(schedule)
         : Results.Json(Error(ApiErrorCodes.NotFound, "尚无课表"), statusCode: StatusCodes.Status404NotFound);
 });
 
 app.MapPost("/api/commands", async (
-    HttpContext ctx, CommandMessage command, IdentityCoordinator identities, PeerRegistry peers, IStateStore store, CancellationToken ct) =>
+    HttpContext ctx, CommandMessage command, Guid? classId, IdentityCoordinator identities,
+    ClassAccessService access, PeerRegistry peers, IStateStore store, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
+    if (await ResolveClassAsync(principal, command.ClassId ?? classId, access, ct) is not { } target) return Forbidden();
+    command.ClassId = target;
+    var classPermissions = await access.GetEffectivePermissionsAsync(
+        principal.User.Id, principal.User.Role, target, principal.User.GrantedPermissions, ct);
     if (command.Command == CommandKind.RunExtension)
     {
         // 与 WS 路径一致：独立扩展权限和管理员逐扩展策略必须同时通过。
         if (string.IsNullOrEmpty(command.ExtensionId))
             return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "缺少扩展 Id"));
-        var definition = store.GetLatestExtensions()?.FirstOrDefault(x => x.Id == command.ExtensionId);
+        var definition = store.GetLatestExtensions(target)?.FirstOrDefault(x => x.Id == command.ExtensionId);
         if (definition is null)
             return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "扩展功能不存在或尚未同步"));
-        if (!ExtensionAccess.CanInvoke(principal.User, definition)) return Forbidden();
+        if (!ExtensionAccess.CanInvoke(classPermissions, principal.User.AllowedExtensionIds, definition)) return Forbidden();
     }
     else
     {
         var required = CommandPermissions.Required(command.Command);
         if (required == UserPermissions.None) return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "未知命令"));
-        if (!principal.User.Permissions.HasFlag(required)) return Forbidden();
+        if (!classPermissions.HasFlag(required)) return Forbidden();
     }
     command.RequestedBy = principal.User;
-    var result = await peers.SendCommandAndWaitAsync(command, TimeSpan.FromSeconds(15), ct);
+    var result = await peers.SendCommandAndWaitAsync(command, target, TimeSpan.FromSeconds(15), ct);
     return Results.Json(result, statusCode: CommandStatus(result));
 });
 
@@ -350,6 +388,22 @@ usersApi.MapPost("/{id:guid}/password", async (
     }
     catch (IdentityOperationException ex) { return OperationError(ex); }
 });
+// 批量导入人员：行格式 ID,用户名,班级,角色,密码（密码可空=待激活），逐行回报结果。
+usersApi.MapPost("/batch-import", async (
+    HttpContext ctx, BatchImportRequest request, IdentityCoordinator identities, UserImportService importService,
+    AuthorizationSyncService authorizationSync, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try
+    {
+        var result = await importService.ImportAsync(request.Text, request.DefaultClassId, request.DefaultRoleId, ct);
+        if (result.Created > 0) await authorizationSync.SyncAsync(ct);
+        return Results.Ok(result);
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
 usersApi.MapDelete("/{id:guid}", async (
     Guid id, HttpContext ctx, IdentityCoordinator identities, AuthorizationSyncService authorizationSync, CancellationToken ct) =>
 {
@@ -370,13 +424,289 @@ usersApi.MapDelete("/{id:guid}", async (
 });
 
 app.MapPost("/api/plugin/pairing-code", async (
-    HttpContext ctx, IdentityCoordinator identities, CancellationToken ct) =>
+    HttpContext ctx, PairingCodeBody? body, IdentityCoordinator identities, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
     return HasPermission(principal, UserPermissions.ManageUsers)
-        ? Results.Ok(new { pairCode = await identities.CreatePluginPairingCodeAsync(ct) })
+        ? Results.Ok(new { pairCode = await identities.CreatePluginPairingCodeAsync(body?.ClassId ?? Classroom.DefaultId, ct) })
         : Forbidden();
+});
+
+// 班级分组：管理员组织班级（如按年级），批量操作与广播通知可按组展开。
+var groupApi = app.MapGroup("/api/class-groups");
+groupApi.MapGet("/", async (
+    HttpContext ctx, IdentityCoordinator identities, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    return Results.Ok(await classrooms.ListGroupsAsync(ct));
+});
+groupApi.MapPost("/", async (
+    HttpContext ctx, CreateClassGroupRequest request, IdentityCoordinator identities, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (MissingFields(request.Name) is { } bad) return bad;
+    try { return Results.Ok(await classrooms.CreateGroupAsync(request.Name, request.ParentId, ct)); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+groupApi.MapPut("/{id:guid}", async (
+    Guid id, HttpContext ctx, UpdateClassGroupRequest request, IdentityCoordinator identities, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (MissingFields(request.Name) is { } bad) return bad;
+    try { await classrooms.RenameGroupAsync(id, request.Name, request.ParentId, ct); return Results.NoContent(); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+// 整体替换一个分组包含的班级（仅直接归属）。
+groupApi.MapPut("/{id:guid}/classes", async (
+    Guid id, HttpContext ctx, UpdateGroupClassesRequest request, IdentityCoordinator identities, ClassroomService classrooms,
+    AuthorizationSyncService authorizationSync, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try
+    {
+        await classrooms.SetGroupClassesAsync(id, request.ClassIds, ct);
+        await authorizationSync.SyncAsync(ct);
+        return Results.NoContent();
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+groupApi.MapDelete("/{id:guid}", async (
+    Guid id, HttpContext ctx, IdentityCoordinator identities, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try { await classrooms.DeleteGroupAsync(id, ct); return Results.NoContent(); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+
+// 集控广播：一次向多个班级/分组发送通知、清除通知、电源或语音消息，逐班按班内权限鉴权并回报结果。
+app.MapPost("/api/commands/broadcast", async (
+    HttpContext ctx, BroadcastCommandRequest request, IdentityCoordinator identities,
+    ClassBroadcastService broadcast, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (request.ClassIds.Count == 0 && (request.GroupIds?.Count ?? 0) == 0)
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "请选择要操作的班级或分组"));
+    if (request.Command is CommandKind.SendNotification && request.Notification is null)
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "缺少通知内容"));
+    if (request.Command is CommandKind.SendVoiceMessage &&
+        !VoiceMessageRequest.TryDecode(request.VoiceMessage, out _))
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "语音格式无效或超过 60 秒"));
+    try
+    {
+        return Results.Ok(await broadcast.BroadcastAsync(principal, request, ct));
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+
+// 当前账号可访问的班级：客户端班级选择/切换的数据源。
+app.MapGet("/api/me/classes", async (
+    HttpContext ctx, IdentityCoordinator identities, ClassAccessService access, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    return Results.Ok(await access.GetAccessibleClassesAsync(principal.User.Id, principal.User.Role, principal.User.GrantedPermissions, ct));
+});
+
+// 班级管理：仅系统管理员。
+var classesApi = app.MapGroup("/api/classes");
+classesApi.MapGet("/", async (
+    HttpContext ctx, IdentityCoordinator identities, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    return Results.Ok(await classrooms.ListAsync(ct));
+});
+classesApi.MapPost("/", async (
+    HttpContext ctx, CreateClassRequest request, IdentityCoordinator identities, ClassroomService classrooms,
+    AuthorizationSyncService authorizationSync, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (MissingFields(request.Name) is { } bad) return bad;
+    try
+    {
+        var created = await classrooms.CreateAsync(request.Name, ct);
+        await authorizationSync.SyncAsync(ct);
+        return Results.Created($"/api/classes/{created.Id}", created);
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+classesApi.MapPut("/{id:guid}", async (
+    Guid id, HttpContext ctx, UpdateClassRequest request, IdentityCoordinator identities, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (MissingFields(request.Name) is { } bad) return bad;
+    try { await classrooms.RenameAsync(id, request.Name, ct); return Results.NoContent(); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+classesApi.MapDelete("/{id:guid}", async (
+    Guid id, HttpContext ctx, IdentityCoordinator identities, ClassroomService classrooms,
+    AuthorizationSyncService authorizationSync, PeerRegistry peers, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try
+    {
+        await classrooms.DeleteAsync(id, ct);
+        // 班级删除会级联清理插件凭据；对应在线连接立即断开，重新配对前不再接收命令。
+        await peers.DisconnectPluginClassAsync(id, ct);
+        await authorizationSync.SyncAsync(ct);
+        return Results.NoContent();
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+// 班级信息：系统管理员或本班班管理员可改班名；头像小图直存数据库。
+classesApi.MapPut("/{id:guid}/info", async (
+    Guid id, HttpContext ctx, UpdateClassRequest request, IdentityCoordinator identities, ClassAccessService access,
+    ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!await access.IsClassAdminAsync(principal.User.Id, principal.User.Role, id, ct)) return Forbidden();
+    if (MissingFields(request.Name) is { } bad) return bad;
+    try
+    {
+        await classrooms.RenameClassAsync(id, request.Name, ct);
+        return Results.NoContent();
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+// 头像走原始字节上传（Bearer 客户端没有 antiforgery 令牌，不用 multipart 表单）。
+classesApi.MapPut("/{id:guid}/avatar", async (
+    Guid id, HttpContext ctx, IdentityCoordinator identities, ClassAccessService access,
+    ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!await access.IsClassAdminAsync(principal.User.Id, principal.User.Role, id, ct)) return Forbidden();
+    var contentType = ctx.Request.Headers["X-Avatar-Type"].ToString();
+    var allowed = new[] { "image/png", "image/jpeg", "image/webp" };
+    if (!allowed.Contains(contentType))
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "头像仅支持 PNG/JPEG/WebP"));
+    if (ctx.Request.ContentLength is null or 0 or > 256 * 1024)
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "头像需为不超过 256KB 的图片"));
+    using var memory = new MemoryStream();
+    await ctx.Request.Body.CopyToAsync(memory, ct);
+    await classrooms.SetAvatarAsync(id, memory.ToArray(), contentType, ct);
+    return Results.NoContent();
+});
+classesApi.MapDelete("/{id:guid}/avatar", async (
+    Guid id, HttpContext ctx, IdentityCoordinator identities, ClassAccessService access,
+    ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!await access.IsClassAdminAsync(principal.User.Id, principal.User.Role, id, ct)) return Forbidden();
+    await classrooms.SetAvatarAsync(id, null, null, ct);
+    return Results.NoContent();
+});
+// 头像属于班级公开信息（访客页也展示），无需鉴权；ETag 支持客户端缓存。
+app.MapGet("/api/classes/{id:guid}/avatar", async (
+    Guid id, HttpContext ctx, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var classroom = await classrooms.RequireAsync(id, ct);
+    if (classroom.Avatar is null) return Results.NotFound();
+    var etag = $"\"{classroom.AvatarUpdatedAt?.Ticks ?? 0:x}\"";
+    if (ctx.Request.Headers.IfNoneMatch == etag)
+        return Results.StatusCode(StatusCodes.Status304NotModified);
+    ctx.Response.Headers.ETag = etag;
+    return Results.File(classroom.Avatar, classroom.AvatarContentType ?? "image/png");
+});
+
+classesApi.MapPut("/{id:guid}/visitor", async (
+    Guid id, HttpContext ctx, ClassVisitorRequest request, IdentityCoordinator identities, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try
+    {
+        await classrooms.SetVisitorAccessAsync(id, request.Enabled, ct);
+        return Results.NoContent();
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+// 整体替换一个班级所属的分组（多归属）。
+classesApi.MapPut("/{id:guid}/groups", async (
+    Guid id, HttpContext ctx, UpdateClassGroupsRequest request, IdentityCoordinator identities, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try
+    {
+        await classrooms.SetClassGroupsAsync(id, request.GroupIds, ct);
+        return Results.NoContent();
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+classesApi.MapGet("/{id:guid}/members", async (
+    Guid id, HttpContext ctx, IdentityCoordinator identities, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try { return Results.Ok(await classrooms.ListMembersAsync(id, ct)); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+classesApi.MapPut("/{id:guid}/members", async (
+    Guid id, HttpContext ctx, UpdateClassMembersRequest request, IdentityCoordinator identities, ClassroomService classrooms,
+    AuthorizationSyncService authorizationSync, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try
+    {
+        await classrooms.UpdateMembersAsync(id, request, ct);
+        await authorizationSync.SyncAsync(ct);
+        return Results.NoContent();
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+classesApi.MapPost("/batch", async (
+    HttpContext ctx, BatchClassOperationRequest request, IdentityCoordinator identities, ClassroomService classrooms,
+    AuthorizationSyncService authorizationSync, PeerRegistry peers, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (MissingFields(request.Operation) is { } bad) return bad;
+    BatchClassOperationResult result;
+    try
+    {
+        result = await classrooms.BatchAsync(request, ct);
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+    if (request.Operation.Trim().Equals("delete", StringComparison.OrdinalIgnoreCase) ||
+        request.Operation.Trim().Equals("enablevisitor", StringComparison.OrdinalIgnoreCase) ||
+        request.Operation.Trim().Equals("disablevisitor", StringComparison.OrdinalIgnoreCase))
+    {
+        if (result.Results.Any(x => x.Success))
+        {
+            if (request.Operation.Trim().Equals("delete", StringComparison.OrdinalIgnoreCase))
+                await peers.DisconnectPluginClassAsync([.. request.ClassIds.Distinct()], ct);
+            await authorizationSync.SyncAsync(ct);
+        }
+    }
+    return Results.Ok(result);
 });
 
 // 插件长期凭据管理：仅管理员可列举与吊销；吊销后通过连接注册表立即断开对应插件。
@@ -405,21 +735,213 @@ app.MapDelete("/api/plugins/credentials/{id:guid}", async (
 });
 
 app.MapGet("/api/admin/status", async (
-    HttpContext ctx, IdentityCoordinator identities, PeerRegistry peers, IStateStore store, CancellationToken ct) =>
+    HttpContext ctx, IdentityCoordinator identities, PeerRegistry peers, ClassroomService classrooms, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
     if (!HasPermission(principal, UserPermissions.AccessWebUi)) return Forbidden();
+    var classes = await classrooms.ListAsync(ct);
     return Results.Ok(new
     {
         pluginOnline = peers.HasPlugin,
         pluginConnections = peers.PluginCount,
         watchConnections = peers.WatchCount,
+        mobileConnections = peers.MobileCount,
         accountCount = (await identities.ListUsersAsync(ct)).Count,
-        latestStateAt = store.GetLatestSnapshot()?.GeneratedAt,
-        latestScheduleAt = store.GetLatestSchedule()?.GeneratedAt,
+        classes = classes.Select(x => new
+        {
+            id = x.Id,
+            name = x.Name,
+            pluginOnline = x.PluginCount > 0,
+        }),
         protocolVersion = Protocol.Version,
     });
+});
+
+app.MapGet("/api/roles", async (HttpContext ctx, IdentityCoordinator identities, AccountRoleService roles, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!HasPermission(principal, UserPermissions.ManageUsers)) return Forbidden();
+    return Results.Ok(await roles.ListAsync(ct));
+});
+app.MapPost("/api/roles", async (HttpContext ctx, CreateAccountRoleRequest request, AccountRoleService roles, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities: ctx.RequestServices.GetRequiredService<IdentityCoordinator>(), ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (MissingFields(request.Name) is { } bad) return bad;
+    try { return Results.Ok(await roles.CreateAsync(request.Name, request.DefaultPermissions, ct)); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+app.MapPut("/api/roles/{id:guid}", async (Guid id, HttpContext ctx, UpdateAccountRoleRequest request, AccountRoleService roles, AuthorizationSyncService authorizationSync, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, ctx.RequestServices.GetRequiredService<IdentityCoordinator>(), ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try
+    {
+        await roles.UpdateAsync(id, request.Name, request.DefaultPermissions, ct);
+        await authorizationSync.SyncAsync(ct);
+        return Results.NoContent();
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+app.MapDelete("/api/roles/{id:guid}", async (Guid id, HttpContext ctx, AccountRoleService roles, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, ctx.RequestServices.GetRequiredService<IdentityCoordinator>(), ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try { await roles.DeleteAsync(id, ct); return Results.NoContent(); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+// 访客设置：autoEnter 是全局登录页行为；“哪些班级开放访客”在班级管理中逐班配置。
+app.MapGet("/api/visitor", async (
+    HttpContext ctx, IdentityCoordinator identities, VisitorAccessSettings visitor, ClassroomService classrooms, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!HasPermission(principal, UserPermissions.ManageUsers)) return Forbidden();
+    var classes = await classrooms.ListAsync(ct);
+    return Results.Ok(new
+    {
+        autoEnter = await visitor.GetAutoEnterAsync(ct),
+        anyVisitorClass = classes.Any(x => x.VisitorEnabled),
+        classes = classes.Select(x => new { id = x.Id, name = x.Name, visitorEnabled = x.VisitorEnabled }),
+    });
+});
+app.MapPut("/api/visitor", async (
+    VisitorAutoEnterBody body, HttpContext ctx, IdentityCoordinator identities, VisitorAccessSettings visitor, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!HasPermission(principal, UserPermissions.ManageUsers)) return Forbidden();
+    return Results.Ok(new { autoEnter = await visitor.SetAutoEnterAsync(body.AutoEnter, ct) });
+});
+app.MapGet("/api/settings/notifications", async (HttpContext ctx, IdentityCoordinator identities, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    return Results.Ok(new SettingsSync { ForceSenderInTitle = await identities.GetForceSenderInTitleAsync(ct) });
+});
+app.MapPut("/api/settings/notifications", async (SettingsSync body, HttpContext ctx, IdentityCoordinator identities, PeerRegistry peers, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!HasPermission(principal, UserPermissions.SendNotifications) && principal.User.Role != UserRole.Admin)
+        return Forbidden();
+    var updated = await identities.SetForceSenderInTitleAsync(body.ForceSenderInTitle, ct);
+    await peers.SendSettingsToWatchesAsync(updated, ct);
+    return Results.Ok(updated);
+});
+app.MapGet("/api/settings/schedule-pull", async (HttpContext ctx, IdentityCoordinator identities, SchedulePullSettings pull, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    return Results.Ok(new { intervalMinutes = (int)await pull.GetIntervalAsync(ct) });
+});
+app.MapPut("/api/settings/schedule-pull", async (HttpContext ctx, SchedulePullIntervalBody body, IdentityCoordinator identities, SchedulePullSettings pull, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!HasPermission(principal, UserPermissions.ManageSchedule)) return Forbidden();
+    var interval = Enum.IsDefined(typeof(SchedulePullInterval), body.IntervalMinutes)
+        ? (SchedulePullInterval)body.IntervalMinutes
+        : SchedulePullInterval.Disabled;
+    await pull.SetIntervalAsync(interval, ct);
+    return Results.Ok(new { intervalMinutes = (int)interval });
+});
+app.MapGet("/api/extensions", async (
+    HttpContext ctx, Guid? classId, IdentityCoordinator identities, ClassAccessService access,
+    ExtensionPolicyService policies, IStateStore store, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (await ResolveClassAsync(principal, classId, access, ct) is not { } target) return Forbidden();
+    var definitions = store.GetLatestExtensions(target) ?? [];
+    var classPermissions = await access.GetEffectivePermissionsAsync(principal.User.Id, principal.User.Role, target, principal.User.GrantedPermissions, ct);
+    var items = await policies.ListForUserAsync(principal.User.Id, principal.User.Role, classPermissions, definitions, ct);
+    return Results.Ok(items.Select(item => new
+    {
+        id = item.Definition.Id,
+        displayName = item.Definition.DisplayName,
+        enabled = item.Enabled,
+        allowNonAdmin = item.AllowNonAdmin,
+        showOnWatch = item.ShowOnWatch,
+        canInvoke = item.CanInvoke,
+        classId = target,
+    }));
+});
+app.MapPut("/api/extensions/{id}", async (string id, ExtensionPolicyBody body, HttpContext ctx, IdentityCoordinator identities, ExtensionPolicyService policies, AuthorizationSyncService authorizationSync, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    try
+    {
+        if (principal.User.Role == UserRole.Admin)
+            await policies.UpdateAdminAsync(principal.User.Id, id, body.Enabled ?? true, body.AllowNonAdmin ?? false, body.ShowOnWatch ?? true, ct);
+        else
+            await policies.UpdatePersonalAsync(principal.User.Id, id, body.ShowOnWatch ?? true, ct);
+        await authorizationSync.SyncAsync(ct);
+        return Results.NoContent();
+    }
+    catch (Exception ex) { return Results.Json(Error(ApiErrorCodes.InvalidRequest, ex.Message), statusCode: 400); }
+});
+app.MapGet("/api/admin/system", async (HttpContext ctx, IdentityCoordinator identities, UpdateService updates, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    var development = ctx.RequestServices.GetRequiredService<IHostEnvironment>().IsDevelopment();
+    return Results.Ok(new
+    {
+        currentVersion = updates.CurrentVersion,
+        canSelfUpdate = UpdateService.CanSelfUpdate(development, UpdateService.IsFnosRuntime),
+        message = UpdateService.IsFnosRuntime ? UpdateService.FnosManagedMessage : "",
+    });
+});
+app.MapPost("/api/admin/updates/check", async (UpdateCheckBody body, HttpContext ctx, IdentityCoordinator identities, UpdateService updates, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    var channel = string.Equals(body.Channel, "beta", StringComparison.OrdinalIgnoreCase) ? UpdateChannel.Beta : UpdateChannel.Stable;
+    var release = await updates.FetchLatestReleaseAsync(channel, ct);
+    return Results.Ok(new { tag = release?.Tag, name = release?.Name });
+});
+app.MapGet("/api/admin/backups", async (HttpContext ctx, IdentityCoordinator identities, ConfigurationArchiveService archives, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    return Results.Ok(archives.ListBackups());
+});
+app.MapPost("/api/admin/backups", async (HttpContext ctx, IdentityCoordinator identities, ConfigurationArchiveService archives, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    await archives.CreateLocalBackupAsync("manual", ct);
+    return Results.NoContent();
+});
+app.MapDelete("/api/admin/backups/{name}", async (string name, HttpContext ctx, IdentityCoordinator identities, ConfigurationArchiveService archives, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try { archives.DeleteBackup(name); return Results.NoContent(); }
+    catch { return Results.Json(Error(ApiErrorCodes.NotFound, "备份不存在"), statusCode: 404); }
+});
+app.MapPost("/api/admin/backups/{name}/restore", async (string name, HttpContext ctx, IdentityCoordinator identities, ConfigurationArchiveService archives, PeerRegistry peers, IHostApplicationLifetime lifetime, IHostEnvironment environment, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    await archives.CreateLocalBackupAsync("preimport", ct);
+    await archives.ApplyAsync(archives.ParseLocalBackup(archives.ReadBackup(name)), ct);
+    await peers.DisconnectAllAsync(ct);
+    ApplicationRestartCoordinator.ScheduleRestart(lifetime, environment);
+    return Results.NoContent();
 });
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok", protocolVersion = Protocol.Version }));
@@ -435,6 +957,18 @@ static async Task<AuthPrincipal?> AuthorizeAsync(HttpContext ctx, IdentityCoordi
 
 static bool HasPermission(AuthPrincipal? principal, UserPermissions permission) =>
     principal?.User?.Permissions.HasFlag(permission) == true;
+
+/// <summary>
+/// 解析请求的目标班级：显式 classId 必须可访问（否则 null→403），缺省落到默认班级或第一个成员班级。
+/// </summary>
+static async Task<Guid?> ResolveClassAsync(
+    AuthPrincipal principal, Guid? requested, ClassAccessService access, CancellationToken ct)
+{
+    var user = principal.User!;
+    if (requested is { } id)
+        return await access.CanAccessAsync(user.Id, user.Role, id, ct) ? id : null;
+    return await access.ResolveDefaultClassIdAsync(user.Id, user.Role, ct);
+}
 
 /// <summary>认证端点的必填字段缺失（含 JSON 显式传 null）时返回 400 而不是内部 500。</summary>
 static IResult? MissingFields(params string?[] values) =>
@@ -467,5 +1001,11 @@ static IResult OperationError(IdentityOperationException ex) => Results.Json(
         _ => StatusCodes.Status400BadRequest,
     });
 static ApiError Error(string code, string message) => new() { Code = code, Message = message };
+
+public sealed record SchedulePullIntervalBody(int IntervalMinutes);
+public sealed record ExtensionPolicyBody(bool? Enabled, bool? AllowNonAdmin, bool? ShowOnWatch);
+public sealed record UpdateCheckBody(string Channel, bool Force = false);
+public sealed record PairingCodeBody(Guid? ClassId);
+public sealed record VisitorAutoEnterBody(bool AutoEnter);
 
 public partial class Program;

@@ -35,6 +35,7 @@ public enum PeerRole
 {
     Plugin = 1,
     Watch = 2,
+    Mobile = 3,
 }
 
 public enum UserRole
@@ -232,6 +233,7 @@ public enum ScheduleSyncSource
     Watch = 3,
     Automatic = 4,
     Connection = 5,
+    Mobile = 6,
 }
 
 public enum ScheduleSyncTaskState

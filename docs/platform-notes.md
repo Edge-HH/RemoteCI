@@ -169,3 +169,25 @@ cd wearos
 ```
 
 本机 2026-08-11 验证使用 Eclipse Temurin 17.0.20 和现有 Android SDK，Debug APK 构建成功。
+
+
+## Android 手机应用
+
+源码在 `android/`，包名 `com.remoteci.mobile`，minSdk 26。构建方式与手表端相同，使用同一套发布签名。
+
+- WebUI 概览页生成当前访问地址的登录二维码；二维码不包含账号、密码或令牌，手机端扫码后仅填写服务器地址。
+- 手机端设备名以 `Android · 厂商 型号` 上报，设备管理据此显示手机图标；旧会话在重新登录前仍可能沿用原设备名。
+- 浅色、深色或跟随系统与六套 Material 3 配色由根主题统一提供，系统状态栏和导航栏图标亮暗随主题同步。
+- 控制操作统一通过根级 Snackbar 显示真实回执；WebSocket 拒绝发送时立即提示连接已断开。
+- 局域网 WebSocket 连接仍会先刷新并保留云端短期访问令牌，供账号、角色、访客、凭证、备份等 WebUI 管理 API 使用；此前只连局域网时令牌为空会导致这些页面整体失效。
+- 访客访问与自动进入访客页收纳在独立子页面，账号创建通过下拉列表选择服务端角色，配对码支持选择与复制。
+- 首页底栏的四个板块共享同一个页面动画容器，切换板块只替换正文，底栏不参与横向转场。
+- 手机端六套主题与 Wear OS `WatchPalette` 使用相同色值，外观页采用 Material 3 `ListItem` 与单选控件。
+
+```powershell
+$env:JAVA_HOME = 'E:\Android Studio\jbr'
+cd android
+.\gradlew.bat :app:assembleRelease
+```
+
+本机可将构建目录放到 `android/local.properties` 的 `remoteci.buildDir`。Debug/Release APK 默认在 `android/app/build/outputs/apk/`，若配置了外部目录则在该目录的 `app/outputs/apk/`。

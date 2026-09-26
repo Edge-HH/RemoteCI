@@ -39,9 +39,11 @@ public sealed class AccountRoleService(AppDbContext db)
     {
         var role = await db.AccountRoles.SingleOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new IdentityOperationException(ApiErrorCodes.NotFound, "Role not found");
-        if (role.Kind == AccountRoleKind.Administrator)
+        if (role.Kind is AccountRoleKind.Administrator)
             throw new IdentityOperationException(ApiErrorCodes.Forbidden, "Administrator role is immutable");
-        var normalized = role.Kind == AccountRoleKind.Student ? role.NormalizedName : NormalizeName(name);
+        var normalized = role.Kind is AccountRoleKind.Student or AccountRoleKind.ClassAdministrator
+            ? role.NormalizedName
+            : NormalizeName(name);
         if (role.Kind == AccountRoleKind.Custom && await db.AccountRoles.AnyAsync(x => x.Id != id && x.NormalizedName == normalized, ct))
             throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "Role name already exists");
         if (role.Kind == AccountRoleKind.Custom) { role.Name = name.Trim(); role.NormalizedName = normalized; }
@@ -64,8 +66,20 @@ public sealed class AccountRoleService(AppDbContext db)
             throw new IdentityOperationException(ApiErrorCodes.Forbidden, "Built-in roles cannot be deleted");
         if (await db.Users.AnyAsync(x => x.RoleDefinitionId == id, ct))
             throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "Role is still assigned to accounts");
+        if (await db.ClassMemberships.AnyAsync(x => x.RoleDefinitionId == id, ct))
+            throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "Role is still assigned to class members");
         db.AccountRoles.Remove(role);
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>按显示名或规范化名查找角色（批量导入按角色名引用）。</summary>
+    public async Task<AccountRole?> FindByNameAsync(string name, CancellationToken ct = default)
+    {
+        var trimmed = name?.Trim() ?? string.Empty;
+        if (trimmed.Length == 0) return null;
+        var normalized = trimmed.ToUpperInvariant();
+        return await db.AccountRoles.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Name == trimmed || x.NormalizedName == normalized, ct);
     }
 
     private static string NormalizeName(string value)

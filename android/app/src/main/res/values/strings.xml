@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RemoteCI</string>
+
+    <!-- 登录页 -->
+    <string name="login_title">登录 RemoteCI</string>
+    <string name="input_label_username">ID</string>
+    <string name="input_label_password">密码</string>
+    <string name="input_label_cloud_url">云端地址</string>
+    <string name="cloud_http_warning">云端地址使用明文 HTTP，账号密码可能被同一局域网窃听，建议改用 HTTPS</string>
+    <string name="lan_scan_button">扫描局域网设备</string>
+    <string name="lan_scanning">正在扫描…</string>
+    <string name="lan_bootstrap_confirm">确认使用 %1$s 提供的云服务器</string>
+    <string name="login_button">安全登录</string>
+
+    <!-- 主页 -->
+    <string name="home_next_lesson">下一节课是：%1$s</string>
+    <string name="home_next_lesson_prefix">下一节课是：</string>
+    <string name="home_next_lesson_none">无</string>
+    <string name="home_menu_title">菜单</string>
+
+    <!-- 课表 -->
+    <string name="schedule_title">课表</string>
+    <string name="schedule_not_synced">尚未同步课表</string>
+    <string name="schedule_pull_button">向插件拉取</string>
+    <string name="schedule_pulling_button">正在拉取</string>
+    <string name="schedule_empty_day">当天没有课程</string>
+    <string name="pick_date_title">选择日期</string>
+    <string name="no_viewable_schedule">没有可查看的课表</string>
+    <string name="no_swappable_day">没有可换课的日期</string>
+
+    <!-- 换课 -->
+    <string name="swap_title">换课</string>
+    <string name="swap_source_label">原课</string>
+    <string name="swap_target_label">目标</string>
+    <string name="pick_placeholder">选择</string>
+    <string name="pick_subject_placeholder">选择科目</string>
+    <string name="confirm_exchange">确认交换</string>
+    <string name="confirm_replace">确认替换</string>
+    <string name="pick_source_lesson">选择原课</string>
+    <string name="pick_target_lesson">选择目标课</string>
+    <string name="pick_subject_title">选择科目</string>
+    <string name="swap_mode_exchange">交换</string>
+    <string name="swap_mode_replace">替换</string>
+
+    <!-- 控制 -->
+    <string name="control_title">控制</string>
+    <string name="teacher_coming">老师来了</string>
+    <string name="send_notification">发送通知</string>
+    <string name="clear_notifications">清除通知</string>
+    <string name="run_extension">执行</string>
+
+    <!-- 音量 -->
+    <string name="volume_title">音量</string>
+    <string name="volume_hint">当前音量 %1$d%%</string>
+    <string name="volume_muted_hint">当前已静音 · 音量 %1$d%%</string>
+    <string name="volume_rotary_hint">可触摸拖动，也可旋转表冠调节</string>
+    <string name="mute">静音</string>
+    <string name="unmute">取消静音</string>
+
+    <!-- 电源 -->
+    <string name="power_title">电源</string>
+    <string name="power_shutdown">关机</string>
+    <string name="power_restart">重启</string>
+    <string name="power_sleep">睡眠</string>
+    <string name="power_hibernate">休眠</string>
+
+    <!-- 发送消息 -->
+    <string name="notice_screen_title">发送消息</string>
+    <string name="notice_title_label">标题</string>
+    <string name="notice_sender_hint">将显示发送人</string>
+    <string name="notice_message_label">正文</string>
+    <string name="notice_effect_toggle">启用提醒强调特效</string>
+    <string name="notice_sound_toggle">启用提醒音效</string>
+    <string name="notice_speech_toggle">启用提醒语言</string>
+    <string name="notice_send_button">发送并等待回执</string>
+
+    <!-- 设置 -->
+    <string name="settings_title">设置</string>
+    <string name="settings_connection">连接</string>
+    <string name="settings_notifications">通知</string>
+    <string name="settings_appearance">外观</string>
+    <string name="settings_update">更新</string>
+    <string name="settings_developer">开发者</string>
+    <string name="appearance_pick_palette">选择配色方案</string>
+
+    <!-- 更新 -->
+    <string name="update_need_webui">请先连接 WebUI，再检查手表更新</string>
+    <string name="update_up_to_date">已是当前渠道允许的最新版本 %1$s</string>
+    <string name="update_check_failed">检查更新失败</string>
+    <string name="update_current_version">当前版本 %1$s</string>
+    <string name="update_connected_webui">已连接 WebUI %1$s</string>
+    <string name="update_webui_unknown">未知</string>
+    <string name="update_channel_label">更新渠道</string>
+    <string name="update_force_toggle">强制更新</string>
+    <string name="update_force_hint">允许同版本重新下载并覆盖安装，不允许降级</string>
+    <string name="update_check_button">检查更新</string>
+    <string name="update_recheck_button">重新检查</string>
+    <string name="update_new_version">发现新版本 %1$s</string>
+    <string name="update_reinstall_available">可强制覆盖安装 %1$s</string>
+    <string name="update_install_button">下载并安装</string>
+    <string name="update_reinstall_button">重新下载并覆盖</string>
+    <string name="update_failed">更新失败</string>
+    <string name="update_downloading">正在下载更新包…</string>
+    <string name="update_installing">正在安装，请按系统提示确认…</string>
+    <string name="update_channel_stable">正式版</string>
+    <string name="update_channel_beta">Beta版</string>
+
+    <!-- 连接设置 -->
+    <string name="lan_host_label">电脑 IP</string>
+    <string name="lan_port_label">局域网端口</string>
+    <string name="save_and_reconnect">保存并重连</string>
+    <string name="logout">退出账号</string>
+
+    <!-- 开发者设置 -->
+    <string name="developer_hint">关闭云端后只能依赖局域网直连；关闭局域网后只使用云端。密码登录仍会临时使用云端完成认证。</string>
+    <string name="cloud_server_toggle">云服务器</string>
+    <string name="lan_direct_toggle">局域网直连</string>
+    <string name="apply_and_reconnect">应用并重连</string>
+
+    <!-- 通知设置 -->
+    <string name="notif_on_class">上课</string>
+    <string name="notif_on_breaking">下课</string>
+    <string name="notif_after_school">放学</string>
+    <string name="notif_schedule_changed">课表变更</string>
+    <string name="notif_custom">自定义消息</string>
+    <string name="notif_automation">ClassIsland 自动化</string>
+    <string name="notif_plugin">其他插件通知</string>
+
+    <!-- 连接状态与命令回执 -->
+    <string name="connection_state_idle">未连接</string>
+    <string name="connection_state_connecting">连接中…</string>
+    <string name="connection_state_lan">局域网直连</string>
+    <string name="connection_state_cloud">云端中转</string>
+    <string name="connection_state_error">错误：%1$s</string>
+    <string name="result_success">已完成：%1$s</string>
+    <string name="result_failure">失败：%1$s</string>
+
+    <!-- 通用 -->
+    <string name="back">返回</string>
+
+    <!-- 系统通知 -->
+    <string name="notification_channel_name">RemoteCI 通知</string>
+    <string name="notification_channel_description">课程、自动化和 ClassIsland 插件提醒</string>
+    <string name="notification_title_on_class">上课了</string>
+    <string name="notification_title_on_breaking">课间休息</string>
+    <string name="notification_title_after_school">放学啦</string>
+    <string name="notification_title_schedule_changed">课表已更新</string>
+    <string name="notification_title_remote_ci">RemoteCI 通知</string>
+    <string name="notification_title_classisland">ClassIsland 通知</string>
+    <string name="notification_title_fallback">RemoteCI</string>
+</resources>

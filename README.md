@@ -4,16 +4,16 @@
 [![Release](https://img.shields.io/github/v/release/Edge-HH/RemoteCI?include_prereleases)](https://github.com/Edge-HH/RemoteCI/releases)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 
-> 把 ClassIsland 的课表、通知和受控操作，安全地延伸到 Web 与 Wear OS。
+> 把 ClassIsland 的课表、通知和受控操作，安全地延伸到 Web、手机和 Wear OS。
 
-RemoteCI 是面向 ClassIsland 2.x 的跨设备联动系统，由 ClassIsland 插件、ASP.NET Core 服务端、WebUI 和 Wear OS 应用组成。它让用户可以在浏览器或手表上查看当前课程与未来七日课表、接收课堂事件，并在权限允许时执行通知、换课和扩展操作。
+RemoteCI 是面向 ClassIsland 2.x 的跨设备联动系统，由 ClassIsland 插件、ASP.NET Core 服务端、WebUI、Android 手机和 Wear OS 应用组成。它让用户可以在浏览器、手机或手表上查看当前课程与未来七日课表、接收课堂事件，并在权限允许时执行通知、换课和扩展操作。
 
 当前稳定软件版本为 `3.2.1.4`，通信协议为 V3。稳定版使用 ClassIsland 要求的四段纯数字版本；保留的 Beta 使用 `v3.x.x-beta.y`，仅用于测试且不会进入插件市场。
 
 ## ✨ 主要能力
 
 - **课程状态同步**：插件按秒推送当前课程状态，并独立同步未来七日课表。
-- **Web 与手表联动**：在 WebUI 和 Wear OS 上查看课表、课堂事件与连接状态。
+- **Web、手机与手表联动**：在 WebUI、Android 手机和 Wear OS 上查看课表、课堂事件与连接状态。
 - **通知与“老师来了”**：从 WebUI 或手表触发 ClassIsland 正式通知，并把结果同步到在线设备。
 - **课表操作**：支持手动拉取、自动拉取、换课与并发修订校验；多个入口共用任务锁，避免重复执行。
 - **细粒度权限**：按账号分别控制概览、人员管理、通知、换课、扩展、主界面和电源等能力，命令会在服务端与插件端再次鉴权。
@@ -42,7 +42,7 @@ ClassIsland + RemoteCI 插件
            ⇅ WebSocket / 局域网
 ASP.NET Core 服务端 ─── WebUI
            ⇅ 云端或局域网
-        Wear OS 应用
+     Android 手机 / Wear OS 应用
 ```
 
 | 目录 | 职责 |
@@ -51,6 +51,7 @@ ASP.NET Core 服务端 ─── WebUI
 | `server/` | ASP.NET Core 服务端、Razor WebUI、Identity 与 SQLite |
 | `plugin/` | ClassIsland 2.x 插件、远程命令执行与 CIPX 构建 |
 | `wearos/` | Kotlin / Compose for Wear OS 应用 |
+| `android/` | Kotlin / Jetpack Compose Material 3 Expressive 手机应用 |
 | `fnos/` | 飞牛 fnOS FPK 工程与打包脚本 |
 | `docs/` | 部署、协议和平台说明 |
 
@@ -64,6 +65,7 @@ ASP.NET Core 服务端 ─── WebUI
 
 - `RemoteCI.Plugin.cipx`：ClassIsland 插件市场使用的固定名称插件包。
 - `RemoteCI.Watch-<版本>.apk`：Wear OS 应用。
+- `RemoteCI.Mobile-<版本>.apk`：Android 手机应用。
 - 服务端压缩包：Windows 或 Linux 部署。
 - `RemoteCI-<版本>.fpk`：fnOS 在线多架构包，或 x86_64 / ARM64 单架构离线包。
 

@@ -41,6 +41,11 @@ public sealed class CommandMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, string?>? ExtensionArgs { get; set; }
 
+    /// <summary>命令目标班级；缺省时由服务端路由到默认班级或用户唯一成员班级。</summary>
+    [JsonPropertyName("classId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? ClassId { get; set; }
+
     /// <summary>接入端覆盖此字段，插件只信任经服务端或本地挑战认证后的身份。</summary>
     [JsonPropertyName("requestedBy")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

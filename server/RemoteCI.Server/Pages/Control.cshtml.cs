@@ -16,7 +16,9 @@ public sealed class ControlModel(
     IStateStore store,
     IdentityCoordinator identities,
     ExtensionPolicyService extensionPolicies,
-    AuthorizationSyncService authorizationSync) : WebPageModel(users)
+    AuthorizationSyncService authorizationSync,
+    ClassBroadcastService broadcast,
+    ClassroomService classesService) : WebPageModel(users)
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(15);
 
@@ -32,18 +34,38 @@ public sealed class ControlModel(
     [BindProperty]
     public List<ExtensionInput> ExtensionInputs { get; set; } = [];
 
-    public bool PluginOnline => peers.HasPlugin;
+    [BindProperty]
+    public NoticeInput BroadcastInput { get; set; } = new();
+
+    [BindProperty]
+    public string? ClassNameInput { get; set; }
+
+    [BindProperty]
+    public IFormFile? AvatarFile { get; set; }
+
+    public bool HasAvatar => CurrentClass?.HasAvatar == true;
+
+    [BindProperty]
+    public List<Guid> BroadcastClassIds { get; set; } = [];
+
+    public bool PluginOnline => peers.HasPluginFor(CurrentClassId);
     public ClassStateSnapshot? Snapshot { get; private set; }
     public IReadOnlyList<ExtensionControlItem> Extensions { get; private set; } = [];
-    public bool CanTeacherComing => Permissions.HasFlag(UserPermissions.TeacherComing) && Supports(RemoteCiCapabilities.TeacherComing);
-    public bool CanSendNotifications => Permissions.HasFlag(UserPermissions.SendNotifications) && Supports(RemoteCiCapabilities.NotificationSend);
-    public bool CanSendVoiceMessages => Permissions.HasFlag(UserPermissions.SendVoiceMessages) && Supports(RemoteCiCapabilities.VoiceMessageSend);
-    public bool CanClearNotifications => Permissions.HasFlag(UserPermissions.SendNotifications) && Supports(RemoteCiCapabilities.NotificationClear);
-    public bool CanControlMainMenu => Permissions.HasFlag(UserPermissions.MainMenuControl) && Supports(RemoteCiCapabilities.MainMenuVisibility);
-    public bool CanControlPower => Permissions.HasFlag(UserPermissions.PowerControl) && Supports(RemoteCiCapabilities.PowerControl);
-    public bool CanControlVolume => Permissions.HasFlag(UserPermissions.PowerControl) && Supports(RemoteCiCapabilities.VolumeControl);
-    public bool CanUseExtensions => Permissions.HasFlag(UserPermissions.RunExtensions) && Supports(RemoteCiCapabilities.ExtensionsRun);
+    public bool CanTeacherComing => ClassPermissions.HasFlag(UserPermissions.TeacherComing) && Supports(RemoteCiCapabilities.TeacherComing);
+    public bool CanSendNotifications => ClassPermissions.HasFlag(UserPermissions.SendNotifications) && Supports(RemoteCiCapabilities.NotificationSend);
+    public bool CanSendVoiceMessages => ClassPermissions.HasFlag(UserPermissions.SendVoiceMessages) && Supports(RemoteCiCapabilities.VoiceMessageSend);
+    public bool CanClearNotifications => ClassPermissions.HasFlag(UserPermissions.SendNotifications) && Supports(RemoteCiCapabilities.NotificationClear);
+    public bool CanControlMainMenu => ClassPermissions.HasFlag(UserPermissions.MainMenuControl) && Supports(RemoteCiCapabilities.MainMenuVisibility);
+    public bool CanControlPower => ClassPermissions.HasFlag(UserPermissions.PowerControl) && Supports(RemoteCiCapabilities.PowerControl);
+    public bool CanControlVolume => ClassPermissions.HasFlag(UserPermissions.PowerControl) && Supports(RemoteCiCapabilities.VolumeControl);
+    public bool CanUseExtensions => ClassPermissions.HasFlag(UserPermissions.RunExtensions) && Supports(RemoteCiCapabilities.ExtensionsRun);
     public bool IsAdmin => CurrentUser.Role == UserRole.Admin;
+
+    /// <summary>广播面板的候选班级：当前用户有通知发送权限的班级（不含当前班——单班用上方表单即可）。</summary>
+    public IReadOnlyList<ClassSummary> BroadcastTargets { get; private set; } = [];
+
+    /// <summary>有至少两个可广播班级时才展示广播面板，单班级部署保持原有操作路径。</summary>
+    public bool ShowBroadcast => BroadcastTargets.Count >= 2;
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -53,14 +75,16 @@ public sealed class ControlModel(
 
     public async Task<IActionResult> OnPostTeacherComingAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.TeacherComing) is { } denied) return denied;
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.TeacherComing) is { } classDenied) return classDenied;
         return RedirectWithResult(await SendAsync(
             new CommandMessage { Command = CommandKind.TeacherComing }, ct));
     }
 
     public async Task<IActionResult> OnPostVoiceMessageAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.SendVoiceMessages) is { } denied) return denied;
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.SendVoiceMessages) is { } classDenied) return classDenied;
         // 原始 PCM 请求不经过表单文件缓存，不在服务器临时目录保留录音。
         if (Request.ContentType != "application/octet-stream" || Request.ContentLength is > VoiceMessageRequest.MaxBytes)
             return new JsonResult(CommandResult.Failure(CommandResultCodes.InvalidRequest, "语音格式无效或超过 60 秒"));
@@ -84,7 +108,8 @@ public sealed class ControlModel(
 
     public async Task<IActionResult> OnPostNotificationAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.SendNotifications) is { } denied) return denied;
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.SendNotifications) is { } classDenied) return classDenied;
         if (!ModelState.IsValid)
         {
             if (await LoadAsync(ct) is { } loadDenied) return loadDenied;
@@ -106,7 +131,8 @@ public sealed class ControlModel(
 
     public async Task<IActionResult> OnPostNotificationSettingsAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.SendNotifications) is { } denied) return denied;
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.SendNotifications) is { } classDenied) return classDenied;
         var settings = await identities.SetForceSenderInTitleAsync(ForceSenderInTitle, ct);
         await peers.SendSettingsToWatchesAsync(settings, ct);
         TempData["Message"] = ForceSenderInTitle ? "已开启强制显示发送人" : "已关闭强制显示发送人";
@@ -115,14 +141,16 @@ public sealed class ControlModel(
 
     public async Task<IActionResult> OnPostClearNotificationsAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.SendNotifications) is { } denied) return denied;
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.SendNotifications) is { } classDenied) return classDenied;
         return RedirectWithResult(await SendAsync(
             new CommandMessage { Command = CommandKind.ClearNotifications }, ct));
     }
 
     public async Task<IActionResult> OnPostMainMenuAsync(bool visible, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.MainMenuControl) is { } denied) return denied;
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.MainMenuControl) is { } classDenied) return classDenied;
         return RedirectWithResult(await SendAsync(new CommandMessage
         {
             Command = CommandKind.SetMainMenuVisibility,
@@ -132,7 +160,8 @@ public sealed class ControlModel(
 
     public async Task<IActionResult> OnPostVolumeAsync(bool unmute, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.PowerControl) is { } denied) return denied;
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.PowerControl) is { } classDenied) return classDenied;
         if (VolumeLevel is < 0 or > 100)
             return VolumeResult(CommandResult.Failure(
                 CommandResultCodes.InvalidRequest, "音量必须在 0 到 100 之间"));
@@ -148,7 +177,8 @@ public sealed class ControlModel(
 
     public async Task<IActionResult> OnPostMuteAsync(bool muted, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.PowerControl) is { } denied) return denied;
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.PowerControl) is { } classDenied) return classDenied;
         return RedirectWithResult(await SendAsync(new CommandMessage
         {
             Command = CommandKind.Volume,
@@ -158,7 +188,8 @@ public sealed class ControlModel(
 
     public async Task<IActionResult> OnPostPowerAsync(PowerActionKind action, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.PowerControl) is { } denied) return denied;
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.PowerControl) is { } classDenied) return classDenied;
         if (!Enum.IsDefined(action))
         {
             TempData["Error"] = "未知电源操作";
@@ -173,8 +204,9 @@ public sealed class ControlModel(
 
     public async Task<IActionResult> OnPostExtensionAsync(string extensionId, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.RunExtensions) is { } denied) return denied;
-        var definition = store.GetLatestExtensions()?.FirstOrDefault(extension =>
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.RunExtensions) is { } classDenied) return classDenied;
+        var definition = store.GetLatestExtensions(CurrentClassId)?.FirstOrDefault(extension =>
             string.Equals(extension.Id, extensionId, StringComparison.Ordinal));
         if (definition is null)
         {
@@ -182,7 +214,7 @@ public sealed class ControlModel(
             return RedirectToPage();
         }
         var item = (await extensionPolicies.ListForUserAsync(
-                CurrentUser.Id, CurrentUser.Role, Permissions, [definition], ct))
+                CurrentUser.Id, CurrentUser.Role, ClassPermissions, [definition], ct))
             .SingleOrDefault();
         if (item?.CanInvoke != true) return RedirectToPage("/Denied");
 
@@ -244,8 +276,9 @@ public sealed class ControlModel(
         bool showOnWatch,
         CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.RunExtensions) is { } denied) return denied;
-        var definition = store.GetLatestExtensions()?.FirstOrDefault(x => x.Id == extensionId);
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.RunExtensions) is { } classDenied) return classDenied;
+        var definition = store.GetLatestExtensions(CurrentClassId)?.FirstOrDefault(x => x.Id == extensionId);
         if (definition is null) return RedirectToPage("/Denied");
 
         try
@@ -258,17 +291,105 @@ public sealed class ControlModel(
         return RedirectToPage();
     }
 
+    // ---------- 班级设置（班名/头像）：系统管理员或本班班管理员 ----------
+
+    public async Task<IActionResult> OnPostClassInfoAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (!CanManageClassInfo) return RedirectToPage("/Denied");
+        if (string.IsNullOrWhiteSpace(ClassNameInput))
+        {
+            TempData["Error"] = "班名不能为空。";
+            return RedirectToPage();
+        }
+        try
+        {
+            await classesService.RenameClassAsync(CurrentClassId, ClassNameInput, ct);
+            TempData["Message"] = "班名已更新。";
+        }
+        catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostAvatarAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (!CanManageClassInfo) return RedirectToPage("/Denied");
+        var allowed = new[] { "image/png", "image/jpeg", "image/webp" };
+        if (AvatarFile is null || AvatarFile.Length is 0 or > 256 * 1024)
+        {
+            TempData["Error"] = "头像需为不超过 256KB 的图片。";
+            return RedirectToPage();
+        }
+        if (!allowed.Contains(AvatarFile.ContentType))
+        {
+            TempData["Error"] = "头像仅支持 PNG/JPEG/WebP。";
+            return RedirectToPage();
+        }
+        using var memory = new MemoryStream();
+        await AvatarFile.CopyToAsync(memory, ct);
+        await classesService.SetAvatarAsync(CurrentClassId, memory.ToArray(), AvatarFile.ContentType, ct);
+        TempData["Message"] = "班头像已更新。";
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostRemoveAvatarAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (!CanManageClassInfo) return RedirectToPage("/Denied");
+        await classesService.SetAvatarAsync(CurrentClassId, null, null, ct);
+        TempData["Message"] = "班头像已清除。";
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostBroadcastAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.SendNotifications) is { } classDenied) return classDenied;
+        if (BroadcastClassIds.Count == 0)
+        {
+            TempData["Error"] = "请先勾选要通知的班级。";
+            return RedirectToPage();
+        }
+
+        var result = await broadcast.BroadcastAsync(
+            new AuthPrincipal(PeerRole.Watch,
+                await identities.GetProfileAsync(CurrentUser.Id, ct),
+                null, null, null),
+            new BroadcastCommandRequest
+            {
+                Command = CommandKind.SendNotification,
+                Notification = new NotificationRequest
+                {
+                    Title = BroadcastInput.Title,
+                    Message = BroadcastInput.Message,
+                },
+                ClassIds = BroadcastClassIds,
+            }, ct);
+        var ok = result.Results.Count(x => x.Success);
+        var failures = result.Results.Where(x => !x.Success).ToList();
+        TempData[ok > 0 ? "Message" : "Error"] = failures.Count == 0
+            ? $"广播通知已发送到 {ok} 个班级。"
+            : $"广播完成 {ok} 个班级，{failures.Count} 个失败：{string.Join("；", failures.Select(x => x.Message))}";
+        return RedirectToPage();
+    }
+
     private async Task<IActionResult?> LoadAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        Snapshot = store.GetLatestSnapshot();
+        Snapshot = store.GetLatestSnapshot(CurrentClassId);
         VolumeLevel = Snapshot?.VolumePercent ?? 0;
         if (CanSendNotifications) ForceSenderInTitle = await identities.GetForceSenderInTitleAsync();
+        // 广播候选：有通知权限的可访问班级，排除当前班级（当前班用上方单班表单）。
+        BroadcastTargets = AccessibleClasses
+            .Where(x => x.Id != CurrentClassId && x.Permissions?.HasFlag(UserPermissions.SendNotifications) == true)
+            .OrderBy(x => x.Name)
+            .ToList();
         Extensions = await extensionPolicies.ListForUserAsync(
             CurrentUser.Id,
             CurrentUser.Role,
-            Permissions,
-            store.GetLatestExtensions() ?? [],
+            ClassPermissions,
+            store.GetLatestExtensions(CurrentClassId) ?? [],
             ct);
         return !CanTeacherComing && !CanSendNotifications && !CanSendVoiceMessages && !CanClearNotifications && !CanControlMainMenu &&
             !CanControlPower && !CanControlVolume && !CanUseExtensions
@@ -285,13 +406,15 @@ public sealed class ControlModel(
     private async Task<CommandResult> SendAsync(CommandMessage command, CancellationToken ct)
     {
         command.RequestedBy = await identities.GetProfileAsync(CurrentUser.Id, ct);
-        return await peers.SendCommandAndWaitAsync(command, CommandTimeout, ct);
+        command.ClassId = CurrentClassId;
+        return await peers.SendCommandAndWaitAsync(command, CurrentClassId, CommandTimeout, ct);
     }
 
     private bool HasCurrentExtension(string extensionId) =>
-        store.GetLatestExtensions()?.Any(x => x.Id == extensionId) == true;
+        store.GetLatestExtensions(CurrentClassId)?.Any(x => x.Id == extensionId) == true;
 
-    private bool Supports(string capability) => !peers.HasPlugin || peers.PrimaryPluginSupports(capability);
+    private bool Supports(string capability) =>
+        !PluginOnline || peers.PrimaryPluginSupports(CurrentClassId, capability);
 
     private IActionResult VolumeResult(CommandResult result, bool unmuted = false)
     {

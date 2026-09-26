@@ -383,9 +383,8 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var usersHtml = WebUtility.HtmlDecode(await browser.GetStringAsync("/Users"));
         Assert.Contains("角色配置", usersHtml);
         Assert.Contains("创建角色", usersHtml);
-        Assert.Contains("启用访客功能", usersHtml);
         Assert.Contains("自动进入访客页", usersHtml);
-        Assert.Contains("data-visitor-access-form", usersHtml);
+        Assert.Contains("班级管理", usersHtml);
         Assert.Contains("""class="user-account-table role-summary-table""", usersHtml);
         Assert.Contains("""<dialog id="role-create-dialog""", usersHtml);
         var roleTableStart = usersHtml.IndexOf("""class="user-account-table role-summary-table""", StringComparison.Ordinal);
@@ -411,7 +410,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         using (var scope = _factory.Services.CreateScope())
         {
             var store = scope.ServiceProvider.GetRequiredService<IStateStore>();
-            store.SaveSnapshot(new ClassStateSnapshot
+            store.SaveSnapshot(Classroom.DefaultId, new ClassStateSnapshot
             {
                 IsNotificationPlaying = true,
                 IsMainMenuVisible = false,
@@ -421,7 +420,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
                 VolumePercent = 42,
                 IsMuted = false,
             });
-            store.SaveExtensions(new[]
+            store.SaveExtensions(Classroom.DefaultId, new[]
             {
                 new ExtensionDefinition
                 {
@@ -505,7 +504,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var subjectId = Guid.NewGuid();
         using (var setupScope = _factory.Services.CreateScope())
         {
-            setupScope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(new ScheduleBundle
+            setupScope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(Classroom.DefaultId, new ScheduleBundle
             {
                 FromDate = "2026-08-17",
                 Days =
@@ -664,7 +663,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
     {
         using var scope = _factory.Services.CreateScope();
         var tracker = scope.ServiceProvider.GetRequiredService<ScheduleSyncTaskTracker>();
-        var running = tracker.TryBegin(ScheduleSyncRequest.Create(ScheduleSyncSource.Automatic));
+        var running = tracker.TryBegin(ScheduleSyncRequest.Create(ScheduleSyncSource.Automatic), Classroom.DefaultId);
         try
         {
             using var browser = CreateBrowserClient();
@@ -958,6 +957,9 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var overviewHtml = await browser.GetStringAsync("/");
         Assert.Contains("生成配对码", overviewHtml);
         Assert.Contains("重新检测连接", overviewHtml);
+        Assert.Contains("data-mobile-login-qr", overviewHtml);
+        Assert.Contains("手机扫码填写服务器地址", WebUtility.HtmlDecode(overviewHtml));
+        Assert.Contains(WebUtility.HtmlEncode(_factory.Server.BaseAddress.ToString().TrimEnd('/')), overviewHtml);
         Assert.DoesNotContain("去重试连接</a>", overviewHtml);
 
         var retry = await PostRazorFormAsync(browser, "/?handler=RetryConnection", overviewHtml);
@@ -1086,7 +1088,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         {
             var identities = scope.ServiceProvider.GetRequiredService<IdentityCoordinator>();
             var policies = scope.ServiceProvider.GetRequiredService<ExtensionPolicyService>();
-            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveExtensions([definition]);
+            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveExtensions(Classroom.DefaultId, [definition]);
             await policies.EnsureRegisteredAsync([definition]);
             var admin = (await identities.ListUsersAsync()).Single(x => x.Role == UserRole.Admin);
             await policies.UpdateAdminAsync(admin.Id, definition.Id, enabled: true, allowNonAdmin: true, showOnWatch: true);
@@ -1619,7 +1621,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             ["Input.Password"] = password,
             ["__RequestVerificationToken"] = WebUtility.HtmlDecode(match.Groups[1].Value),
         }));
-        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal(HttpStatusCode.SeeOther, response.StatusCode);
     }
 
     private static async Task<HttpResponseMessage> PostRazorFormAsync(
@@ -1694,6 +1696,26 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             return JsonSerializer.Deserialize<T>(
                 JsonSerializer.Serialize(envelope.Payload), JsonDefaults.Options)!;
         }
+    }
+
+    [Fact]
+    public async Task MobileAdminApis_RolesAndVisitorRoundTrip()
+    {
+        var admin = await LoginViaAsync(_client, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
+        var roles = await _client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, "/api/roles", admin.AccessToken));
+        roles.EnsureSuccessStatusCode();
+        var visitor = await _client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, "/api/visitor", admin.AccessToken));
+        visitor.EnsureSuccessStatusCode();
+        var updated = await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Put, "/api/visitor", admin.AccessToken,
+            new VisitorAutoEnterBody(true)));
+        updated.EnsureSuccessStatusCode();
+        var state = await updated.Content.ReadFromJsonAsync<Dictionary<string, object>>();
+        Assert.NotNull(state);
+        var reset = await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Put, "/api/visitor", admin.AccessToken,
+            new VisitorAutoEnterBody(false)));
+        reset.EnsureSuccessStatusCode();
     }
 
     private static async Task<AuthResponse> LoginViaAsync(HttpClient client, string username, string password)

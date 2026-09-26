@@ -60,6 +60,9 @@ public sealed class RemoteCiService : IDisposable
     public CloudConnectionStatus CurrentCloudConnectionStatus =>
         _cloudClient?.CurrentStatus ?? CloudConnectionStatus.Stopped();
 
+    /// <summary>插件归属班级名称（来自按班级生成的授权镜像）；旧版服务端为 null。</summary>
+    public string? CurrentClassName => _accounts.ClassName;
+
     public void Start()
     {
         if (_cts is not null)

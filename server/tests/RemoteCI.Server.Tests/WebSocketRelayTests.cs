@@ -24,7 +24,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         using var plugin = await ConnectPluginAsync();
         await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
         await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
-        await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>().PrimaryPluginSupports(RemoteCiCapabilities.VoiceMessageSend));
+        await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>().PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.VoiceMessageSend));
         using var watch = await ConnectWatchAsync();
         var audio = new byte[VoiceMessageRequest.MaxBytes];
         new Random(42).NextBytes(audio);
@@ -49,6 +49,34 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         var reply = await ReceiveEnvelopeAsync(watch, Protocol.MessageTypeCommandResult);
         Assert.Equal(request.MessageId, reply.ReplyToMessageId);
         Assert.True(ConvertPayload<CommandResult>(reply.Payload).Success);
+    }
+
+    [Fact]
+    public async Task MobileCommand_RelaysToPluginAndReturnsCorrelatedReply()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
+        using var mobile = await ConnectMobileAsync();
+        await ReceivePayloadAsync<AuthState>(mobile, Protocol.MessageTypeAuthState);
+        var request = Envelope.Command(new CommandMessage
+        {
+            Command = CommandKind.TeacherComing,
+        });
+
+        await SendAsync(mobile, request);
+
+        var forwarded = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
+        Assert.Equal(CommandKind.TeacherComing, ConvertPayload<CommandMessage>(forwarded.Payload).Command);
+        await SendAsync(plugin, new Envelope
+        {
+            Type = Protocol.MessageTypeCommandResult,
+            ReplyToMessageId = forwarded.MessageId,
+            Payload = new CommandResult { Success = true, Code = CommandResultCodes.Ok },
+        });
+        var reply = await ReceiveEnvelopeAsync(mobile, Protocol.MessageTypeCommandResult);
+        Assert.Equal(request.MessageId, reply.ReplyToMessageId);
+        Assert.True(ConvertPayload<CommandResult>(reply.Payload).Success);
+        Assert.Equal(1, _factory.Services.GetRequiredService<PeerRegistry>().MobileCount);
     }
 
     [Fact]
@@ -498,7 +526,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
 
         var store = factory.Services.GetRequiredService<IStateStore>();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (store.GetLatestSnapshot()?.CurrentSubject != "性能回归-2")
+        while (store.GetLatestSnapshot(Classroom.DefaultId)?.CurrentSubject != "性能回归-2")
             await Task.Delay(10, timeout.Token);
 
         Assert.Equal(0, commands.Count);
@@ -644,11 +672,15 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         string password = TestWebApplicationFactory.AdminPassword) =>
         await ConnectAsync((await _factory.LoginAsync(username, password)).AccessToken);
 
-    private async Task<WebSocket> ConnectAsync(string token)
+    private async Task<WebSocket> ConnectMobileAsync() =>
+        await ConnectAsync((await _factory.LoginAsync()).AccessToken, "mobile");
+
+    private async Task<WebSocket> ConnectAsync(string token, string? clientKind = null)
     {
-        var client = _factory.Server.CreateWebSocketClient();
-        return await client.ConnectAsync(
-            new Uri(_factory.Server.BaseAddress, $"/ws?{Protocol.QueryToken}={Uri.EscapeDataString(token)}"),
+        var socketClient = _factory.Server.CreateWebSocketClient();
+        var clientQuery = string.IsNullOrWhiteSpace(clientKind) ? string.Empty : $"&client={Uri.EscapeDataString(clientKind)}";
+        return await socketClient.ConnectAsync(
+            new Uri(_factory.Server.BaseAddress, $"/ws?{Protocol.QueryToken}={Uri.EscapeDataString(token)}{clientQuery}"),
             CancellationToken.None);
     }
 

@@ -5,6 +5,11 @@ namespace RemoteCI.Shared.Models;
 /// <summary>高频状态快照，不包含低频七日课表。</summary>
 public sealed class ClassStateSnapshot
 {
+    /// <summary>快照归属班级；旧版服务端不下发该字段。</summary>
+    [JsonPropertyName("classId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? ClassId { get; set; }
+
     [JsonPropertyName("scheduleDate")]
     public string? ScheduleDate { get; set; }
 

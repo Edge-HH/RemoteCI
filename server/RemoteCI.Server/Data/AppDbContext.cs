@@ -16,6 +16,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<BackupConfiguration> BackupConfigurations => Set<BackupConfiguration>();
     public DbSet<ExtensionPolicy> ExtensionPolicies => Set<ExtensionPolicy>();
     public DbSet<UserExtensionPreference> UserExtensionPreferences => Set<UserExtensionPreference>();
+    public DbSet<Classroom> Classrooms => Set<Classroom>();
+    public DbSet<ClassMembership> ClassMemberships => Set<ClassMembership>();
+    public DbSet<ClassGroup> ClassGroups => Set<ClassGroup>();
+    public DbSet<ClassGroupAssignment> ClassGroupAssignments => Set<ClassGroupAssignment>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -24,6 +28,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
         builder.Entity<AppUser>(entity =>
         {
             entity.Property(x => x.DisplayName).HasMaxLength(40);
+            entity.Property(x => x.SetupTokenHash).HasMaxLength(64);
             entity.HasIndex(x => x.Version);
             entity.HasOne(x => x.RoleDefinition).WithMany(x => x.Users).HasForeignKey(x => x.RoleDefinitionId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -62,11 +67,39 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.HasIndex(x => x.TokenHash).IsUnique();
             entity.Property(x => x.TokenHash).HasMaxLength(64);
             entity.Property(x => x.Name).HasMaxLength(80);
+            entity.HasOne(x => x.Classroom).WithMany().HasForeignKey(x => x.ClassroomId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<PluginPairingCode>(entity =>
         {
             entity.HasIndex(x => x.CodeHash).IsUnique();
             entity.Property(x => x.CodeHash).HasMaxLength(64);
+        });
+        builder.Entity<Classroom>(entity =>
+        {
+            entity.Property(x => x.Name).HasMaxLength(40);
+            entity.HasIndex(x => x.Name).IsUnique();
+            entity.Property(x => x.AvatarContentType).HasMaxLength(64);
+        });
+        builder.Entity<ClassGroup>(entity =>
+        {
+            entity.Property(x => x.Name).HasMaxLength(40);
+            entity.HasIndex(x => x.Name).IsUnique();
+            entity.HasOne(x => x.Parent).WithMany(x => x.Children).HasForeignKey(x => x.ParentId).OnDelete(DeleteBehavior.SetNull);
+        });
+        builder.Entity<ClassGroupAssignment>(entity =>
+        {
+            entity.HasKey(x => new { x.GroupId, x.ClassroomId });
+            entity.HasIndex(x => x.ClassroomId);
+            entity.HasOne(x => x.Group).WithMany(x => x.Assignments).HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Classroom).WithMany(x => x.GroupAssignments).HasForeignKey(x => x.ClassroomId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ClassMembership>(entity =>
+        {
+            entity.HasKey(x => new { x.UserId, x.ClassroomId });
+            entity.HasIndex(x => x.ClassroomId);
+            entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Classroom).WithMany(x => x.Memberships).HasForeignKey(x => x.ClassroomId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.RoleDefinition).WithMany().HasForeignKey(x => x.RoleDefinitionId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

@@ -34,6 +34,11 @@ public readonly record struct ExtensionId
 /// </summary>
 public sealed class ExtensionDefinition
 {
+    /// <summary>扩展归属班级；旧版服务端不下发该字段。</summary>
+    [JsonPropertyName("classId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? ClassId { get; set; }
+
     /// <summary>全局唯一扩展 Id，命令路由与去重都使用它；格式由 <see cref="ExtensionId"/> 统一约束。</summary>
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
@@ -97,11 +102,16 @@ public enum ExtensionParameterType
 /// <summary>扩展调用权限的统一判定，供服务端、插件和客户端保持一致。</summary>
 public static class ExtensionAccess
 {
-    public static bool CanInvoke(UserProfile? user, ExtensionDefinition extension)
+    /// <summary>按有效权限位与允许列表判定；供班级上下文等没有完整 Profile 的场景使用。</summary>
+    public static bool CanInvoke(
+        UserPermissions permissions, IEnumerable<string>? allowedExtensionIds, ExtensionDefinition extension)
     {
-        if (user is null || !user.Permissions.HasFlag(UserPermissions.RunExtensions)) return false;
-        return user.AllowedExtensionIds is null || user.AllowedExtensionIds.Contains(extension.Id, StringComparer.Ordinal);
+        if (!permissions.HasFlag(UserPermissions.RunExtensions)) return false;
+        return allowedExtensionIds is null || allowedExtensionIds.Contains(extension.Id, StringComparer.Ordinal);
     }
+
+    public static bool CanInvoke(UserProfile? user, ExtensionDefinition extension) =>
+        CanInvoke(user?.Permissions ?? UserPermissions.None, user?.AllowedExtensionIds, extension);
 
     public static bool IsVisibleOnWatch(UserProfile? user, ExtensionDefinition extension) =>
         CanInvoke(user, extension) &&

@@ -3,29 +3,37 @@ using RemoteCI.Server.Data;
 
 namespace RemoteCI.Server.Services;
 
-public sealed record VisitorAccessState(bool Enabled, bool AutoEnter);
-
+/// <summary>全局访客入口设置；班级级“是否开放访客”开关在 Classroom.VisitorAccessEnabled 上。</summary>
 public sealed class VisitorAccessSettings(AppDbContext db)
 {
-    public async Task<VisitorAccessState> GetAsync(CancellationToken ct = default)
+    public async Task<bool> GetAutoEnterAsync(CancellationToken ct = default)
     {
-        var row = await db.SystemMetadata.AsNoTracking()
+        return await db.SystemMetadata.AsNoTracking()
             .Where(metadata => metadata.Id == 1)
-            .Select(metadata => new { metadata.VisitorAccessEnabled, metadata.AutoEnterVisitorPage })
+            .Select(metadata => metadata.AutoEnterVisitorPage)
             .SingleAsync(ct);
-        return Normalize(row.VisitorAccessEnabled, row.AutoEnterVisitorPage);
     }
 
-    public async Task<VisitorAccessState> SetAsync(bool enabled, bool autoEnter, CancellationToken ct = default)
+    public async Task<bool> SetAutoEnterAsync(bool autoEnter, CancellationToken ct = default)
     {
         var metadata = await db.SystemMetadata.SingleAsync(row => row.Id == 1, ct);
-        var state = Normalize(enabled, autoEnter);
-        metadata.VisitorAccessEnabled = state.Enabled;
-        metadata.AutoEnterVisitorPage = state.AutoEnter;
+        // 只保存管理员意图；是否真正生效由读取方结合“存在开放访客的班级”判断，
+        // 避免开关班级后全局意图被静默改写。
+        metadata.AutoEnterVisitorPage = autoEnter;
         await db.SaveChangesAsync(ct);
-        return state;
+        return metadata.AutoEnterVisitorPage;
     }
 
-    private static VisitorAccessState Normalize(bool enabled, bool autoEnter) =>
-        new(enabled, enabled && autoEnter);
+    /// <summary>是否存在开放访客的班级；决定访客页与自动进入是否可用。</summary>
+    public async Task<bool> AnyVisitorClassEnabledAsync(CancellationToken ct = default) =>
+        await db.Classrooms.AsNoTracking().AnyAsync(x => x.VisitorAccessEnabled, ct);
+
+    /// <summary>开放访客的班级，供访客页渲染班级选择；访客数量级很小，直接取回。</summary>
+    public async Task<IReadOnlyList<Classroom>> ListVisitorClassroomsAsync(CancellationToken ct = default)
+    {
+        var classrooms = await db.Classrooms.AsNoTracking()
+            .Where(x => x.VisitorAccessEnabled)
+            .ToListAsync(ct);
+        return classrooms.OrderBy(x => x.CreatedAt).ToList();
+    }
 }
