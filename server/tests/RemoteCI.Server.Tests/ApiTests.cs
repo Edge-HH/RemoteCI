@@ -1622,7 +1622,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             ["Input.Password"] = password,
             ["__RequestVerificationToken"] = WebUtility.HtmlDecode(match.Groups[1].Value),
         }));
-        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal(HttpStatusCode.SeeOther, response.StatusCode);
     }
 
     private static async Task<HttpResponseMessage> PostRazorFormAsync(

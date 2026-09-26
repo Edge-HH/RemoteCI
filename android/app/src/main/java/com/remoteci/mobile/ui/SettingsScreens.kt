@@ -26,6 +26,7 @@ import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.Button
@@ -43,6 +44,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -96,6 +98,7 @@ fun SecondaryHost(
         Screen.Pairing -> PairingScreen(onBack, snackbar)
         Screen.Connection -> ConnectionScreen(settings, onBack, onPersist)
         Screen.NotificationSettings -> NotificationSettingsScreen(settings, onBack, onPersist)
+        Screen.ScheduleSettings -> ScheduleSettingsScreen(onBack)
         Screen.Appearance -> AppearanceScreen(settings, onBack, onPersist)
         Screen.Updates -> UpdatesScreen(settings, onBack, onPersist)
         Screen.Developer -> DeveloperScreen(settings, onBack, onPersist)
@@ -151,6 +154,7 @@ fun AccountScreen(
         val rows = listOf(
             Triple("连接与服务器", "账号、云端地址、局域网插件发现与重新连接", Screen.Connection to Icons.Rounded.Wifi),
             Triple("通知设置", "课程、自动化和第三方插件提醒的同步开关", Screen.NotificationSettings to Icons.Rounded.Notifications),
+            Triple("自动拉取课表", "设置在线插件自动刷新课表的周期", Screen.ScheduleSettings to Icons.Rounded.Schedule),
             Triple("外观", "主题与显示偏好", Screen.Appearance to Icons.Rounded.Palette),
             Triple("更新", "检查更新与同版本强制覆盖", Screen.Updates to Icons.Rounded.SystemUpdate),
             Triple("开发者设置", "云端中转、局域网连接开关与重新连接", Screen.Developer to Icons.Rounded.Code),
@@ -169,6 +173,50 @@ fun AccountScreen(
                     onClick = { onOpen(screen) },
                 )
             }
+        }
+    }
+}
+
+/** 与 WebUI“自动拉取课表”使用同一个管理 API；旧服务端不支持时保留当前页面并提示原因。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ScheduleSettingsScreen(onBack: () -> Unit) {
+    val user by ConnectionManager.currentUser.collectAsState()
+    val scope = rememberCoroutineScope()
+    var interval by remember { mutableStateOf(0) }
+    var status by remember { mutableStateOf("正在读取设置…") }
+    val choices = listOf(0 to "关闭", 15 to "每 15 分钟", 60 to "每小时", 360 to "每 6 小时", 1440 to "每天")
+    LaunchedEffect(user) {
+        if (user != null) {
+            runCatching { AdminApi.schedulePull() }
+                .onSuccess { interval = it.intervalMinutes; status = "已读取服务端设置" }
+                .onFailure { status = it.message ?: "旧版服务端未提供自动拉取设置" }
+        }
+    }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        TopAppBar(title = { Text("自动拉取课表") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("插件每次连接时都会拉取课表；这里设置在线期间的额外刷新周期。", style = MaterialTheme.typography.bodyMedium)
+            choices.forEach { (value, label) ->
+                FilterChip(
+                    selected = interval == value,
+                    onClick = { interval = value },
+                    label = { Text(label) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(
+                onClick = {
+                    scope.launch {
+                        runCatching { AdminApi.setSchedulePull(interval) }
+                            .onSuccess { saved -> status = "已保存：${choices.firstOrNull { it.first == saved.intervalMinutes }?.second ?: "自定义"}" }
+                            .onFailure { status = it.message ?: "保存失败" }
+                    }
+                },
+                enabled = user?.has(Protocol.PERMISSION_MANAGE_SCHEDULE) == true,
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+            ) { Text("保存设置") }
         }
     }
 }
@@ -420,19 +468,29 @@ fun SystemScreen(onBack: () -> Unit, snackbar: SnackbarHostState) {
                 }, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("立即备份") }
                 if (backups.isEmpty()) EmptyState("没有备份", "创建后可在这里恢复或删除。")
                 backups.forEach { backup ->
-                    AppListItem(
-                        title = backup.name,
-                        supporting = "${backup.createdAt ?: ""} · ${backup.size} 字节",
-                        leading = Icons.Rounded.Settings,
-                        trailingText = "恢复",
-                        onClick = {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        AppListItem(
+                            title = backup.name,
+                            supporting = "${backup.createdAt ?: ""} · ${backup.size} 字节",
+                            leading = Icons.Rounded.Settings,
+                            trailingText = "恢复",
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                scope.launch {
+                                    runCatching { AdminApi.restoreBackup(backup.name) }
+                                        .onSuccess { snackbar.showSnackbar("已请求恢复") }
+                                        .onFailure { snackbar.showSnackbar(it.message ?: "恢复失败") }
+                                }
+                            },
+                        )
+                        TextButton(onClick = {
                             scope.launch {
-                                runCatching { AdminApi.restoreBackup(backup.name) }
-                                    .onSuccess { snackbar.showSnackbar("已请求恢复") }
-                                    .onFailure { snackbar.showSnackbar(it.message ?: "恢复失败") }
+                                runCatching { AdminApi.deleteBackup(backup.name) }
+                                    .onSuccess { backups = AdminApi.backups(); snackbar.showSnackbar("备份已删除") }
+                                    .onFailure { snackbar.showSnackbar(it.message ?: "删除失败") }
                             }
-                        },
-                    )
+                        }) { Text("删除") }
+                    }
                 }
             }
         }

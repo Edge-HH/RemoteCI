@@ -98,6 +98,35 @@ public sealed class VisitorAccessTests
     }
 
     [Fact]
+    public async Task LoginPage_OffersRememberMeAndUsesPersistentCookieWhenSelected()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var browser = CreateBrowser(factory);
+
+        var loginHtml = WebUtility.HtmlDecode(await browser.GetStringAsync("/Login"));
+        Assert.Contains("name=\"Input.RememberMe\"", loginHtml);
+        Assert.Contains("保持登录", loginHtml);
+
+        var token = Regex.Match(
+            loginHtml,
+            "<input[^>]+name=\"__RequestVerificationToken\"[^>]+value=\"([^\"]+)\"",
+            RegexOptions.IgnoreCase);
+        Assert.True(token.Success, "登录页必须包含 CSRF 令牌");
+        using var response = await browser.PostAsync("/Login", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["Input.Username"] = TestWebApplicationFactory.AdminUsername,
+            ["Input.Password"] = TestWebApplicationFactory.AdminPassword,
+            ["Input.RememberMe"] = "true",
+            ["__RequestVerificationToken"] = WebUtility.HtmlDecode(token.Groups[1].Value),
+        }));
+
+        Assert.Equal(HttpStatusCode.SeeOther, response.StatusCode);
+        var cookies = response.Headers.GetValues("Set-Cookie");
+        Assert.Contains(cookies, cookie => cookie.Contains("RemoteCI.Web=", StringComparison.Ordinal));
+        Assert.Contains(cookies, cookie => cookie.Contains("expires=", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task AutoEnter_RequiresVisitorAccessAndCanReturnToLogin()
     {
         await using var factory = new TestWebApplicationFactory();
@@ -190,7 +219,7 @@ public sealed class VisitorAccessTests
             ["Input.Password"] = password,
             ["__RequestVerificationToken"] = WebUtility.HtmlDecode(match.Groups[1].Value),
         }));
-        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal(HttpStatusCode.SeeOther, response.StatusCode);
     }
 
     private static async Task<HttpResponseMessage> PostRazorFormAsync(

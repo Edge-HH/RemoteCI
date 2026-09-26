@@ -58,6 +58,7 @@ sealed interface Screen {
     data object Pairing : Screen
     data object Connection : Screen
     data object NotificationSettings : Screen
+    data object ScheduleSettings : Screen
     data object Appearance : Screen
     data object Updates : Screen
     data object Developer : Screen

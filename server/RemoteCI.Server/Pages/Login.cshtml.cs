@@ -55,14 +55,23 @@ public sealed class LoginModel(
             ModelState.AddModelError(string.Empty, "ID 或密码错误");
             return Page();
         }
-        var result = await signIn.PasswordSignInAsync(user, Input.Password, false, true);
+        var result = await signIn.PasswordSignInAsync(user, Input.Password, Input.RememberMe, true);
         if (!result.Succeeded)
         {
             ModelState.AddModelError(string.Empty, result.IsLockedOut ? "登录失败次数过多，请稍后再试" : "ID 或密码错误");
             return Page();
         }
         var permissions = RolePermissions.Effective(user.Role, user.GrantedPermissions);
-        return RedirectToPage(permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account");
+        // 登录表单是 POST。使用 303 明确要求浏览器以 GET 打开落地页，避免
+        // 用户返回时恢复 POST 历史并触发“重新提交表单”（ERR_CACHE_MISS）。
+        return RedirectAfterPost(permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account");
+    }
+
+    private IActionResult RedirectAfterPost(string page)
+    {
+        Response.StatusCode = StatusCodes.Status303SeeOther;
+        Response.Headers.Location = Url.Page(page) ?? "/";
+        return new EmptyResult();
     }
 
     public sealed class LoginInput
@@ -72,5 +81,7 @@ public sealed class LoginModel(
 
         [Required, StringLength(128, MinimumLength = 8)]
         public string Password { get; set; } = string.Empty;
+
+        public bool RememberMe { get; set; }
     }
 }

@@ -100,6 +100,7 @@ fun AppListItem(
     onSwitch: ((Boolean) -> Unit)? = null,
     index: Int = 0,
     count: Int = 1,
+    modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
 ) {
     val colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
@@ -126,7 +127,7 @@ fun AppListItem(
             }
         },
         colors = colors,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .scale(scale)
             .clip(shape)

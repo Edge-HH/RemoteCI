@@ -64,8 +64,13 @@ object ConnectionManager {
         // 否则连接会“看起来还活着”却永远收不到数据、永不重连。
         .pingInterval(20, TimeUnit.SECONDS)
         .build()
-    private val lanDiscoveryClient = LanDiscoveryClient(okHttp, json)
+    // 无效的局域网候选只等待很短时间；云端请求仍使用上面的 6 秒超时。
+    private val lanOkHttp = okHttp.newBuilder()
+        .connectTimeout(1_500, TimeUnit.MILLISECONDS)
+        .build()
+    private val lanDiscoveryClient = LanDiscoveryClient(lanOkHttp, json)
     private lateinit var sessions: SessionStorage
+    private var appContext: Context? = null
     // 以下字段会被 OkHttp 回调线程、IO 协程与主线程并发读写，必须保证跨线程可见性。
     @Volatile private var webSocket: WebSocket? = null
     private var activeJob: Job? = null
@@ -128,8 +133,11 @@ object ConnectionManager {
     val lanBootstrapPending = MutableStateFlow<Pair<LanPluginCandidate, WatchSettings>?>(null)
 
     fun initialize(context: Context) {
+        appContext = context.applicationContext
         if (!::sessions.isInitialized) sessions = SecureSessionStore(context.applicationContext)
     }
+
+    private fun localNetworkAllowed(): Boolean = appContext?.let(::hasLocalNetworkPermission) ?: true
 
     /** 仅供 JVM 单元测试注入内存会话存储，绕开 Android Keystore。 */
     internal fun installSessionStorageForTest(storage: SessionStorage) {
@@ -145,6 +153,11 @@ object ConnectionManager {
     fun scanLanPlugins() {
         discoveryJob?.cancel()
         lanPlugins.value = emptyList()
+        if (!localNetworkAllowed()) {
+            lanDiscoveryScanning.value = false
+            lanDiscoveryStatus.value = LocalNetworkPermissionMessage
+            return
+        }
         lanDiscoveryStatus.value = "正在扫描同一局域网中的 RemoteCI 插件…"
         lanDiscoveryScanning.value = true
         discoveryJob = scope.launch {
@@ -170,6 +183,7 @@ object ConnectionManager {
     ): WatchSettings? {
         lanDiscoveryStatus.value = "正在连接 ${candidate.instanceName}…"
         return try {
+            if (!localNetworkAllowed()) throw IOException(LocalNetworkPermissionMessage)
             val bootstrap = lanDiscoveryClient.fetchBootstrap(candidate)
             val updated = mergeLanBootstrapInfo(settings, candidate, bootstrap)
             lanPlugins.value = emptyList()
@@ -238,14 +252,10 @@ object ConnectionManager {
                     accessToken = auth.accessToken
                     val session = sessions.load() ?: throw MissingSessionException()
                     if (plan.preferLanAfterCloudAuthentication) {
-                        // 登录端点会把新设备会话先同步给插件；镜像传播需要时间，
-                        // 因此短间隔重试几次 HMAC 挑战，全部失败再回退云端中转。
-                        repeat(6) {
-                            delay(400)
-                            if (connectLan(settings, session, attempt)) {
-                                scheduleAccessRefresh(settings, auth.accessExpiresAt, attempt)
-                                return@launch
-                            }
+                        // 先直连一次；插件镜像尚未同步时走云端，后续地址上报会触发重新直连。
+                        if (connectLan(settings, session, attempt)) {
+                            scheduleAccessRefresh(settings, auth.accessExpiresAt, attempt)
+                            return@launch
                         }
                     }
                     if (!plan.allowCloudFallback)
@@ -254,33 +264,40 @@ object ConnectionManager {
                     return@launch
                 }
 
-                var saved = sessions.load() ?: throw MissingSessionException()
+                val saved = sessions.load() ?: throw MissingSessionException()
                 if (settings.username.isNotBlank() && saved.username != settings.username)
                     throw MissingSessionException()
 
-                // 恢复会话时先换取 WebUI 管理 API 所需的短期访问令牌，再尝试局域网直连。
-                // refresh 会轮换设备密钥并同步到插件，因此直连采用刷新后的会话并短暂重试。
-                val refreshed = if (plan.allowCloudFallback) refreshCloud(settings, saved) else null
-                if (refreshed != null) {
-                    persist(refreshed)
-                    accessToken = refreshed.accessToken
-                    saved = sessions.load() ?: throw MissingSessionException()
-                }
-                var lanOk = false
-                if (settings.lanConnectionEnabled && lanEndpointHosts(settings).isNotEmpty()) {
-                    repeat(if (refreshed == null) 1 else 6) { index ->
-                        if (!lanOk) {
-                            if (index > 0) delay(400)
-                            lanOk = connectLan(settings, saved, attempt)
+                // 已保存会话优先走局域网，和手表保持相同的低延迟路径。
+                // 令牌刷新只服务于 WebUI 管理 API，不能阻塞本地 WebSocket 的首屏连接。
+                // 已保存的设备会话不需要等待登录端点传播；重复握手会把一次失败的
+                // 超时放大成几十秒。手表端也只走一次，失败后直接使用云端回退。
+                val lanOk = settings.lanConnectionEnabled && lanEndpointHosts(settings).isNotEmpty() &&
+                    connectLan(settings, saved, attempt)
+                if (lanOk) {
+                    // 局域网连接已可用后，再后台刷新短期令牌。这样人员、设置、备份等
+                    // WebUI 管理接口仍然可用，同时不会把云端往返放在连接关键路径上。
+                    if (plan.allowCloudFallback) {
+                        scope.launch {
+                            runCatching { refreshCloud(settings, saved) }
+                                .onSuccess { refreshed ->
+                                    if (attempt == generation.get()) {
+                                        persist(refreshed)
+                                        accessToken = refreshed.accessToken
+                                        scheduleAccessRefresh(settings, refreshed.accessExpiresAt, attempt)
+                                    }
+                                }
                         }
                     }
-                }
-                if (lanOk) {
-                    refreshed?.let { scheduleAccessRefresh(settings, it.accessExpiresAt, attempt) }
                     return@launch
                 }
-                if (!plan.allowCloudFallback) throw IOException("局域网连接失败")
-                connectCloud(settings, refreshed ?: throw IOException("无法刷新云端会话"), attempt)
+                if (!plan.allowCloudFallback) {
+                    throw IOException(if (localNetworkAllowed()) "局域网连接失败" else LocalNetworkPermissionMessage)
+                }
+                val refreshed = refreshCloud(settings, saved)
+                persist(refreshed)
+                accessToken = refreshed.accessToken
+                connectCloud(settings, refreshed, attempt)
             } catch (_: AuthenticationException) {
                 state.value = State.Error("用户名或密码错误")
                 serverVersion.value = null
@@ -480,6 +497,7 @@ object ConnectionManager {
         session: PersistedDeviceSession,
         attempt: Int,
     ): Boolean {
+        if (!localNetworkAllowed()) return false
         // 明文 ws:// 直连只允许私网/环回主机，公网候选一律跳过。
         for (host in lanEndpointHosts(settings).filter(::isCleartextSafeHost)) {
             if (!connectWebSocket(
@@ -487,6 +505,8 @@ object ConnectionManager {
                     successState = State.LanConnected,
                     session = session,
                     attempt = attempt,
+                    client = lanOkHttp,
+                    handshakeTimeoutMs = LanAuthHandshakeTimeoutMs,
                 )
             ) continue
 
@@ -539,6 +559,9 @@ object ConnectionManager {
     private suspend fun postAuth(settings: WatchSettings, path: String, bodyJson: String): AuthResponse =
         withContext(Dispatchers.IO) {
             requireCloudServerUrl(settings.cloudServerUrl)
+            if (!localNetworkAllowed() && isLocalServerUrl(settings.cloudServerUrl)) {
+                throw IOException(LocalNetworkPermissionMessage)
+            }
             val request = Request.Builder()
                 .url("${settings.cloudServerUrl.trimEnd('/')}$path")
                 .post(bodyJson.toRequestBody("application/json".toMediaType()))
@@ -567,11 +590,13 @@ object ConnectionManager {
         successState: State,
         session: PersistedDeviceSession?,
         attempt: Int,
+        client: OkHttpClient = okHttp,
+        handshakeTimeoutMs: Long = AuthHandshakeTimeoutMs,
     ): Boolean = try {
         // 认证阶段限时：故障或恶意对端完成握手后从不回 auth_state 时（readTimeout=0 + ping 保活
         // 会让死连接永久存活），超时后按连接失败走外层回退，而不是永久停在“连接中”。
-        withTimeout(AuthHandshakeTimeoutMs) {
-            awaitAuthenticatedSocket(url, successState, session, attempt)
+        withTimeout(handshakeTimeoutMs) {
+            awaitAuthenticatedSocket(url, successState, session, attempt, client)
         }
     } catch (_: TimeoutCancellationException) {
         false
@@ -582,6 +607,7 @@ object ConnectionManager {
         successState: State,
         session: PersistedDeviceSession?,
         attempt: Int,
+        client: OkHttpClient,
     ): Boolean = suspendCancellableCoroutine { continuation ->
         // 只有“认证成功进入工作状态”的连接在断开后才允许自动重连；
         // 连接失败或认证被拒的 socket 由外层流程决定回退，否则每次失败都会调度一次全量重连形成风暴。
@@ -659,7 +685,7 @@ object ConnectionManager {
                 if (authenticated && attempt == generation.get() && !continuation.isActive) scheduleReconnect(attempt)
             }
         }
-        val socket = okHttp.newWebSocket(Request.Builder().url(url).build(), listener)
+        val socket = client.newWebSocket(Request.Builder().url(url).build(), listener)
         continuation.invokeOnCancellation { socket.close(1000, "cancelled") }
     }
 
@@ -852,6 +878,9 @@ internal const val MaxReconnectDelayMs = 60_000L
 
 /** 认证握手限时：对端只完成 WebSocket 握手但从不回 auth_state 时不得永久挂起。 */
 internal const val AuthHandshakeTimeoutMs = 15_000L
+
+/** 局域网认证应在一次短探测内失败，避免坏的虚拟网卡地址拖慢整个登录流程。 */
+internal const val LanAuthHandshakeTimeoutMs = 4_000L
 
 /** 手动拉取课表等待插件回传的最长时间，与 WebUI 的等待上限保持一致。 */
 internal const val SchedulePullTimeoutMs = 15_000L

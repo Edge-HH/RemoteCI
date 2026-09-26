@@ -10,6 +10,10 @@
         <div asp-validation-summary="ModelOnly" class="validation"></div>
         <label>ID<input asp-for="Input.Username" autocomplete="username" /></label>
         <label>密码<input asp-for="Input.Password" type="password" autocomplete="current-password" /></label>
+        <label class="check remember-me">
+            <input asp-for="Input.RememberMe" />
+            <span>保持登录</span>
+        </label>
         <button type="submit">登录</button>
     </form>
     @if (Model.VisitorAccessEnabled)

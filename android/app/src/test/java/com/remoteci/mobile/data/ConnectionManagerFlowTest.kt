@@ -162,10 +162,6 @@ class ConnectionManagerFlowTest {
     @Test
     fun `lan challenge proof verifies server-side and reaches lan connected`() = runBlocking {
         ConnectionManager.installSessionStorageForTest(FakeSessionStorage(session()))
-        server.enqueue(
-            MockResponse.Builder().code(200)
-                .body(json.encodeToString(AuthResponse.serializer(), authResponse())).build(),
-        )
         val challenge = AuthChallenge(challengeId = "c1", nonce = "n1", expiresAt = "2099-01-01T00:00:00Z")
         var proofVerified = false
         val wsListener = object : WebSocketListener() {
@@ -205,6 +201,11 @@ class ConnectionManagerFlowTest {
             }
         }
         server.enqueue(MockResponse.Builder().webSocketUpgrade(wsListener).build())
+        // 已保存会话的局域网连接先于管理 API 令牌刷新；刷新请求在 WebSocket 成功后后台发送。
+        server.enqueue(
+            MockResponse.Builder().code(200)
+                .body(json.encodeToString(AuthResponse.serializer(), authResponse())).build(),
+        )
         val settings = WatchSettings(
             cloudServerUrl = server.url("/").toString().trimEnd('/'),
             lanConnectionEnabled = true,
@@ -217,6 +218,10 @@ class ConnectionManagerFlowTest {
         awaitState({ it is ConnectionManager.State.LanConnected })
         assertTrue(proofVerified)
         assertEquals("teacher", ConnectionManager.currentUser.value?.username)
+        // 局域网连接不再等待云端往返；管理 API 令牌在连接成功后后台刷新。
+        withTimeout(5_000) {
+            while (ConnectionManager.restToken() == null) delay(10)
+        }
         assertEquals("tok-abc", ConnectionManager.restToken())
     }
 

@@ -193,6 +193,17 @@ class AuthorizationAndNotificationTest {
     }
 
     @Test
+    fun `local server addresses need network permission regardless of tls`() {
+        assertTrue(isLocalServerUrl("http://10.0.2.2:8080"))
+        assertTrue(isLocalServerUrl("https://192.168.1.5:8443"))
+        assertTrue(isLocalServerUrl("http://localhost:8080"))
+        assertTrue(isLocalServerUrl("https://server.local"))
+        assertTrue(isLocalServerUrl("http://[fd00::10]:8080"))
+        assertFalse(isLocalServerUrl("https://ci.example.com"))
+        assertFalse(isLocalServerUrl("https://1.1.1.1"))
+    }
+
+    @Test
     fun `lan endpoint hosts deduplicate and preserve preferred order`() {
         assertEquals(
             listOf("192.168.50.8", "10.0.0.9"),
