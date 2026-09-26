@@ -25,7 +25,6 @@ public sealed class UsersModel(
     public IReadOnlyList<UserListItem> Accounts { get; private set; } = [];
     public IReadOnlyList<AccountRoleInfo> RoleDefinitions { get; private set; } = [];
     [BindProperty] public RoleInput RoleEdit { get; set; } = new();
-    [BindProperty] public bool VisitorAccessEnabled { get; set; }
     [BindProperty] public bool AutoEnterVisitorPage { get; set; }
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct) => await LoadAsync(ct);
@@ -153,10 +152,12 @@ public sealed class UsersModel(
     public async Task<IActionResult> OnPostVisitorAccessAsync(CancellationToken ct)
     {
         if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
-        var state = await visitorAccess.SetAsync(VisitorAccessEnabled, AutoEnterVisitorPage, ct);
-        TempData["Message"] = state.Enabled
-            ? state.AutoEnter ? "已启用访客功能，访问 WebUI 将直接进入访客课表。" : "已启用访客功能。"
-            : "已关闭访客功能。";
+        // 班级级“开放访客”开关在班级管理页逐班配置；这里只保留登录页自动进入的全局行为。
+        var autoEnter = await visitorAccess.SetAutoEnterAsync(AutoEnterVisitorPage, ct);
+        AutoEnterVisitorPage = autoEnter;
+        TempData["Message"] = autoEnter
+            ? "已开启自动进入访客页。"
+            : "已关闭自动进入访客页。";
         return RedirectToPage();
     }
 
@@ -192,9 +193,7 @@ public sealed class UsersModel(
         if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
         Accounts = await identities.ListUsersAsync(ct);
         RoleDefinitions = await roleService.ListAsync(ct);
-        var visitor = await visitorAccess.GetAsync(ct);
-        VisitorAccessEnabled = visitor.Enabled;
-        AutoEnterVisitorPage = visitor.AutoEnter;
+        AutoEnterVisitorPage = await visitorAccess.GetAutoEnterAsync(ct);
         return Page();
     }
 
@@ -237,9 +236,7 @@ public sealed class UsersModel(
         TempData["Error"] = message;
         Accounts = await identities.ListUsersAsync(ct);
         RoleDefinitions = await roleService.ListAsync(ct);
-        var visitor = await visitorAccess.GetAsync(ct);
-        VisitorAccessEnabled = visitor.Enabled;
-        AutoEnterVisitorPage = visitor.AutoEnter;
+        AutoEnterVisitorPage = await visitorAccess.GetAutoEnterAsync(ct);
         return Page();
     }
 

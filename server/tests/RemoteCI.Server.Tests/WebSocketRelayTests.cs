@@ -24,7 +24,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         using var plugin = await ConnectPluginAsync();
         await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
         await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
-        await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>().PrimaryPluginSupports(RemoteCiCapabilities.VoiceMessageSend));
+        await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>().PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.VoiceMessageSend));
         using var watch = await ConnectWatchAsync();
         var audio = new byte[VoiceMessageRequest.MaxBytes];
         new Random(42).NextBytes(audio);
@@ -526,7 +526,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
 
         var store = factory.Services.GetRequiredService<IStateStore>();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (store.GetLatestSnapshot()?.CurrentSubject != "性能回归-2")
+        while (store.GetLatestSnapshot(Classroom.DefaultId)?.CurrentSubject != "性能回归-2")
             await Task.Delay(10, timeout.Token);
 
         Assert.Equal(0, commands.Count);

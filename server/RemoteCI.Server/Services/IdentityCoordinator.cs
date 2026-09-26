@@ -17,6 +17,7 @@ public sealed partial class IdentityCoordinator(
     AppDbContext db,
     UserManager<AppUser> users,
     ExtensionPolicyService extensionPolicies,
+    ClassAccessService classAccess,
     IOptions<ServerOptions> options,
     ILogger<IdentityCoordinator> logger)
 {
@@ -37,18 +38,54 @@ public sealed partial class IdentityCoordinator(
     /// <summary>每个账号同时保持的设备会话上限，超出时撤销最早创建的会话。</summary>
     private const int MaxActiveSessionsPerUser = 20;
 
+    /// <summary>内置“班管理员”角色的默认权限：班内日常管理，不含用户管理、电源/主菜单控制等系统级权限。</summary>
+    public const UserPermissions ClassAdministratorDefaultPermissions =
+        UserPermissions.ViewCurrentCourse | UserPermissions.AccessWebUi | UserPermissions.ManageSchedule |
+        UserPermissions.SendNotifications | UserPermissions.SendVoiceMessages | UserPermissions.TeacherComing |
+        UserPermissions.RunExtensions;
+
+    /// <summary>确保默认班级存在；迁移或首次启动都依赖它承接升级前的全部数据。</summary>
+    private async Task SeedDefaultClassroomAsync(CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (await db.Classrooms.AnyAsync(x => x.Id == Classroom.DefaultId, ct))
+        {
+            await db.Classrooms.Where(x => x.Id == Classroom.DefaultId).ExecuteUpdateAsync(setters => setters
+                .SetProperty(x => x.Name, "默认班级"), ct);
+            return;
+        }
+        db.Classrooms.Add(new Classroom
+        {
+            Id = Classroom.DefaultId,
+            Name = "默认班级",
+            VisitorAccessEnabled = false,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync(ct);
+    }
+
     public async Task BootstrapAsync(CancellationToken ct = default)
     {
         await db.Database.MigrateAsync(ct);
+        // 显式列出全部列：不依赖数据库 schema 中的列默认值，INSERT OR IGNORE 才不会因
+        // NOT NULL 约束被静默跳过。
         await db.Database.ExecuteSqlRawAsync(
-            "INSERT OR IGNORE INTO SystemMetadata (Id, AccountVersion) VALUES (1, 0);", ct);
+            "INSERT OR IGNORE INTO SystemMetadata (Id, AccountVersion, ForceSenderInTitle, SchedulePullIntervalMinutes, AutoEnterVisitorPage) VALUES (1, 0, 1, 0, 0);", ct);
         var now = DateTimeOffset.UtcNow;
         if (!await db.AccountRoles.AnyAsync(ct))
         {
             db.AccountRoles.AddRange(
                 new AccountRole { Id = AccountRole.StudentId, Name = "Student", NormalizedName = "STUDENT", Kind = AccountRoleKind.Student, DefaultPermissions = UserPermissions.None, CreatedAt = now, UpdatedAt = now },
-                new AccountRole { Id = AccountRole.AdministratorId, Name = "Administrator", NormalizedName = "ADMINISTRATOR", Kind = AccountRoleKind.Administrator, DefaultPermissions = UserPermissions.All, CreatedAt = now, UpdatedAt = now });
+                new AccountRole { Id = AccountRole.AdministratorId, Name = "Administrator", NormalizedName = "ADMINISTRATOR", Kind = AccountRoleKind.Administrator, DefaultPermissions = UserPermissions.All, CreatedAt = now, UpdatedAt = now },
+                new AccountRole { Id = AccountRole.ClassAdministratorId, Name = "ClassAdministrator", NormalizedName = "CLASSADMINISTRATOR", Kind = AccountRoleKind.ClassAdministrator, DefaultPermissions = ClassAdministratorDefaultPermissions, CreatedAt = now, UpdatedAt = now });
         }
+        // 历史迁移 AddRolesAndBackups 会在建库时直接插入两个内置角色，导致上面的 AddRange 被跳过；
+        // 班管理员角色是新增的，必须独立幂等种子才能同时覆盖全新与已升级的数据库。
+        await db.Database.ExecuteSqlRawAsync($"""
+            INSERT OR IGNORE INTO AccountRoles (Id, Name, NormalizedName, Kind, DefaultPermissions, CreatedAt, UpdatedAt)
+            VALUES ('{AccountRole.ClassAdministratorId}', 'ClassAdministrator', 'CLASSADMINISTRATOR', 4, {(int)ClassAdministratorDefaultPermissions}, '{now:O}', '{now:O}');
+            """, ct);
         if (!await db.BackupConfigurations.AnyAsync(ct)) db.BackupConfigurations.Add(new BackupConfiguration());
         await db.SaveChangesAsync(ct);
         await db.AccountRoles.Where(x => x.Id == AccountRole.StudentId).ExecuteUpdateAsync(setters => setters
@@ -58,6 +95,12 @@ public sealed partial class IdentityCoordinator(
             .SetProperty(x => x.Name, "管理员")
             .SetProperty(x => x.NormalizedName, "管理员")
             .SetProperty(x => x.DefaultPermissions, UserPermissions.All), ct);
+        await db.AccountRoles.Where(x => x.Id == AccountRole.ClassAdministratorId).ExecuteUpdateAsync(setters => setters
+            .SetProperty(x => x.Name, "班管理员")
+            .SetProperty(x => x.NormalizedName, "班管理员")
+            .SetProperty(x => x.Kind, AccountRoleKind.ClassAdministrator)
+            .SetProperty(x => x.DefaultPermissions, ClassAdministratorDefaultPermissions), ct);
+        await SeedDefaultClassroomAsync(ct);
 
         // 启动时清理过期超过 30 天的会话行，避免 DeviceSessions 表长期无界增长。
         // SQLite 不支持 DateTimeOffset 比较的 SQL 翻译，先投影再在内存过滤。
@@ -182,7 +225,8 @@ public sealed partial class IdentityCoordinator(
             await ToProfileAsync(session.User, ct),
             session.Id,
             PluginCredentialId: null,
-            ValidUntil: session.AccessExpiresAt < session.ExpiresAt ? session.AccessExpiresAt : session.ExpiresAt);
+            ValidUntil: session.AccessExpiresAt < session.ExpiresAt ? session.AccessExpiresAt : session.ExpiresAt,
+            AccessibleClassIds: await classAccess.GetAccessibleClassIdsAsync(session.User.Id, session.User.Role, ct));
     }
 
     public async Task<AuthPrincipal?> ValidatePluginTokenAsync(string token, CancellationToken ct = default)
@@ -202,7 +246,8 @@ public sealed partial class IdentityCoordinator(
             User: null,
             DeviceSessionId: null,
             PluginCredentialId: credential.Id,
-            ValidUntil: null);
+            ValidUntil: null,
+            ClassId: credential.ClassroomId);
     }
 
     public async Task<AuthPrincipal?> ValidateAnyTokenAsync(string token, CancellationToken ct = default) =>
@@ -211,13 +256,14 @@ public sealed partial class IdentityCoordinator(
     public async Task<IReadOnlyList<PluginCredentialInfo>> ListPluginCredentialsAsync(CancellationToken ct = default)
     {
         // SQLite 不支持 DateTimeOffset 排序的 SQL 翻译；凭证数量极少，取回后在内存排序。
-        var credentials = await db.PluginCredentials.AsNoTracking().ToListAsync(ct);
+        var credentials = await db.PluginCredentials.Include(x => x.Classroom).AsNoTracking().ToListAsync(ct);
         return credentials
             .OrderByDescending(x => x.CreatedAt)
             .Select(x => new PluginCredentialInfo
             {
                 Id = x.Id,
                 Name = x.Name,
+                ClassName = x.Classroom?.Name,
                 CreatedAt = x.CreatedAt,
                 LastSeenAt = x.LastSeenAt,
                 Enabled = x.Enabled,
@@ -250,12 +296,14 @@ public sealed partial class IdentityCoordinator(
         if (consumed == 0)
             throw new IdentityOperationException(ApiErrorCodes.PairCodeInvalid, "插件配对码无效、已使用或已过期");
 
+        // 配对码创建时已绑定班级；旧版请求不携带班级信息的配对码统一归属默认班级。
         var token = CreateSecret(32);
         db.PluginCredentials.Add(new PluginCredential
         {
             Id = Guid.NewGuid(),
             Name = "ClassIsland 插件",
             TokenHash = Hash(token),
+            ClassroomId = candidate.ClassroomId,
             CreatedAt = now,
             LastSeenAt = now,
             Enabled = true,
@@ -264,10 +312,12 @@ public sealed partial class IdentityCoordinator(
         return new PairResponse { Token = token, Role = "plugin", ExpiresAt = null };
     }
 
-    public async Task<string> CreatePluginPairingCodeAsync(CancellationToken ct = default)
+    public async Task<string> CreatePluginPairingCodeAsync(Guid classroomId, CancellationToken ct = default)
     {
+        if (!await db.Classrooms.AnyAsync(x => x.Id == classroomId, ct))
+            throw new IdentityOperationException(ApiErrorCodes.NotFound, "班级不存在");
         var code = CreateReadableSecret(12);
-        await AddPairingCodeAsync(code, ct);
+        await AddPairingCodeAsync(code, ct, classroomId: classroomId);
         return code;
     }
 
@@ -323,6 +373,13 @@ public sealed partial class IdentityCoordinator(
         };
         user.Version = await NextVersionAsync(ct);
         EnsureIdentitySucceeded(await users.CreateAsync(user, request.Password));
+        db.ClassMemberships.Add(new ClassMembership
+        {
+            UserId = user.Id,
+            ClassroomId = Classroom.DefaultId,
+            RoleDefinitionId = role.Id,
+        });
+        await db.SaveChangesAsync(ct);
         return await ToListItemAsync(user, ct);
     }
 
@@ -348,6 +405,11 @@ public sealed partial class IdentityCoordinator(
             user.UpdatedAt = DateTimeOffset.UtcNow;
             user.Version = await NextVersionAsync(ct);
             EnsureIdentitySucceeded(await users.UpdateAsync(user));
+            // Users 页编辑的是账号的全局默认角色；默认班级成员关系跟随它，其他班级成员角色独立管理。
+            var defaultMembership = await db.ClassMemberships.SingleOrDefaultAsync(
+                x => x.UserId == user.Id && x.ClassroomId == Classroom.DefaultId, ct);
+            if (defaultMembership is not null) defaultMembership.RoleDefinitionId = targetRole.Id;
+            await db.SaveChangesAsync(ct);
             if (mustRevoke) await RevokeAllSessionsAsync(user.Id, ct);
             return await ToListItemAsync(user, ct);
         }
@@ -422,25 +484,33 @@ public sealed partial class IdentityCoordinator(
         await NextVersionAsync(ct);
     }
 
-    public async Task<AccountSync> CreateSyncAsync(CancellationToken ct = default)
+    /// <summary>
+    /// 生成面向指定班级插件的授权镜像：账号为该班成员 ∪ 启用的系统管理员，
+    /// 有效权限按该班成员角色计算；插件局域网认证只需要能连到自己的账号。
+    /// </summary>
+    public async Task<AccountSync> CreateSyncAsync(Guid classId, CancellationToken ct = default)
     {
         var now = DateTimeOffset.UtcNow;
         var accountVersion = await db.SystemMetadata.Where(x => x.Id == 1).Select(x => x.AccountVersion).SingleAsync(ct);
-        var accounts = await users.Users.Include(x => x.RoleDefinition).Select(x => new SyncedAccount
-        {
-            Id = x.Id,
-            Username = x.UserName!,
-            DisplayName = x.DisplayName,
-            Role = x.Role,
-            RoleId = x.RoleDefinitionId,
-            RoleName = x.RoleDefinition.Name,
-            GrantedPermissions = x.GrantedPermissions,
-            EffectivePermissions = x.Role == UserRole.Admin
-                ? UserPermissions.All
-                : UserPermissions.ViewCurrentCourse | x.RoleDefinition.DefaultPermissions | x.GrantedPermissions,
-            Enabled = x.Enabled,
-            Version = x.Version,
-        }).ToListAsync(ct);
+
+        // 班级成员关系一次性取回，再与启用的系统管理员合并。
+        var memberships = await db.ClassMemberships.AsNoTracking()
+            .Where(x => x.ClassroomId == classId)
+            .Select(x => new { x.UserId, x.RoleDefinitionId, x.RoleDefinition.DefaultPermissions })
+            .ToListAsync(ct);
+        var memberIds = memberships.Select(x => x.UserId).ToHashSet();
+        var memberRoles = memberships.ToDictionary(x => x.UserId, x => (x.RoleDefinitionId, x.DefaultPermissions));
+
+        var accounts = await users.Users.Include(x => x.RoleDefinition)
+            .Where(x => x.Enabled && (x.Role == UserRole.Admin || memberIds.Contains(x.Id)))
+            .ToListAsync(ct);
+        var roleIds = accounts.Select(x => x.RoleDefinitionId)
+            .Concat(memberRoles.Values.Select(x => x.RoleDefinitionId))
+            .Distinct().ToList();
+        var roleNames = await db.AccountRoles.AsNoTracking()
+            .Where(x => roleIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+
         var extensionPolicyRows = await db.ExtensionPolicies.AsNoTracking()
             .Where(x => x.Enabled).ToListAsync(ct);
         var hiddenByUser = (await db.UserExtensionPreferences.AsNoTracking()
@@ -449,8 +519,30 @@ public sealed partial class IdentityCoordinator(
                 .ToListAsync(ct))
             .GroupBy(x => x.UserId)
             .ToDictionary(group => group.Key, group => (IReadOnlyCollection<string>)group.Select(x => x.ExtensionId).ToArray());
-        foreach (var account in accounts)
+
+        var syncedAccounts = new List<SyncedAccount>();
+        foreach (var user in accounts)
         {
+            var isAdmin = user.Role == UserRole.Admin;
+            var (memberRoleId, memberDefaults) = memberRoles.TryGetValue(user.Id, out var membership)
+                ? membership
+                : (user.RoleDefinitionId, user.RoleDefinition?.DefaultPermissions ?? UserPermissions.None);
+            var effective = isAdmin
+                ? UserPermissions.All
+                : UserPermissions.ViewCurrentCourse | memberDefaults | user.GrantedPermissions;
+            var account = new SyncedAccount
+            {
+                Id = user.Id,
+                Username = user.UserName!,
+                DisplayName = user.DisplayName,
+                Role = user.Role,
+                RoleId = isAdmin ? user.RoleDefinitionId : memberRoleId,
+                RoleName = roleNames.GetValueOrDefault(isAdmin ? user.RoleDefinitionId : memberRoleId),
+                GrantedPermissions = user.GrantedPermissions,
+                EffectivePermissions = effective,
+                Enabled = user.Enabled,
+                Version = user.Version,
+            };
             var profile = account.ToProfile();
             ExtensionPolicyService.ApplyAccess(
                 profile,
@@ -458,10 +550,13 @@ public sealed partial class IdentityCoordinator(
                 hiddenByUser.GetValueOrDefault(account.Id, Array.Empty<string>()));
             account.AllowedExtensionIds = profile.AllowedExtensionIds;
             account.VisibleExtensionIds = profile.VisibleExtensionIds;
+            syncedAccounts.Add(account);
         }
-        var activeSessions = await db.DeviceSessions.Include(x => x.User).ThenInclude(x => x.RoleDefinition)
-            .Where(x => x.RevokedAt == null).ToListAsync(ct);
-        var sessions = activeSessions.Where(x => x.ExpiresAt > now && x.User.Enabled)
+
+        var accountIds = syncedAccounts.Select(x => x.Id).ToHashSet();
+        var sessions = (await db.DeviceSessions.AsNoTracking()
+                .Where(x => x.RevokedAt == null).ToListAsync(ct))
+            .Where(x => x.ExpiresAt > now && accountIds.Contains(x.UserId))
             .Select(x => new SyncedDeviceSession
             {
                 Id = x.Id,
@@ -476,7 +571,7 @@ public sealed partial class IdentityCoordinator(
             ServerVersion = AppVersion.Version,
             ServerCapabilities = RemoteCiCapabilities.Current.ToList(),
             GeneratedAt = now,
-            Accounts = accounts,
+            Accounts = syncedAccounts,
             Sessions = sessions,
         };
     }
@@ -528,13 +623,15 @@ public sealed partial class IdentityCoordinator(
         };
     }
 
-    private async Task AddPairingCodeAsync(string code, CancellationToken ct, bool timeLimited = true)
+    private async Task AddPairingCodeAsync(
+        string code, CancellationToken ct, bool timeLimited = true, Guid? classroomId = null)
     {
         var now = DateTimeOffset.UtcNow;
         db.PluginPairingCodes.Add(new PluginPairingCode
         {
             Id = Guid.NewGuid(),
             CodeHash = Hash(code),
+            ClassroomId = classroomId ?? Classroom.DefaultId,
             CreatedAt = now,
             // WebUI 生成的配对码限时 30 分钟；一次性消费仍由 UsedAt 原子控制。
             ExpiresAt = timeLimited ? now.Add(PairCodeLifetime) : DateTimeOffset.MaxValue,
@@ -608,6 +705,7 @@ public sealed partial class IdentityCoordinator(
             RoleName = role.Name,
             GrantedPermissions = user.GrantedPermissions,
             Permissions = user.Role == UserRole.Admin ? UserPermissions.All : UserPermissions.ViewCurrentCourse | role.DefaultPermissions | user.GrantedPermissions,
+            Classes = [.. await classAccess.GetAccessibleClassesAsync(user.Id, user.Role, user.GrantedPermissions, ct)],
             Version = user.Version,
         };
         await extensionPolicies.ApplyAccessAsync(profile, ct);
@@ -707,15 +805,26 @@ public sealed partial class IdentityCoordinator(
     private static partial Regex UsernameRegex();
 }
 
+/// <summary>
+/// 已认证连接/请求的主体。插件连接带其归属班级 ClassId；
+/// 用户连接带可访问班级列表 AccessibleClassIds（管理员为全部班级快照，由刷新任务周期更新）。
+/// </summary>
 public sealed record AuthPrincipal(
     PeerRole PeerRole,
     UserProfile? User,
     Guid? DeviceSessionId,
     Guid? PluginCredentialId,
-    DateTimeOffset? ValidUntil)
+    DateTimeOffset? ValidUntil,
+    Guid? ClassId = null,
+    IReadOnlyList<Guid>? AccessibleClassIds = null)
 {
     public bool IsPlugin => PeerRole == PeerRole.Plugin;
     public bool IsAdmin => User?.Role == UserRole.Admin;
+
+    /// <summary>该主体的连接是否覆盖指定班级（插件看归属班，用户看成员/管理范围）。</summary>
+    public bool CoversClass(Guid classId) => IsPlugin
+        ? ClassId == classId
+        : IsAdmin || (AccessibleClassIds?.Contains(classId) ?? false);
 }
 
 public sealed class IdentityOperationException(string code, string message) : Exception(message)

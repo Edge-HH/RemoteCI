@@ -1,6 +1,7 @@
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using RemoteCI.Server.Data;
 using RemoteCI.Server.Services;
 using RemoteCI.Shared;
 using RemoteCI.Shared.Models;
@@ -19,6 +20,7 @@ public static class WebSocketHub
         ExtensionPolicyService extensionPolicies,
         AuthorizationSyncService authorizationSync,
         ScheduleSyncService scheduleSync,
+        ClassAccessService classAccess,
         ILogger logger)
     {
         if (!context.WebSockets.IsWebSocketRequest)
@@ -41,7 +43,8 @@ public static class WebSocketHub
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
         var connectionId = registry.Register(socket, token, principal);
         var session = new ConnectionSession(
-            context, identities, registry, store, extensionPolicies, authorizationSync, scheduleSync, logger, socket, connectionId, principal);
+            context, identities, registry, store, extensionPolicies, authorizationSync, scheduleSync, classAccess,
+            logger, socket, connectionId, principal);
         logger.LogInformation(
             "WebSocket connected: {Role}/{User} ({Id})",
             principal.PeerRole,
@@ -72,19 +75,24 @@ public static class WebSocketHub
 
     private static async Task InitializePluginAsync(ConnectionSession session)
     {
-        if (session.Registry.PluginCount > 1)
+        var classId = session.Principal.ClassId ?? Classroom.DefaultId;
+        var sameClassPlugins = session.Registry.GetOnlinePluginConnections()
+            .Count(x => x.ClassId == classId);
+        if (sameClassPlugins > 1)
         {
             session.Logger.LogWarning(
-                "检测到 {Count} 个插件同时在线，命令将只投递给最早接入的插件，请确认是否为预期部署",
-                session.Registry.PluginCount);
+                "班级 {ClassId} 检测到 {Count} 个插件同时在线，命令将只投递给最早接入的插件，请确认是否为预期部署",
+                classId, sameClassPlugins);
         }
 
         var ct = session.CancellationToken;
-        await session.Registry.SendAccountSyncToPluginsAsync(
-            await session.Identities.CreateSyncAsync(ct), ct);
+        // 授权镜像按班级生成并定向发给本连接：插件只需要自己班级的账号。
+        var sync = await session.Identities.CreateSyncAsync(classId, ct);
+        await session.Registry.SendToPluginConnectionAsync(
+            session.ConnectionId, Envelope.AccountSync(sync), ct);
         await session.Registry.BroadcastCapabilitiesToWatchesAsync(ct);
         await session.ScheduleSync.StartFromPluginAsync(
-            session.ConnectionId, ScheduleSyncSource.Connection, ct);
+            session.ConnectionId, classId, ScheduleSyncSource.Connection, ct);
     }
 
     private static async Task InitializeWatchAsync(ConnectionSession session)
@@ -97,14 +105,19 @@ public static class WebSocketHub
         await session.Registry.SendCurrentCapabilitiesToWatchAsync(session.ConnectionId, ct);
         await session.Registry.SendLatestPluginNetworkInfoToWatchAsync(session.ConnectionId, ct);
 
-        if (session.Store.GetLatestSnapshot() is { } snapshot)
-            await session.Registry.SendToWatchAsync(session.ConnectionId, Envelope.StatePush(snapshot), ct);
-        if (session.Store.GetLatestSchedule() is { } schedule)
-            await session.Registry.SendToWatchAsync(session.ConnectionId, Envelope.ScheduleSync(schedule), ct);
-        if (session.Store.GetLatestExtensions() is { } extensions)
-            await session.Registry.SendToWatchAsync(session.ConnectionId, Envelope.ExtensionsSync(extensions), ct);
-        if (session.ScheduleSync.Current is { } task)
-            await session.Registry.SendToWatchAsync(session.ConnectionId, Envelope.ScheduleSyncStatus(task), ct);
+        // 该账号可访问的每个班级各推一份最新数据；消息负载带 classId 供新版客户端区分，
+        // 旧客户端在单班级部署下只会收到一份，行为不变。
+        foreach (var classId in session.Principal.AccessibleClassIds ?? [])
+        {
+            if (session.Store.GetLatestSnapshot(classId) is { } snapshot)
+                await session.Registry.SendToWatchAsync(session.ConnectionId, Envelope.StatePush(snapshot), ct);
+            if (session.Store.GetLatestSchedule(classId) is { } schedule)
+                await session.Registry.SendToWatchAsync(session.ConnectionId, Envelope.ScheduleSync(schedule), ct);
+            if (session.Store.GetLatestExtensions(classId) is { } extensions)
+                await session.Registry.SendToWatchAsync(session.ConnectionId, Envelope.ExtensionsSync(extensions), ct);
+            if (session.ScheduleSync.Current(classId) is { } task)
+                await session.Registry.SendToWatchAsync(session.ConnectionId, Envelope.ScheduleSyncStatus(task), ct);
+        }
 
         await session.Registry.SendToWatchAsync(
             session.ConnectionId,
@@ -148,7 +161,9 @@ public static class WebSocketHub
         finally
         {
             if (session.Principal.IsPlugin)
-                await session.ScheduleSync.FailActiveAsync("插件连接已断开，课表任务未完成");
+                await session.ScheduleSync.FailActiveAsync(
+                    "插件连接已断开，课表任务未完成",
+                    session.Principal.ClassId ?? Classroom.DefaultId);
             await session.Registry.UnregisterAsync(session.ConnectionId);
             session.Logger.LogInformation("WebSocket disconnected: {Id}", session.ConnectionId);
         }
@@ -295,38 +310,39 @@ public static class WebSocketHub
         ConnectionSession session)
     {
         var ct = session.CancellationToken;
+        var classId = session.Principal.ClassId ?? Classroom.DefaultId;
         switch (envelope.Type)
         {
             case Protocol.MessageTypeStatePush:
                 if (ConvertPayload<ClassStateSnapshot>(envelope.Payload) is { } snapshot)
                 {
-                    session.Store.SaveSnapshot(snapshot);
-                    await session.Registry.SendSnapshotToWatchesAsync(snapshot, ct);
+                    session.Store.SaveSnapshot(classId, snapshot);
+                    await session.Registry.SendSnapshotToWatchesAsync(classId, snapshot, ct);
                 }
                 return true;
             case Protocol.MessageTypeScheduleSync:
                 if (ConvertPayload<ScheduleBundle>(envelope.Payload) is { } schedule)
                 {
-                    session.Store.SaveSchedule(schedule);
-                    await session.Registry.SendScheduleToWatchesAsync(schedule, ct);
-                    await session.ScheduleSync.CompleteFromScheduleAsync(ct);
+                    session.Store.SaveSchedule(classId, schedule);
+                    await session.Registry.SendScheduleToWatchesAsync(classId, schedule, ct);
+                    await session.ScheduleSync.CompleteFromScheduleAsync(classId, ct);
                 }
                 return true;
             case Protocol.MessageTypeEventNotify:
                 if (ConvertPayload<ClassEvent>(envelope.Payload) is { } value)
                 {
-                    session.Store.SaveEvent(value);
-                    await session.Registry.SendEventToWatchesAsync(value, ct);
+                    session.Store.SaveEvent(classId, value);
+                    await session.Registry.SendEventToWatchesAsync(classId, value, ct);
                 }
                 return true;
             case Protocol.MessageTypeExtensionsSync:
                 if (ConvertPayload<List<ExtensionDefinition>>(envelope.Payload) is { } extensions)
                 {
                     var accessChanged = await session.ExtensionPolicies.EnsureRegisteredAsync(extensions, ct);
-                    session.Store.SaveExtensions(extensions);
+                    session.Store.SaveExtensions(classId, extensions);
                     if (accessChanged)
                         await session.AuthorizationSync.SyncAsync(ct);
-                    await session.Registry.SendExtensionsToWatchesAsync(extensions, ct);
+                    await session.Registry.SendExtensionsToWatchesAsync(classId, extensions, ct);
                 }
                 return true;
             default:
@@ -343,7 +359,10 @@ public static class WebSocketHub
         {
             case Protocol.MessageTypePluginNetworkInfo:
                 if (NormalizePluginNetworkInfo(ConvertPayload<PluginNetworkInfo>(envelope.Payload)) is { } info)
+                {
+                    info.ClassId = session.Principal.ClassId ?? Classroom.DefaultId;
                     await session.Registry.PublishPluginNetworkInfoAsync(info, ct);
+                }
                 else
                     session.Logger.LogWarning("插件上报了无效的局域网地址或端口");
                 return true;
@@ -375,10 +394,15 @@ public static class WebSocketHub
                 var source = request?.Source == ScheduleSyncSource.Mobile
                     ? ScheduleSyncSource.Mobile
                     : ScheduleSyncSource.Watch;
+                var classId = await ResolveClassAsync(request?.ClassId, session);
+                if (classId is null) return;
+                request ??= new ScheduleSyncRequest { Source = source };
+                request.ClassId = classId;
                 await session.ScheduleSync.StartAsync(
                     source,
+                    classId.Value,
                     session.CancellationToken,
-                    request?.TaskId ?? envelope.MessageId);
+                    request.TaskId);
                 return;
             default:
                 LogUnhandled(envelope, session);
@@ -391,6 +415,17 @@ public static class WebSocketHub
             "Unhandled message type {Type} from {Role}",
             envelope.Type,
             session.Principal.PeerRole);
+
+    /// <summary>解析命令/拉取请求的目标班级：显式指定时校验可访问性，否则落到默认班级。</summary>
+    private static async Task<Guid?> ResolveClassAsync(Guid? requested, ConnectionSession session)
+    {
+        var user = session.Principal.User!;
+        if (requested is { } classId)
+            return await session.ClassAccess.CanAccessAsync(user.Id, user.Role, classId, session.CancellationToken)
+                ? classId
+                : null;
+        return await session.ClassAccess.ResolveDefaultClassIdAsync(user.Id, user.Role, session.CancellationToken);
+    }
 
     private static async Task ForwardUserCommandAsync(
         Envelope envelope,
@@ -420,13 +455,29 @@ public static class WebSocketHub
             return;
         }
 
+        // 命令按班级路由与鉴权：用户只能在有权限的班级上操作该班的插件。
+        var classId = await ResolveClassAsync(command.ClassId, session);
+        if (classId is null)
+        {
+            await SendFailureAsync(
+                envelope, session.ConnectionId, session.Registry,
+                CommandResultCodes.Forbidden, "没有该班级的操作权限", session.CancellationToken);
+            return;
+        }
+        command.ClassId = classId;
+
         if (command.Notification is not null)
         {
             command.Notification.ForceSenderInTitle =
                 await session.Identities.GetForceSenderInTitleAsync(session.CancellationToken);
         }
 
-        if (GetCommandValidationError(command, session.Principal.User!, session.Store) is { } error)
+        var classPermissions = await session.ClassAccess.GetEffectivePermissionsAsync(
+            session.Principal.User!.Id, session.Principal.User!.Role, classId.Value,
+            session.Principal.User!.GrantedPermissions, session.CancellationToken);
+        if (GetCommandValidationError(
+                command, classPermissions, session.Principal.User!.AllowedExtensionIds,
+                session.Store, classId.Value) is { } error)
         {
             await SendFailureAsync(
                 envelope, session.ConnectionId, session.Registry,
@@ -434,32 +485,34 @@ public static class WebSocketHub
             return;
         }
 
-        if (session.Registry.HasPlugin &&
+        if (session.Registry.HasPluginFor(classId.Value) &&
             RemoteCiCapabilities.Required(command.Command) is { } capability &&
-            !session.Registry.PrimaryPluginSupports(capability))
+            !session.Registry.PrimaryPluginSupports(classId.Value, capability))
         {
             await SendFailureAsync(
                 envelope, session.ConnectionId, session.Registry,
                 CommandResultCodes.CapabilityUnsupported,
-                $"当前主插件未声明能力 {capability}", session.CancellationToken);
+                $"当前班级的插件未声明能力 {capability}", session.CancellationToken);
             return;
         }
 
-        await ForwardValidatedCommandAsync(envelope, command, session);
+        await ForwardValidatedCommandAsync(envelope, command, session, classId.Value);
     }
 
     private static CommandError? GetCommandValidationError(
         CommandMessage command,
-        UserProfile user,
-        IStateStore store)
+        UserPermissions classPermissions,
+        IReadOnlyList<string>? allowedExtensionIds,
+        IStateStore store,
+        Guid classId)
     {
         if (command.Command == CommandKind.RunExtension)
-            return GetExtensionValidationError(command, user, store);
+            return GetExtensionValidationError(command, classPermissions, allowedExtensionIds, store, classId);
 
         var required = CommandPermissions.Required(command.Command);
         if (required == UserPermissions.None)
             return new CommandError(CommandResultCodes.InvalidRequest, "未知命令");
-        if (!user.Permissions.HasFlag(required))
+        if (!classPermissions.HasFlag(required))
             return new CommandError(CommandResultCodes.Forbidden, "权限不足");
         if (command.Command == CommandKind.SendVoiceMessage && !VoiceMessageRequest.TryDecode(command.VoiceMessage, out _))
             return new CommandError(CommandResultCodes.InvalidRequest, "语音格式无效或超过 60 秒");
@@ -468,17 +521,19 @@ public static class WebSocketHub
 
     private static CommandError? GetExtensionValidationError(
         CommandMessage command,
-        UserProfile user,
-        IStateStore store)
+        UserPermissions classPermissions,
+        IReadOnlyList<string>? allowedExtensionIds,
+        IStateStore store,
+        Guid classId)
     {
         if (string.IsNullOrWhiteSpace(command.ExtensionId))
             return new CommandError(CommandResultCodes.InvalidRequest, "缺少扩展 Id");
 
-        var definition = store.GetLatestExtensions()?.FirstOrDefault(
+        var definition = store.GetLatestExtensions(classId)?.FirstOrDefault(
             extension => extension.Id == command.ExtensionId);
         if (definition is null)
             return new CommandError(CommandResultCodes.InvalidRequest, "扩展功能不存在或尚未同步");
-        return ExtensionAccess.CanInvoke(user, definition)
+        return ExtensionAccess.CanInvoke(classPermissions, allowedExtensionIds, definition)
             ? null
             : new CommandError(CommandResultCodes.Forbidden, "权限不足或扩展未开放");
     }
@@ -486,12 +541,13 @@ public static class WebSocketHub
     private static async Task ForwardValidatedCommandAsync(
         Envelope envelope,
         CommandMessage command,
-        ConnectionSession session)
+        ConnectionSession session,
+        Guid classId)
     {
         command.RequestedBy = session.Principal.User;
         envelope.Payload = command;
         session.Registry.RegisterWatchCommand(envelope.MessageId, session.ConnectionId);
-        if (await session.Registry.SendToPluginAsync(envelope, session.CancellationToken)) return;
+        if (await session.Registry.SendToPluginAsync(classId, envelope, session.CancellationToken)) return;
 
         await session.Registry.CompleteCommandAsync(
             new Envelope
@@ -519,6 +575,7 @@ public static class WebSocketHub
         ExtensionPolicyService extensionPolicies,
         AuthorizationSyncService authorizationSync,
         ScheduleSyncService scheduleSync,
+        ClassAccessService classAccess,
         ILogger logger,
         WebSocket socket,
         Guid connectionId,
@@ -531,6 +588,7 @@ public static class WebSocketHub
         public ExtensionPolicyService ExtensionPolicies { get; } = extensionPolicies;
         public AuthorizationSyncService AuthorizationSync { get; } = authorizationSync;
         public ScheduleSyncService ScheduleSync { get; } = scheduleSync;
+        public ClassAccessService ClassAccess { get; } = classAccess;
         public ILogger Logger { get; } = logger;
         public WebSocket Socket { get; } = socket;
         public Guid ConnectionId { get; } = connectionId;

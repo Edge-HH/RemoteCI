@@ -26,9 +26,10 @@ public sealed class LoginModel(
             return RedirectToPage(permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account");
         }
 
-        var visitor = await visitorAccess.GetAsync(ct);
-        VisitorAccessEnabled = visitor.Enabled;
-        if (visitor.Enabled && visitor.AutoEnter && ShouldAutoEnter(from, returnUrl))
+        var visitorEnabled = await visitorAccess.AnyVisitorClassEnabledAsync(ct);
+        var autoEnter = visitorEnabled && await visitorAccess.GetAutoEnterAsync(ct);
+        VisitorAccessEnabled = visitorEnabled;
+        if (autoEnter && ShouldAutoEnter(from, returnUrl))
             return RedirectToPage("/Visitor");
         return Page();
     }
@@ -45,7 +46,7 @@ public sealed class LoginModel(
 
     public async Task<IActionResult> OnPostAsync(CancellationToken ct)
     {
-        VisitorAccessEnabled = (await visitorAccess.GetAsync(ct)).Enabled;
+        VisitorAccessEnabled = await visitorAccess.AnyVisitorClassEnabledAsync(ct);
         if (!ModelState.IsValid) return Page();
         var user = await users.FindByNameAsync(Input.Username.Trim());
         if (user is null || !user.Enabled)

@@ -1,73 +1,74 @@
 using System.Collections.Concurrent;
+using RemoteCI.Server.Data;
 using RemoteCI.Shared;
 using RemoteCI.Shared.Models;
 
 namespace RemoteCI.Server.Services;
 
-/// <summary>服务端保存当前课表任务并为 WebUI 提供可等待的终态。</summary>
+/// <summary>服务端按班级保存当前课表任务并为 WebUI 提供可等待的终态。</summary>
 public sealed class ScheduleSyncTaskTracker
 {
-    private readonly object _gate = new();
+    private readonly ConcurrentDictionary<Guid, ScheduleSyncStatus> _current = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<ScheduleSyncStatus>> _waiters = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ScheduleSyncStatus> _terminal = new(StringComparer.Ordinal);
-    private ScheduleSyncStatus? _current;
 
-    public ScheduleSyncStatus? Current
+    public ScheduleSyncStatus? Current(Guid classId) =>
+        _current.TryGetValue(classId, out var status) ? status : null;
+
+    public ScheduleSyncStatus TryBegin(ScheduleSyncRequest request, Guid classId)
     {
-        get
+        if (_current.TryGetValue(classId, out var active) && active.State == ScheduleSyncTaskState.Running)
         {
-            lock (_gate) return _current;
-        }
-    }
-
-    public ScheduleSyncStatus TryBegin(ScheduleSyncRequest request)
-    {
-        lock (_gate)
-        {
-            if (_current is { State: ScheduleSyncTaskState.Running } active)
-            {
-                return new ScheduleSyncStatus
-                {
-                    TaskId = request.TaskId,
-                    Source = request.Source,
-                    State = ScheduleSyncTaskState.Busy,
-                    Message = $"已有{SourceName(active.Source)}课表任务正在执行，请稍候",
-                    StartedAt = active.StartedAt,
-                    FinishedAt = DateTimeOffset.UtcNow,
-                    ActiveTaskId = active.TaskId,
-                };
-            }
-
-            _current = new ScheduleSyncStatus
+            return new ScheduleSyncStatus
             {
                 TaskId = request.TaskId,
                 Source = request.Source,
-                State = ScheduleSyncTaskState.Running,
-                Message = $"正在连接插件执行{SourceName(request.Source)}任务",
-                StartedAt = DateTimeOffset.UtcNow,
+                State = ScheduleSyncTaskState.Busy,
+                Message = $"已有{SourceName(active.Source)}课表任务正在执行，请稍候",
+                StartedAt = active.StartedAt,
+                FinishedAt = DateTimeOffset.UtcNow,
+                ActiveTaskId = active.TaskId,
+                ClassId = classId,
             };
-            return _current;
         }
+
+        var started = new ScheduleSyncStatus
+        {
+            TaskId = request.TaskId,
+            Source = request.Source,
+            State = ScheduleSyncTaskState.Running,
+            Message = $"正在连接插件执行{SourceName(request.Source)}任务",
+            StartedAt = DateTimeOffset.UtcNow,
+            ClassId = classId,
+        };
+        _current[classId] = started;
+        return started;
     }
 
     public void Observe(ScheduleSyncStatus status)
     {
-        lock (_gate)
+        var classId = status.ClassId ?? Classroom.DefaultId;
+        if (status.State == ScheduleSyncTaskState.Running)
         {
-            if (status.State == ScheduleSyncTaskState.Running)
-                _current = status;
-            else if (_current?.TaskId == status.TaskId)
+            _current[classId] = status;
+        }
+        else if (_current.TryGetValue(classId, out var current) && current.TaskId == status.TaskId)
+        {
+            if (status.State == ScheduleSyncTaskState.Busy && !string.IsNullOrWhiteSpace(status.ActiveTaskId))
             {
-                _current = status.State == ScheduleSyncTaskState.Busy && !string.IsNullOrWhiteSpace(status.ActiveTaskId)
-                    ? new ScheduleSyncStatus
-                    {
-                        TaskId = status.ActiveTaskId,
-                        Source = ScheduleSyncSource.Unknown,
-                        State = ScheduleSyncTaskState.Running,
-                        Message = status.Message,
-                        StartedAt = status.StartedAt,
-                    }
-                    : null;
+                _current[classId] = new ScheduleSyncStatus
+                {
+                    TaskId = status.ActiveTaskId,
+                    Source = ScheduleSyncSource.Unknown,
+                    State = ScheduleSyncTaskState.Running,
+                    Message = status.Message,
+                    StartedAt = status.StartedAt,
+                    ClassId = classId,
+                };
+            }
+            else
+            {
+                _current.TryRemove(classId, out _);
             }
         }
 

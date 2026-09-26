@@ -30,22 +30,24 @@ public sealed class ConfigurationArchiveService(
         var users = await db.Users.AsNoTracking().Select(x => new UserSnapshot(
             x.Id, x.UserName!, x.NormalizedUserName!, x.DisplayName, x.PasswordHash!, x.SecurityStamp!, x.ConcurrencyStamp!,
             x.Role, x.RoleDefinitionId, x.GrantedPermissions, x.Enabled, x.Version, x.UpdatedAt)).ToListAsync(ct);
-        var plugins = await db.PluginCredentials.AsNoTracking().Select(x => new PluginSnapshot(x.Id, x.Name, x.TokenHash, x.Enabled, x.CreatedAt, x.LastSeenAt)).ToListAsync(ct);
+        var classrooms = await db.Classrooms.AsNoTracking().Select(x => new ClassroomSnapshot(x.Id, x.Name, x.VisitorAccessEnabled, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
+        var memberships = await db.ClassMemberships.AsNoTracking().Select(x => new MembershipSnapshot(x.UserId, x.ClassroomId, x.RoleDefinitionId)).ToListAsync(ct);
+        var plugins = await db.PluginCredentials.AsNoTracking().Select(x => new PluginSnapshot(x.Id, x.Name, x.TokenHash, x.Enabled, x.CreatedAt, x.LastSeenAt, x.ClassroomId)).ToListAsync(ct);
         var extensionPolicies = await db.ExtensionPolicies.AsNoTracking()
             .Select(x => new ExtensionPolicySnapshot(x.ExtensionId, x.Enabled, x.AllowNonAdmin, x.UpdatedAt)).ToListAsync(ct);
         var extensionPreferences = await db.UserExtensionPreferences.AsNoTracking()
             .Select(x => new ExtensionPreferenceSnapshot(x.UserId, x.ExtensionId, x.ShowOnWatch, x.UpdatedAt)).ToListAsync(ct);
         var metadata = await db.SystemMetadata.AsNoTracking().SingleAsync(x => x.Id == 1, ct);
         var backup = await db.BackupConfigurations.AsNoTracking().SingleAsync(x => x.Id == 1, ct);
-        return new ConfigurationSnapshot(2, DateTimeOffset.UtcNow, roles, users, plugins,
+        return new ConfigurationSnapshot(3, DateTimeOffset.UtcNow, roles, users, plugins,
             new MetadataSnapshot(
                 metadata.AccountVersion,
                 metadata.ForceSenderInTitle,
                 metadata.SchedulePullIntervalMinutes,
-                metadata.VisitorAccessEnabled,
-                metadata.AutoEnterVisitorPage),
+                AutoEnterVisitorPage: metadata.AutoEnterVisitorPage),
             new BackupSettingsSnapshot(backup.Enabled, backup.Cadence, backup.TimeOfDay, backup.DayOfWeek, backup.MaxBackups),
-            state.GetLatestSchedule(), extensionPolicies, extensionPreferences);
+            state.GetLatestSchedule(Classroom.DefaultId), extensionPolicies, extensionPreferences,
+            classrooms, memberships);
     }
 
     public async Task<BackupFileInfo> CreateLocalBackupAsync(string source, CancellationToken ct = default)
@@ -106,24 +108,44 @@ public sealed class ConfigurationArchiveService(
         await db.Users.ExecuteDeleteAsync(ct);
         await db.AccountRoles.ExecuteDeleteAsync(ct);
         await db.PluginCredentials.ExecuteDeleteAsync(ct);
+        await db.ClassMemberships.ExecuteDeleteAsync(ct);
+        await db.Classrooms.ExecuteDeleteAsync(ct);
         db.ChangeTracker.Clear();
         db.AccountRoles.AddRange(snapshot.Roles.Select(x => new AccountRole { Id=x.Id, Name=x.Name, NormalizedName=x.Name.Trim().ToUpperInvariant(), Kind=x.Kind, DefaultPermissions=UpgradeImportedPermissions(snapshot.Version, x.DefaultPermissions), CreatedAt=x.CreatedAt, UpdatedAt=x.UpdatedAt }));
         await db.SaveChangesAsync(ct);
         db.Users.AddRange(snapshot.Users.Select(x => new AppUser { Id=x.Id, UserName=x.Username, NormalizedUserName=x.NormalizedUsername, DisplayName=x.DisplayName, PasswordHash=x.PasswordHash, SecurityStamp=x.SecurityStamp, ConcurrencyStamp=x.ConcurrencyStamp, Role=x.Role, RoleDefinitionId=x.RoleId, GrantedPermissions=UpgradeImportedPermissions(snapshot.Version, x.GrantedPermissions), Enabled=x.Enabled, Version=x.Version, UpdatedAt=x.UpdatedAt, EmailConfirmed=false, PhoneNumberConfirmed=false, TwoFactorEnabled=false, LockoutEnabled=true }));
-        db.PluginCredentials.AddRange(snapshot.Plugins.Select(x => new PluginCredential { Id=x.Id, Name=x.Name, TokenHash=x.TokenHash, Enabled=x.Enabled, CreatedAt=x.CreatedAt, LastSeenAt=x.LastSeenAt }));
+        // v1/v2 旧包没有班级数据：落到默认班级，访客开关沿用包内全局设置。
+        var classrooms = (snapshot.Classrooms ?? []).ToList();
+        if (classrooms.All(x => x.Id != Classroom.DefaultId))
+        {
+            classrooms.Add(new ClassroomSnapshot(
+                Classroom.DefaultId, "默认班级",
+                snapshot.Metadata.VisitorAccessEnabled, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+        }
+        db.Classrooms.AddRange(classrooms.Select(x => new Classroom { Id=x.Id, Name=x.Name, VisitorAccessEnabled=x.VisitorAccessEnabled, CreatedAt=x.CreatedAt, UpdatedAt=x.UpdatedAt }));
+        var memberships = (snapshot.Memberships ?? []).ToList();
+        if (snapshot.Memberships is null)
+        {
+            // 旧包：为每个用户按其全局角色在默认班级补建成员关系，保持升级前权限不变。
+            memberships = snapshot.Users.Select(x => new MembershipSnapshot(x.Id, Classroom.DefaultId, x.RoleId)).ToList();
+        }
+        db.ClassMemberships.AddRange(memberships.Select(x => new ClassMembership { UserId=x.UserId, ClassroomId=x.ClassroomId, RoleDefinitionId=x.RoleDefinitionId }));
+        db.PluginCredentials.AddRange(snapshot.Plugins.Select(x => new PluginCredential { Id=x.Id, Name=x.Name, TokenHash=x.TokenHash, Enabled=x.Enabled, ClassroomId=x.ClassroomId ?? Classroom.DefaultId, CreatedAt=x.CreatedAt, LastSeenAt=x.LastSeenAt }));
         db.ExtensionPolicies.AddRange((snapshot.ExtensionPolicies ?? []).Select(x => new ExtensionPolicy { ExtensionId=x.ExtensionId, Enabled=x.Enabled, AllowNonAdmin=x.AllowNonAdmin, UpdatedAt=x.UpdatedAt }));
         db.UserExtensionPreferences.AddRange((snapshot.ExtensionPreferences ?? []).Select(x => new UserExtensionPreference { UserId=x.UserId, ExtensionId=x.ExtensionId, ShowOnWatch=x.ShowOnWatch, UpdatedAt=x.UpdatedAt }));
         var metadata = await db.SystemMetadata.SingleAsync(x => x.Id == 1, ct);
         metadata.AccountVersion = snapshot.Metadata.AccountVersion + 1;
         metadata.ForceSenderInTitle = snapshot.Metadata.ForceSenderInTitle;
         metadata.SchedulePullIntervalMinutes = snapshot.Metadata.SchedulePullIntervalMinutes;
-        metadata.VisitorAccessEnabled = snapshot.Metadata.VisitorAccessEnabled;
-        metadata.AutoEnterVisitorPage = snapshot.Metadata.VisitorAccessEnabled && snapshot.Metadata.AutoEnterVisitorPage;
+        // autoEnter 只在存在开放访客的班级时有效；v1/v2 旧包的全局访客开关已映射到默认班级。
+        metadata.AutoEnterVisitorPage =
+            (classrooms.Any(x => x.VisitorAccessEnabled) || snapshot.Metadata.VisitorAccessEnabled) &&
+            snapshot.Metadata.AutoEnterVisitorPage;
         var backup = await db.BackupConfigurations.SingleAsync(x => x.Id == 1, ct);
         backup.Enabled=snapshot.Backup.Enabled; backup.Cadence=snapshot.Backup.Cadence; backup.TimeOfDay=snapshot.Backup.TimeOfDay; backup.DayOfWeek=snapshot.Backup.DayOfWeek; backup.MaxBackups=Math.Clamp(snapshot.Backup.MaxBackups,1,100); backup.LastScheduledAt=null; backup.LastSucceededAt=null; backup.LastError=null;
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
-        if (snapshot.Schedule is not null) state.SaveSchedule(snapshot.Schedule);
+        if (snapshot.Schedule is not null) state.SaveSchedule(Classroom.DefaultId, snapshot.Schedule);
     }
 
     public IReadOnlyList<BackupFileInfo> ListBackups() { Directory.CreateDirectory(_backupDirectory); return Directory.EnumerateFiles(_backupDirectory,"*.rcibak").Select(x=>ToInfo(new FileInfo(x))).OrderByDescending(x=>x.CreatedAt).ToList(); }
@@ -141,20 +163,23 @@ public sealed class ConfigurationArchiveService(
         snapshotVersion == 1 && permissions.HasFlag(UserPermissions.PowerControl)
             ? permissions | UserPermissions.MainMenuControl
             : permissions;
-    private static void Validate(ConfigurationSnapshot value) { if(value.Version is not (1 or 2) || value.Roles.Count==0 || value.Users.Count==0) throw new InvalidDataException("Invalid backup schema"); var roleIds=value.Roles.Select(x=>x.Id).ToHashSet(); if(value.Users.Any(x=>!roleIds.Contains(x.RoleId))) throw new InvalidDataException("Unknown role reference"); if(!value.Users.Any(x=>x.Enabled && x.Role==UserRole.Admin)) throw new InvalidDataException("At least one enabled administrator is required"); if(value.Users.Select(x=>x.Username.ToUpperInvariant()).Distinct().Count()!=value.Users.Count) throw new InvalidDataException("Duplicate account ID"); var userIds=value.Users.Select(x=>x.Id).ToHashSet(); if((value.ExtensionPreferences??[]).Any(x=>!userIds.Contains(x.UserId))) throw new InvalidDataException("Unknown extension preference user"); }
+    private static void Validate(ConfigurationSnapshot value) { if(value.Version is not (1 or 2 or 3) || value.Roles.Count==0 || value.Users.Count==0) throw new InvalidDataException("Invalid backup schema"); var roleIds=value.Roles.Select(x=>x.Id).ToHashSet(); if(value.Users.Any(x=>!roleIds.Contains(x.RoleId))) throw new InvalidDataException("Unknown role reference"); if(!value.Users.Any(x=>x.Enabled && x.Role==UserRole.Admin)) throw new InvalidDataException("At least one enabled administrator is required"); if(value.Users.Select(x=>x.Username.ToUpperInvariant()).Distinct().Count()!=value.Users.Count) throw new InvalidDataException("Duplicate account ID"); var userIds=value.Users.Select(x=>x.Id).ToHashSet(); if((value.ExtensionPreferences??[]).Any(x=>!userIds.Contains(x.UserId))) throw new InvalidDataException("Unknown extension preference user"); if((value.Memberships??[]).Any(x=>!userIds.Contains(x.UserId))) throw new InvalidDataException("Unknown membership user"); var classroomIds=(value.Classrooms??[]).Select(x=>x.Id).ToHashSet(); if((value.Memberships??[]).Any(x=>!classroomIds.Contains(x.ClassroomId))) throw new InvalidDataException("Unknown membership classroom"); }
 }
 
 public sealed record BackupFileInfo(string Name, DateTimeOffset CreatedAt, long Size, string Source);
-public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null);
+public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null, List<ClassroomSnapshot>? Classrooms = null, List<MembershipSnapshot>? Memberships = null);
 public sealed record RoleSnapshot(Guid Id,string Name,AccountRoleKind Kind,UserPermissions DefaultPermissions,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);
 public sealed record UserSnapshot(Guid Id,string Username,string NormalizedUsername,string DisplayName,string PasswordHash,string SecurityStamp,string ConcurrencyStamp,UserRole Role,Guid RoleId,UserPermissions GrantedPermissions,bool Enabled,long Version,DateTimeOffset UpdatedAt);
-public sealed record PluginSnapshot(Guid Id,string Name,string TokenHash,bool Enabled,DateTimeOffset CreatedAt,DateTimeOffset LastSeenAt);
+public sealed record ClassroomSnapshot(Guid Id,string Name,bool VisitorAccessEnabled,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);
+public sealed record MembershipSnapshot(Guid UserId,Guid ClassroomId,Guid RoleDefinitionId);
+public sealed record PluginSnapshot(Guid Id,string Name,string TokenHash,bool Enabled,DateTimeOffset CreatedAt,DateTimeOffset LastSeenAt,Guid? ClassroomId = null);
 public sealed record ExtensionPolicySnapshot(string ExtensionId,bool Enabled,bool AllowNonAdmin,DateTimeOffset UpdatedAt);
 public sealed record ExtensionPreferenceSnapshot(Guid UserId,string ExtensionId,bool ShowOnWatch,DateTimeOffset UpdatedAt);
 public sealed record MetadataSnapshot(
     long AccountVersion,
     bool ForceSenderInTitle,
     int SchedulePullIntervalMinutes,
+    // v1/v2 旧包字段：VisitorAccessEnabled 是升级前的全局开关，v3 起按班级存储，导入时映射到默认班级。
     bool VisitorAccessEnabled = false,
     bool AutoEnterVisitorPage = false);
 public sealed record BackupSettingsSnapshot(bool Enabled,BackupCadence Cadence,TimeSpan TimeOfDay,DayOfWeek DayOfWeek,int MaxBackups);

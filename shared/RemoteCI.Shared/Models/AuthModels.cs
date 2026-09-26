@@ -89,6 +89,11 @@ public sealed class UserProfile : UserProfileLike
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? VisibleExtensionIds { get; set; }
 
+    /// <summary>该账号可访问的班级列表；null 表示旧版服务端未下发班级信息。</summary>
+    [JsonPropertyName("classes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ClassSummary>? Classes { get; set; }
+
     [JsonPropertyName("version")]
     public long Version { get; set; }
 }

@@ -45,6 +45,11 @@ public sealed class PluginCredentialInfo
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
 
+    /// <summary>插件归属班级名称；旧版服务端为 null。</summary>
+    [JsonPropertyName("className")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ClassName { get; set; }
+
     [JsonPropertyName("createdAt")]
     public DateTimeOffset CreatedAt { get; set; }
 

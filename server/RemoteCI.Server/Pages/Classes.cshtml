@@ -1,0 +1,157 @@
+@page
+@model ClassesModel
+@{
+    ViewData["Title"] = "班级管理";
+}
+<div class="page-head">
+    <div>
+        <p class="eyebrow">班级与访客</p>
+        <h1>班级管理</h1>
+    </div>
+</div>
+
+<section class="panel">
+    <h2>新建班级</h2>
+    <p class="muted">每个班级对应一个教室端的 ClassIsland 插件与独立课表；创建后在概览页生成绑定该班级的配对码接入插件。</p>
+    <form method="post" asp-page-handler="Create" class="stack">
+        <label>班级名称<input asp-for="NewClassName" required maxlength="40" placeholder="例如：高一（1）班" /></label>
+        <button type="submit">创建班级</button>
+    </form>
+</section>
+
+<section class="panel">
+    <div class="panel-heading">
+        <div><h2>全部班级</h2><p class="muted">默认班级不可删除；删除班级会同时移除成员关系与插件凭据（需重新配对）。勾选班级后可批量开关访客功能或删除。</p></div>
+    </div>
+    @if (Model.Classes.Count == 0)
+    {
+        <div class="notice warning">还没有班级。</div>
+    }
+    else
+    {
+        <form id="batch-form" method="post" asp-page-handler="Batch" class="stack">
+            <label>批量操作
+                <select asp-for="BatchOperation" required>
+                    <option value="enableVisitor">批量开启访客功能</option>
+                    <option value="disableVisitor">批量关闭访客功能</option>
+                    <option value="delete">批量删除班级</option>
+                </select>
+            </label>
+            <button type="submit">对勾选的班级执行</button>
+        </form>
+        <div class="user-account-table-wrap">
+            <table class="user-account-table">
+                <thead>
+                    <tr>
+                        <th scope="col"><span class="visually-hidden">选择</span></th>
+                        <th scope="col">班级</th>
+                        <th scope="col">成员</th>
+                        <th scope="col">插件</th>
+                        <th scope="col">访客</th>
+                        <th scope="col"><span class="visually-hidden">操作</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var classroom in Model.Classes)
+                {
+                    var members = Model.MembersByClass.GetValueOrDefault(classroom.Id, Array.Empty<ClassMemberInfo>());
+                    <tr>
+                        <td data-label="选择">
+                            @if (classroom.Id != Classroom.DefaultId)
+                            {
+                                <input type="checkbox" name="SelectedClassIds" value="@classroom.Id" form="batch-form" aria-label="选择 @classroom.Name" />
+                            }
+                            else
+                            {
+                                <span class="muted" title="默认班级不可删除">默认</span>
+                            }
+                        </td>
+                        <td data-label="班级">
+                            <strong>@classroom.Name</strong>
+                            @if (classroom.Id != Classroom.DefaultId)
+                            {
+                                <form method="post" asp-page-handler="Rename" class="inline-form">
+                                    <input type="hidden" name="id" value="@classroom.Id" />
+                                    <input type="text" name="name" required maxlength="40" placeholder="新名称" aria-label="@classroom.Name 的新名称" />
+                                    <button type="submit" class="ghost">改名</button>
+                                </form>
+                            }
+                        </td>
+                        <td data-label="成员">@classroom.MemberCount</td>
+                        <td data-label="插件">
+                            @if (classroom.PluginCount > 0)
+                            {
+                                <span title="插件在线">在线</span>
+                            }
+                            else
+                            {
+                                <span class="muted" title="插件离线">离线</span>
+                            }
+                        </td>
+                        <td data-label="访客">
+                            <form method="post" asp-page-handler="ToggleVisitor" class="inline-form">
+                                <input type="hidden" name="id" value="@classroom.Id" />
+                                <input type="hidden" name="enabled" value="@(classroom.VisitorEnabled ? "false" : "true")" />
+                                <button type="submit" class="ghost">@(classroom.VisitorEnabled ? "关闭" : "开启")</button>
+                            </form>
+                        </td>
+                        <td data-label="操作">
+                            @if (classroom.Id != Classroom.DefaultId)
+                            {
+                                <form method="post" asp-page-handler="Delete" class="inline-form">
+                                    <input type="hidden" name="id" value="@classroom.Id" />
+                                    <button type="submit" class="ghost">删除</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                    <tr class="member-row">
+                        <td></td>
+                        <td colspan="5">
+                            <details>
+                                <summary>成员（@members.Count）</summary>
+                                <ul class="member-list">
+                                    @foreach (var member in members)
+                                    {
+                                        <li>
+                                            <span>@member.DisplayName（@member.Username）· @member.RoleName</span>
+                                            <form method="post" asp-page-handler="RemoveMember" class="inline-form">
+                                                <input type="hidden" name="id" value="@classroom.Id" />
+                                                <input type="hidden" name="userId" value="@member.UserId" />
+                                                <button type="submit" class="ghost">移出</button>
+                                            </form>
+                                        </li>
+                                    }
+                                    @if (members.Count == 0)
+                                    {
+                                        <li class="muted">暂无成员。</li>
+                                    }
+                                </ul>
+                                @if (Model.Accounts.Any(x => x.Enabled && members.All(m => m.UserId != x.Id)))
+                                {
+                                    <form method="post" asp-page-handler="AddMember" class="inline-form">
+                                        <input type="hidden" name="id" value="@classroom.Id" />
+                                        <select name="userId" required aria-label="选择用户">
+                                            @foreach (var account in Model.Accounts.Where(x => x.Enabled && members.All(m => m.UserId != x.Id)))
+                                            {
+                                                <option value="@account.Id">@account.DisplayName（@account.Username）</option>
+                                            }
+                                        </select>
+                                        <select name="roleId" required aria-label="选择角色">
+                                            @foreach (var role in Model.RoleDefinitions.Where(x => x.Kind != nameof(AccountRoleKind.Administrator)))
+                                            {
+                                                <option value="@role.Id">@role.Name</option>
+                                            }
+                                        </select>
+                                        <button type="submit">添加成员</button>
+                                    </form>
+                                }
+                            </details>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>

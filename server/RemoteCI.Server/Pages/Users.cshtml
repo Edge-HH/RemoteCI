@@ -13,10 +13,9 @@
 
 <section class="panel">
     <h2>访客访问</h2>
-    <p class="muted">启用后，登录页会出现「仅查看」，未登录访客只能浏览课表。自动进入访客页默认关闭，且仅在启用访客功能时可开启。</p>
-    <form method="post" asp-page-handler="VisitorAccess" class="stack" data-visitor-access-form>
-        <label class="check"><input asp-for="VisitorAccessEnabled" data-visitor-enabled /> 启用访客功能</label>
-        <label class="check"><input asp-for="AutoEnterVisitorPage" data-visitor-auto-enter disabled="@(!Model.VisitorAccessEnabled)" /> 自动进入访客页</label>
+    <p class="muted">在<a asp-page="/Classes">班级管理</a>中逐班开启访客功能后，登录页会出现「仅查看」，未登录访客只能浏览开放班级的课表。自动进入访客页默认关闭，且仅在存在开放访客的班级时可开启。</p>
+    <form method="post" asp-page-handler="VisitorAccess" class="stack">
+        <label class="check"><input asp-for="AutoEnterVisitorPage" /> 自动进入访客页</label>
         <button type="submit">保存访客设置</button>
     </form>
 </section>

@@ -19,19 +19,19 @@ public sealed class ScheduleModel(
     [BindProperty]
     public ScheduleInput Input { get; set; } = new();
     public ScheduleBundle? Bundle { get; private set; }
-    public bool PluginOnline => peers.HasPlugin;
-    public bool CanPullSchedule => !PluginOnline || peers.PrimaryPluginSupports(RemoteCiCapabilities.SchedulePull);
-    public bool CanConfigureSchedulePull => Permissions.HasFlag(UserPermissions.ManageSchedule) && CanPullSchedule;
-    public bool CanManageSchedule => Permissions.HasFlag(UserPermissions.ManageSchedule) &&
-        (!PluginOnline || peers.PrimaryPluginSupports(RemoteCiCapabilities.ScheduleChange));
-    public ScheduleSyncStatus? CurrentTask => scheduleSync.Current;
+    public bool PluginOnline => peers.HasPluginFor(CurrentClassId);
+    public bool CanPullSchedule => !PluginOnline || peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.SchedulePull);
+    public bool CanConfigureSchedulePull => ClassPermissions.HasFlag(UserPermissions.ManageSchedule) && CanPullSchedule;
+    public bool CanManageSchedule => ClassPermissions.HasFlag(UserPermissions.ManageSchedule) &&
+        (!PluginOnline || peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.ScheduleChange));
+    public ScheduleSyncStatus? CurrentTask => scheduleSync.Current(CurrentClassId);
     [BindProperty]
     public SchedulePullInterval PullInterval { get; set; }
 
     public async Task<IActionResult> OnGetAsync()
     {
         if (await RequireAsync() is { } denied) return denied;
-        Bundle = state.GetLatestSchedule();
+        Bundle = state.GetLatestSchedule(CurrentClassId);
         PullInterval = await pullSettings.GetIntervalAsync();
         return Page();
     }
@@ -39,12 +39,13 @@ public sealed class ScheduleModel(
     public async Task<IActionResult> OnPostPullAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (PluginOnline && !peers.PrimaryPluginSupports(RemoteCiCapabilities.SchedulePull))
+        if (RequireClass(UserPermissions.ManageSchedule) is { } classDenied) return classDenied;
+        if (PluginOnline && !peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.SchedulePull))
         {
-            TempData["Error"] = $"{CommandResultCodes.CapabilityUnsupported}：当前主插件不支持拉取课表。";
+            TempData["Error"] = $"{CommandResultCodes.CapabilityUnsupported}：当前班级的插件不支持拉取课表。";
             return RedirectToPage();
         }
-        var status = await scheduleSync.StartAndWaitAsync(ScheduleSyncSource.WebUi, ct);
+        var status = await scheduleSync.StartAndWaitAsync(ScheduleSyncSource.WebUi, CurrentClassId, ct);
         if (status.State == ScheduleSyncTaskState.Completed)
             TempData["Message"] = "已从插件拉取最新课表，并强制覆盖服务端缓存。";
         else
@@ -54,10 +55,11 @@ public sealed class ScheduleModel(
 
     public async Task<IActionResult> OnPostPullIntervalAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageSchedule) is { } denied) return denied;
-        if (PluginOnline && !peers.PrimaryPluginSupports(RemoteCiCapabilities.SchedulePull))
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.ManageSchedule) is { } classDenied) return classDenied;
+        if (PluginOnline && !peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.SchedulePull))
         {
-            TempData["Error"] = $"{CommandResultCodes.CapabilityUnsupported}：当前主插件不支持拉取课表。";
+            TempData["Error"] = $"{CommandResultCodes.CapabilityUnsupported}：当前班级的插件不支持拉取课表。";
             return RedirectToPage();
         }
         if (!Enum.IsDefined(PullInterval))
@@ -74,8 +76,9 @@ public sealed class ScheduleModel(
 
     public async Task<IActionResult> OnPostAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageSchedule) is { } denied) return denied;
-        var sourceDay = state.GetLatestSchedule()?.Days.FirstOrDefault(day =>
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.ManageSchedule) is { } classDenied) return classDenied;
+        var sourceDay = state.GetLatestSchedule(CurrentClassId)?.Days.FirstOrDefault(day =>
             day.Enabled &&
             string.Equals(day.Date, Input.Date, StringComparison.Ordinal) &&
             string.Equals(day.Revision, Input.ExpectedRevision, StringComparison.Ordinal));
@@ -102,6 +105,7 @@ public sealed class ScheduleModel(
         var result = await peers.SendCommandAndWaitAsync(new CommandMessage
         {
             Command = CommandKind.ChangeSchedule,
+            ClassId = CurrentClassId,
             RequestedBy = new UserProfile
             {
                 Id = CurrentUser.Id,
@@ -109,7 +113,7 @@ public sealed class ScheduleModel(
                 DisplayName = CurrentUser.DisplayName,
                 Role = CurrentUser.Role,
                 GrantedPermissions = CurrentUser.GrantedPermissions,
-                Permissions = Permissions,
+                Permissions = ClassPermissions,
                 Version = CurrentUser.Version,
             },
             ScheduleChange = new ScheduleChangeRequest
@@ -121,7 +125,7 @@ public sealed class ScheduleModel(
                 ReplacementSubjectId = Input.Mode == ScheduleChangeMode.Replace ? Input.ReplacementSubjectId : null,
                 ExpectedRevision = sourceDay.Revision,
             },
-        }, TimeSpan.FromSeconds(15), ct);
+        }, CurrentClassId, TimeSpan.FromSeconds(15), ct);
         TempData[result.Success ? "Message" : "Error"] = result.Message;
         return RedirectToPage();
     }
