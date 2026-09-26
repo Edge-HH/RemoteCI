@@ -758,7 +758,6 @@ app.MapGet("/api/admin/status", async (
     });
 });
 
-
 app.MapGet("/api/roles", async (HttpContext ctx, IdentityCoordinator identities, AccountRoleService roles, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
