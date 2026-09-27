@@ -22,6 +22,7 @@ public static class Protocol
     public const string MessageTypeConnectionBootstrap = "connection_bootstrap";
     public const string MessageTypePeerCapabilities = "peer_capabilities";
     public const string MessageTypeCapabilitiesSync = "capabilities_sync";
+    public const string MessageTypeSoftwareInventory = "software_inventory";
 
     public const int LanDiscoveryPort = 48765;
     public const string LanDiscoveryRequest = "REMOTECI_DISCOVER_V3";
@@ -63,8 +64,13 @@ public enum UserPermissions
     RunExtensions = 1 << 7,
     MainMenuControl = 1 << 8,
     SendVoiceMessages = 1 << 9,
+    // 修改自己的用户可见用户名（DisplayName）；不改变唯一登录 ID。
+    ChangeDisplayName = 1 << 10,
+    // 允许使用 API Key 调用服务端 REST API；API Key 仍会按账号当前权限逐次鉴权。
+    ApiAccess = 1 << 11,
     All = ViewCurrentCourse | AccessWebUi | ManageUsers | SendNotifications | ManageSchedule |
-          PowerControl | TeacherComing | RunExtensions | MainMenuControl | SendVoiceMessages,
+          PowerControl | TeacherComing | RunExtensions | MainMenuControl | SendVoiceMessages |
+          ChangeDisplayName | ApiAccess,
 }
 
 public static class RolePermissions
@@ -72,7 +78,8 @@ public static class RolePermissions
     /// <summary>可授予普通账号或自定义角色的权限集合。</summary>
     public const UserPermissions Assignable = UserPermissions.AccessWebUi | UserPermissions.ManageUsers |
         UserPermissions.SendNotifications | UserPermissions.ManageSchedule | UserPermissions.PowerControl |
-        UserPermissions.TeacherComing | UserPermissions.RunExtensions | UserPermissions.MainMenuControl | UserPermissions.SendVoiceMessages;
+        UserPermissions.TeacherComing | UserPermissions.RunExtensions | UserPermissions.MainMenuControl |
+        UserPermissions.SendVoiceMessages | UserPermissions.ChangeDisplayName | UserPermissions.ApiAccess;
 
     public static UserPermissions Effective(
         UserRole role,
@@ -127,6 +134,28 @@ public enum CommandKind
     /// <summary>显示“老师来了”强调提醒，等待 1 秒后由插件自动清除。</summary>
     TeacherComing = 8,
     SendVoiceMessage = 9,
+    /// <summary>升级 ClassIsland 插件；升级包由宿主插件市场处理，重启后生效。</summary>
+    UpgradePlugins = 10,
+    /// <summary>升级 ClassIsland 主程序；由宿主官方更新服务下载并部署。</summary>
+    UpgradeClassIsland = 11,
+    /// <summary>请求插件重新采集并上报应用与插件版本清单。</summary>
+    RefreshSoftwareInventory = 12,
+    /// <summary>通过 ClassIsland 插件市场下载并安装一组插件，重启后生效。</summary>
+    InstallPlugins = 13,
+    /// <summary>卸载一组本地插件，重启后生效。</summary>
+    UninstallPlugins = 14,
+    /// <summary>启用或禁用一组本地插件，重启后生效。</summary>
+    SetPluginEnabled = 15,
+    /// <summary>设置 RemoteCI 远程插件管理策略。</summary>
+    SetPluginManagementPolicy = 16,
+    /// <summary>把档案 JSON 中的时间表、课表或科目分发到设备。</summary>
+    DistributeProfile = 17,
+    /// <summary>新增或整体替换一张 ClassIsland 时间表。</summary>
+    UpdateTimeLayout = 18,
+    /// <summary>让设备加入 ClassIsland 内置集控。</summary>
+    JoinManagement = 19,
+    /// <summary>仅重启 ClassIsland 宿主，不重启 Windows。</summary>
+    RestartClassIsland = 20,
 }
 
 public enum PowerActionKind
@@ -147,6 +176,13 @@ public static class CommandPermissions
         CommandKind.TeacherComing => UserPermissions.TeacherComing,
         CommandKind.SetMainMenuVisibility => UserPermissions.MainMenuControl,
         CommandKind.Power or CommandKind.Volume => UserPermissions.PowerControl,
+        // 远程升级、插件管理和集控操作都会改变教室端程序或宿主配置，与账号管理同属高风险管理员操作。
+        CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
+        CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
+        CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
+        CommandKind.JoinManagement
+        or CommandKind.RestartClassIsland
+            => UserPermissions.ManageUsers,
         _ => UserPermissions.None,
     };
 }
@@ -166,6 +202,18 @@ public static class RemoteCiCapabilities
     public const string PowerControl = "power.control";
     public const string VolumeControl = "volume.control";
     public const string ExtensionsRun = "extensions.run";
+    public const string SoftwareInventory = "software.inventory";
+    public const string SoftwareUpgradePlugins = "software.upgrade-plugins";
+    public const string SoftwareUpgradeClassIsland = "software.upgrade-classisland";
+    public const string PluginInstall = "plugin.install";
+    public const string PluginUninstall = "plugin.uninstall";
+    public const string PluginEnable = "plugin.enable";
+    public const string PluginManagementPolicy = "plugin.management-policy";
+    public const string ProfileDistribute = "profile.distribute";
+    public const string TimeLayoutUpdate = "schedule.time-layout";
+    public const string ManagementJoin = "management.join";
+    /// <summary>把换课写入 ClassIsland 源课表（本周及以后每周生效），而不是只写到当天临时课表层。</summary>
+    public const string ScheduleChangePermanent = "schedule.change-permanent";
 
     /// <summary>没有上报能力列表的旧 V3 端自动获得的基础能力。</summary>
     public static IReadOnlyList<string> Baseline { get; } =
@@ -184,7 +232,9 @@ public static class RemoteCiCapabilities
     ];
 
     /// <summary>当前版本支持的能力；新能力不能加入旧端默认获得的 Baseline。</summary>
-    public static IReadOnlyList<string> Current { get; } = [.. Baseline, VoiceMessageSend];
+    public static IReadOnlyList<string> Current { get; } =
+        [.. Baseline, VoiceMessageSend, SoftwareInventory, SoftwareUpgradePlugins, SoftwareUpgradeClassIsland,
+            PluginInstall, PluginUninstall, PluginEnable, PluginManagementPolicy, ProfileDistribute, TimeLayoutUpdate, ManagementJoin];
 
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
@@ -201,6 +251,16 @@ public static class RemoteCiCapabilities
         PowerControl => "电源控制",
         VolumeControl => "音量控制",
         ExtensionsRun => "运行扩展功能",
+        SoftwareInventory => "读取软件版本",
+        SoftwareUpgradePlugins => "升级插件",
+        SoftwareUpgradeClassIsland => "升级 ClassIsland",
+        PluginInstall => "安装插件",
+        PluginUninstall => "卸载插件",
+        PluginEnable => "启用或禁用插件",
+        PluginManagementPolicy => "远程插件管理策略",
+        ProfileDistribute => "分发档案",
+        TimeLayoutUpdate => "修改时间表",
+        ManagementJoin => "加入集控",
         _ => "未知能力",
     };
 
@@ -215,6 +275,16 @@ public static class RemoteCiCapabilities
         CommandKind.Power => PowerControl,
         CommandKind.Volume => VolumeControl,
         CommandKind.RunExtension => ExtensionsRun,
+        CommandKind.RefreshSoftwareInventory => SoftwareInventory,
+        CommandKind.UpgradePlugins => SoftwareUpgradePlugins,
+        CommandKind.UpgradeClassIsland => SoftwareUpgradeClassIsland,
+        CommandKind.InstallPlugins => PluginInstall,
+        CommandKind.UninstallPlugins => PluginUninstall,
+        CommandKind.SetPluginEnabled => PluginEnable,
+        CommandKind.SetPluginManagementPolicy => PluginManagementPolicy,
+        CommandKind.DistributeProfile => ProfileDistribute,
+        CommandKind.UpdateTimeLayout => TimeLayoutUpdate,
+        CommandKind.JoinManagement => ManagementJoin,
         _ => null,
     };
 }

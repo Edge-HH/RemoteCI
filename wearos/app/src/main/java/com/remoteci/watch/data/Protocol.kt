@@ -231,6 +231,7 @@ data class ScheduleChangeRequest(
     @SerialName("targetIndex") val targetIndex: Int? = null,
     @SerialName("replacementSubjectId") val replacementSubjectId: String? = null,
     @SerialName("expectedRevision") val expectedRevision: String,
+    val permanent: Boolean = false,
 )
 
 @Serializable

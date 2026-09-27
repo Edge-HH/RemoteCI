@@ -409,6 +409,134 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
     }
 
     [Fact]
+    public async Task BatchGroupAssignment_SupportsAddRemoveReplaceAndClear()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var classrooms = scope.ServiceProvider.GetRequiredService<ClassroomService>();
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+
+        var firstGroup = await classrooms.CreateGroupAsync($"批量分组甲-{suffix}", null);
+        var secondGroup = await classrooms.CreateGroupAsync($"批量分组乙-{suffix}", null);
+        var firstClass = await classrooms.CreateAsync($"批量分组一班-{suffix}");
+        var secondClass = await classrooms.CreateAsync($"批量分组二班-{suffix}");
+
+        await classrooms.SetClassGroupsAsync(firstClass.Id, [firstGroup.Id]);
+        await classrooms.SetClassGroupsAsync(secondClass.Id, [secondGroup.Id]);
+
+        var added = await classrooms.BatchSetClassGroupsAsync(
+            [firstClass.Id, secondClass.Id], [firstGroup.Id], "addGroups");
+        Assert.All(added.Results, x => Assert.True(x.Success));
+
+        var details = await classrooms.ListAsync();
+        Assert.Contains(firstGroup.Id, details.Single(x => x.Id == firstClass.Id).GroupIds ?? []);
+        Assert.Contains(firstGroup.Id, details.Single(x => x.Id == secondClass.Id).GroupIds ?? []);
+        Assert.Contains(secondGroup.Id, details.Single(x => x.Id == secondClass.Id).GroupIds ?? []);
+
+        var removed = await classrooms.BatchSetClassGroupsAsync(
+            [secondClass.Id], [secondGroup.Id], "removeGroups");
+        Assert.True(removed.Results.Single().Success);
+        details = await classrooms.ListAsync();
+        Assert.DoesNotContain(secondGroup.Id, details.Single(x => x.Id == secondClass.Id).GroupIds ?? []);
+
+        var replaced = await classrooms.BatchSetClassGroupsAsync(
+            [firstClass.Id], [secondGroup.Id], "replaceGroups");
+        Assert.True(replaced.Results.Single().Success);
+        details = await classrooms.ListAsync();
+        Assert.Equal(new[] { secondGroup.Id }, details.Single(x => x.Id == firstClass.Id).GroupIds ?? []);
+
+        var cleared = await classrooms.BatchSetClassGroupsAsync(
+            [firstClass.Id], [], "clearGroups");
+        Assert.True(cleared.Results.Single().Success);
+        details = await classrooms.ListAsync();
+        Assert.Empty(details.Single(x => x.Id == firstClass.Id).GroupIds ?? []);
+    }
+
+    [Fact]
+    public async Task ClassesPage_RendersTreeAndBatchControlsForSelectedGroup()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var browser = CreateBrowser(factory);
+        await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+
+        Guid childId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var classrooms = scope.ServiceProvider.GetRequiredService<ClassroomService>();
+            var root = await classrooms.CreateGroupAsync($"树根分组-{suffix}", null);
+            var child = await classrooms.CreateGroupAsync($"树子分组-{suffix}", root.Id);
+            var classroom = await classrooms.CreateAsync($"树内班级-{suffix}");
+            await classrooms.CreateAsync($"树外班级-{suffix}");
+            await classrooms.SetClassGroupsAsync(classroom.Id, [child.Id]);
+            childId = child.Id;
+        }
+
+        var html = WebUtility.HtmlDecode(await browser.GetStringAsync("/Classes"));
+        Assert.Contains("class-manager", html);
+        Assert.Contains("data-class-batch-form", html);
+        Assert.Contains("data-class-tree-toggle", html);
+        Assert.Contains($"树根分组-{suffix}", html);
+        Assert.Contains($"树子分组-{suffix}", html);
+
+        var selectedHtml = WebUtility.HtmlDecode(await browser.GetStringAsync($"/Classes?groupId={childId}"));
+        Assert.Contains($"<strong>树内班级-{suffix}</strong>", selectedHtml);
+        Assert.DoesNotContain($"<strong>树外班级-{suffix}</strong>", selectedHtml);
+    }
+
+    // ---------- 批量语音广播 ----------
+
+    /// <summary>
+    /// 批量页的语音表单复用 voice-message.js：脚本把勾选目标按 data-voice-query 声明的键追加到上传地址。
+    /// 这里按同样的方式上传一次，确保勾选班级真的进入广播目标，而不是被当成“没有勾选目标”。
+    /// </summary>
+    [Fact]
+    public async Task BatchControlVoice_BroadcastsToCheckedClasses()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        var admin = await factory.LoginAsync();
+        using var client = factory.CreateClient();
+        using var browser = CreateBrowser(factory);
+        await LoginWebUiAsync(browser);
+
+        // 先建分组，让“整组执行”的勾选框也渲染出来。
+        await client.SendAsync(Bearer(HttpMethod.Post, "/api/class-groups", admin.AccessToken,
+            new CreateClassGroupRequest { Name = "语音广播组" }));
+        var classB = (await (await client.SendAsync(Bearer(HttpMethod.Post, "/api/classes", admin.AccessToken,
+            new CreateClassRequest { Name = "语音广播二班" }))).Content.ReadFromJsonAsync<ClassDetail>())!;
+
+        var html = await browser.GetStringAsync("/BatchControl");
+        var classKey = VoiceQueryKey(html, "SelectedClassIds");
+        var groupKey = VoiceQueryKey(html, "SelectedGroupIds");
+        // 键名必须与服务端 OnPostBroadcastVoiceAsync 读取的查询键一致。
+        Assert.Equal("classIds", classKey);
+        Assert.Equal("groupIds", groupKey);
+
+        var token = System.Text.RegularExpressions.Regex
+            .Match(html, "name=\"__RequestVerificationToken\"[^>]+value=\"([^\"]+)\"").Groups[1].Value;
+        using var request = new HttpRequestMessage(HttpMethod.Post,
+            $"/BatchControl?handler=BroadcastVoice&{classKey}={classB.Id}");
+        request.Headers.Add("X-CSRF-TOKEN", WebUtility.HtmlDecode(token));
+        request.Content = new ByteArrayContent([0, 0]);
+        request.Content.Headers.ContentType = new("application/octet-stream");
+        using var response = await browser.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var message = payload.GetProperty("message").GetString() ?? string.Empty;
+        // 勾选的二班确实成为广播目标：它没有在线插件，因此逐台失败，而不是被当成“没有选择目标”整体拒绝。
+        Assert.DoesNotContain("请先", message);
+        Assert.Contains("语音广播二班", message);
+        Assert.Contains("插件未在线", message);
+    }
+
+    private static string VoiceQueryKey(string html, string inputName)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            html, $"name=\"{inputName}\"[^>]*data-voice-query=\"([^\"]+)\"");
+        Assert.True(match.Success, $"勾选框 {inputName} 必须用 data-voice-query 声明上传键名");
+        return match.Groups[1].Value;
+    }
+
+    [Fact]
     public async Task Groups_SupportHierarchyAndMultiMembership()
     {
         var admin = await _factory.LoginAsync();

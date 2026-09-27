@@ -37,7 +37,7 @@ internal static class ScheduleChangeExecutor
         if (validationError is not null)
             return CommandResult.Failure(CommandResultCodes.InvalidRequest, validationError);
 
-        var plan = GetWritablePlan(date, backend, profile);
+        var plan = GetWritablePlan(date, request.Permanent, backend, profile);
         if (plan is null)
             return CommandResult.Failure(CommandResultCodes.ScheduleUnavailable, $"{date:yyyy-MM-dd} 无法创建临时课表层");
         validationError = ScheduleMutation.Validate(
@@ -66,17 +66,20 @@ internal static class ScheduleChangeExecutor
         {
             Success = true,
             Code = CommandResultCodes.Ok,
-            Message = request.Mode == ScheduleChangeMode.Exchange ? "两节课程已临时交换" : "课程已临时替换",
+            Message = request.Permanent
+                ? request.Mode == ScheduleChangeMode.Exchange ? "两节课程已永久交换" : "课程已永久替换"
+                : request.Mode == ScheduleChangeMode.Exchange ? "两节课程已临时交换" : "课程已临时替换",
             ScheduleRevision = after.Revision,
         };
     }
 
     /// <summary>取得可写的课表层：已是临时层直接使用，否则创建临时层并取回。</summary>
     internal static ClassPlan? GetWritablePlan(
-        DateTime date, IScheduleBackend backend, IProfileWriteOperations profile)
+        DateTime date, bool permanent, IScheduleBackend backend, IProfileWriteOperations profile)
     {
         var plan = backend.GetClassPlan(date, out var planId);
         if (plan is null || planId is null) return null;
+        if (permanent) return plan;
         if (plan.IsOverlay) return plan;
         var overlayId = profile.CreateTempClassPlan(planId.Value, date);
         if (overlayId is null) return null;

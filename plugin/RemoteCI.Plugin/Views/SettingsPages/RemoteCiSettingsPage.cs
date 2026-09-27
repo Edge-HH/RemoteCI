@@ -24,6 +24,7 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
     private readonly TextBox _portBox;
     private readonly TextBox _cloudUrlBox;
     private readonly TextBox _pairCodeBox;
+    private readonly TextBox _classNameRemarkBox;
     private readonly TextBlock _httpWarning;
     private readonly Button _pushScheduleButton;
     private readonly Button _testConnectionButton;
@@ -40,7 +41,8 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
 
         _portBox = new TextBox { Text = settings.LanServerPort.ToString(), Watermark = "端口（默认 8765）" };
         _cloudUrlBox = new TextBox { Text = settings.CloudServerUrl, Watermark = "云端地址，如 https://nas:8080" };
-        _pairCodeBox = new TextBox { Text = settings.PluginPairCode, Watermark = "WebUI 生成的一次性插件配对码" };
+        _pairCodeBox = new TextBox { Text = settings.PluginPairCode, Watermark = "班级配对码或统一连接码" };
+        _classNameRemarkBox = new TextBox { Text = settings.ClassNameRemark, Watermark = "统一连接码下填写，例如：高一（1）班" };
         _showDeveloperSettingsToggle = new ToggleSwitch
         {
             IsChecked = settings.ShowDeveloperSettingsMenu,
@@ -122,7 +124,22 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
                 new StackPanel
                 {
                     Spacing = 6,
-                    Children = { new TextBlock { Text = "一次性插件配对码" }, _pairCodeBox },
+                    Children = { new TextBlock { Text = "插件连接码" }, _pairCodeBox },
+                },
+                new StackPanel
+                {
+                    Spacing = 6,
+                    Children =
+                    {
+                        new TextBlock { Text = "统一连接码班级备注" },
+                        _classNameRemarkBox,
+                        new TextBlock
+                        {
+                            Text = "填写统一连接码时使用；设备会先进入服务端“未分配”，管理员确认后才能控制。",
+                            Opacity = 0.7,
+                            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                        },
+                    },
                 },
                 new Grid
                 {
@@ -205,6 +222,7 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
             ? "http://localhost:8080"
             : urlText;
         _settings.PluginPairCode = _pairCodeBox.Text?.Trim() ?? string.Empty;
+        _settings.ClassNameRemark = _classNameRemarkBox.Text?.Trim() ?? string.Empty;
         _settings.ShowDeveloperSettingsMenu = _showDeveloperSettingsToggle.IsChecked == true;
         // 属性变更已由 Plugin.cs 的 PropertyChanged 订阅自动落盘，无需重复写 Settings.json。
 

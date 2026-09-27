@@ -19,6 +19,11 @@ public sealed class ClassroomService(AppDbContext db)
             .GroupBy(x => x.ClassroomId)
             .Select(x => new { ClassroomId = x.Key, Count = x.Count() })
             .ToDictionaryAsync(x => x.ClassroomId, x => x.Count, ct);
+        var classIdsWithPairCode = (await db.PluginPairingCodes.AsNoTracking()
+                .Where(x => x.IsPersistent)
+                .Select(x => x.ClassroomId)
+                .ToListAsync(ct))
+            .ToHashSet();
         // 插件在线数来自连接注册表；服务是 scoped，通过注入的在线快照函数避免引用单例链。
         return classrooms.Select(x => new ClassDetail
         {
@@ -30,6 +35,7 @@ public sealed class ClassroomService(AppDbContext db)
             GroupIds = x.GroupAssignments.Select(a => a.GroupId).ToList(),
             GroupNames = x.GroupAssignments.Select(a => a.Group.Name).ToList(),
             HasAvatar = x.Avatar != null,
+            HasPairingCode = classIdsWithPairCode.Contains(x.Id),
             CreatedAt = x.CreatedAt,
         }).ToList();
     }
@@ -247,12 +253,20 @@ public sealed class ClassroomService(AppDbContext db)
         if (found != wanted.Count)
             throw new IdentityOperationException(ApiErrorCodes.NotFound, "包含不存在的分组");
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        await db.ClassGroupAssignments.Where(x => x.ClassroomId == classId).ExecuteDeleteAsync(ct);
-        db.ClassGroupAssignments.AddRange(wanted.Select(groupId => new ClassGroupAssignment
-        {
-            GroupId = groupId,
-            ClassroomId = classId,
-        }));
+        // 只增删差集，避免同一分组先删后加触发 EF 的键冲突，也减少无意义写入。
+        var existing = await db.ClassGroupAssignments
+            .Where(x => x.ClassroomId == classId)
+            .ToListAsync(ct);
+        var existingIds = existing.Select(x => x.GroupId).ToHashSet();
+        var wantedIds = wanted.ToHashSet();
+        db.ClassGroupAssignments.RemoveRange(existing.Where(x => !wantedIds.Contains(x.GroupId)));
+        db.ClassGroupAssignments.AddRange(wanted
+            .Where(groupId => !existingIds.Contains(groupId))
+            .Select(groupId => new ClassGroupAssignment
+            {
+                GroupId = groupId,
+                ClassroomId = classId,
+            }));
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
     }
@@ -346,6 +360,58 @@ public sealed class ClassroomService(AppDbContext db)
                 results.Add(new BatchClassItemResult { ClassId = classId, Success = false, Message = ex.Message });
             }
         }
+        return new BatchClassOperationResult { Results = results };
+    }
+
+    /// <summary>
+    /// 批量调整班级分组归属。addGroups / removeGroups / replaceGroups 需要目标分组，
+    /// clearGroups 会把所选班级从全部分组移出；每个班级独立返回结果。
+    /// </summary>
+    public async Task<BatchClassOperationResult> BatchSetClassGroupsAsync(
+        IReadOnlyCollection<Guid> classIds,
+        IReadOnlyCollection<Guid> groupIds,
+        string operation,
+        CancellationToken ct = default)
+    {
+        var mode = operation.Trim().ToLowerInvariant();
+        var targetGroupIds = groupIds.Distinct().ToList();
+        if (mode != "cleargroups")
+        {
+            if (targetGroupIds.Count == 0)
+                throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "请选择目标分组");
+            var foundGroups = await db.ClassGroups.Where(x => targetGroupIds.Contains(x.Id)).CountAsync(ct);
+            if (foundGroups != targetGroupIds.Count)
+                throw new IdentityOperationException(ApiErrorCodes.NotFound, "包含不存在的分组");
+        }
+
+        var results = new List<BatchClassItemResult>();
+        foreach (var classId in classIds.Distinct())
+        {
+            try
+            {
+                var current = await db.ClassGroupAssignments.AsNoTracking()
+                    .Where(x => x.ClassroomId == classId)
+                    .Select(x => x.GroupId)
+                    .ToListAsync(ct);
+                var next = mode switch
+                {
+                    "addgroups" => current.Union(targetGroupIds).ToList(),
+                    "removegroups" => current.Except(targetGroupIds).ToList(),
+                    "replacegroups" => targetGroupIds,
+                    "cleargroups" => [],
+                    _ => throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "未知批量分组操作"),
+                };
+
+                if (!current.OrderBy(x => x).SequenceEqual(next.OrderBy(x => x)))
+                    await SetClassGroupsAsync(classId, next, ct);
+                results.Add(new BatchClassItemResult { ClassId = classId, Success = true });
+            }
+            catch (IdentityOperationException ex)
+            {
+                results.Add(new BatchClassItemResult { ClassId = classId, Success = false, Message = ex.Message });
+            }
+        }
+
         return new BatchClassOperationResult { Results = results };
     }
 

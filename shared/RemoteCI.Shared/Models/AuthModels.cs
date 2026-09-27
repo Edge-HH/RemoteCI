@@ -379,6 +379,13 @@ public sealed class ChangePasswordRequest
     public string NewPassword { get; set; } = string.Empty;
 }
 
+/// <summary>账号自助修改用户可见用户名（DisplayName）；登录 ID（Username）不可自行修改。</summary>
+public sealed class ChangeDisplayNameRequest
+{
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = string.Empty;
+}
+
 public sealed class ResetPasswordRequest
 {
     [JsonPropertyName("password")]
@@ -448,4 +455,59 @@ public sealed class UpdateAccountRoleRequest
     public string Name { get; set; } = string.Empty;
     [JsonPropertyName("defaultPermissions")]
     public UserPermissions DefaultPermissions { get; set; }
+}
+
+
+/// <summary>
+/// API Key 管理视图；密钥明文只在创建时返回一次，服务端仅保存摘要。
+/// </summary>
+public sealed class ApiKeyInfo
+{
+    [JsonPropertyName("id")]
+    public Guid Id { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>用于在列表中区分密钥的前缀，不包含完整密钥。</summary>
+    [JsonPropertyName("prefix")]
+    public string Prefix { get; set; } = string.Empty;
+
+    [JsonPropertyName("createdAt")]
+    public DateTimeOffset CreatedAt { get; set; }
+
+    [JsonPropertyName("lastUsedAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? LastUsedAt { get; set; }
+
+    [JsonPropertyName("expiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? ExpiresAt { get; set; }
+
+    [JsonPropertyName("revokedAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? RevokedAt { get; set; }
+}
+
+/// <summary>创建 API Key 时的可选名称。</summary>
+public sealed class CreateApiKeyRequest
+{
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+}
+
+/// <summary>API Key 创建结果；Key 仅在本次响应中出现。</summary>
+public sealed class ApiKeyCreationResult
+{
+    [JsonPropertyName("userId")]
+    public Guid UserId { get; set; }
+
+    [JsonPropertyName("username")]
+    public string Username { get; set; } = string.Empty;
+
+    [JsonPropertyName("apiKey")]
+    public ApiKeyInfo ApiKey { get; set; } = new();
+
+    [JsonPropertyName("key")]
+    public string Key { get; set; } = string.Empty;
 }

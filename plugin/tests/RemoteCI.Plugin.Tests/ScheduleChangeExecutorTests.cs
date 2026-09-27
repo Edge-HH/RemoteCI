@@ -148,6 +148,23 @@ public sealed class ScheduleChangeExecutorTests
     }
 
     [Fact]
+    public void Apply_PermanentExchangeWritesSourcePlanWithoutCreatingOverlay()
+    {
+        var (catalog, backend, profile, plan, subjectIds) = CreateHarness(overlay: false);
+        var before = catalog.BuildDay(TestDay);
+        var request = Exchange(before.Revision);
+        request.Permanent = true;
+
+        var result = ScheduleChangeExecutor.Apply(TestDay, request, catalog, backend, profile);
+
+        Assert.True(result.Success);
+        Assert.Contains("永久交换", result.Message);
+        Assert.Equal(subjectIds[1], plan.Classes[0].SubjectId);
+        Assert.Equal(1, profile.SaveCount);
+        Assert.Null(profile.NextOverlayId);
+    }
+
+    [Fact]
     public void Apply_SaveFailureRollsBackMutationAndReportsSaveFailed()
     {
         var (catalog, backend, profile, plan, subjectIds) = CreateHarness(overlay: true);
@@ -168,7 +185,7 @@ public sealed class ScheduleChangeExecutorTests
         var (_, backend, profile, plan, _) = CreateHarness(overlay: true);
         profile.NextOverlayId = Guid.NewGuid(); // 不应被使用。
 
-        var writable = ScheduleChangeExecutor.GetWritablePlan(TestDay, backend, profile);
+        var writable = ScheduleChangeExecutor.GetWritablePlan(TestDay, false, backend, profile);
 
         Assert.Same(plan, writable);
     }
@@ -179,7 +196,7 @@ public sealed class ScheduleChangeExecutorTests
         var (_, backend, profile, _, _) = CreateHarness(overlay: false);
         profile.NextOverlayId = null;
 
-        Assert.Null(ScheduleChangeExecutor.GetWritablePlan(TestDay, backend, profile));
+        Assert.Null(ScheduleChangeExecutor.GetWritablePlan(TestDay, false, backend, profile));
     }
 
     [Fact]
@@ -193,7 +210,7 @@ public sealed class ScheduleChangeExecutorTests
         // 第二次解析仍返回源课表(非 overlay),但按 overlayId 查 Profile.ClassPlans。
         backend.PlanIdAfterCreation = overlayId;
 
-        var writable = ScheduleChangeExecutor.GetWritablePlan(TestDay, backend, profile);
+        var writable = ScheduleChangeExecutor.GetWritablePlan(TestDay, false, backend, profile);
 
         Assert.Same(overlay, writable);
     }
@@ -208,7 +225,7 @@ public sealed class ScheduleChangeExecutorTests
         backend.PlanAfterCreation = refreshed;
         backend.PlanIdAfterCreation = overlayId;
 
-        var writable = ScheduleChangeExecutor.GetWritablePlan(TestDay, backend, profile);
+        var writable = ScheduleChangeExecutor.GetWritablePlan(TestDay, false, backend, profile);
 
         Assert.Same(refreshed, writable);
     }

@@ -81,6 +81,7 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AllowAnonymousToPage("/Visitor");
     options.Conventions.AllowAnonymousToPage("/SetupPassword");
 });
+builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IdentityCoordinator>();
 builder.Services.AddScoped<AccountRoleService>();
 builder.Services.AddScoped<ExtensionPolicyService>();
@@ -88,9 +89,13 @@ builder.Services.AddScoped<AuthorizationSyncService>();
 builder.Services.AddScoped<ConfigurationArchiveService>();
 builder.Services.AddScoped<SchedulePullSettings>();
 builder.Services.AddScoped<VisitorAccessSettings>();
+builder.Services.AddScoped<LoginPageSettings>();
 builder.Services.AddScoped<ClassAccessService>();
 builder.Services.AddScoped<ClassBroadcastService>();
+ builder.Services.AddScoped<DeviceInventoryService>();
 builder.Services.AddScoped<UserImportService>();
+builder.Services.AddScoped<MemberExcelService>();
+builder.Services.AddScoped<ClassExcelService>();
 builder.Services.AddScoped(sp =>
 {
     // 插件在线数来自单例连接注册表；scoped 服务通过回调取数，避免直接依赖单例链。
@@ -239,6 +244,7 @@ app.MapPost("/api/me/password", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
+    if (principal.IsApiKey) return Forbidden();
     if (MissingFields(request.CurrentPassword, request.NewPassword) is { } bad) return bad;
     try
     {
@@ -252,9 +258,9 @@ app.MapPost("/api/me/password", async (
 app.MapGet("/api/me/sessions", async (HttpContext ctx, IdentityCoordinator identities, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
-    return principal?.User is null
-        ? Unauthorized()
-        : Results.Ok(await identities.ListSessionsAsync(principal.User.Id, principal.DeviceSessionId, ct));
+    if (principal?.User is null) return Unauthorized();
+    if (principal.IsApiKey) return Forbidden();
+    return Results.Ok(await identities.ListSessionsAsync(principal.User.Id, principal.DeviceSessionId, ct));
 });
 
 app.MapDelete("/api/me/sessions/{id:guid}", async (
@@ -262,6 +268,7 @@ app.MapDelete("/api/me/sessions/{id:guid}", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
+    if (principal.IsApiKey) return Forbidden();
     try
     {
         await identities.RevokeSessionAsync(principal.User.Id, id, ct);
@@ -428,9 +435,15 @@ app.MapPost("/api/plugin/pairing-code", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    return HasPermission(principal, UserPermissions.ManageUsers)
-        ? Results.Ok(new { pairCode = await identities.CreatePluginPairingCodeAsync(body?.ClassId ?? Classroom.DefaultId, ct) })
-        : Forbidden();
+    if (!HasPermission(principal, UserPermissions.ManageUsers)) return Forbidden();
+    var classId = body?.ClassId ?? Classroom.DefaultId;
+    // unified=统一连接码；persistent=班级固定码；否则为绑定班级的一次性码。
+    var pairCode = body?.Unified == true
+        ? await identities.CreateSharedPluginPairingCodeAsync(body?.RequestedCode, ct)
+        : body?.Persistent == true
+            ? await identities.SetClassPairingCodeAsync(classId, body?.RequestedCode, ct)
+            : await identities.CreatePluginPairingCodeAsync(classId, ct);
+    return Results.Ok(new { pairCode });
 });
 
 // 班级分组：管理员组织班级（如按年级），批量操作与广播通知可按组展开。
@@ -851,7 +864,16 @@ app.MapPut("/api/settings/schedule-pull", async (HttpContext ctx, SchedulePullIn
     await pull.SetIntervalAsync(interval, ct);
     return Results.Ok(new { intervalMinutes = (int)interval });
 });
-app.MapGet("/api/extensions", async (
+// 登录页背景图属于未登录可见的公开资源，无需鉴权；ETag 让浏览器在图片未变时复用缓存。
+app.MapGet("/api/settings/login-background", async (HttpContext ctx, LoginPageSettings loginPage, CancellationToken ct) =>
+{
+    var metadata = await loginPage.GetAsync(ct);
+    if (metadata.LoginBackground is null) return Results.NotFound();
+    var etag = $"\"{metadata.LoginBackgroundUpdatedAt?.Ticks ?? 0:x}\"";
+    if (ctx.Request.Headers.IfNoneMatch == etag) return Results.StatusCode(StatusCodes.Status304NotModified);
+    ctx.Response.Headers.ETag = etag;
+    return Results.File(metadata.LoginBackground, metadata.LoginBackgroundContentType ?? "image/png");
+});app.MapGet("/api/extensions", async (
     HttpContext ctx, Guid? classId, IdentityCoordinator identities, ClassAccessService access,
     ExtensionPolicyService policies, IStateStore store, CancellationToken ct) =>
 {
@@ -950,9 +972,16 @@ app.Run();
 
 static async Task<AuthPrincipal?> AuthorizeAsync(HttpContext ctx, IdentityCoordinator identities, CancellationToken ct)
 {
+    // 现有客户端统一使用 Bearer；API Key 也复用该标准头，服务端按固定前缀分流，
+    // 同时兼容部分脚本客户端习惯使用的 X-API-Key。
     var header = ctx.Request.Headers.Authorization.ToString();
-    if (!header.StartsWith($"{Protocol.BearerScheme} ", StringComparison.OrdinalIgnoreCase)) return null;
-    return await identities.ValidateAccessTokenAsync(header[(Protocol.BearerScheme.Length + 1)..].Trim(), ct);
+    var token = header.StartsWith($"{Protocol.BearerScheme} ", StringComparison.OrdinalIgnoreCase)
+        ? header[(Protocol.BearerScheme.Length + 1)..].Trim()
+        : ctx.Request.Headers["X-API-Key"].ToString().Trim();
+    if (string.IsNullOrWhiteSpace(token)) return null;
+    return token.StartsWith(IdentityCoordinator.ApiKeyPrefix, StringComparison.Ordinal)
+        ? await identities.ValidateApiKeyAsync(token, ct)
+        : await identities.ValidateAccessTokenAsync(token, ct);
 }
 
 static bool HasPermission(AuthPrincipal? principal, UserPermissions permission) =>
@@ -1005,7 +1034,7 @@ static ApiError Error(string code, string message) => new() { Code = code, Messa
 public sealed record SchedulePullIntervalBody(int IntervalMinutes);
 public sealed record ExtensionPolicyBody(bool? Enabled, bool? AllowNonAdmin, bool? ShowOnWatch);
 public sealed record UpdateCheckBody(string Channel, bool Force = false);
-public sealed record PairingCodeBody(Guid? ClassId);
+public sealed record PairingCodeBody(Guid? ClassId, bool Unified = false, bool Persistent = false, string? RequestedCode = null);
 public sealed record VisitorAutoEnterBody(bool AutoEnter);
 
 public partial class Program;

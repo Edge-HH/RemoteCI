@@ -4,7 +4,7 @@
 
 <header class="dashboard-head">
     <div>
-        <p class="eyebrow">REMOTE CLASSROOM OPERATIONS</p>
+        <p class="eyebrow">课堂工作台</p>
         <h1>课堂控制总览</h1>
         <p class="muted">集中查看课程、连接与同步状态，并快速进入常用操作。</p>
     </div>
@@ -26,19 +26,6 @@
         <button class="copy-button" type="button" data-copy-value="@Model.PairCode" aria-label="复制配对码" title="复制配对码"><i class="bi bi-copy" aria-hidden="true"></i></button>
     </div>
 }
-
-<section class="mobile-login-card" aria-labelledby="mobile-login-title">
-    <div class="mobile-login-copy">
-        <p class="eyebrow">ANDROID QUICK CONNECT</p>
-        <h2 id="mobile-login-title">手机扫码填写服务器地址</h2>
-        <p class="muted">在安卓版登录页点击二维码按钮扫描。二维码只包含当前 WebUI 地址，不包含账号、密码或令牌。</p>
-        <div class="mobile-login-url">
-            <code>@Model.MobileLoginUrl</code>
-            <button class="copy-button" type="button" data-copy-value="@Model.MobileLoginUrl" aria-label="复制服务器地址" title="复制服务器地址"><i class="bi bi-copy" aria-hidden="true"></i></button>
-        </div>
-    </div>
-    <div class="mobile-login-qr" data-mobile-login-qr aria-label="安卓版服务器地址二维码">@Html.Raw(Model.MobileLoginQrSvg)</div>
-</section>
 
 @if (Model.PluginProtocolMismatch is { } mismatch)
 {
@@ -82,7 +69,7 @@
 <div class="dashboard-grid">
     <section class="dashboard-panel classroom-panel">
         <header class="panel-heading">
-            <div><p class="eyebrow">CLASSROOM STATUS</p><h2>实时课堂状态</h2></div>
+            <div><h2>实时课堂状态</h2></div>
             <span class="status-pill @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "在线刷新" : "连接中断")</span>
         </header>
         <div class="course-spotlight">
@@ -99,7 +86,7 @@
 
     <section class="dashboard-panel activity-panel">
         <header class="panel-heading">
-            <div><p class="eyebrow">LIVE SIGNALS</p><h2>运行信号</h2></div><span class="status-pill">自动汇总</span>
+            <div><h2>运行信号</h2></div><span class="status-pill">自动汇总</span>
         </header>
         <div class="activity-list">
             <article>
@@ -125,7 +112,7 @@
 @if (Model.Permissions.HasFlag(UserPermissions.ManageSchedule) || Model.Permissions.HasFlag(UserPermissions.SendNotifications))
 {
     <section class="dashboard-panel execution-panel">
-        <header class="panel-heading execution-heading"><div><p class="eyebrow">EXECUTION BOARD</p><h2>常用任务</h2></div><span class="muted">根据当前账号权限显示</span></header>
+        <header class="panel-heading execution-heading"><div><h2>常用任务</h2></div><span class="muted">根据当前账号权限显示</span></header>
         <div class="task-table">
             @if (Model.Permissions.HasFlag(UserPermissions.ManageSchedule) && Model.Supports(RemoteCiCapabilities.ScheduleChange))
             {
@@ -156,9 +143,22 @@
     </section>
 }
 
+<section class="mobile-login-card" aria-labelledby="mobile-login-title">
+    <div class="mobile-login-copy">
+        <p class="eyebrow">ANDROID</p>
+        <h2 id="mobile-login-title">手机扫码填写服务器地址</h2>
+        <p class="muted">在安卓版登录页点击二维码按钮扫描。二维码只包含当前 WebUI 地址，不包含账号、密码或令牌。</p>
+        <div class="mobile-login-url">
+            <code>@Model.MobileLoginUrl</code>
+            <button class="copy-button" type="button" data-copy-value="@Model.MobileLoginUrl" aria-label="复制服务器地址" title="复制服务器地址"><i class="bi bi-copy" aria-hidden="true"></i></button>
+        </div>
+    </div>
+    <div class="mobile-login-qr" data-mobile-login-qr aria-label="安卓版服务器地址二维码">@Html.Raw(Model.MobileLoginQrSvg)</div>
+</section>
+
 <div class="dashboard-grid lower-grid">
     <section class="dashboard-panel system-panel">
-        <header class="panel-heading"><div><p class="eyebrow">SYSTEM</p><h2>系统信息</h2></div></header>
+        <header class="panel-heading"><div><h2>系统信息</h2></div></header>
         <dl class="system-table">
             <div><dt>服务端版本</dt><dd>@(Model.ServerVersion)</dd></div><div><dt>协议版本</dt><dd>v@(Protocol.Version)</dd></div>
             <div><dt>在线手表</dt><dd>@Model.WatchConnections</dd></div><div><dt>账号数量</dt><dd>@Model.AccountCount</dd></div>
@@ -196,7 +196,7 @@
         </section>
 
         <section class="dashboard-panel credential-panel">
-            <header class="panel-heading"><div><p class="eyebrow">CREDENTIALS</p><h2>插件凭据</h2></div><span class="status-pill">@Model.PluginCredentials.Count 项</span></header>
+            <header class="panel-heading"><div><h2>插件凭据</h2></div><span class="status-pill">@Model.PluginCredentials.Count 项</span></header>
             @if (Model.PluginCredentials.Count == 0)
             {
                 <div class="empty-state"><i class="bi bi-key" aria-hidden="true"></i><strong>暂无插件凭据</strong><span>完成首次配对后可在此查看和吊销。</span></div>

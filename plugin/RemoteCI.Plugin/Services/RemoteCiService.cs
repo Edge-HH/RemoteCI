@@ -21,6 +21,7 @@ public sealed class RemoteCiService : IDisposable
     private readonly CloudTokenStore _tokenStore;
     private readonly IRemoteCiExtensionRegistry _extensions;
     private readonly ScheduleSyncTaskCoordinator _scheduleSync;
+    private readonly SoftwareInventoryService _softwareInventory;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<RemoteCiService> _logger;
     private LanServer? _lanServer;
@@ -39,6 +40,7 @@ public sealed class RemoteCiService : IDisposable
         CloudTokenStore tokenStore,
         IRemoteCiExtensionRegistry extensions,
         ScheduleSyncTaskCoordinator scheduleSync,
+        SoftwareInventoryService softwareInventory,
         ILoggerFactory loggerFactory)
     {
         _collector = collector;
@@ -49,6 +51,7 @@ public sealed class RemoteCiService : IDisposable
         _tokenStore = tokenStore;
         _extensions = extensions;
         _scheduleSync = scheduleSync;
+        _softwareInventory = softwareInventory;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<RemoteCiService>();
     }
@@ -85,6 +88,7 @@ public sealed class RemoteCiService : IDisposable
         _notificationBridge.NotificationCaptured += OnEventOccurred;
         _extensions.ExtensionsChanged += OnExtensionsChanged;
         _scheduleSync.StatusChanged += OnScheduleSyncStatusChanged;
+        _softwareInventory.InventoryChanged += OnSoftwareInventoryChanged;
         _notificationBridge.Start();
 
         if (_settings.EnableLanServer)
@@ -128,6 +132,7 @@ public sealed class RemoteCiService : IDisposable
         _commandHandler.HostStateChanged -= OnHostStateChanged;
         _notificationBridge.NotificationCaptured -= OnEventOccurred;
         _extensions.ExtensionsChanged -= OnExtensionsChanged;
+        _softwareInventory.InventoryChanged -= OnSoftwareInventoryChanged;
         if (_scheduleSync.Current is { } active)
             _scheduleSync.TryFail(active.TaskId, "RemoteCI 服务已停止，课表任务已取消", out _);
         _scheduleSync.StatusChanged -= OnScheduleSyncStatusChanged;
@@ -280,10 +285,22 @@ public sealed class RemoteCiService : IDisposable
     private void OnExtensionsChanged(object? sender, EventArgs e) => PublishExtensions();
 
     // 首次连接或重连时补发当前扩展快照，避免注册早于 WebSocket 就绪时丢失 extensions_sync。
-    private void OnCloudConnected(object? sender, EventArgs e) => PublishExtensions();
+    private void OnCloudConnected(object? sender, EventArgs e)
+    {
+        PublishExtensions();
+        PublishSoftwareInventory();
+    }
+
+    private void OnSoftwareInventoryChanged() => PublishSoftwareInventory();
 
     private void OnCloudConnectionStatusChanged(CloudConnectionStatus status) =>
         CloudConnectionStatusChanged?.Invoke(status);
+
+    private void PublishSoftwareInventory()
+    {
+        if (_cloudClient is not { } cloud) return;
+        Observe(cloud.SendSoftwareInventoryAsync(_softwareInventory.Build()), "软件版本清单");
+    }
 
     private void PublishExtensions()
     {

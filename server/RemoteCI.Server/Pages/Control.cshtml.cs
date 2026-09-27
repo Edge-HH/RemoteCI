@@ -12,13 +12,15 @@ namespace RemoteCI.Server.Pages;
 [Authorize]
 public sealed class ControlModel(
     UserManager<AppUser> users,
+    ClassroomService classrooms,
+    DeviceInventoryService devices,
     PeerRegistry peers,
     IStateStore store,
     IdentityCoordinator identities,
     ExtensionPolicyService extensionPolicies,
     AuthorizationSyncService authorizationSync,
     ClassBroadcastService broadcast,
-    ClassroomService classesService) : WebPageModel(users)
+    ClassroomService classesService) : BatchControlModel(users, classrooms, devices, identities)
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(15);
 
@@ -59,7 +61,7 @@ public sealed class ControlModel(
     public bool CanControlPower => ClassPermissions.HasFlag(UserPermissions.PowerControl) && Supports(RemoteCiCapabilities.PowerControl);
     public bool CanControlVolume => ClassPermissions.HasFlag(UserPermissions.PowerControl) && Supports(RemoteCiCapabilities.VolumeControl);
     public bool CanUseExtensions => ClassPermissions.HasFlag(UserPermissions.RunExtensions) && Supports(RemoteCiCapabilities.ExtensionsRun);
-    public bool IsAdmin => CurrentUser.Role == UserRole.Admin;
+    public override bool IsSingleControl => true;
 
     /// <summary>广播面板的候选班级：当前用户有通知发送权限的班级（不含当前班——单班用上方表单即可）。</summary>
     public IReadOnlyList<ClassSummary> BroadcastTargets { get; private set; } = [];
@@ -67,7 +69,7 @@ public sealed class ControlModel(
     /// <summary>有至少两个可广播班级时才展示广播面板，单班级部署保持原有操作路径。</summary>
     public bool ShowBroadcast => BroadcastTargets.Count >= 2;
 
-    public async Task<IActionResult> OnGetAsync(CancellationToken ct)
+    public override async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         if (await LoadAsync(ct) is { } denied) return denied;
         return Page();
@@ -124,6 +126,12 @@ public sealed class ControlModel(
                 Title = string.IsNullOrWhiteSpace(Input.Title) ? "RemoteCI 通知" : Input.Title.Trim(),
                 Message = Input.Message?.Trim() ?? string.Empty,
                 ForceSenderInTitle = await identities.GetForceSenderInTitleAsync(ct),
+                IsSpeechEnabled = Input.IsSpeechEnabled,
+                IsNotificationSoundEnabled = Input.IsNotificationSoundEnabled,
+                IsNotificationEffectEnabled = Input.IsNotificationEffectEnabled,
+                IsNotificationTopmostEnabled = Input.IsNotificationTopmostEnabled,
+                DurationSeconds = Input.DurationSeconds,
+                RepeatCounts = Input.RepeatCounts,
             },
         }, ct);
         return RedirectWithResult(result);
@@ -199,6 +207,18 @@ public sealed class ControlModel(
         {
             Command = CommandKind.Power,
             PowerAction = action,
+        }, ct));
+    }
+
+    public async Task<IActionResult> OnPostRestartClassIslandAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (CurrentUser.Role != UserRole.Admin)
+            return RedirectToPage("/Denied");
+        if (RequireClass(UserPermissions.ManageUsers) is { } classDenied) return classDenied;
+        return RedirectWithResult(await SendAsync(new CommandMessage
+        {
+            Command = CommandKind.RestartClassIsland,
         }, ct));
     }
 
@@ -363,6 +383,12 @@ public sealed class ControlModel(
                 {
                     Title = BroadcastInput.Title,
                     Message = BroadcastInput.Message,
+                    IsSpeechEnabled = BroadcastInput.IsSpeechEnabled,
+                    IsNotificationSoundEnabled = BroadcastInput.IsNotificationSoundEnabled,
+                    IsNotificationEffectEnabled = BroadcastInput.IsNotificationEffectEnabled,
+                    IsNotificationTopmostEnabled = BroadcastInput.IsNotificationTopmostEnabled,
+                    DurationSeconds = BroadcastInput.DurationSeconds,
+                    RepeatCounts = BroadcastInput.RepeatCounts,
                 },
                 ClassIds = BroadcastClassIds,
             }, ct);
@@ -377,6 +403,7 @@ public sealed class ControlModel(
     private async Task<IActionResult?> LoadAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
+        await LoadBatchAsync(ct);
         Snapshot = store.GetLatestSnapshot(CurrentClassId);
         VolumeLevel = Snapshot?.VolumePercent ?? 0;
         if (CanSendNotifications) ForceSenderInTitle = await identities.GetForceSenderInTitleAsync();
@@ -441,6 +468,19 @@ public sealed class ControlModel(
     {
         [StringLength(60)] public string? Title { get; set; }
         [StringLength(500)] public string? Message { get; set; }
+
+        /// <summary>单条显示秒数；null 或 &lt;= 0 时插件按 ClassIsland 集控默认 5 秒处理。</summary>
+        [Range(0, 3600)] public int? DurationSeconds { get; set; }
+
+        /// <summary>正文滚动重复次数；null 或 &lt; 1 时按 1 次处理。</summary>
+        [Range(0, 10)] public int? RepeatCounts { get; set; }
+
+        public bool IsSpeechEnabled { get; set; }
+        public bool IsNotificationSoundEnabled { get; set; }
+        public bool IsNotificationEffectEnabled { get; set; }
+
+        /// <summary>提醒时置顶 ClassIsland 主界面。</summary>
+        public bool IsNotificationTopmostEnabled { get; set; }
     }
 
     public sealed class ExtensionInput

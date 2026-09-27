@@ -67,6 +67,10 @@ public sealed class ClassDetail
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? HasAvatar { get; set; }
 
+    /// <summary>是否已设置班级固定配对码（不返回明文，仅用于管理页提示）。</summary>
+    [JsonPropertyName("hasPairingCode")]
+    public bool HasPairingCode { get; set; }
+
     [JsonPropertyName("createdAt")]
     public DateTimeOffset CreatedAt { get; set; }
 }

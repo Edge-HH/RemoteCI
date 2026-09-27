@@ -81,6 +81,55 @@ public sealed class RoleAndBackupTests : IClassFixture<TestWebApplicationFactory
     }
 
     [Fact]
+    public async Task ClassAdministratorApiAccessCanBeChangedAndPersistsBootstrap()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        _ = await factory.LoginAsync();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var roles = scope.ServiceProvider.GetRequiredService<AccountRoleService>();
+        var identities = scope.ServiceProvider.GetRequiredService<IdentityCoordinator>();
+        var role = await db.AccountRoles.AsNoTracking().SingleAsync(x => x.Id == AccountRole.ClassAdministratorId);
+        Assert.True(role.DefaultPermissions.HasFlag(UserPermissions.ApiAccess));
+
+        await roles.UpdateAsync(role.Id, role.Name, role.DefaultPermissions & ~UserPermissions.ApiAccess);
+        await identities.BootstrapAsync();
+
+        var persisted = await db.AccountRoles.AsNoTracking().SingleAsync(x => x.Id == AccountRole.ClassAdministratorId);
+        Assert.False(persisted.DefaultPermissions.HasFlag(UserPermissions.ApiAccess));
+    }
+
+    [Fact]
+    public async Task ConfigurationBackupRestoresApiKeyHash()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        _ = await factory.LoginAsync();
+        string rawKey;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var identities = scope.ServiceProvider.GetRequiredService<IdentityCoordinator>();
+            var user = await identities.CreateUserAsync(new CreateUserRequest
+            {
+                Username = "backup.api.key",
+                DisplayName = "备份 API 账号",
+                Password = "Backup-Api-Key-2026",
+                GrantedPermissions = UserPermissions.ApiAccess,
+            });
+            rawKey = (await identities.CreateApiKeyAsync(user.Id, "备份测试")).Key;
+            var archive = scope.ServiceProvider.GetRequiredService<ConfigurationArchiveService>();
+            var snapshot = await archive.CaptureAsync();
+            Assert.Contains(snapshot.ApiKeys!, x => x.UserId == user.Id);
+            await archive.ApplyAsync(snapshot);
+        }
+
+        using var verificationScope = factory.Services.CreateScope();
+        var principal = await verificationScope.ServiceProvider.GetRequiredService<IdentityCoordinator>()
+            .ValidateApiKeyAsync(rawKey);
+        Assert.NotNull(principal);
+        Assert.Equal("backup.api.key", principal.User!.Username);
+    }
+
+    [Fact]
     public async Task VersionOneBackupRestoresLegacySystemControlAsBothSplitPermissions()
     {
         await using var factory = new TestWebApplicationFactory();

@@ -80,6 +80,7 @@ else
                     }
                 </select>
             </label>
+            <label class="schedule-permanent-option"><input asp-for="Input.Permanent" /> 永久换课（写入源课表，之后每周继续生效）</label>
             <button type="submit" class="schedule-submit-button" disabled="@(!Model.PluginOnline)">执行并等待真实回执</button>
         </form>
     </section>

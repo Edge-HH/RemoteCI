@@ -21,6 +21,11 @@ function syncRolePermissions(form) {
         permissions.querySelectorAll('input[type="checkbox"]').forEach(input => { input.disabled = isAdmin; });
     }
     if (adminNote) adminNote.hidden = !isAdmin;
+    // 非管理员账号必须分配班级：隐藏班级字段时同步解除 required，避免不可见控件阻塞提交。
+    const classField = form.querySelector("[data-create-class-field]");
+    const classSelect = form.querySelector("[data-create-class-select]");
+    if (classField) classField.hidden = isAdmin;
+    if (classSelect) classSelect.required = !isAdmin;
 }
 
 async function handleCopyClick(event) {
@@ -31,12 +36,12 @@ async function handleCopyClick(event) {
     try {
         await copyText(copyButton.dataset.copyValue);
         copyButton.classList.add("copied");
-        copyButton.setAttribute("aria-label", "配对码已复制");
+        copyButton.setAttribute("aria-label", "已复制");
         copyButton.title = "已复制";
         icon?.classList.replace("bi-copy", "bi-check2");
         window.setTimeout(() => {
             copyButton.classList.remove("copied");
-            copyButton.setAttribute("aria-label", "复制配对码");
+            copyButton.setAttribute("aria-label", "复制");
             copyButton.title = "复制配对码";
             icon?.classList.replace("bi-check2", "bi-copy");
         }, 1600);
@@ -113,8 +118,13 @@ document.addEventListener("click", async event => {
     handlePageActionClick(event);
 });
 
-const savedTheme = localStorage.getItem("remoteci-theme");
-if (savedTheme === "dark") document.documentElement.dataset.theme = "dark";
+// 管理员为登录页强制了主题时不要再用本地偏好覆盖它；data-login-theme-forced 由布局写入。
+const forcedLoginTheme = document.documentElement.dataset.loginThemeForced;
+if (forcedLoginTheme) document.documentElement.dataset.theme = forcedLoginTheme;
+else {
+    const savedTheme = localStorage.getItem("remoteci-theme");
+    if (savedTheme === "dark") document.documentElement.dataset.theme = "dark";
+}
 if (localStorage.getItem("remoteci-sidebar-collapsed") === "1" && !window.matchMedia("(max-width: 820px)").matches) document.body.classList.add("sidebar-collapsed");
 
 const searchInput = document.querySelector("[data-app-search]");
@@ -316,4 +326,109 @@ document.querySelectorAll("[data-backup-settings-form]").forEach(form => {
 
     cadence.addEventListener("change", syncBackupFields);
     syncBackupFields();
+});
+
+
+// 班级分组树：折叠状态只影响当前页面，不改变服务端选中的分组范围。
+document.querySelectorAll("[data-class-tree-toggle]").forEach(button => {
+    const item = button.closest(".class-tree-item");
+    const children = item?.querySelector(":scope > [data-class-tree-children]");
+    if (!children) return;
+    button.addEventListener("click", () => {
+        const expanded = button.getAttribute("aria-expanded") !== "false";
+        button.setAttribute("aria-expanded", expanded ? "false" : "true");
+        children.hidden = expanded;
+    });
+});
+
+// 班级批量管理：选择、范围全选、按操作类型切换目标分组字段。
+const classBatchForm = document.querySelector("[data-class-batch-form]");
+if (classBatchForm) {
+    const operation = classBatchForm.querySelector("[data-batch-operation]");
+    const groupField = classBatchForm.querySelector("[data-batch-group-field]");
+    const groupSelect = classBatchForm.querySelector("[data-batch-group-select]");
+    const submit = classBatchForm.querySelector("[data-batch-submit]");
+    const selection = classBatchForm.querySelector("[data-batch-selection]");
+    const selectAll = document.querySelector("[data-select-all-classes]");
+    const classChecks = () => [...document.querySelectorAll("[data-class-select]")]
+        .filter(input => input.form === classBatchForm);
+
+    const needsTargetGroups = () => ["addgroups", "removegroups", "replacegroups"]
+        .includes((operation?.value || "").toLowerCase());
+    const isGroupOperation = () => needsTargetGroups() || (operation?.value || "").toLowerCase() === "cleargroups";
+
+    const syncGroupField = () => {
+        const required = needsTargetGroups();
+        if (groupField) groupField.hidden = !isGroupOperation();
+        if (groupSelect) {
+            groupSelect.disabled = !required;
+            groupSelect.required = required && !groupField?.hidden;
+        }
+    };
+
+    const syncSelection = () => {
+        const checkboxes = classChecks();
+        const selectable = checkboxes.filter(input => !input.disabled);
+        const selected = selectable.filter(input => input.checked);
+        if (selection) selection.textContent = `已选 ${selected.length} 个班级`;
+        if (submit) submit.disabled = selected.length === 0;
+        if (selectAll) {
+            selectAll.checked = selectable.length > 0 && selected.length === selectable.length;
+            selectAll.indeterminate = selected.length > 0 && selected.length < selectable.length;
+        }
+    };
+
+    const syncDefaultClassState = () => {
+        const deleting = (operation?.value || "").toLowerCase() === "delete";
+        classChecks()
+            .filter(input => input.dataset.defaultClass === "true")
+            .forEach(input => {
+                input.disabled = deleting;
+                if (deleting) input.checked = false;
+            });
+    };
+
+    selectAll?.addEventListener("change", () => {
+        classChecks().forEach(input => {
+            if (!input.disabled) input.checked = selectAll.checked;
+        });
+        syncSelection();
+    });
+
+    classChecks().forEach(input => input.addEventListener("change", syncSelection));
+    operation?.addEventListener("change", () => {
+        syncDefaultClassState();
+        syncGroupField();
+        syncSelection();
+    });
+
+    classBatchForm.addEventListener("submit", event => {
+        const selected = classChecks().filter(input => input.checked && !input.disabled);
+        if (selected.length === 0) {
+            event.preventDefault();
+            alert("请先勾选要操作的班级。");
+            return;
+        }
+        if (needsTargetGroups() && groupSelect && groupSelect.selectedOptions.length === 0) {
+            event.preventDefault();
+            alert("请选择要批量调整到的目标分组。");
+            groupSelect.focus();
+            return;
+        }
+        if ((operation?.value || "").toLowerCase() === "delete" &&
+            !confirm("删除选中的班级会同时移除成员关系与插件凭据，需重新配对。确定继续？")) {
+            event.preventDefault();
+        }
+    });
+
+    syncDefaultClassState();
+    syncGroupField();
+    syncSelection();
+}
+
+// 菜单只保留一个展开项，避免树节点和行操作菜单互相遮挡。
+document.addEventListener("click", event => {
+    document.querySelectorAll(".tree-node-menu[open], .row-menu[open]").forEach(menu => {
+        if (!menu.contains(event.target)) menu.removeAttribute("open");
+    });
 });

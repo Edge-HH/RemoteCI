@@ -102,7 +102,7 @@
             // 批量页复用本脚本：把页面上勾选的广播目标（data-voice-query）附加到上传地址。
             const action = new URL(form.action, window.location.origin);
             document.querySelectorAll("input[data-voice-query]:checked").forEach(input => {
-                action.searchParams.append(input.name, input.value);
+                action.searchParams.append(input.dataset.voiceQuery || input.name, input.value);
             });
             const response = await fetch(action, {
                 method: "POST", credentials: "same-origin",

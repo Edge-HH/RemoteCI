@@ -189,6 +189,108 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     }
 
     [Fact]
+    public async Task SoftwareInventory_IsCachedPersistedAndReturnedForDevicePage()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities
+        {
+            SoftwareVersion = "3.2.1.4",
+            Capabilities = RemoteCiCapabilities.Current,
+        }));
+        await SendAsync(plugin, Envelope.SoftwareInventory(new SoftwareInventory
+        {
+            DeviceName = "教室电脑-A",
+            OperatingSystem = "Windows",
+            Architecture = "X64",
+            Applications =
+            [
+                new SoftwarePackageInfo
+                {
+                    Id = "classisland",
+                    Name = "ClassIsland",
+                    Version = "2.1.1.1",
+                    LatestVersion = "2.1.2.0",
+                    IsUpdateAvailable = true,
+                    CanUpgrade = true,
+                },
+            ],
+            Plugins =
+            [
+                new SoftwarePackageInfo
+                {
+                    Id = "remoteci.plugin",
+                    Name = "RemoteCI",
+                    Version = "3.2.1.4",
+                    LatestVersion = "3.2.1.4",
+                    CanUpgrade = true,
+                },
+            ],
+            LastUpdate = new SoftwareUpdateStatus
+            {
+                Operation = SoftwareUpdateOperation.InventoryRefresh,
+                State = SoftwareUpdateState.Completed,
+                Message = "版本清单已刷新",
+            },
+        }));
+
+        var registry = _factory.Services.GetRequiredService<PeerRegistry>();
+        await WaitUntilAsync(() => registry.GetPluginDeviceSnapshots().Any(
+            item => item.SoftwareInventory?.DeviceName == "教室电脑-A"));
+        var snapshot = Assert.Single(registry.GetPluginDeviceSnapshots());
+        Assert.Equal("3.2.1.4", snapshot.SoftwareVersion);
+        Assert.Contains(RemoteCiCapabilities.SoftwareInventory, snapshot.EffectiveCapabilities);
+        Assert.NotNull(snapshot.PluginCredentialId);
+        var credentialId = snapshot.PluginCredentialId!.Value;
+        await WaitUntilAsync(() =>
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            return db.PluginCredentials.AsNoTracking().Any(item =>
+                item.Id == credentialId && item.SoftwareInventoryJson != null);
+        });
+        using var persistedScope = _factory.Services.CreateScope();
+        var persistedDb = persistedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var credential = await persistedDb.PluginCredentials.AsNoTracking()
+            .SingleAsync(item => item.Id == credentialId);
+        using var inventoryJson = JsonDocument.Parse(credential.SoftwareInventoryJson!);
+        Assert.Equal("教室电脑-A", inventoryJson.RootElement.GetProperty("deviceName").GetString());
+    }
+
+    [Fact]
+    public async Task DirectCommand_IsSentToSelectedPluginConnection()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities
+        {
+            SoftwareVersion = "3.2.1.4",
+            Capabilities = RemoteCiCapabilities.Current,
+        }));
+
+        var registry = _factory.Services.GetRequiredService<PeerRegistry>();
+        await WaitUntilAsync(() => registry.GetPluginDeviceSnapshots().Count == 1);
+        var target = registry.GetPluginDeviceSnapshots().Single();
+        var pending = registry.SendCommandAndWaitToConnectionAsync(new CommandMessage
+        {
+            Command = CommandKind.RefreshSoftwareInventory,
+        }, target.ConnectionId, TimeSpan.FromSeconds(5));
+
+        var commandEnvelope = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
+        Assert.Equal(CommandKind.RefreshSoftwareInventory,
+            ConvertPayload<CommandMessage>(commandEnvelope.Payload).Command);
+        await SendAsync(plugin, new Envelope
+        {
+            Type = Protocol.MessageTypeCommandResult,
+            ReplyToMessageId = commandEnvelope.MessageId,
+            Payload = new CommandResult { Success = true, Code = CommandResultCodes.Ok, Message = "ok" },
+        });
+
+        var result = await pending;
+        Assert.True(result.Success);
+    }
+
+    [Fact]
     public async Task PluginConnection_ImmediatelyRequestsFreshSchedule()
     {
         using var plugin = await ConnectPluginAsync();
@@ -205,17 +307,12 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         await ReceiveEnvelopeAsync(pluginA, Protocol.MessageTypeSchedulePull); // 连接后的初始拉取。
         using var pluginB = await ConnectPluginAsync();
         await ReceiveEnvelopeAsync(pluginB, Protocol.MessageTypeSchedulePull);
+        // 班级配对码只允许一台设备，新连接会让旧连接失效。
+        await AssertWebSocketClosedAsync(pluginA);
         using var watch = await ConnectWatchAsync();
 
         await SendAsync(watch, Envelope.SchedulePull());
-
-        // 最早接入的插件 A 收到请求；插件 B 在接收超时内不应收到（避免多插件重复执行）。
-        var receiveA = ReceiveEnvelopeAsync(pluginA, Protocol.MessageTypeSchedulePull);
-        var receiveB = ReceiveEnvelopeAsync(pluginB, Protocol.MessageTypeSchedulePull);
-        var winner = await Task.WhenAny(receiveA, receiveB);
-        Assert.Equal(Protocol.MessageTypeSchedulePull, (await winner).Type);
-        var loser = ReferenceEquals(winner, receiveA) ? receiveB : receiveA;
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await loser);
+        await ReceiveEnvelopeAsync(pluginB, Protocol.MessageTypeSchedulePull);
     }
 
     [Fact]

@@ -7,6 +7,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>RemoteCI.Shared</RootNamespace>
     <LangVersion>latest</LangVersion>
+    <!-- obj-check 是本地构建检查生成目录，不应被 SDK 的默认 glob 当成源码。 -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/obj-check/**</DefaultItemExcludes>
     <!-- 协议库仅依赖 BCL，保持零第三方依赖，降低维护与合规负担 -->
   </PropertyGroup>
 

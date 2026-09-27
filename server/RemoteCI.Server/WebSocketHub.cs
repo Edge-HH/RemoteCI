@@ -75,15 +75,14 @@ public static class WebSocketHub
 
     private static async Task InitializePluginAsync(ConnectionSession session)
     {
-        var classId = session.Principal.ClassId ?? Classroom.DefaultId;
-        var sameClassPlugins = session.Registry.GetOnlinePluginConnections()
-            .Count(x => x.ClassId == classId);
-        if (sameClassPlugins > 1)
+        // 统一连接码设备尚未分配班级，不接收账号镜像，也不参与班级数据流。
+        if (session.Principal.ClassId is not { } classId)
         {
-            session.Logger.LogWarning(
-                "班级 {ClassId} 检测到 {Count} 个插件同时在线，命令将只投递给最早接入的插件，请确认是否为预期部署",
-                classId, sameClassPlugins);
+            await session.Registry.BroadcastCapabilitiesToWatchesAsync(session.CancellationToken);
+            return;
         }
+
+        await session.Registry.DisconnectOtherPluginClassAsync(classId, session.ConnectionId, session.CancellationToken);
 
         var ct = session.CancellationToken;
         // 授权镜像按班级生成并定向发给本连接：插件只需要自己班级的账号。
@@ -160,10 +159,11 @@ public static class WebSocketHub
         }
         finally
         {
-            if (session.Principal.IsPlugin)
+            // 未分配设备没有班级，也不会启动课表任务，断开时不应误伤默认班级的进行中任务。
+            if (session.Principal.IsPlugin && session.Principal.ClassId is { } activeClassId)
                 await session.ScheduleSync.FailActiveAsync(
                     "插件连接已断开，课表任务未完成",
-                    session.Principal.ClassId ?? Classroom.DefaultId);
+                    activeClassId);
             await session.Registry.UnregisterAsync(session.ConnectionId);
             session.Logger.LogInformation("WebSocket disconnected: {Id}", session.ConnectionId);
         }
@@ -310,7 +310,14 @@ public static class WebSocketHub
         ConnectionSession session)
     {
         var ct = session.CancellationToken;
-        var classId = session.Principal.ClassId ?? Classroom.DefaultId;
+        if (session.Principal.ClassId is not { } classId)
+        {
+            // 未分配设备只允许上报软件清单，其他状态不会污染默认班级。
+            if (envelope.Type == Protocol.MessageTypeSoftwareInventory &&
+                ConvertPayload<SoftwareInventory>(envelope.Payload) is { } unassignedInventory)
+                await session.Registry.ReportSoftwareInventoryAsync(session.ConnectionId, unassignedInventory, ct);
+            return true;
+        }
         switch (envelope.Type)
         {
             case Protocol.MessageTypeStatePush:
@@ -338,6 +345,10 @@ public static class WebSocketHub
                     session.Store.SaveEvent(classId, value);
                     await session.Registry.SendEventToWatchesAsync(classId, value, ct);
                 }
+                return true;
+            case Protocol.MessageTypeSoftwareInventory:
+                if (ConvertPayload<SoftwareInventory>(envelope.Payload) is { } inventory)
+                    await session.Registry.ReportSoftwareInventoryAsync(session.ConnectionId, inventory, ct);
                 return true;
             case Protocol.MessageTypeExtensionsSync:
                 if (ConvertPayload<List<ExtensionDefinition>>(envelope.Payload) is { } extensions)
@@ -470,7 +481,17 @@ public static class WebSocketHub
             return;
         }
         command.ClassId = classId;
-
+        // 远程升级、插件管理和集控操作属于宿主级维护，即使普通角色被授予 ManageUsers 也仅允许系统管理员执行。
+        if ((command.Command is CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
+            CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
+            CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
+            CommandKind.JoinManagement or CommandKind.RestartClassIsland) && session.Principal.User!.Role != UserRole.Admin)
+        {
+            await SendFailureAsync(
+                envelope, session.ConnectionId, session.Registry,
+                CommandResultCodes.Forbidden, "仅系统管理员可以执行远程维护操作", session.CancellationToken);
+            return;
+        }
         if (command.Notification is not null)
         {
             command.Notification.ForceSenderInTitle =
@@ -521,6 +542,32 @@ public static class WebSocketHub
             return new CommandError(CommandResultCodes.Forbidden, "权限不足");
         if (command.Command == CommandKind.SendVoiceMessage && !VoiceMessageRequest.TryDecode(command.VoiceMessage, out _))
             return new CommandError(CommandResultCodes.InvalidRequest, "语音格式无效或超过 60 秒");
+        if (command.Command is CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled)
+        {
+            if (command.PluginManagement is not { PluginIds.Count: > 0 } pluginRequest)
+                return new CommandError(CommandResultCodes.InvalidRequest, "缺少插件管理参数");
+            var validAction = command.Command switch
+            {
+                CommandKind.InstallPlugins => pluginRequest.Action == PluginActionKind.Install,
+                CommandKind.UninstallPlugins => pluginRequest.Action == PluginActionKind.Uninstall,
+                CommandKind.SetPluginEnabled => pluginRequest.Action is PluginActionKind.Enable or PluginActionKind.Disable,
+                _ => false,
+            };
+            if (!validAction)
+                return new CommandError(CommandResultCodes.InvalidRequest, "插件操作与命令类型不匹配");
+        }
+        if (command.Command == CommandKind.SetPluginManagementPolicy && command.PluginManagementPolicy is null)
+            return new CommandError(CommandResultCodes.InvalidRequest, "缺少插件管理策略");
+        if (command.Command == CommandKind.UpdateTimeLayout &&
+            (command.TimeLayoutUpdate is null || command.TimeLayoutUpdate.Points.Count == 0))
+            return new CommandError(CommandResultCodes.InvalidRequest, "缺少时间表参数");
+        if (command.Command == CommandKind.DistributeProfile &&
+            (command.ProfileDistribution is null ||
+             command.ProfileDistribution.Sections == ProfileDistributionSection.None ||
+             string.IsNullOrWhiteSpace(command.ProfileDistribution.ProfileJson)))
+            return new CommandError(CommandResultCodes.InvalidRequest, "缺少档案分发参数");
+        if (command.Command == CommandKind.JoinManagement && command.ManagementJoin is null)
+            return new CommandError(CommandResultCodes.InvalidRequest, "缺少加入集控参数");
         return null;
     }
 

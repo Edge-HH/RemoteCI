@@ -15,6 +15,25 @@ public sealed class DeviceSession
     public DateTimeOffset? RevokedAt { get; set; }
 }
 
+/// <summary>
+/// 用户 API Key。密钥明文只在创建时展示一次，数据库只保存 SHA-256 摘要；
+/// 权限不复制到密钥上，每次调用都重新按用户当前角色与授权计算。
+/// </summary>
+public sealed class UserApiKey
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public AppUser User { get; set; } = null!;
+    public string Name { get; set; } = string.Empty;
+    public string KeyHash { get; set; } = string.Empty;
+    /// <summary>用于列表识别的前缀，不是完整密钥。</summary>
+    public string Prefix { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? LastUsedAt { get; set; }
+    public DateTimeOffset? ExpiresAt { get; set; }
+    public DateTimeOffset? RevokedAt { get; set; }
+}
+
 public sealed class PluginCredential
 {
     public Guid Id { get; set; }
@@ -23,8 +42,16 @@ public sealed class PluginCredential
     public bool Enabled { get; set; } = true;
     public Guid ClassroomId { get; set; } = Classroom.DefaultId;
     public Classroom Classroom { get; set; } = null!;
+    /// <summary>统一连接码创建的凭据先保持未分配；分配后才可参与班级数据和命令路由。</summary>
+    public bool Assigned { get; set; } = true;
+    public string? ClassNameRemark { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset LastSeenAt { get; set; }
+
+    /// <summary>最近一次软件版本清单的 JSON 快照；用于设备离线时仍可查看最后版本。</summary>
+    public string? SoftwareInventoryJson { get; set; }
+
+    public DateTimeOffset? SoftwareInventoryAt { get; set; }
 }
 
 public sealed class PluginPairingCode
@@ -34,6 +61,10 @@ public sealed class PluginPairingCode
 
     /// <summary>配对成功后插件凭据归属的班级；旧数据回填为默认班级。</summary>
     public Guid ClassroomId { get; set; } = Classroom.DefaultId;
+    /// <summary>共享连接码可被无限次消费；班级配对码仍由 UsedAt 控制为一次性。</summary>
+    public bool IsShared { get; set; }
+    /// <summary>班级固定配对码：可重复使用，绑定到特定班级，班级创建/导入时由管理员指定。</summary>
+    public bool IsPersistent { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }
     public DateTimeOffset? UsedAt { get; set; }
@@ -52,6 +83,36 @@ public sealed class SystemMetadata
 
     /// <summary>启用访客功能时，访问 WebUI 落地页直接进入访客课表；没有任何班级启用访客功能时无效。</summary>
     public bool AutoEnterVisitorPage { get; set; }
+
+    /// <summary>登录页主题：管理员可强制浅色/深色，默认跟随访客本地偏好。</summary>
+    public LoginTheme LoginTheme { get; set; } = LoginTheme.Follow;
+
+    /// <summary>登录页背景图；null 表示使用默认网格背景。图片存库以便随配置一起备份与迁移。</summary>
+    public byte[]? LoginBackground { get; set; }
+    public string? LoginBackgroundContentType { get; set; }
+    public DateTimeOffset? LoginBackgroundUpdatedAt { get; set; }
+
+    /// <summary>登录页背景图不透明度百分比（0-100）；仅在设置了背景图时生效。</summary>
+    public int LoginBackgroundOpacity { get; set; } = 100;
+
+    /// <summary>登录页卡片在页面中的水平位置；默认居中。</summary>
+    public LoginCardPosition LoginCardPosition { get; set; } = LoginCardPosition.Center;
+}
+
+/// <summary>登录页主题策略：跟随访客本地偏好，或由管理员强制浅色/深色。</summary>
+public enum LoginTheme
+{
+    Follow = 0,
+    Light = 1,
+    Dark = 2,
+}
+
+/// <summary>登录页卡片的水平位置：左、中、右。</summary>
+public enum LoginCardPosition
+{
+    Center = 0,
+    Left = 1,
+    Right = 2,
 }
 
 /// <summary>班级：一个班级对应一台教室端 ClassIsland 插件与其课表/状态流。</summary>

@@ -34,6 +34,61 @@ public sealed class RemoteNotificationProviderTests
         Assert.Null(request.OverlayContent);
     }
 
+    [Theory]
+    [InlineData(0, 5)]
+    [InlineData(-3, 5)]
+    [InlineData(1, 1)]
+    [InlineData(15, 15)]
+    public void DurationSeconds_FallsBackToClassIslandDefault(int requested, int expected)
+    {
+        var request = RemoteNotificationProvider.BuildNotificationRequest(
+            new NotificationSettings(), "标题", "正文",
+            isNotificationEffectEnabled: false,
+            isNotificationSoundEnabled: false,
+            isSpeechEnabled: false,
+            durationSeconds: requested);
+
+        // 正文滚动 1 次时，总时长等于单条时长。
+        Assert.Equal(TimeSpan.FromSeconds(expected), request.OverlayContent!.Duration);
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(1, 1)]
+    [InlineData(3, 3)]
+    public void RepeatCounts_MultiplyOverlayDuration(int repeatCounts, int expectedRepeats)
+    {
+        var request = RemoteNotificationProvider.BuildNotificationRequest(
+            new NotificationSettings(), "标题", "正文",
+            isNotificationEffectEnabled: false,
+            isNotificationSoundEnabled: false,
+            isSpeechEnabled: false,
+            durationSeconds: 5,
+            repeatCounts: repeatCounts);
+
+        // 总显示时长 = 持续时间 × 重复次数，与 ClassIsland 集控 SendNotification 一致。
+        Assert.Equal(TimeSpan.FromSeconds(5 * expectedRepeats), request.OverlayContent!.Duration);
+        var template = Assert.IsType<ClassIsland.Core.Controls.NotificationTemplates.RollingTextTemplate>(
+            request.OverlayContent.Content);
+        // RepeatCount 只保存在模板的数据上下文里，控件本身不暴露该属性。
+        var data = Assert.IsType<ClassIsland.Core.Models.Notification.Templates.RollingTextTemplateData>(
+            template.DataContext);
+        Assert.Equal(expectedRepeats, data.RepeatCount);
+    }
+
+    [Fact]
+    public void TopmostEnabled_PassesThroughToRequestSettings()
+    {
+        var request = RemoteNotificationProvider.BuildNotificationRequest(
+            new NotificationSettings(), "标题", "正文",
+            isNotificationEffectEnabled: false,
+            isNotificationSoundEnabled: false,
+            isSpeechEnabled: false,
+            isNotificationTopmostEnabled: true);
+
+        Assert.True(request.RequestNotificationSettings.IsNotificationTopmostEnabled);
+    }
+
     [Fact]
     public void PerMessageOptionsOverrideEnabledProviderDefaults()
     {

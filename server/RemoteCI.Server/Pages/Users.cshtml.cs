@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using RemoteCI.Server.Data;
 using RemoteCI.Server.Services;
 using RemoteCI.Shared;
@@ -17,7 +18,9 @@ public sealed class UsersModel(
     AuthorizationSyncService authorizationSync,
     VisitorAccessSettings visitorAccess,
     ClassroomService classrooms,
-    UserImportService importService)
+    UserImportService importService,
+    MemberExcelService memberExcel,
+    IMemoryCache reportCache)
     : WebPageModel(users)
 {
     [BindProperty]
@@ -26,14 +29,22 @@ public sealed class UsersModel(
     public UserInput Edit { get; set; } = new();
     public IReadOnlyList<UserListItem> Accounts { get; private set; } = [];
     public IReadOnlyList<AccountRoleInfo> RoleDefinitions { get; private set; } = [];
+    public IReadOnlyDictionary<Guid, IReadOnlyList<ApiKeyInfo>> ApiKeysByUser { get; private set; } =
+        new Dictionary<Guid, IReadOnlyList<ApiKeyInfo>>();
+    public ApiKeyCreationResult? CreatedApiKey { get; private set; }
     [BindProperty] public RoleInput RoleEdit { get; set; } = new();
     [BindProperty] public bool AutoEnterVisitorPage { get; set; }
 
-    // 批量导入：每行一个账号（用户名,显示名,密码），整批落入所选班级并使用所选角色预设。
+    // 文本批量导入兼容入口：推荐每行 ID,用户名,班级,角色,密码；旧 3 列格式使用默认班级和角色。
     [BindProperty] public string? ImportText { get; set; }
     [BindProperty] public Guid? ImportClassId { get; set; }
     [BindProperty] public Guid? ImportRoleId { get; set; }
-    public IReadOnlyList<ClassDetail> ImportClasses { get; private set; } = [];
+    /// <summary>班级列表：新建账号的班级分配与文本导入的默认班级共用同一份数据。</summary>
+    public IReadOnlyList<ClassDetail> Classes { get; private set; } = [];
+    public IReadOnlyList<ClassGroupInfo> ImportGroups { get; private set; } = [];
+
+    /// <summary>最近一次 Excel 导入结果；完整失败列表通过短时缓存跨重定向传递。</summary>
+    public MemberExcelImportResult? ExcelImportResult { get; private set; }
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct) => await LoadAsync(ct);
 
@@ -43,6 +54,9 @@ public sealed class UsersModel(
         Create.Role = Create.RoleId == AccountRole.AdministratorId ? UserRole.Admin : UserRole.User;
         if (Create.Role == UserRole.Admin && CurrentUser.Role != UserRole.Admin)
             return await CreateFailureAsync("仅管理员可创建管理员账号。", Array.Empty<string>(), ct);
+        // 非管理员账号必须归属某个班级：没有班级成员关系就访问不到任何班级数据。
+        if (Create.Role != UserRole.Admin && Create.ClassId is null)
+            ModelState.AddModelError($"{nameof(Create)}.{nameof(UserInput.ClassId)}", "请为账号分配班级。");
         KeepModelStateEntries(nameof(Create));
         if (!ModelState.IsValid)
         {
@@ -54,9 +68,22 @@ public sealed class UsersModel(
             return await CreateFailureAsync(message, invalidFields, ct);
         }
 
+        // 班级可能在页面打开后被删除；先校验，避免账号已创建但成员关系写入失败。
+        if (Create.Role != UserRole.Admin && Create.ClassId is { } assignedClassId)
+        {
+            try
+            {
+                await classrooms.RequireAsync(assignedClassId, ct);
+            }
+            catch (IdentityOperationException ex)
+            {
+                return await CreateFailureAsync(ex.Message, new[] { $"{nameof(Create)}.{nameof(UserInput.ClassId)}" }, ct);
+            }
+        }
+
         try
         {
-            await identities.CreateUserAsync(new CreateUserRequest
+            var created = await identities.CreateUserAsync(new CreateUserRequest
             {
                 Username = Create.Username,
                 DisplayName = Create.DisplayName,
@@ -65,6 +92,9 @@ public sealed class UsersModel(
                 RoleId = Create.RoleId,
                 GrantedPermissions = Create.Grants,
             }, ct);
+            // 与批量导入、Excel 导入一致：账号保留默认班级成员关系，显式选择的班级另建一条成员关系。
+            if (Create.Role != UserRole.Admin && Create.ClassId is { } classId)
+                await classrooms.AddMemberAsync(classId, created.Id, Create.RoleId ?? AccountRole.StudentId, ct);
             await authorizationSync.SyncAsync(ct);
             TempData["Message"] = "账号已创建。";
             if (IsAjaxRequest()) return new JsonResult(new { redirectUrl = Url.Page("/Users") });
@@ -188,6 +218,102 @@ public sealed class UsersModel(
         return RedirectToPage();
     }
 
+    public async Task<IActionResult> OnGetTemplateAsync(CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
+        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        var content = await memberExcel.CreateTemplateAsync(ct);
+        return File(content, MemberExcelService.ExcelContentType, MemberExcelService.TemplateFileName);
+    }
+
+    public async Task<IActionResult> OnGetExportAsync(Guid? groupId, CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
+        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        try
+        {
+            var export = await memberExcel.ExportAsync(groupId, ct);
+            return File(export.Content, MemberExcelService.ExcelContentType, export.FileName);
+        }
+        catch (IdentityOperationException ex)
+        {
+            TempData["Error"] = ex.Message;
+            return RedirectToPage();
+        }
+    }
+
+    public async Task<IActionResult> OnPostImportExcelAsync(IFormFile? excelFile, CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
+        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        var bytes = await ReadExcelFileAsync(excelFile, ct);
+        if (bytes is null) return RedirectToPage();
+        try
+        {
+            using var stream = new MemoryStream(bytes);
+            var result = await memberExcel.ImportAsync(stream, ct);
+            if (result.CreatedUsers > 0) await authorizationSync.SyncAsync(ct);
+            StoreExcelResult(result);
+        }
+        catch (IdentityOperationException ex)
+        {
+            TempData["Error"] = ex.Message;
+        }
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostOverwriteExcelAsync(IFormFile? excelFile, CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
+        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        var bytes = await ReadExcelFileAsync(excelFile, ct);
+        if (bytes is null) return RedirectToPage();
+        try
+        {
+            using var stream = new MemoryStream(bytes);
+            var result = await memberExcel.OverwriteAsync(stream, ct);
+            if (!result.HasFailures) await authorizationSync.SyncAsync(ct);
+            StoreExcelResult(result);
+        }
+        catch (IdentityOperationException ex)
+        {
+            TempData["Error"] = ex.Message;
+        }
+        return RedirectToPage();
+    }
+    public async Task<IActionResult> OnPostCreateApiKeyAsync(Guid id, string? name, CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
+        // 普通人员管理员不能为目标管理员创建 Key，否则等于接管管理员权限。
+        if (CurrentUser.Role != UserRole.Admin && await identities.GetRoleAsync(id, ct) == UserRole.Admin)
+            return RedirectToPage("/Denied");
+        try
+        {
+            var created = await identities.CreateApiKeyAsync(id, name, ct);
+            StoreCreatedApiKey(created);
+            TempData["Message"] = "API Key 已生成，请立即复制；离开页面后无法再次查看。";
+        }
+        catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostRevokeApiKeyAsync(Guid id, Guid keyId, CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
+        if (CurrentUser.Role != UserRole.Admin && await identities.GetRoleAsync(id, ct) == UserRole.Admin)
+            return RedirectToPage("/Denied");
+        try
+        {
+            await identities.RevokeApiKeyAsync(id, keyId, ct);
+            TempData["Message"] = "API Key 已吊销。";
+        }
+        catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
+        return RedirectToPage();
+    }
+
+    public IReadOnlyList<ApiKeyInfo> GetApiKeys(Guid userId) =>
+        ApiKeysByUser.TryGetValue(userId, out var keys) ? keys : [];
+
     public async Task<IActionResult> OnPostCreateRoleAsync(CancellationToken ct)
     {
         if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
@@ -220,11 +346,50 @@ public sealed class UsersModel(
         if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
         Accounts = await identities.ListUsersAsync(ct);
         RoleDefinitions = await roleService.ListAsync(ct);
-        ImportClasses = await classrooms.ListAsync(ct);
+        Classes = await classrooms.ListAsync(ct);
+        ImportGroups = await classrooms.ListGroupsAsync(ct);
         AutoEnterVisitorPage = await visitorAccess.GetAutoEnterAsync(ct);
+        await LoadApiKeyStateAsync(ct);
+        if (TempData["MemberExcelReportId"] is string reportId &&
+            reportCache.TryGetValue(reportId, out MemberExcelImportResult? report))
+        {
+            ExcelImportResult = report;
+        }
         return Page();
     }
 
+    /// <summary>把完整导入结果放进短时缓存，TempData 只保存一个很小的键，避免 Cookie 超限。</summary>
+    private void StoreExcelResult(MemberExcelImportResult result)
+    {
+        var key = Guid.NewGuid().ToString("N");
+        reportCache.Set(key, result, TimeSpan.FromMinutes(10));
+        TempData["MemberExcelReportId"] = key;
+        TempData[result.HasFailures ? "Error" : "Message"] = result.Summary;
+    }
+
+    private async Task<byte[]?> ReadExcelFileAsync(IFormFile? file, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0)
+        {
+            TempData["Error"] = "请选择要上传的 .xlsx 文件。";
+            return null;
+        }
+        if (file.Length > 20 * 1024 * 1024)
+        {
+            TempData["Error"] = "Excel 文件不能超过 20 MB。";
+            return null;
+        }
+        if (!string.Equals(Path.GetExtension(file.FileName), ".xlsx", StringComparison.OrdinalIgnoreCase))
+        {
+            TempData["Error"] = "仅支持 .xlsx 格式的 Excel 文件。";
+            return null;
+        }
+
+        using var buffer = new MemoryStream();
+        await using var stream = file.OpenReadStream();
+        await stream.CopyToAsync(buffer, ct);
+        return buffer.ToArray();
+    }
     private bool IsAjaxRequest() => string.Equals(
         Request.Headers["X-Requested-With"],
         "XMLHttpRequest",
@@ -265,7 +430,30 @@ public sealed class UsersModel(
         Accounts = await identities.ListUsersAsync(ct);
         RoleDefinitions = await roleService.ListAsync(ct);
         AutoEnterVisitorPage = await visitorAccess.GetAutoEnterAsync(ct);
+        await LoadApiKeyStateAsync(ct);
         return Page();
+    }
+
+    private async Task LoadApiKeyStateAsync(CancellationToken ct)
+    {
+        ApiKeysByUser = await identities.ListApiKeysByUsersAsync(Accounts.Select(x => x.Id).ToArray(), ct);
+        CreatedApiKey = TakeCreatedApiKey();
+    }
+
+    /// <summary>把一次性明文放进服务端内存缓存，TempData 只保存随机引用，避免明文进入客户端 Cookie。</summary>
+    private void StoreCreatedApiKey(ApiKeyCreationResult result)
+    {
+        var id = Guid.NewGuid().ToString("N");
+        reportCache.Set(id, result, TimeSpan.FromMinutes(10));
+        TempData["ApiKeyRevealId"] = id;
+    }
+
+    private ApiKeyCreationResult? TakeCreatedApiKey()
+    {
+        if (TempData["ApiKeyRevealId"] is not string id ||
+            !reportCache.TryGetValue(id, out ApiKeyCreationResult? result)) return null;
+        reportCache.Remove(id);
+        return result;
     }
 
     private void KeepModelStateEntries(string prefix)
@@ -287,6 +475,8 @@ public sealed class UsersModel(
         public bool RunExtensions { get; set; }
         public bool MainMenuControl { get; set; }
         public bool PowerControl { get; set; }
+        public bool ChangeDisplayName { get; set; }
+        public bool ApiAccess { get; set; }
         public UserPermissions Grants => (AccessWebUi ? UserPermissions.AccessWebUi : 0) |
             (ManageUsers ? UserPermissions.ManageUsers : 0) |
             (SendNotifications ? UserPermissions.SendNotifications : 0) |
@@ -295,7 +485,9 @@ public sealed class UsersModel(
             (ManageSchedule ? UserPermissions.ManageSchedule : 0) |
             (RunExtensions ? UserPermissions.RunExtensions : 0) |
             (MainMenuControl ? UserPermissions.MainMenuControl : 0) |
-            (PowerControl ? UserPermissions.PowerControl : 0);
+            (PowerControl ? UserPermissions.PowerControl : 0) |
+            (ChangeDisplayName ? UserPermissions.ChangeDisplayName : 0) |
+            (ApiAccess ? UserPermissions.ApiAccess : 0);
     }
 
     public sealed class RoleInput : PermissionInput
@@ -319,6 +511,8 @@ public sealed class UsersModel(
         [EnumDataType(typeof(UserRole), ErrorMessage = "角色无效")]
         public UserRole Role { get; set; } = UserRole.User;
         public Guid? RoleId { get; set; } = AccountRole.StudentId;
+        /// <summary>非管理员账号的归属班级；管理员账号忽略该字段。</summary>
+        public Guid? ClassId { get; set; }
         public bool Enabled { get; set; }
     }
 }

@@ -10,44 +10,43 @@
     <div>
         <p class="eyebrow">ClassIsland 远程操作</p>
         <h1>控制</h1>
-        <p class="muted">这里汇总手表控制页中的操作，命令仅在插件在线且账号具有对应权限时执行。</p>
+        <p class="muted">所有操作默认作用于当前班级；需要参数的功能会先弹出填写窗口，其余操作点击后直接执行。</p>
     </div>
     <span class="status @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "插件在线" : "插件离线")</span>
 </div>
 
-<div class="control-grid">
-    @if (Model.CanSendVoiceMessages)
-    {
-        <section class="panel control-card control-card-full" id="voice-message">
-            <div class="control-card-head">
-                <span class="feature-icon"><i class="bi bi-mic" aria-hidden="true"></i></span>
-                <div><h2>语音消息</h2><p class="muted">录制并试听后发送，ClassIsland 会自动播放。每条最长 60 秒。</p></div>
-            </div>
-            <form method="post" asp-page-handler="VoiceMessage" class="stack" data-voice-form data-worklet-url="@Url.Content("~/voice-recorder-worklet.js")">
-                <div class="control-actions">
-                    <button type="button" data-voice-record disabled="@(!Model.PluginOnline)">开始录音</button>
-                    <button type="button" class="ghost" data-voice-stop disabled>停止录音</button>
-                    <button type="button" class="ghost" data-voice-discard disabled>丢弃</button>
-                    <button type="submit" data-voice-send disabled>发送语音</button>
-                </div>
-                <audio controls data-voice-preview hidden aria-label="试听语音"></audio>
-                <p class="control-note" data-voice-status role="status">需要允许麦克风权限；浏览器录音需要 HTTPS 或 localhost。</p>
-            </form>
-        </section>
-    }
-    @if (Model.CanTeacherComing)
-    {
-        <section class="panel control-card" id="teacher-coming">
-            <div class="control-card-head">
-                <span class="feature-icon"><i class="bi bi-mortarboard" aria-hidden="true"></i></span>
-                <div><h2>老师来了</h2></div>
-            </div>
-            <form method="post" asp-page-handler="TeacherComing">
-                <button type="submit" disabled="@(!Model.PluginOnline)"><i class="bi bi-bell" aria-hidden="true"></i>发送快捷提醒</button>
-            </form>
-        </section>
-    }
+@* 复用批量控制页的动作卡片与参数弹窗；SingleControl 模式下目标固定为当前班级。 *@
+@await Html.PartialAsync("_BatchControlActions", Model)
 
+@* 班级控制页独有、且无需填写参数的操作：点击后直接执行或跳到下方编辑区。 *@
+<section class="panel batch-section control-command-section" aria-labelledby="control-extra-actions-title">
+    <div class="panel-heading"><div><h2 id="control-extra-actions-title">当前班级</h2><p class="muted">无需填写参数的操作会直接执行。</p></div></div>
+    <div class="batch-action-grid">
+        @if (Model.CanControlMainMenu)
+        {
+            <form method="post" asp-page-handler="MainMenu" class="batch-action-card-form">
+                <input type="hidden" name="visible" value="@(!mainMenuVisible ? "true" : "false")" />
+                <button type="submit" class="batch-action-card" disabled="@(!Model.PluginOnline)"><span class="batch-action-icon"><i class="bi @(mainMenuVisible ? "bi-eye-slash" : "bi-eye")" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>@(mainMenuVisible ? "隐藏主界面" : "显示主界面")</strong><small>直接切换当前班级设备的主界面。</small></span></button>
+            </form>
+        }
+        @if (Model.CanTeacherComing)
+        {
+            <form method="post" asp-page-handler="TeacherComing" class="batch-action-card-form">
+                <button type="submit" class="batch-action-card" disabled="@(!Model.PluginOnline)"><span class="batch-action-icon"><i class="bi bi-mortarboard" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>老师来了</strong><small>直接发送快捷提醒。</small></span></button>
+            </form>
+        }
+        @if (Model.CanControlVolume)
+        {
+            <a class="batch-action-card" href="#volume"><span class="batch-action-icon"><i class="bi bi-volume-up" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>音量调节</strong><small>打开当前班级设备音量控制。</small></span></a>
+        }
+        @if (Model.CanManageClassInfo)
+        {
+            <a class="batch-action-card" href="#class-info"><span class="batch-action-icon"><i class="bi bi-collection" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>班级设置</strong><small>修改当前班级名称与头像。</small></span></a>
+        }
+    </div>
+</section>
+
+<div class="control-grid">
     @if (Model.CanManageClassInfo)
     {
     <section class="panel control-card control-card-full" id="class-info">
@@ -76,88 +75,6 @@
             }
         </div>
     </section>
-    }
-
-    @if (Model.CanSendNotifications)
-    {
-        <section class="panel control-card control-card-full" id="send-notification">
-            <div class="control-card-head">
-                <span class="feature-icon"><i class="bi bi-send" aria-hidden="true"></i></span>
-                <div><h2>发送通知</h2><p class="muted">向 ClassIsland 发送自定义通知，成功后广播给在线手表。</p></div>
-            </div>
-            <div class="notification-control-grid">
-                <form method="post" asp-page-handler="Notification" class="stack">
-                    <label>标题<input asp-for="Input.Title" maxlength="60" placeholder="RemoteCI 通知" /></label>
-                    <label>正文<textarea asp-for="Input.Message" maxlength="500" rows="5"></textarea></label>
-                    <button type="submit" disabled="@(!Model.PluginOnline)">发送并等待回执</button>
-                </form>
-                <form method="post" asp-page-handler="NotificationSettings" class="stack notification-settings-form">
-                    <h3>发送人显示</h3>
-                    <label class="check"><input type="checkbox" asp-for="ForceSenderInTitle" /> 强制在标题显示发送人</label>
-                    <p class="muted">此设置对 WebUI 和手表发送的自定义通知全局生效。</p>
-                    <button class="ghost" type="submit">保存设置</button>
-                </form>
-            </div>
-        </section>
-
-        @if (Model.ShowBroadcast)
-        {
-        <section class="panel control-card control-card-full" id="broadcast-notification">
-            <div class="panel-heading">
-                <div><h2>广播通知（集控）</h2><p class="muted">一次向多个班级同时发送通知；逐班校验权限并回报各班插件的执行结果。</p></div>
-            </div>
-            <form method="post" asp-page-handler="Broadcast" class="stack">
-                <label>标题<input asp-for="BroadcastInput.Title" maxlength="60" placeholder="RemoteCI 通知" /></label>
-                <label>正文<textarea asp-for="BroadcastInput.Message" maxlength="500" rows="3"></textarea></label>
-                <div class="broadcast-targets" aria-label="选择要通知的班级">
-                    @foreach (var target in Model.BroadcastTargets)
-                    {
-                        <label class="check">
-                            <input type="checkbox" name="BroadcastClassIds" value="@target.Id" />
-                            @target.Name
-                            @if (target.GroupNames is { Count: > 0 })
-                            {
-                                foreach (var groupName in target.GroupNames)
-                                {
-                                    <span class="group-name">@groupName</span>
-                                }
-                            }
-                        </label>
-                    }
-                </div>
-                <div>
-                    <button type="submit">广播到勾选的 @Model.BroadcastTargets.Count 个班级</button>
-                </div>
-            </form>
-        </section>
-        }
-
-        @if (Model.CanClearNotifications)
-        {
-        <section class="panel control-card" id="clear-notifications">
-            <div class="control-card-head">
-                <span class="feature-icon"><i class="bi bi-bell-slash" aria-hidden="true"></i></span>
-                <div><h2>清除通知</h2><p class="muted">清除 ClassIsland 当前正在显示的提醒。</p></div>
-            </div>
-            <form method="post" asp-page-handler="ClearNotifications">
-                <button class="ghost" type="submit" disabled="@(!Model.PluginOnline || snapshot?.IsNotificationPlaying != true)">清除当前提醒</button>
-            </form>
-        </section>
-        }
-    }
-
-    @if (Model.CanControlMainMenu)
-    {
-        <section class="panel control-card" id="main-menu">
-            <div class="control-card-head">
-                <span class="feature-icon"><i class="bi @(mainMenuVisible ? "bi-eye-slash" : "bi-eye")" aria-hidden="true"></i></span>
-                <div><h2>主界面</h2><p class="muted">当前状态：@(mainMenuVisible ? "已显示" : "已隐藏")。</p></div>
-            </div>
-            <form method="post" asp-page-handler="MainMenu">
-                <input type="hidden" name="visible" value="@(!mainMenuVisible ? "true" : "false")" />
-                <button type="submit" disabled="@(!Model.PluginOnline)">@(mainMenuVisible ? "隐藏主菜单" : "显示主菜单")</button>
-            </form>
-        </section>
     }
 
     @if (Model.CanControlVolume)
@@ -189,26 +106,65 @@
                 <p class="control-note">插件尚未报告可用的 Windows 默认播放设备。</p>
             }
         </section>
-
     }
 
-    @if (Model.CanControlPower)
+    @if (Model.CanSendNotifications)
     {
-        <section class="panel control-card control-card-wide" id="power">
+        <section class="panel control-card" id="notification-settings">
             <div class="control-card-head">
-                <span class="feature-icon"><i class="bi bi-power" aria-hidden="true"></i></span>
-                <div><h2>电源</h2><p class="muted">直接控制运行 ClassIsland 的教室电脑，请在执行前确认。</p></div>
+                <span class="feature-icon"><i class="bi bi-person-badge" aria-hidden="true"></i></span>
+                <div><h2>发送人显示</h2><p class="muted">自定义通知是否在标题中附带发送人。</p></div>
             </div>
-            <div class="power-actions">
-                <form method="post" asp-page-handler="Power" onsubmit="return confirm('确定关闭教室电脑？')"><button class="danger ghost" type="submit" name="action" value="Shutdown" disabled="@(!Model.PluginOnline)">关机</button></form>
-                <form method="post" asp-page-handler="Power" onsubmit="return confirm('确定重启教室电脑？')"><button class="danger ghost" type="submit" name="action" value="Restart" disabled="@(!Model.PluginOnline)">重启</button></form>
-                <form method="post" asp-page-handler="Power" onsubmit="return confirm('确定让教室电脑进入睡眠？')"><button class="ghost" type="submit" name="action" value="Sleep" disabled="@(!Model.PluginOnline || snapshot?.IsSleepAvailable != true)">睡眠</button></form>
-                @if (snapshot?.IsHibernateAvailable == true)
-                {
-                    <form method="post" asp-page-handler="Power" onsubmit="return confirm('确定让教室电脑进入休眠？')"><button class="ghost" type="submit" name="action" value="Hibernate" disabled="@(!Model.PluginOnline)">休眠</button></form>
-                }
-            </div>
+            <form method="post" asp-page-handler="NotificationSettings" class="stack notification-settings-form">
+                <label class="check"><input type="checkbox" asp-for="ForceSenderInTitle" /> 强制在标题显示发送人</label>
+                <p class="muted">此设置对 WebUI 和手表发送的自定义通知全局生效。</p>
+                <button class="ghost" type="submit">保存设置</button>
+            </form>
         </section>
+
+        @if (Model.ShowBroadcast)
+        {
+        <section class="panel control-card control-card-full" id="broadcast-notification">
+            <div class="panel-heading">
+                <div><h2>广播通知（集控）</h2><p class="muted">一次向多个班级同时发送通知；逐班校验权限并回报各班插件的执行结果。</p></div>
+            </div>
+            <form method="post" asp-page-handler="Broadcast" class="stack">
+                <label>标题<input asp-for="BroadcastInput.Title" maxlength="60" placeholder="RemoteCI 通知" /></label>
+                <label>正文<textarea asp-for="BroadcastInput.Message" maxlength="500" rows="3"></textarea></label>
+                <div class="two-column">
+                    <label>持续时间（秒）<input asp-for="BroadcastInput.DurationSeconds" type="number" min="1" max="3600" value="5" /></label>
+                    <label>重复次数<input asp-for="BroadcastInput.RepeatCounts" type="number" min="1" max="10" value="1" /></label>
+                </div>
+                <fieldset class="batch-check-group">
+                    <legend>提醒选项</legend>
+                    <label class="check"><input type="checkbox" asp-for="BroadcastInput.IsSpeechEnabled" /> 启用语音</label>
+                    <label class="check"><input type="checkbox" asp-for="BroadcastInput.IsNotificationSoundEnabled" /> 启用提醒音效</label>
+                    <label class="check"><input type="checkbox" asp-for="BroadcastInput.IsNotificationEffectEnabled" /> 启用提醒特效</label>
+                    <label class="check"><input type="checkbox" asp-for="BroadcastInput.IsNotificationTopmostEnabled" /> 提醒时置顶主界面</label>
+                </fieldset>
+                <p class="muted">重复次数让正文横向滚动指定遍数，总显示时长为“持续时间 × 重复次数”。</p>
+                <div class="broadcast-targets" aria-label="选择要通知的班级">
+                    @foreach (var target in Model.BroadcastTargets)
+                    {
+                        <label class="check">
+                            <input type="checkbox" name="BroadcastClassIds" value="@target.Id" />
+                            @target.Name
+                            @if (target.GroupNames is { Count: > 0 })
+                            {
+                                foreach (var groupName in target.GroupNames)
+                                {
+                                    <span class="group-name">@groupName</span>
+                                }
+                            }
+                        </label>
+                    }
+                </div>
+                <div>
+                    <button type="submit">广播到勾选的 @Model.BroadcastTargets.Count 个班级</button>
+                </div>
+            </form>
+        </section>
+        }
     }
 
     @if (Model.CanUseExtensions)

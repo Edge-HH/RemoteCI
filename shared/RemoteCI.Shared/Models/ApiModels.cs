@@ -11,6 +11,11 @@ public sealed class PairRequest
     /// <summary>申请角色：plugin 或 watch。</summary>
     [JsonPropertyName("role")]
     public required string Role { get; set; }
+
+    /// <summary>使用统一连接码时，插件端填写的班级名备注；班级配对码忽略该字段。</summary>
+    [JsonPropertyName("classNameRemark")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ClassNameRemark { get; set; }
 }
 
 /// <summary>配对成功响应。</summary>
@@ -49,6 +54,14 @@ public sealed class PluginCredentialInfo
     [JsonPropertyName("className")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ClassName { get; set; }
+
+    /// <summary>统一连接码设备在未分配列表中提供的班级名备注。</summary>
+    [JsonPropertyName("classNameRemark")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ClassNameRemark { get; set; }
+
+    [JsonPropertyName("assigned")]
+    public bool Assigned { get; set; }
 
     [JsonPropertyName("createdAt")]
     public DateTimeOffset CreatedAt { get; set; }

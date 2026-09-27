@@ -33,6 +33,7 @@ public sealed class VisitorAccessSettings(AppDbContext db)
     {
         var classrooms = await db.Classrooms.AsNoTracking()
             .Where(x => x.VisitorAccessEnabled)
+            .Include(x => x.GroupAssignments)
             .ToListAsync(ct);
         return classrooms.OrderBy(x => x.CreatedAt).ToList();
     }

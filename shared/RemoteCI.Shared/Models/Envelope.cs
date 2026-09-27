@@ -85,6 +85,9 @@ public sealed class Envelope
     public static Envelope PeerCapabilities(object payload) =>
         New(Protocol.MessageTypePeerCapabilities, payload);
 
+    public static Envelope SoftwareInventory(object payload) =>
+        New(Protocol.MessageTypeSoftwareInventory, payload);
+
     public static Envelope CapabilitiesSync(object payload) =>
         New(Protocol.MessageTypeCapabilitiesSync, payload);
 
