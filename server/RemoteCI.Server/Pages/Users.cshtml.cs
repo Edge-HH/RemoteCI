@@ -52,6 +52,39 @@ public sealed class UsersModel(
     {
         if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
         Create.Role = Create.RoleId == AccountRole.AdministratorId ? UserRole.Admin : UserRole.User;
+        if (await ValidateCreateAsync(ct) is { } validationFailure)
+            return validationFailure;
+
+        try
+        {
+            var created = await identities.CreateUserAsync(new CreateUserRequest
+            {
+                Username = Create.Username,
+                DisplayName = Create.DisplayName,
+                Password = Create.Password,
+                Role = Create.Role,
+                RoleId = Create.RoleId,
+                GrantedPermissions = Create.Grants,
+            }, ct);
+            // 与批量导入、Excel 导入一致：账号保留默认班级成员关系，显式选择的班级另建一条成员关系。
+            if (Create.Role != UserRole.Admin && Create.ClassId is { } classId)
+                await classrooms.AddMemberAsync(classId, created.Id, Create.RoleId ?? AccountRole.StudentId, ct);
+            await authorizationSync.SyncAsync(ct);
+            TempData["Message"] = "账号已创建。";
+            if (IsAjaxRequest()) return new JsonResult(new { redirectUrl = Url.Page("/Users") });
+            return RedirectToPage();
+        }
+        catch (IdentityOperationException ex)
+        {
+            var invalidFields = ex.Code == ApiErrorCodes.UsernameExists
+                ? new[] { $"{nameof(Create)}.{nameof(UserInput.Username)}" }
+                : Array.Empty<string>();
+            return await CreateFailureAsync(ex.Message, invalidFields, ct);
+        }
+    }
+
+    private async Task<IActionResult?> ValidateCreateAsync(CancellationToken ct)
+    {
         if (Create.Role == UserRole.Admin && CurrentUser.Role != UserRole.Admin)
             return await CreateFailureAsync("仅管理员可创建管理员账号。", Array.Empty<string>(), ct);
         // 非管理员账号必须归属某个班级：没有班级成员关系就访问不到任何班级数据。
@@ -80,33 +113,7 @@ public sealed class UsersModel(
                 return await CreateFailureAsync(ex.Message, new[] { $"{nameof(Create)}.{nameof(UserInput.ClassId)}" }, ct);
             }
         }
-
-        try
-        {
-            var created = await identities.CreateUserAsync(new CreateUserRequest
-            {
-                Username = Create.Username,
-                DisplayName = Create.DisplayName,
-                Password = Create.Password,
-                Role = Create.Role,
-                RoleId = Create.RoleId,
-                GrantedPermissions = Create.Grants,
-            }, ct);
-            // 与批量导入、Excel 导入一致：账号保留默认班级成员关系，显式选择的班级另建一条成员关系。
-            if (Create.Role != UserRole.Admin && Create.ClassId is { } classId)
-                await classrooms.AddMemberAsync(classId, created.Id, Create.RoleId ?? AccountRole.StudentId, ct);
-            await authorizationSync.SyncAsync(ct);
-            TempData["Message"] = "账号已创建。";
-            if (IsAjaxRequest()) return new JsonResult(new { redirectUrl = Url.Page("/Users") });
-            return RedirectToPage();
-        }
-        catch (IdentityOperationException ex)
-        {
-            var invalidFields = ex.Code == ApiErrorCodes.UsernameExists
-                ? new[] { $"{nameof(Create)}.{nameof(UserInput.Username)}" }
-                : Array.Empty<string>();
-            return await CreateFailureAsync(ex.Message, invalidFields, ct);
-        }
+        return null;
     }
 
     public async Task<IActionResult> OnPostUpdateAsync(CancellationToken ct)

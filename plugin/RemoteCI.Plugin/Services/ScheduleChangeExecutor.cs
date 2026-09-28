@@ -19,33 +19,16 @@ internal static class ScheduleChangeExecutor
         Action<Exception>? onSaveFailure = null)
     {
         var before = catalog.BuildDay(date);
-        if (!before.Enabled)
-            return CommandResult.Failure(CommandResultCodes.ScheduleUnavailable, $"{date:yyyy-MM-dd} 没有可编辑课表");
-        if (!string.Equals(before.Revision, request.ExpectedRevision, StringComparison.Ordinal))
-            return new CommandResult
-            {
-                Success = false,
-                Code = CommandResultCodes.ScheduleStale,
-                Message = "课表已被其他管理者修改，请刷新后重新确认",
-                ScheduleRevision = before.Revision,
-            };
-
-        var validationError = ScheduleMutation.Validate(
-            before.Courses.Count,
-            request,
-            subjectId => profile.Subjects.ContainsKey(subjectId));
-        if (validationError is not null)
-            return CommandResult.Failure(CommandResultCodes.InvalidRequest, validationError);
+        if (GetPreconditionFailure(date, before, request) is { } precondition)
+            return precondition;
+        if (ValidateMutation(before.Courses.Count, request, profile) is { } beforeValidation)
+            return beforeValidation;
 
         var plan = GetWritablePlan(date, request.Permanent, backend, profile);
         if (plan is null)
             return CommandResult.Failure(CommandResultCodes.ScheduleUnavailable, $"{date:yyyy-MM-dd} 无法创建临时课表层");
-        validationError = ScheduleMutation.Validate(
-            plan.Classes.Count,
-            request,
-            subjectId => profile.Subjects.ContainsKey(subjectId));
-        if (validationError is not null)
-            return CommandResult.Failure(CommandResultCodes.InvalidRequest, validationError);
+        if (ValidateMutation(plan.Classes.Count, request, profile) is { } validationFailure)
+            return validationFailure;
 
         var mutation = ScheduleMutation.Create(plan.Classes, request);
         mutation.Apply();
@@ -61,17 +44,42 @@ internal static class ScheduleChangeExecutor
             return CommandResult.Failure(CommandResultCodes.SaveFailed, "ClassIsland 保存课表失败，操作未确认");
         }
 
-        var after = catalog.BuildDay(date);
+        return BuildSuccessResult(catalog.BuildDay(date), request);
+    }
+
+    private static CommandResult? GetPreconditionFailure(
+        DateTime date, ScheduleDay before, ScheduleChangeRequest request)
+    {
+        if (!before.Enabled)
+            return CommandResult.Failure(CommandResultCodes.ScheduleUnavailable, $"{date:yyyy-MM-dd} 没有可编辑课表");
+        if (string.Equals(before.Revision, request.ExpectedRevision, StringComparison.Ordinal))
+            return null;
         return new CommandResult
         {
-            Success = true,
-            Code = CommandResultCodes.Ok,
-            Message = request.Permanent
-                ? request.Mode == ScheduleChangeMode.Exchange ? "两节课程已永久交换" : "课程已永久替换"
-                : request.Mode == ScheduleChangeMode.Exchange ? "两节课程已临时交换" : "课程已临时替换",
-            ScheduleRevision = after.Revision,
+            Success = false,
+            Code = CommandResultCodes.ScheduleStale,
+            Message = "课表已被其他管理者修改，请刷新后重新确认",
+            ScheduleRevision = before.Revision,
         };
     }
+
+    private static CommandResult? ValidateMutation(
+        int classCount, ScheduleChangeRequest request, IProfileWriteOperations profile)
+    {
+        var error = ScheduleMutation.Validate(
+            classCount, request, subjectId => profile.Subjects.ContainsKey(subjectId));
+        return error is null ? null : CommandResult.Failure(CommandResultCodes.InvalidRequest, error);
+    }
+
+    private static CommandResult BuildSuccessResult(ScheduleDay after, ScheduleChangeRequest request) => new()
+    {
+        Success = true,
+        Code = CommandResultCodes.Ok,
+        Message = request.Permanent
+            ? request.Mode == ScheduleChangeMode.Exchange ? "两节课程已永久交换" : "课程已永久替换"
+            : request.Mode == ScheduleChangeMode.Exchange ? "两节课程已临时交换" : "课程已临时替换",
+        ScheduleRevision = after.Revision,
+    };
 
     /// <summary>取得可写的课表层：已是临时层直接使用，否则创建临时层并取回。</summary>
     internal static ClassPlan? GetWritablePlan(

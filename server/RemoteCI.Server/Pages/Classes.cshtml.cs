@@ -298,36 +298,44 @@ public sealed class ClassesModel(
 
         var operation = BatchOperation.Trim();
         var isGroupOperation = IsBatchGroupOperation(operation);
-        BatchClassOperationResult result;
         try
         {
-            if (isGroupOperation)
+            if (ValidateBatchTarget(operation, isGroupOperation) is { } error)
             {
-                if (!operation.Equals("clearGroups", StringComparison.OrdinalIgnoreCase) && BatchTargetGroupIds.Count == 0)
-                {
-                    TempData["Error"] = "请选择要批量调整到的目标分组。";
-                    return RedirectToClasses();
-                }
-
-                result = await classrooms.BatchSetClassGroupsAsync(
-                    SelectedClassIds, BatchTargetGroupIds, operation, ct);
+                TempData["Error"] = error;
+                return RedirectToClasses();
             }
-            else
-            {
-                result = await classrooms.BatchAsync(
-                    new BatchClassOperationRequest
-                    {
-                        ClassIds = SelectedClassIds,
-                        Operation = operation,
-                    }, ct);
-            }
+            var result = await ExecuteBatchAsync(operation, isGroupOperation, ct);
+            await StoreBatchResultAsync(operation, isGroupOperation, result, ct);
         }
         catch (IdentityOperationException ex)
         {
             TempData["Error"] = ex.Message;
             return RedirectToClasses();
         }
+        return RedirectToClasses();
+    }
 
+    private string? ValidateBatchTarget(string operation, bool isGroupOperation) =>
+        isGroupOperation && !operation.Equals("clearGroups", StringComparison.OrdinalIgnoreCase) && BatchTargetGroupIds.Count == 0
+            ? "请选择要批量调整到的目标分组。"
+            : null;
+
+    private Task<BatchClassOperationResult> ExecuteBatchAsync(string operation, bool isGroupOperation, CancellationToken ct) =>
+        isGroupOperation
+            ? classrooms.BatchSetClassGroupsAsync(SelectedClassIds, BatchTargetGroupIds, operation, ct)
+            : classrooms.BatchAsync(new BatchClassOperationRequest
+            {
+                ClassIds = SelectedClassIds,
+                Operation = operation,
+            }, ct);
+
+    private async Task StoreBatchResultAsync(
+        string operation,
+        bool isGroupOperation,
+        BatchClassOperationResult result,
+        CancellationToken ct)
+    {
         var succeeded = result.Results.Count(x => x.Success);
         if (succeeded > 0)
         {
@@ -343,7 +351,6 @@ public sealed class ClassesModel(
         TempData[succeeded > 0 ? "Message" : "Error"] = failures.Count == 0
             ? $"{operationName}已完成（{succeeded} 个班级）。"
             : $"{operationName}完成 {succeeded} 个，失败 {failures.Count} 个：{string.Join("；", failures.Select(x => x.Message))}";
-        return RedirectToClasses();
     }
 
     public async Task<IActionResult> OnPostCreateGroupAsync(Guid? parentGroupId, CancellationToken ct)
@@ -524,30 +531,35 @@ public sealed class ClassesModel(
         AnyVisitorClass = await visitorAccess.AnyVisitorClassEnabledAsync(ct);
         AutoEnter = await visitorAccess.GetAutoEnterAsync(ct);
         HasUnifiedCode = await identities.HasSharedPluginPairingCodeAsync(ct);
-        // 未分配设备把凭据（含班级名备注）与在线设备名合并展示，离线时仍能看到最后状态。
-        var unassigned = await identities.ListUnassignedPluginCredentialsAsync(ct);
-        var onlineByName = peers.GetPluginDeviceSnapshots()
-            .Where(x => !x.Assigned && x.PluginCredentialId is not null)
-            .GroupBy(x => x.PluginCredentialId!.Value)
-            .ToDictionary(
-                group => group.Key,
-                group => group.OrderByDescending(x => x.SoftwareInventoryAt ?? DateTimeOffset.MinValue).First());
-        UnassignedDevices = unassigned.Select(credential =>
-        {
-            onlineByName.TryGetValue(credential.Id, out var snapshot);
-            return new UnassignedDevice(
-                credential.Id,
-                snapshot?.DisplayName ?? credential.Name,
-                credential.ClassNameRemark,
-                snapshot is not null,
-                credential.LastSeenAt);
-        }).ToList();
+        UnassignedDevices = await LoadUnassignedDevicesAsync(ct);
         if (TempData["ClassExcelReportId"] is string reportId &&
             reportCache.TryGetValue(reportId, out ClassExcelImportResult? report))
         {
             ExcelImportResult = report;
         }
 
+        ResolveSelectionState();
+    }
+
+    private async Task<List<UnassignedDevice>> LoadUnassignedDevicesAsync(CancellationToken ct)
+    {
+        // 未分配设备把凭据（含班级名备注）与在线设备名合并展示，离线时仍能看到最后状态。
+        var unassigned = await identities.ListUnassignedPluginCredentialsAsync(ct);
+        var onlineByName = peers.GetPluginDeviceSnapshots()
+            .Where(x => !x.Assigned && x.PluginCredentialId is not null)
+            .GroupBy(x => x.PluginCredentialId!.Value)
+            .ToDictionary(group => group.Key,
+                group => group.OrderByDescending(x => x.SoftwareInventoryAt ?? DateTimeOffset.MinValue).First());
+        return unassigned.Select(credential =>
+        {
+            onlineByName.TryGetValue(credential.Id, out var snapshot);
+            return new UnassignedDevice(credential.Id, snapshot?.DisplayName ?? credential.Name,
+                credential.ClassNameRemark, snapshot is not null, credential.LastSeenAt);
+        }).ToList();
+    }
+
+    private void ResolveSelectionState()
+    {
         // 无效的 query 值不应让页面停留在“已选中但无内容”的状态。
         if (SelectedGroupId is { } selectedId && Groups.All(x => x.Id != selectedId))
             SelectedGroupId = null;

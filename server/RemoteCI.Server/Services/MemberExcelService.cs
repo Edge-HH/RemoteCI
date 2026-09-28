@@ -291,19 +291,9 @@ public sealed partial class MemberExcelService(
     {
         var first = group.First();
         var failures = new List<string>();
-        if (group.Any(x => !string.Equals(x.UserId, first.UserId, StringComparison.OrdinalIgnoreCase)))
-            failures.Add("同一系统标识的用户 ID 必须保持一致。");
-        if (group.Any(x => !string.Equals(x.DisplayName.Trim(), first.DisplayName.Trim(), StringComparison.Ordinal)))
-            failures.Add("同一系统标识的用户名必须保持一致。");
-
+        ValidateOverwriteIdentity(group, first, failures);
         var existingUser = FindExistingUser(first, userById, userByName, failures);
-        if (existingUser is not null && !seenUserIds.Add(existingUser.Id))
-            failures.Add("同一账号在文件中出现多次。");
-        if (!seenLoginIds.Add(first.UserId.Trim()))
-            failures.Add("文件内存在重复的用户 ID。");
-        if (userByName.TryGetValue(first.UserId.Trim(), out var loginOwner) && loginOwner.Id != existingUser?.Id)
-            failures.Add("用户 ID 已被其他账号使用。");
-
+        ValidateOverwriteConflicts(first, existingUser, userByName, seenUserIds, seenLoginIds, failures);
         var memberships = BuildMemberships(group, scopeIds, classByName, roleByKey, failures);
         if (failures.Count > 0)
         {
@@ -312,12 +302,42 @@ public sealed partial class MemberExcelService(
             return null;
         }
 
-        var globalRole = memberships.Count > 0
-            ? allRoles.Single(x => x.Id == memberships[0].RoleId)
-            : allRoles.Single(x => x.Id == AccountRole.StudentId);
+        var globalRole = GetGlobalRole(memberships, allRoles);
         return new OverwritePlan(existingUser, existingUser?.Id ?? Guid.NewGuid(), first.UserId.Trim(),
             first.DisplayName.Trim(), globalRole, memberships);
     }
+
+    private static void ValidateOverwriteIdentity(
+        IGrouping<string, ParsedMemberRow> group,
+        ParsedMemberRow first,
+        ICollection<string> failures)
+    {
+        if (group.Any(x => !string.Equals(x.UserId, first.UserId, StringComparison.OrdinalIgnoreCase)))
+            failures.Add("同一系统标识的用户 ID 必须保持一致。");
+        if (group.Any(x => !string.Equals(x.DisplayName.Trim(), first.DisplayName.Trim(), StringComparison.Ordinal)))
+            failures.Add("同一系统标识的用户名必须保持一致。");
+    }
+
+    private static void ValidateOverwriteConflicts(
+        ParsedMemberRow first,
+        AppUser? existingUser,
+        IReadOnlyDictionary<string, AppUser> userByName,
+        ISet<Guid> seenUserIds,
+        ISet<string> seenLoginIds,
+        ICollection<string> failures)
+    {
+        if (existingUser is not null && !seenUserIds.Add(existingUser.Id))
+            failures.Add("同一账号在文件中出现多次。");
+        var login = first.UserId.Trim();
+        if (!seenLoginIds.Add(login)) failures.Add("文件内存在重复的用户 ID。");
+        if (userByName.TryGetValue(login, out var loginOwner) && loginOwner.Id != existingUser?.Id)
+            failures.Add("用户 ID 已被其他账号使用。");
+    }
+
+    private static AccountRole GetGlobalRole(
+        IReadOnlyList<PlannedMembership> memberships,
+        IReadOnlyList<AccountRole> allRoles) =>
+        allRoles.Single(x => x.Id == (memberships.Count > 0 ? memberships[0].RoleId : AccountRole.StudentId));
 
     private static AppUser? FindExistingUser(
         ParsedMemberRow row,
@@ -686,6 +706,13 @@ public sealed partial class MemberExcelService(
 
     private static void ValidateRow(ParsedMemberRow row, bool allowPassword, bool allowSystemId)
     {
+        ValidateIdentityFields(row);
+        ValidatePassword(row.Password, allowPassword);
+        ValidateSystemId(row.SystemId, allowSystemId);
+    }
+
+    private static void ValidateIdentityFields(ParsedMemberRow row)
+    {
         if (!UsernameRegex().IsMatch(row.UserId))
             throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "用户 ID 需为 3-32 位字母、数字、点、下划线或短横线。");
         if (string.IsNullOrWhiteSpace(row.DisplayName) || row.DisplayName.Trim().Length > 40)
@@ -694,11 +721,19 @@ public sealed partial class MemberExcelService(
             throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "班级名称需为 1-40 个字符。");
         if (string.IsNullOrWhiteSpace(row.RoleName))
             throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "角色不能为空。");
-        if (!allowPassword && !string.IsNullOrWhiteSpace(row.Password))
+    }
+
+    private static void ValidatePassword(string password, bool allowPassword)
+    {
+        if (!allowPassword && !string.IsNullOrWhiteSpace(password))
             throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "覆盖导入不会修改密码，请删除密码列内容。");
-        if (allowPassword && !string.IsNullOrWhiteSpace(row.Password) && row.Password.Length is < 8 or > 128)
+        if (allowPassword && !string.IsNullOrWhiteSpace(password) && password.Length is < 8 or > 128)
             throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "密码需为 8-128 个字符。");
-        if (!allowSystemId && !string.IsNullOrWhiteSpace(row.SystemId))
+    }
+
+    private static void ValidateSystemId(string systemId, bool allowSystemId)
+    {
+        if (!allowSystemId && !string.IsNullOrWhiteSpace(systemId))
             throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "请使用“覆盖导入”上传 RemoteCI 导出的文件。");
     }
 

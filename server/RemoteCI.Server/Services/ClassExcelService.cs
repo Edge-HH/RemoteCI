@@ -167,79 +167,105 @@ public sealed class ClassExcelService(AppDbContext db, ClassroomService classroo
         var groupByName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
         foreach (var group in allGroups)
             groupByName[group.Name] = group.Id;
-
-        // 分组可能带层级：多轮处理，先创建父分组已经存在（数据库或本文件较早行）的行，直到没有进展。
-        var pending = new List<GroupRow>(groupRows);
-        var seenGroupNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        while (pending.Count > 0)
-        {
-            var progressed = false;
-            var remaining = new List<GroupRow>();
-            foreach (var row in pending)
-            {
-                var name = row.Name.Trim();
-                var parentName = row.ParentName.Trim();
-                if (parentName.Length > 0 && !groupByName.ContainsKey(parentName))
-                {
-                    // 父分组可能定义在后面的行，先跳过，下一轮再试。
-                    remaining.Add(row);
-                    continue;
-                }
-
-                progressed = true;
-                try
-                {
-                    if (name.Length is < 1 or > 40)
-                        throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "分组名称需为 1-40 个字符。");
-                    if (!seenGroupNames.Add(name))
-                        throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "文件内存在重复的分组名称。");
-                    if (groupByName.ContainsKey(name))
-                        throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "分组名称已存在。");
-
-                    var parentId = parentName.Length > 0 ? groupByName[parentName] : (Guid?)null;
-                    var created = await classrooms.CreateGroupAsync(name, parentId, ct);
-                    groupByName[name] = created.Id;
-                    result.CreatedGroups++;
-                }
-                catch (IdentityOperationException ex)
-                {
-                    result.Failures.Add(new ClassExcelImportFailure(GroupSheetName, row.RowNumber, name, ex.Message));
-                }
-            }
-
-            if (!progressed)
-            {
-                foreach (var row in remaining)
-                    result.Failures.Add(new ClassExcelImportFailure(GroupSheetName, row.RowNumber, row.Name.Trim(), "上级分组不存在或存在循环引用。"));
-                break;
-            }
-            pending = remaining;
-        }
+        await ImportGroupsAsync(groupRows, groupByName, result, ct);
 
         var classNames = new HashSet<string>(
             await db.Classrooms.AsNoTracking().Select(x => x.Name).ToListAsync(ct),
             StringComparer.OrdinalIgnoreCase);
+        await ImportClassesAsync(classRows, classNames, groupByName, result, ct);
+
+        return result;
+    }
+
+    private async Task ImportGroupsAsync(
+        IReadOnlyList<GroupRow> groupRows,
+        Dictionary<string, Guid> groupByName,
+        ClassExcelImportResult result,
+        CancellationToken ct)
+    {
+        var pending = new List<GroupRow>(groupRows);
+        var seenGroupNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (pending.Count > 0)
+        {
+            var remaining = new List<GroupRow>();
+            var progressed = await ImportGroupPassAsync(
+                pending, remaining, groupByName, seenGroupNames, result, ct);
+            if (!progressed)
+            {
+                foreach (var row in remaining)
+                    result.Failures.Add(new ClassExcelImportFailure(
+                        GroupSheetName, row.RowNumber, row.Name.Trim(), "上级分组不存在或存在循环引用。"));
+                return;
+            }
+            pending = remaining;
+        }
+    }
+
+    private async Task<bool> ImportGroupPassAsync(
+        IReadOnlyList<GroupRow> pending,
+        List<GroupRow> remaining,
+        Dictionary<string, Guid> groupByName,
+        HashSet<string> seenGroupNames,
+        ClassExcelImportResult result,
+        CancellationToken ct)
+    {
+        var progressed = false;
+        foreach (var row in pending)
+        {
+            var name = row.Name.Trim();
+            var parentName = row.ParentName.Trim();
+            if (parentName.Length > 0 && !groupByName.ContainsKey(parentName))
+            {
+                remaining.Add(row);
+                continue;
+            }
+            progressed = true;
+            try
+            {
+                ValidateNewGroup(name, groupByName, seenGroupNames);
+                var parentId = parentName.Length > 0 ? groupByName[parentName] : (Guid?)null;
+                var created = await classrooms.CreateGroupAsync(name, parentId, ct);
+                groupByName[name] = created.Id;
+                result.CreatedGroups++;
+            }
+            catch (IdentityOperationException ex)
+            {
+                result.Failures.Add(new ClassExcelImportFailure(GroupSheetName, row.RowNumber, name, ex.Message));
+            }
+        }
+        return progressed;
+    }
+
+    private static void ValidateNewGroup(
+        string name,
+        IReadOnlyDictionary<string, Guid> groupByName,
+        ISet<string> seenGroupNames)
+    {
+        if (name.Length is < 1 or > 40)
+            throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "分组名称需为 1-40 个字符。");
+        if (!seenGroupNames.Add(name))
+            throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "文件内存在重复的分组名称。");
+        if (groupByName.ContainsKey(name))
+            throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "分组名称已存在。");
+    }
+
+    private async Task ImportClassesAsync(
+        IReadOnlyList<ClassRow> classRows,
+        HashSet<string> classNames,
+        IReadOnlyDictionary<string, Guid> groupByName,
+        ClassExcelImportResult result,
+        CancellationToken ct)
+    {
         foreach (var row in classRows)
         {
             var name = row.Name.Trim();
             try
             {
-                if (name.Length is < 1 or > 40)
-                    throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "班级名称需为 1-40 个字符。");
-                if (classNames.Contains(name))
-                    throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "班级名称已存在。");
-                var visitorAccess = ParseVisitorAccess(row.VisitorText);
-                var groupIds = ResolveGroupIds(row.GroupsText, groupByName);
-                var pairCode = row.PairCode.Trim();
-                ValidatePairCode(pairCode);
-
+                var plan = BuildNewClassPlan(row, name, classNames, groupByName);
                 var created = await classrooms.CreateAsync(name, ct);
-                if (visitorAccess)
-                    await classrooms.SetVisitorAccessAsync(created.Id, true, ct);
-                if (groupIds.Count > 0)
-                    await classrooms.SetClassGroupsAsync(created.Id, groupIds, ct);
-                if (pairCode.Length > 0)
-                    await SetClassPairingCodeAsync(created.Id, pairCode, ct);
+                if (plan.VisitorAccess) await classrooms.SetVisitorAccessAsync(created.Id, true, ct);
+                if (plan.GroupIds.Count > 0) await classrooms.SetClassGroupsAsync(created.Id, plan.GroupIds, ct);
+                if (plan.PairCode.Length > 0) await SetClassPairingCodeAsync(created.Id, plan.PairCode, ct);
                 classNames.Add(name);
                 result.CreatedClasses++;
             }
@@ -248,8 +274,23 @@ public sealed class ClassExcelService(AppDbContext db, ClassroomService classroo
                 result.Failures.Add(new ClassExcelImportFailure(ClassSheetName, row.RowNumber, name, ex.Message));
             }
         }
+    }
 
-        return result;
+    private static (bool VisitorAccess, List<Guid> GroupIds, string PairCode) BuildNewClassPlan(
+        ClassRow row,
+        string name,
+        ISet<string> classNames,
+        IReadOnlyDictionary<string, Guid> groupByName)
+    {
+        if (name.Length is < 1 or > 40)
+            throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "班级名称需为 1-40 个字符。");
+        if (classNames.Contains(name))
+            throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "班级名称已存在。");
+        var visitorAccess = ParseVisitorAccess(row.VisitorText);
+        var groupIds = ResolveGroupIds(row.GroupsText, groupByName);
+        var pairCode = row.PairCode.Trim();
+        ValidatePairCode(pairCode);
+        return (visitorAccess, groupIds, pairCode);
     }
 
     // ---------- 覆盖导入（新增 + 修改，不删除） ----------
@@ -306,41 +347,47 @@ public sealed class ClassExcelService(AppDbContext db, ClassroomService classroo
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in rows)
         {
-            var name = row.Name.Trim();
-            var failures = new List<string>();
-            if (name.Length is < 1 or > 40)
-                failures.Add("分组名称需为 1-40 个字符。");
-
-            Guid id;
-            ClassGroup? existing = null;
-            if (!string.IsNullOrWhiteSpace(row.SystemId))
-            {
-                if (!Guid.TryParse(row.SystemId, out id) || !groupById.TryGetValue(id, out existing))
-                {
-                    failures.Add("系统标识对应的分组不存在，请重新导出后再修改。");
-                    id = Guid.Empty;
-                }
-                else if (!seenIds.Add(id))
-                {
-                    failures.Add("同一分组在文件中出现多次。");
-                }
-            }
+            if (BuildGroupPlan(row, groupById, seenIds, seenNames, out var plan, out var failure))
+                plans.Add(plan!);
             else
-            {
-                id = Guid.NewGuid();
-            }
-
-            if (name.Length is >= 1 and <= 40 && !seenNames.Add(name))
-                failures.Add("文件内存在重复的分组名称。");
-
-            if (failures.Count > 0)
-            {
-                result.Failures.Add(new ClassExcelImportFailure(GroupSheetName, row.RowNumber, name, string.Join("；", failures.Distinct())));
-                continue;
-            }
-            plans.Add(new GroupPlan(existing, id, name, row.ParentName.Trim(), row.RowNumber));
+                result.Failures.Add(new ClassExcelImportFailure(GroupSheetName, row.RowNumber, row.Name.Trim(), failure!));
         }
         return plans;
+    }
+
+    private static bool BuildGroupPlan(
+        GroupRow row,
+        IReadOnlyDictionary<Guid, ClassGroup> groupById,
+        ISet<Guid> seenIds,
+        ISet<string> seenNames,
+        out GroupPlan? plan,
+        out string? failure)
+    {
+        var name = row.Name.Trim();
+        var failures = new List<string>();
+        if (name.Length is < 1 or > 40) failures.Add("分组名称需为 1-40 个字符。");
+        var id = Guid.NewGuid();
+        ClassGroup? existing = null;
+        if (!string.IsNullOrWhiteSpace(row.SystemId))
+        {
+            if (!Guid.TryParse(row.SystemId, out id) || !groupById.TryGetValue(id, out existing))
+            {
+                failures.Add("系统标识对应的分组不存在，请重新导出后再修改。");
+                id = Guid.Empty;
+            }
+            else if (!seenIds.Add(id)) failures.Add("同一分组在文件中出现多次。");
+        }
+        if (name.Length is >= 1 and <= 40 && !seenNames.Add(name))
+            failures.Add("文件内存在重复的分组名称。");
+        if (failures.Count > 0)
+        {
+            plan = null;
+            failure = string.Join("；", failures.Distinct());
+            return false;
+        }
+        plan = new GroupPlan(existing, id, name, row.ParentName.Trim(), row.RowNumber);
+        failure = null;
+        return true;
     }
 
     private static List<ClassPlan> BuildClassPlans(
@@ -354,67 +401,61 @@ public sealed class ClassExcelService(AppDbContext db, ClassroomService classroo
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in rows)
         {
-            var name = row.Name.Trim();
-            var failures = new List<string>();
-            if (name.Length is < 1 or > 40)
-                failures.Add("班级名称需为 1-40 个字符。");
-
-            Guid id;
-            Classroom? existing = null;
-            if (!string.IsNullOrWhiteSpace(row.SystemId))
-            {
-                if (!Guid.TryParse(row.SystemId, out id) || !classById.TryGetValue(id, out existing))
-                {
-                    failures.Add("系统标识对应的班级不存在，请重新导出后再修改。");
-                    id = Guid.Empty;
-                }
-                else if (!seenIds.Add(id))
-                {
-                    failures.Add("同一班级在文件中出现多次。");
-                }
-            }
+            if (BuildClassPlan(row, classById, idByGroupName, seenIds, seenNames, out var plan, out var failure))
+                plans.Add(plan!);
             else
-            {
-                id = Guid.NewGuid();
-            }
-
-            if (name.Length is >= 1 and <= 40 && !seenNames.Add(name))
-                failures.Add("文件内存在重复的班级名称。");
-
-            var visitorAccess = false;
-            try
-            {
-                visitorAccess = ParseVisitorAccess(row.VisitorText);
-            }
-            catch (IdentityOperationException ex)
-            {
-                failures.Add(ex.Message);
-            }
-
-            var groupIds = new List<Guid>();
-            foreach (var groupName in SplitGroups(row.GroupsText))
-            {
-                if (!idByGroupName.TryGetValue(groupName, out var groupId))
-                    failures.Add($"分组“{groupName}”不存在。");
-                else
-                    groupIds.Add(groupId);
-            }
-
-            // 配对码可留空；填写时必须是 6-64 个不含空白的字符，与固定配对码规则保持一致。
-            var pairCode = row.PairCode.Trim();
-            if (pairCode.Length > 0 && (pairCode.Length is < 6 or > 64 || pairCode.Any(char.IsWhiteSpace)))
-                failures.Add("配对码需为 6-64 个不含空白的字符。");
-
-            if (failures.Count > 0)
-            {
-                result.Failures.Add(new ClassExcelImportFailure(ClassSheetName, row.RowNumber, name, string.Join("；", failures.Distinct())));
-                continue;
-            }
-            plans.Add(new ClassPlan(
-                existing, id, name, visitorAccess, groupIds.Distinct().ToList(), row.RowNumber,
-                pairCode.Length == 0 ? null : pairCode));
+                result.Failures.Add(new ClassExcelImportFailure(ClassSheetName, row.RowNumber, row.Name.Trim(), failure!));
         }
         return plans;
+    }
+
+    private static bool BuildClassPlan(
+        ClassRow row,
+        IReadOnlyDictionary<Guid, Classroom> classById,
+        IReadOnlyDictionary<string, Guid> idByGroupName,
+        ISet<Guid> seenIds,
+        ISet<string> seenNames,
+        out ClassPlan? plan,
+        out string? failure)
+    {
+        var name = row.Name.Trim();
+        var failures = new List<string>();
+        if (name.Length is < 1 or > 40) failures.Add("班级名称需为 1-40 个字符。");
+        var id = Guid.NewGuid();
+        Classroom? existing = null;
+        if (!string.IsNullOrWhiteSpace(row.SystemId))
+        {
+            if (!Guid.TryParse(row.SystemId, out id) || !classById.TryGetValue(id, out existing))
+            {
+                failures.Add("系统标识对应的班级不存在，请重新导出后再修改。");
+                id = Guid.Empty;
+            }
+            else if (!seenIds.Add(id)) failures.Add("同一班级在文件中出现多次。");
+        }
+        if (name.Length is >= 1 and <= 40 && !seenNames.Add(name))
+            failures.Add("文件内存在重复的班级名称。");
+        var visitorAccess = false;
+        try { visitorAccess = ParseVisitorAccess(row.VisitorText); }
+        catch (IdentityOperationException ex) { failures.Add(ex.Message); }
+        var groupIds = new List<Guid>();
+        foreach (var groupName in SplitGroups(row.GroupsText))
+        {
+            if (!idByGroupName.TryGetValue(groupName, out var groupId)) failures.Add($"分组“{groupName}”不存在。");
+            else groupIds.Add(groupId);
+        }
+        var pairCode = row.PairCode.Trim();
+        if (pairCode.Length > 0 && (pairCode.Length is < 6 or > 64 || pairCode.Any(char.IsWhiteSpace)))
+            failures.Add("配对码需为 6-64 个不含空白的字符。");
+        if (failures.Count > 0)
+        {
+            plan = null;
+            failure = string.Join("；", failures.Distinct());
+            return false;
+        }
+        plan = new ClassPlan(existing, id, name, visitorAccess, groupIds.Distinct().ToList(), row.RowNumber,
+            pairCode.Length == 0 ? null : pairCode);
+        failure = null;
+        return true;
     }
 
     /// <summary>把现有名称与计划名称合并成“最终名称 → Id”表，并报告重名冲突。</summary>
@@ -531,75 +572,13 @@ public sealed class ClassExcelService(AppDbContext db, ClassroomService classroo
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
-            // 新建分组：按层级从浅到深依次落库，保证父分组先存在。
-            var newGroupPlans = groupPlans.Where(x => x.Existing is null).ToList();
-            foreach (var plan in newGroupPlans.OrderBy(x => DepthOf(parentById, x.Id)))
-            {
-                db.ClassGroups.Add(new ClassGroup
-                {
-                    Id = plan.Id,
-                    Name = plan.Name,
-                    ParentId = parentById.GetValueOrDefault(plan.Id),
-                    CreatedAt = now,
-                    UpdatedAt = now,
-                });
-                await db.SaveChangesAsync(ct);
-                result.CreatedGroups++;
-            }
-
-            foreach (var plan in groupPlans.Where(x => x.Existing is not null))
-            {
-                var group = await db.ClassGroups.SingleAsync(x => x.Id == plan.Id, ct);
-                group.Name = plan.Name;
-                group.ParentId = parentById.GetValueOrDefault(plan.Id);
-                group.UpdatedAt = now;
-                result.UpdatedGroups++;
-            }
-
-            foreach (var plan in classPlans)
-            {
-                if (plan.Existing is null)
-                {
-                    db.Classrooms.Add(new Classroom
-                    {
-                        Id = plan.Id,
-                        Name = plan.Name,
-                        VisitorAccessEnabled = plan.VisitorAccess,
-                        CreatedAt = now,
-                        UpdatedAt = now,
-                    });
-                    result.CreatedClasses++;
-                }
-                else
-                {
-                    var classroom = await db.Classrooms.SingleAsync(x => x.Id == plan.Id, ct);
-                    classroom.Name = plan.Name;
-                    classroom.VisitorAccessEnabled = plan.VisitorAccess;
-                    classroom.UpdatedAt = now;
-                    result.UpdatedClasses++;
-                }
-            }
+            await ApplyNewGroupsAsync(groupPlans, parentById, now, result, ct);
+            await ApplyExistingGroupsAsync(groupPlans, parentById, now, result, ct);
+            await ApplyClassesAsync(classPlans, now, result, ct);
             await db.SaveChangesAsync(ct);
 
-            // 固定配对码：仅当覆盖文件里填写了明文时才设置/替换，留空表示保持现状。
-            foreach (var plan in classPlans.Where(x => x.PairCode is not null))
-                await SetClassPairingCodeAsync(plan.Id, plan.PairCode!, ct);
-
-            // 班级分组归属按“分组”列整体更新；只增删该班级的归属关系，不影响班级本身。
-            var plannedClassIds = classPlans.Select(x => x.Id).ToHashSet();
-            var existingAssignments = await db.ClassGroupAssignments
-                .Where(x => plannedClassIds.Contains(x.ClassroomId))
-                .ToListAsync(ct);
-            foreach (var plan in classPlans)
-            {
-                var current = existingAssignments.Where(x => x.ClassroomId == plan.Id).ToList();
-                var currentIds = current.Select(x => x.GroupId).ToHashSet();
-                var wanted = plan.GroupIds.ToHashSet();
-                db.ClassGroupAssignments.RemoveRange(current.Where(x => !wanted.Contains(x.GroupId)));
-                db.ClassGroupAssignments.AddRange(wanted
-                    .Where(groupId => !currentIds.Contains(groupId))
-                    .Select(groupId => new ClassGroupAssignment { ClassroomId = plan.Id, GroupId = groupId }));
-            }
+            await ApplyPairCodesAsync(classPlans, ct);
+            await ApplyGroupAssignmentsAsync(classPlans, ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
@@ -607,6 +586,98 @@ public sealed class ClassExcelService(AppDbContext db, ClassroomService classroo
         {
             await transaction.RollbackAsync(ct);
             throw;
+        }
+    }
+
+    private async Task ApplyNewGroupsAsync(
+        IReadOnlyList<GroupPlan> plans,
+        IReadOnlyDictionary<Guid, Guid?> parentById,
+        DateTimeOffset now,
+        ClassExcelImportResult result,
+        CancellationToken ct)
+    {
+        foreach (var plan in plans.Where(x => x.Existing is null).OrderBy(x => DepthOf(parentById, x.Id)))
+        {
+            db.ClassGroups.Add(new ClassGroup
+            {
+                Id = plan.Id,
+                Name = plan.Name,
+                ParentId = parentById.GetValueOrDefault(plan.Id),
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+            await db.SaveChangesAsync(ct);
+            result.CreatedGroups++;
+        }
+    }
+
+    private async Task ApplyExistingGroupsAsync(
+        IReadOnlyList<GroupPlan> plans,
+        IReadOnlyDictionary<Guid, Guid?> parentById,
+        DateTimeOffset now,
+        ClassExcelImportResult result,
+        CancellationToken ct)
+    {
+        foreach (var plan in plans.Where(x => x.Existing is not null))
+        {
+            var group = await db.ClassGroups.SingleAsync(x => x.Id == plan.Id, ct);
+            group.Name = plan.Name;
+            group.ParentId = parentById.GetValueOrDefault(plan.Id);
+            group.UpdatedAt = now;
+            result.UpdatedGroups++;
+        }
+    }
+
+    private async Task ApplyClassesAsync(
+        IReadOnlyList<ClassPlan> plans,
+        DateTimeOffset now,
+        ClassExcelImportResult result,
+        CancellationToken ct)
+    {
+        foreach (var plan in plans)
+        {
+            if (plan.Existing is null)
+            {
+                db.Classrooms.Add(new Classroom
+                {
+                    Id = plan.Id,
+                    Name = plan.Name,
+                    VisitorAccessEnabled = plan.VisitorAccess,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                });
+                result.CreatedClasses++;
+            }
+            else
+            {
+                var classroom = await db.Classrooms.SingleAsync(x => x.Id == plan.Id, ct);
+                classroom.Name = plan.Name;
+                classroom.VisitorAccessEnabled = plan.VisitorAccess;
+                classroom.UpdatedAt = now;
+                result.UpdatedClasses++;
+            }
+        }
+    }
+
+    private async Task ApplyPairCodesAsync(IReadOnlyList<ClassPlan> plans, CancellationToken ct)
+    {
+        foreach (var plan in plans.Where(x => x.PairCode is not null))
+            await SetClassPairingCodeAsync(plan.Id, plan.PairCode!, ct);
+    }
+
+    private async Task ApplyGroupAssignmentsAsync(IReadOnlyList<ClassPlan> plans, CancellationToken ct)
+    {
+        var plannedClassIds = plans.Select(x => x.Id).ToHashSet();
+        var existingAssignments = await db.ClassGroupAssignments
+            .Where(x => plannedClassIds.Contains(x.ClassroomId)).ToListAsync(ct);
+        foreach (var plan in plans)
+        {
+            var current = existingAssignments.Where(x => x.ClassroomId == plan.Id).ToList();
+            var currentIds = current.Select(x => x.GroupId).ToHashSet();
+            var wanted = plan.GroupIds.ToHashSet();
+            db.ClassGroupAssignments.RemoveRange(current.Where(x => !wanted.Contains(x.GroupId)));
+            db.ClassGroupAssignments.AddRange(wanted.Where(groupId => !currentIds.Contains(groupId))
+                .Select(groupId => new ClassGroupAssignment { ClassroomId = plan.Id, GroupId = groupId }));
         }
     }
 

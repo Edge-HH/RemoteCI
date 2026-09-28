@@ -312,87 +312,103 @@ public static class WebSocketHub
         var ct = session.CancellationToken;
         if (session.Principal.ClassId is not { } classId)
         {
-            // 未分配设备只允许上报软件清单，其他状态不会污染默认班级。
-            if (envelope.Type == Protocol.MessageTypeSoftwareInventory &&
-                ConvertPayload<SoftwareInventory>(envelope.Payload) is { } unassignedInventory)
-                await session.Registry.ReportSoftwareInventoryAsync(session.ConnectionId, unassignedInventory, ct);
+            await HandleUnassignedPluginStateAsync(envelope, session);
             return true;
         }
         switch (envelope.Type)
         {
-            case Protocol.MessageTypeStatePush:
-                if (ConvertPayload<ClassStateSnapshot>(envelope.Payload) is { } snapshot)
-                {
-                    // 负载携带班级标识，客户端据此区分多个班级的推送。
-                    snapshot.ClassId = classId;
-                    session.Store.SaveSnapshot(classId, snapshot);
-                    await session.Registry.SendSnapshotToWatchesAsync(classId, snapshot, ct);
-                }
-                return true;
-            case Protocol.MessageTypeScheduleSync:
-                if (ConvertPayload<ScheduleBundle>(envelope.Payload) is { } schedule)
-                {
-                    schedule.ClassId = classId;
-                    session.Store.SaveSchedule(classId, schedule);
-                    await session.Registry.SendScheduleToWatchesAsync(classId, schedule, ct);
-                    await session.ScheduleSync.CompleteFromScheduleAsync(classId, ct);
-                }
-                return true;
-            case Protocol.MessageTypeEventNotify:
-                if (ConvertPayload<ClassEvent>(envelope.Payload) is { } value)
-                {
-                    value.ClassId = classId;
-                    session.Store.SaveEvent(classId, value);
-                    await session.Registry.SendEventToWatchesAsync(classId, value, ct);
-                }
-                return true;
-            case Protocol.MessageTypeSoftwareInventory:
-                if (ConvertPayload<SoftwareInventory>(envelope.Payload) is { } inventory)
-                    await session.Registry.ReportSoftwareInventoryAsync(session.ConnectionId, inventory, ct);
-                return true;
-            case Protocol.MessageTypeExtensionsSync:
-                if (ConvertPayload<List<ExtensionDefinition>>(envelope.Payload) is { } extensions)
-                {
-                    foreach (var definition in extensions) definition.ClassId = classId;
-                    var accessChanged = await session.ExtensionPolicies.EnsureRegisteredAsync(extensions, ct);
-                    session.Store.SaveExtensions(classId, extensions);
-                    if (accessChanged)
-                        await session.AuthorizationSync.SyncAsync(ct);
-                    await session.Registry.SendExtensionsToWatchesAsync(classId, extensions, ct);
-                }
-                return true;
+            case Protocol.MessageTypeStatePush: await HandleStatePushAsync(envelope, session, classId); return true;
+            case Protocol.MessageTypeScheduleSync: await HandleScheduleSyncAsync(envelope, session, classId); return true;
+            case Protocol.MessageTypeEventNotify: await HandleEventNotifyAsync(envelope, session, classId); return true;
+            case Protocol.MessageTypeSoftwareInventory: await HandleSoftwareInventoryAsync(envelope, session); return true;
+            case Protocol.MessageTypeExtensionsSync: await HandleExtensionsSyncAsync(envelope, session, classId); return true;
             default:
                 return false;
         }
+    }
+
+    private static async Task HandleUnassignedPluginStateAsync(Envelope envelope, ConnectionSession session)
+    {
+        if (envelope.Type == Protocol.MessageTypeSoftwareInventory &&
+            ConvertPayload<SoftwareInventory>(envelope.Payload) is { } inventory)
+            await session.Registry.ReportSoftwareInventoryAsync(session.ConnectionId, inventory, session.CancellationToken);
+    }
+
+    private static async Task HandleStatePushAsync(Envelope envelope, ConnectionSession session, Guid classId)
+    {
+        if (ConvertPayload<ClassStateSnapshot>(envelope.Payload) is not { } snapshot) return;
+        snapshot.ClassId = classId;
+        session.Store.SaveSnapshot(classId, snapshot);
+        await session.Registry.SendSnapshotToWatchesAsync(classId, snapshot, session.CancellationToken);
+    }
+
+    private static async Task HandleScheduleSyncAsync(Envelope envelope, ConnectionSession session, Guid classId)
+    {
+        if (ConvertPayload<ScheduleBundle>(envelope.Payload) is not { } schedule) return;
+        schedule.ClassId = classId;
+        session.Store.SaveSchedule(classId, schedule);
+        await session.Registry.SendScheduleToWatchesAsync(classId, schedule, session.CancellationToken);
+        await session.ScheduleSync.CompleteFromScheduleAsync(classId, session.CancellationToken);
+    }
+
+    private static async Task HandleEventNotifyAsync(Envelope envelope, ConnectionSession session, Guid classId)
+    {
+        if (ConvertPayload<ClassEvent>(envelope.Payload) is not { } value) return;
+        value.ClassId = classId;
+        session.Store.SaveEvent(classId, value);
+        await session.Registry.SendEventToWatchesAsync(classId, value, session.CancellationToken);
+    }
+
+    private static async Task HandleSoftwareInventoryAsync(Envelope envelope, ConnectionSession session)
+    {
+        if (ConvertPayload<SoftwareInventory>(envelope.Payload) is { } inventory)
+            await session.Registry.ReportSoftwareInventoryAsync(session.ConnectionId, inventory, session.CancellationToken);
+    }
+
+    private static async Task HandleExtensionsSyncAsync(Envelope envelope, ConnectionSession session, Guid classId)
+    {
+        if (ConvertPayload<List<ExtensionDefinition>>(envelope.Payload) is not { } extensions) return;
+        foreach (var definition in extensions) definition.ClassId = classId;
+        var accessChanged = await session.ExtensionPolicies.EnsureRegisteredAsync(extensions, session.CancellationToken);
+        session.Store.SaveExtensions(classId, extensions);
+        if (accessChanged) await session.AuthorizationSync.SyncAsync(session.CancellationToken);
+        await session.Registry.SendExtensionsToWatchesAsync(classId, extensions, session.CancellationToken);
     }
 
     private static async Task<bool> TryDispatchPluginControlAsync(
         Envelope envelope,
         ConnectionSession session)
     {
-        var ct = session.CancellationToken;
         switch (envelope.Type)
         {
-            case Protocol.MessageTypePluginNetworkInfo:
-                if (NormalizePluginNetworkInfo(ConvertPayload<PluginNetworkInfo>(envelope.Payload)) is { } info)
-                {
-                    info.ClassId = session.Principal.ClassId ?? Classroom.DefaultId;
-                    await session.Registry.PublishPluginNetworkInfoAsync(info, ct);
-                }
-                else
-                    session.Logger.LogWarning("插件上报了无效的局域网地址或端口");
-                return true;
-            case Protocol.MessageTypeScheduleSyncStatus:
-                if (ConvertPayload<ScheduleSyncStatus>(envelope.Payload) is { } status)
-                    await session.ScheduleSync.ObserveFromPluginAsync(status, ct);
-                return true;
-            case Protocol.MessageTypeCommandResult:
-                if (ConvertPayload<CommandResult>(envelope.Payload) is { } result)
-                    await session.Registry.CompleteCommandAsync(envelope, result, ct);
-                return true;
+            case Protocol.MessageTypePluginNetworkInfo: await HandlePluginNetworkInfoAsync(envelope, session); return true;
+            case Protocol.MessageTypeScheduleSyncStatus: await HandleScheduleSyncStatusAsync(envelope, session); return true;
+            case Protocol.MessageTypeCommandResult: await HandleCommandResultAsync(envelope, session); return true;
             default:
                 return false;
         }
+    }
+
+    private static async Task HandlePluginNetworkInfoAsync(Envelope envelope, ConnectionSession session)
+    {
+        if (NormalizePluginNetworkInfo(ConvertPayload<PluginNetworkInfo>(envelope.Payload)) is { } info)
+        {
+            info.ClassId = session.Principal.ClassId ?? Classroom.DefaultId;
+            await session.Registry.PublishPluginNetworkInfoAsync(info, session.CancellationToken);
+        }
+        else session.Logger.LogWarning("插件上报了无效的局域网地址或端口");
+    }
+
+    private static async Task HandleScheduleSyncStatusAsync(Envelope envelope, ConnectionSession session)
+    {
+        if (ConvertPayload<ScheduleSyncStatus>(envelope.Payload) is { } status)
+            await session.ScheduleSync.ObserveFromPluginAsync(status, session.CancellationToken);
+    }
+
+    private static async Task HandleCommandResultAsync(Envelope envelope, ConnectionSession session)
+    {
+        if (ConvertPayload<CommandResult>(envelope.Payload) is { } result)
+            await session.Registry.CompleteCommandAsync(envelope, result, session.CancellationToken);
     }
 
     private static async Task DispatchUserAsync(

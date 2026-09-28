@@ -147,78 +147,28 @@ public sealed class SoftwareInventoryService
             var market = IAppHost.GetService<IPluginMarketService>();
             await market.RefreshPluginSourceAsync();
             market.LoadPluginSource();
-
-            var requested = requestedIds is { Count: > 0 }
-                ? new HashSet<string>(requestedIds, StringComparer.Ordinal)
-                : null;
-            var candidates = market.MergedPlugins.Values
-                .Where(plugin => plugin.IsLocal && plugin.IsEnabled)
-                .Where(plugin => requested is null || requested.Contains(plugin.Manifest.Id))
-                .Where(plugin => force || plugin.IsUpdateAvailable)
-                .ToList();
-            if (candidates.Count == 0)
+            var targetIds = SelectPluginUpgradeIds(market, requestedIds, force);
+            if (targetIds.Count == 0)
             {
                 SetStatus(SoftwareUpdateOperation.Plugins, SoftwareUpdateState.Completed, "所有插件均已是最新版本");
                 RaiseInventoryChanged();
                 return;
             }
 
-            var targetIds = candidates
-                .Select(plugin => plugin.Manifest.Id)
-                .ToHashSet(StringComparer.Ordinal);
             SetStatus(SoftwareUpdateOperation.Plugins, SoftwareUpdateState.Running,
                 $"正在下载 {targetIds.Count} 个插件更新");
-
             foreach (var id in targetIds)
                 market.RequestDownloadPlugin(id);
 
             var deadline = DateTimeOffset.UtcNow + UpdateTimeout;
             while (DateTimeOffset.UtcNow < deadline)
             {
-                var pending = 0;
-                var succeeded = 0;
-                var failed = 0;
-                foreach (var id in targetIds)
+                var state = GetPluginDownloadState(market, targetIds);
+                if (state.Pending == 0)
                 {
-                    if (!market.MergedPlugins.TryGetValue(id, out var plugin))
-                    {
-                        failed++;
-                        continue;
-                    }
-                    if (plugin.DownloadProgress?.Exception is not null)
-                    {
-                        failed++;
-                        continue;
-                    }
-                    if (plugin.RestartRequired)
-                    {
-                        succeeded++;
-                        continue;
-                    }
-
-                    // 下载任务尚未建立或仍在进行中，继续等待官方市场服务完成。
-                    pending++;
-                }
-
-                if (pending == 0)
-                {
-                    if (succeeded > 0)
-                    {
-                        SetStatus(SoftwareUpdateOperation.Plugins, SoftwareUpdateState.Completed,
-                            $"已下载 {succeeded} 个插件更新，ClassIsland 即将重启");
-                        RaiseInventoryChanged();
-                        await Task.Delay(750);
-                        RestartClassIslandAfterPluginUpdate();
-                    }
-                    else
-                    {
-                        SetStatus(SoftwareUpdateOperation.Plugins, SoftwareUpdateState.Failed,
-                            $"插件更新失败，失败 {failed} 个");
-                        RaiseInventoryChanged();
-                    }
+                    await CompletePluginUpgradeAsync(state.Succeeded, state.Failed);
                     return;
                 }
-
                 await Task.Delay(500);
             }
 
@@ -236,6 +186,66 @@ public sealed class SoftwareInventoryService
         {
             _operationLock.Release();
         }
+    }
+
+    private static HashSet<string> SelectPluginUpgradeIds(
+        IPluginMarketService market,
+        IReadOnlyCollection<string>? requestedIds,
+        bool force)
+    {
+        var requested = requestedIds is { Count: > 0 }
+            ? new HashSet<string>(requestedIds, StringComparer.Ordinal)
+            : null;
+        return market.MergedPlugins.Values
+            .Where(plugin => plugin.IsLocal && plugin.IsEnabled)
+            .Where(plugin => requested is null || requested.Contains(plugin.Manifest.Id))
+            .Where(plugin => force || plugin.IsUpdateAvailable)
+            .Select(plugin => plugin.Manifest.Id)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    private static (int Pending, int Succeeded, int Failed) GetPluginDownloadState(
+        IPluginMarketService market,
+        IEnumerable<string> targetIds)
+    {
+        var pending = 0;
+        var succeeded = 0;
+        var failed = 0;
+        foreach (var id in targetIds)
+        {
+            if (!market.MergedPlugins.TryGetValue(id, out var plugin) ||
+                plugin.DownloadProgress?.Exception is not null)
+            {
+                failed++;
+            }
+            else if (plugin.RestartRequired)
+            {
+                succeeded++;
+            }
+            else
+            {
+                // 下载任务尚未建立或仍在进行中，继续等待官方市场服务完成。
+                pending++;
+            }
+        }
+        return (pending, succeeded, failed);
+    }
+
+    private async Task CompletePluginUpgradeAsync(int succeeded, int failed)
+    {
+        if (succeeded > 0)
+        {
+            SetStatus(SoftwareUpdateOperation.Plugins, SoftwareUpdateState.Completed,
+                $"已下载 {succeeded} 个插件更新，ClassIsland 即将重启");
+            RaiseInventoryChanged();
+            await Task.Delay(750);
+            RestartClassIslandAfterPluginUpdate();
+            return;
+        }
+
+        SetStatus(SoftwareUpdateOperation.Plugins, SoftwareUpdateState.Failed,
+            $"插件更新失败，失败 {failed} 个");
+        RaiseInventoryChanged();
     }
 
     private async Task RunClassIslandUpgradeAsync(object updateService, bool force)

@@ -24,26 +24,59 @@ public sealed class ProfileManagementService(ILogger<ProfileManagementService> l
 
     public async Task<CommandResult> UpdateTimeLayoutAsync(TimeLayoutUpdateRequest? request, CancellationToken ct = default)
     {
-        if (request is null)
-            return CommandResult.Failure(CommandResultCodes.InvalidRequest, "缺少时间表参数");
-        if (string.IsNullOrWhiteSpace(request.Name))
-            return CommandResult.Failure(CommandResultCodes.InvalidRequest, "时间表名称不能为空");
-        if (request.Points.Count == 0)
-            return CommandResult.Failure(CommandResultCodes.InvalidRequest, "时间表至少需要一个时间点");
-        if (request.Points.Count > 64)
-            return CommandResult.Failure(CommandResultCodes.InvalidRequest, "单个时间表最多支持 64 个时间点");
+        if (ValidateTimeLayoutRequest(request) is { } error)
+            return CommandResult.Failure(CommandResultCodes.InvalidRequest, error);
+        var validRequest = request!;
+        if (!TryBuildTimeLayoutItems(validRequest, out var points, out error))
+            return CommandResult.Failure(CommandResultCodes.InvalidRequest, error!);
 
-        var points = new List<TimeLayoutItem>(request.Points.Count);
+        try
+        {
+            await SaveTimeLayoutAsync(validRequest, points);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "修改 ClassIsland 时间表失败");
+            return CommandResult.Failure(CommandResultCodes.SaveFailed, $"修改时间表失败：{ex.Message}");
+        }
+
+        if (validRequest.RestartAfter)
+            ScheduleRestart();
+        return Success(validRequest.RestartAfter ? "时间表已更新，ClassIsland 将自动重启" : "时间表已更新");
+    }
+
+    private static string? ValidateTimeLayoutRequest(TimeLayoutUpdateRequest? request)
+    {
+        if (request is null) return "缺少时间表参数";
+        if (string.IsNullOrWhiteSpace(request.Name)) return "时间表名称不能为空";
+        if (request.Points.Count == 0) return "时间表至少需要一个时间点";
+        return request.Points.Count > 64 ? "单个时间表最多支持 64 个时间点" : null;
+    }
+
+    private static bool TryBuildTimeLayoutItems(
+        TimeLayoutUpdateRequest request,
+        out List<TimeLayoutItem> points,
+        out string? error)
+    {
+        points = new List<TimeLayoutItem>(request.Points.Count);
         foreach (var point in request.Points)
         {
             if (!TimeSpan.TryParse(point.StartTime, out var start) ||
                 !TimeSpan.TryParse(point.EndTime, out var end))
-                return CommandResult.Failure(CommandResultCodes.InvalidRequest, "时间点必须使用 HH:mm 格式");
+            {
+                error = "时间点必须使用 HH:mm 格式";
+                return false;
+            }
             if (end < start)
-                return CommandResult.Failure(CommandResultCodes.InvalidRequest, "时间点结束时间不能早于开始时间");
+            {
+                error = "时间点结束时间不能早于开始时间";
+                return false;
+            }
             if (point.TimeType is < 0 or > 3)
-                return CommandResult.Failure(CommandResultCodes.InvalidRequest, "时间点类型必须是 0、1、2 或 3");
-
+            {
+                error = "时间点类型必须是 0、1、2 或 3";
+                return false;
+            }
             points.Add(new TimeLayoutItem
             {
                 StartTime = start,
@@ -52,42 +85,32 @@ public sealed class ProfileManagementService(ILogger<ProfileManagementService> l
                 BreakName = point.BreakName?.Trim() ?? string.Empty,
             });
         }
+        error = null;
+        return true;
+    }
 
-        try
+    private static async Task SaveTimeLayoutAsync(TimeLayoutUpdateRequest request, IReadOnlyList<TimeLayoutItem> points)
+    {
+        await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            await Dispatcher.UIThread.InvokeAsync(() =>
+            var profileService = IAppHost.GetService<IProfileService>();
+            var profile = profileService.Profile;
+            var id = request.TimeLayoutId ?? Guid.NewGuid();
+            if (request.Activate)
+                foreach (var existing in profile.TimeLayouts.Values)
+                    existing.IsActivated = false;
+
+            var layout = new TimeLayout
             {
-                var profileService = IAppHost.GetService<IProfileService>();
-                var profile = profileService.Profile;
-                var id = request.TimeLayoutId ?? Guid.NewGuid();
-                if (request.Activate)
-                {
-                    foreach (var existing in profile.TimeLayouts.Values)
-                        existing.IsActivated = false;
-                }
-
-                var layout = new TimeLayout
-                {
-                    Name = request.Name.Trim(),
-                    IsActivated = request.Activate,
-                    IsActivatedManually = request.Activate,
-                };
-                foreach (var point in points.OrderBy(point => point.StartTime).ThenBy(point => point.EndTime))
-                    layout.Layouts.Add(point);
-
-                profile.TimeLayouts[id] = layout;
-                profileService.SaveProfile();
-            });
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "修改 ClassIsland 时间表失败");
-            return CommandResult.Failure(CommandResultCodes.SaveFailed, $"修改时间表失败：{ex.Message}");
-        }
-
-        if (request.RestartAfter)
-            ScheduleRestart();
-        return Success(request.RestartAfter ? "时间表已更新，ClassIsland 将自动重启" : "时间表已更新");
+                Name = request.Name.Trim(),
+                IsActivated = request.Activate,
+                IsActivatedManually = request.Activate,
+            };
+            foreach (var point in points.OrderBy(point => point.StartTime).ThenBy(point => point.EndTime))
+                layout.Layouts.Add(point);
+            profile.TimeLayouts[id] = layout;
+            profileService.SaveProfile();
+        });
     }
 
     public async Task<CommandResult> DistributeProfileAsync(

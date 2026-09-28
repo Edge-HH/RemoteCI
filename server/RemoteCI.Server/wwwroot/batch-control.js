@@ -168,88 +168,83 @@
         currentSettingsDialog.querySelector("input:not([type=hidden]), select, textarea")?.focus();
     };
 
-    document.addEventListener("click", event => {
-        const openButton = event.target.closest("[data-batch-open]");
-        if (openButton) {
-            openOperation(openButton.dataset.batchOpen, openButton.dataset.batchTitle, openButton.dataset.batchRisk === "true");
-            return;
-        }
-
-        const closeButton = event.target.closest("[data-batch-close]");
-        if (closeButton) {
-            closeNearest(closeButton);
-            return;
-        }
-
-        const nextButton = event.target.closest("[data-batch-next]");
-        if (nextButton) {
-            const dialog = nextButton.closest("dialog");
-            if (dialog) {
-                currentOperation = dialog.dataset.batchSettings;
-                currentSettingsDialog = dialog;
-                copySettings();
-                openTargetDialog(currentOperation, dialog.dataset.batchTitle, dialog.dataset.batchRisk === "true", dialog);
-            }
-            return;
-        }
-
-        const backButton = event.target.closest("[data-batch-back]");
-        if (backButton) {
-            closeDialog(targetDialog);
-            // 语音消息的“上一步”回到录音弹窗，其他功能回到参数弹窗。
-            if (currentOperation === "VoiceMessage") openDialog(voiceDialog);
-            else if (currentSettingsDialog) openDialog(currentSettingsDialog);
-            return;
-        }
-
-        // 录音完成后进入目标选择。
-        const voiceToTargets = event.target.closest("[data-voice-next-to-targets]");
-        if (voiceToTargets) {
-            if (singleControl) {
-                voiceForm?.requestSubmit();
-                return;
-            }
+    const findTarget = (event, selector) => event.target.closest(selector);
+    const handleOpenClick = event => {
+        const button = findTarget(event, "[data-batch-open]");
+        if (!button) return false;
+        openOperation(button.dataset.batchOpen, button.dataset.batchTitle, button.dataset.batchRisk === "true");
+        return true;
+    };
+    const handleCloseClick = event => {
+        const button = findTarget(event, "[data-batch-close]");
+        if (!button) return false;
+        closeNearest(button);
+        return true;
+    };
+    const handleNextClick = event => {
+        const button = findTarget(event, "[data-batch-next]");
+        const dialog = button?.closest("dialog");
+        if (!dialog) return false;
+        currentOperation = dialog.dataset.batchSettings;
+        currentSettingsDialog = dialog;
+        copySettings();
+        openTargetDialog(currentOperation, dialog.dataset.batchTitle, dialog.dataset.batchRisk === "true", dialog);
+        return true;
+    };
+    const handleBackClick = event => {
+        if (!findTarget(event, "[data-batch-back]")) return false;
+        closeDialog(targetDialog);
+        if (currentOperation === "VoiceMessage") openDialog(voiceDialog);
+        else if (currentSettingsDialog) openDialog(currentSettingsDialog);
+        return true;
+    };
+    const handleVoiceTargetClick = event => {
+        if (!findTarget(event, "[data-voice-next-to-targets]")) return false;
+        if (singleControl) voiceForm?.requestSubmit();
+        else {
             closeDialog(voiceDialog);
             openTargetDialog("VoiceMessage", "语音消息", false, null);
-            return;
         }
-
-        // 目标确认后回到录音弹窗发送：录音仍在 voice-message.js 的内存里，状态也显示在录音弹窗。
-        const voiceSendButton = event.target.closest("[data-batch-voice-send]");
-        if (voiceSendButton) {
-            if (!validateTargets()) return;
-            closeDialog(targetDialog);
-            openDialog(voiceDialog);
-            voiceForm?.requestSubmit();
-            return;
+        return true;
+    };
+    const handleVoiceSendClick = event => {
+        if (!findTarget(event, "[data-batch-voice-send]") || !validateTargets()) return false;
+        closeDialog(targetDialog);
+        openDialog(voiceDialog);
+        voiceForm?.requestSubmit();
+        return true;
+    };
+    const handleTargetTabClick = event => {
+        const tab = findTarget(event, "[data-batch-target-tab]");
+        if (!tab) return false;
+        setTargetMode(tab.dataset.batchTargetTab);
+        return true;
+    };
+    const handleSelectOnlineClick = event => {
+        if (!findTarget(event, "[data-batch-select-online]")) return false;
+        const boxes = [...targetDialog.querySelectorAll('[data-batch-target-panel="devices"] input[name="SelectedConnectionIds"]:not(:disabled)')];
+        const allChecked = boxes.length > 0 && boxes.every(box => box.checked);
+        boxes.forEach(box => { box.checked = !allChecked; });
+        return true;
+    };
+    const handleTimeLayoutClick = event => {
+        const add = findTarget(event, "[data-time-layout-add]");
+        if (add) {
+            addTimeLayoutRow(add.closest("dialog"));
+            return true;
         }
-
-        const tab = event.target.closest("[data-batch-target-tab]");
-        if (tab) {
-            setTargetMode(tab.dataset.batchTargetTab);
-            return;
+        const remove = findTarget(event, "[data-time-layout-remove]");
+        if (remove) {
+            remove.closest(".time-layout-row")?.remove();
+            return true;
         }
-
-        const selectOnline = event.target.closest("[data-batch-select-online]");
-        if (selectOnline) {
-            const boxes = [...targetDialog.querySelectorAll('[data-batch-target-panel="devices"] input[name="SelectedConnectionIds"]:not(:disabled)')];
-            const allChecked = boxes.length > 0 && boxes.every(box => box.checked);
-            boxes.forEach(box => { box.checked = !allChecked; });
-            return;
-        }
-
-        const addRow = event.target.closest("[data-time-layout-add]");
-        if (addRow) {
-            addTimeLayoutRow(addRow.closest("dialog"));
-            return;
-        }
-
-        const removeRow = event.target.closest("[data-time-layout-remove]");
-        if (removeRow) {
-            removeRow.closest(".time-layout-row")?.remove();
-            return;
-        }
-
+        return false;
+    };
+    const clickHandlers = [handleOpenClick, handleCloseClick, handleNextClick, handleBackClick,
+        handleVoiceTargetClick, handleVoiceSendClick, handleTargetTabClick, handleSelectOnlineClick,
+        handleTimeLayoutClick];
+    document.addEventListener("click", event => {
+        if (clickHandlers.some(handler => handler(event))) return;
         if (event.target.matches("dialog.batch-dialog")) closeDialog(event.target);
     });
 

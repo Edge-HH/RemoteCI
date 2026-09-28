@@ -580,17 +580,20 @@ public sealed class PeerRegistry(
 
     private CapabilitiesSync CreateCapabilitiesSync()
     {
-        var plugin = PrimaryPlugin();
         return new CapabilitiesSync
         {
             Server = AppVersion.Capabilities(),
-            Plugin = plugin is null
-                ? null
-                : new PeerCapabilities
-                {
-                    SoftwareVersion = plugin.SoftwareVersion ?? string.Empty,
-                    Capabilities = EffectiveCapabilities(plugin),
-                },
+            Plugin = BuildPrimaryPluginCapabilities(),
+        };
+    }
+
+    private PeerCapabilities? BuildPrimaryPluginCapabilities()
+    {
+        var plugin = PrimaryPlugin();
+        return plugin is null ? null : new PeerCapabilities
+        {
+            SoftwareVersion = plugin.SoftwareVersion ?? string.Empty,
+            Capabilities = EffectiveCapabilities(plugin),
         };
     }
 

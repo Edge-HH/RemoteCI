@@ -289,18 +289,14 @@ public sealed partial class IdentityCoordinator(
         var key = await db.UserApiKeys.Include(x => x.User).ThenInclude(x => x.RoleDefinition)
             .SingleOrDefaultAsync(x => x.KeyHash == hash, ct);
         var now = DateTimeOffset.UtcNow;
-        if (key is null || key.RevokedAt is not null || (key.ExpiresAt is { } expires && expires <= now) || !key.User.Enabled)
+        if (key is null || !IsApiKeyActive(key, now))
             return null;
 
         var profile = await ToProfileAsync(key.User, ct);
         if (!profile.Permissions.HasFlag(UserPermissions.ApiAccess)) return null;
 
         // API Key 通常由脚本高频调用；与设备会话一样，LastUsedAt 最多每分钟落库一次。
-        if (key.LastUsedAt is null || now - key.LastUsedAt > TimeSpan.FromMinutes(1))
-        {
-            key.LastUsedAt = now;
-            await db.SaveChangesAsync(ct);
-        }
+        await TouchApiKeyAsync(key, now, ct);
 
         return new AuthPrincipal(
             PeerRole.Watch,
@@ -310,6 +306,18 @@ public sealed partial class IdentityCoordinator(
             ValidUntil: key.ExpiresAt,
             AccessibleClassIds: await classAccess.GetAccessibleClassIdsAsync(key.User.Id, key.User.Role, ct),
             ApiKeyId: key.Id);
+    }
+
+    private static bool IsApiKeyActive(UserApiKey? key, DateTimeOffset now) =>
+        key is not null && key.RevokedAt is null &&
+        (key.ExpiresAt is not { } expires || expires > now) && key.User.Enabled;
+
+    private async Task TouchApiKeyAsync(UserApiKey key, DateTimeOffset now, CancellationToken ct)
+    {
+        if (key.LastUsedAt is not null && now - key.LastUsedAt <= TimeSpan.FromMinutes(1))
+            return;
+        key.LastUsedAt = now;
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task<AuthPrincipal?> ValidatePluginTokenAsync(string token, CancellationToken ct = default)

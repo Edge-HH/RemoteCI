@@ -31,30 +31,34 @@ public sealed class DeviceInventoryService(
                 group => group.Key,
                 group => group.OrderByDescending(x => x.SoftwareInventoryAt ?? DateTimeOffset.MinValue).First());
 
-        return credentials.Select(credential =>
-        {
-            online.TryGetValue(credential.Id, out var snapshot);
-            var inventory = snapshot?.SoftwareInventory ?? TryParseInventory(credential.SoftwareInventoryJson);
-            var capabilities = snapshot?.EffectiveCapabilities ?? [];
-            return new DeviceInventory(
-                snapshot?.ConnectionId,
-                credential.Id,
-                string.IsNullOrWhiteSpace(inventory?.DeviceName) ? credential.Name : inventory.DeviceName,
-                credential.ClassroomId,
-                credential.Assigned ? credential.Classroom?.Name ?? "默认班级" : "未分配",
-                snapshot is not null,
-                FindVersion(inventory?.Plugins, "remoteci.plugin") ?? snapshot?.SoftwareVersion ?? "未知",
-                FindVersion(inventory?.Applications, "classisland") ?? "未知",
-                inventory?.GeneratedAt ?? credential.SoftwareInventoryAt,
-                capabilities.Contains(RemoteCiCapabilities.SoftwareUpgradePlugins, StringComparer.Ordinal),
-                capabilities.Contains(RemoteCiCapabilities.SoftwareUpgradeClassIsland, StringComparer.Ordinal),
-                capabilities,
-                inventory?.Applications ?? [],
-                inventory?.Plugins ?? [],
-                inventory?.LastUpdate,
-                credential.Assigned,
-                credential.ClassNameRemark);
-        }).ToList();
+        return credentials.Select(credential => BuildDeviceInventory(credential, online)).ToList();
+    }
+
+    private static DeviceInventory BuildDeviceInventory(
+        PluginCredential credential,
+        IReadOnlyDictionary<Guid, PluginDeviceSnapshot> online)
+    {
+        online.TryGetValue(credential.Id, out var snapshot);
+        var inventory = snapshot?.SoftwareInventory ?? TryParseInventory(credential.SoftwareInventoryJson);
+        var capabilities = snapshot?.EffectiveCapabilities ?? [];
+        return new DeviceInventory(
+            snapshot?.ConnectionId,
+            credential.Id,
+            string.IsNullOrWhiteSpace(inventory?.DeviceName) ? credential.Name : inventory.DeviceName,
+            credential.ClassroomId,
+            credential.Assigned ? credential.Classroom?.Name ?? "默认班级" : "未分配",
+            snapshot is not null,
+            FindVersion(inventory?.Plugins, "remoteci.plugin") ?? snapshot?.SoftwareVersion ?? "未知",
+            FindVersion(inventory?.Applications, "classisland") ?? "未知",
+            inventory?.GeneratedAt ?? credential.SoftwareInventoryAt,
+            capabilities.Contains(RemoteCiCapabilities.SoftwareUpgradePlugins, StringComparer.Ordinal),
+            capabilities.Contains(RemoteCiCapabilities.SoftwareUpgradeClassIsland, StringComparer.Ordinal),
+            capabilities,
+            inventory?.Applications ?? [],
+            inventory?.Plugins ?? [],
+            inventory?.LastUpdate,
+            credential.Assigned,
+            credential.ClassNameRemark);
     }
 
     /// <summary>
