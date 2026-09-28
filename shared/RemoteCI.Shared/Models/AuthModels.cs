@@ -457,7 +457,6 @@ public sealed class UpdateAccountRoleRequest
     public UserPermissions DefaultPermissions { get; set; }
 }
 
-
 /// <summary>
 /// API Key 管理视图；密钥明文只在创建时返回一次，服务端仅保存摘要。
 /// </summary>
