@@ -2,117 +2,38 @@
 @model BatchControlModel
 @{
     ViewData["Title"] = "批量控制";
+    var onlineDevices = Model.Devices.Count(device => device.Online);
 }
 <div class="page-head">
     <div>
         <p class="eyebrow">系统管理员</p>
         <h1>批量控制</h1>
+        <p class="muted">选择一个统一功能，填写参数，然后选择要执行的班级、分组或具体设备。</p>
     </div>
+    <span class="status-pill @(onlineDevices > 0 ? "online" : "offline")">@onlineDevices 台设备在线</span>
 </div>
 
 @if (Model.LastResults.Count > 0)
 {
     <section class="panel">
-        <h2>上次执行结果</h2>
+        <div class="panel-heading">
+            <div>
+                <h2>上次执行结果</h2>
+                <p class="muted">按设备回报；离线设备或没有在线设备的班级会单独列出。</p>
+            </div>
+            <span class="status-pill">@Model.LastResults.Count(x => x.Success) / @Model.LastResults.Count 成功</span>
+        </div>
         <ul class="broadcast-result">
             @foreach (var item in Model.LastResults)
             {
-                var className = Model.Classes.FirstOrDefault(x => x.Id == item.ClassId)?.Name ?? item.ClassId.ToString();
-                if (item.Success)
-                {
-                    <li><i class="bi bi-check-circle ok" aria-hidden="true"></i><span>@className — 成功</span></li>
-                }
-                else
-                {
-                    <li><i class="bi bi-x-circle bad" aria-hidden="true"></i><span>@item.Message</span></li>
-                }
+                <li>
+                    <i class="bi @(item.Success ? "bi-check-circle ok" : "bi-x-circle bad")" aria-hidden="true"></i>
+                    <span><strong>@item.TargetName</strong>@(item.Success ? " — 成功" : $" — {item.Message}")</span>
+                </li>
             }
         </ul>
     </section>
 }
 
-<form method="post">
-    <section class="panel">
-        <h2>选择目标班级</h2>
-        <p class="muted">勾选分组即对整组生效；下方操作会逐班执行并回报每个班级的结果。</p>
-        @if (Model.Groups.Count > 0)
-        {
-            <h3>整组执行</h3>
-            <div class="broadcast-targets">
-                @foreach (var group in Model.Groups)
-                {
-                    <label class="check">
-                        <input type="checkbox" name="SelectedGroupIds" value="@group.Id" />
-                        @group.Name（@group.ClassCount 个班级）
-                    </label>
-                }
-            </div>
-        }
-        <h3>逐班勾选</h3>
-        <div class="broadcast-targets">
-            @foreach (var classroom in Model.Classes)
-            {
-                <label class="check">
-                    <input type="checkbox" name="SelectedClassIds" value="@classroom.Id" data-voice-query />
-                    @classroom.Name
-                    <span class="muted">@(classroom.PluginCount > 0 ? "在线" : "离线")</span>
-                    @if (classroom.GroupNames is { Count: > 0 })
-                    {
-                        foreach (var groupName in classroom.GroupNames)
-                        {
-                            <span class="group-name">@groupName</span>
-                        }
-                    }
-                </label>
-            }
-        </div>
-    </section>
-
-    <section class="panel">
-        <h2>广播通知</h2>
-        <div class="stack">
-            <label>标题<input asp-for="BroadcastTitle" maxlength="60" placeholder="RemoteCI 通知" /></label>
-            <label>正文<textarea asp-for="BroadcastMessage" maxlength="500" rows="3"></textarea></label>
-            <button type="submit" asp-page-handler="Notify">发送通知到勾选的班级</button>
-        </div>
-    </section>
-
-    <section class="panel">
-        <h2>清除通知</h2>
-        <p class="muted">清除勾选班级正在显示的提醒。</p>
-        <button type="submit" asp-page-handler="Clear" class="ghost">批量清除通知</button>
-    </section>
-
-    <section class="panel">
-        <h2>电源控制</h2>
-        <p class="muted">对勾选班级的教室端设备执行电源操作，请谨慎使用。</p>
-        <div class="stack">
-            <label>操作
-                <select asp-for="PowerAction">
-                    <option value="@PowerActionKind.Shutdown">关机</option>
-                    <option value="@PowerActionKind.Restart">重启</option>
-                    <option value="@PowerActionKind.Sleep">睡眠</option>
-                    <option value="@PowerActionKind.Hibernate">休眠</option>
-                </select>
-            </label>
-            <label class="check"><input asp-for="ConfirmPower" /> 我已确认要对勾选的班级执行电源操作</label>
-            <button type="submit" asp-page-handler="Power">执行电源操作</button>
-        </div>
-    </section>
-</form>
-
-<section class="panel">
-    <h2>语音消息</h2>
-    <p class="muted">录制一段最长 60 秒的语音，同时推送到勾选班级的教室端播放。</p>
-    <form method="post" asp-page-handler="BroadcastVoice" class="stack" data-voice-form data-worklet-url="@Url.Content("~/voice-recorder-worklet.js")">
-        @Html.AntiForgeryToken()
-        <div class="control-actions">
-            <button type="button" data-voice-record>开始录音</button>
-            <button type="button" class="ghost" data-voice-stop disabled>停止录音</button>
-            <button type="button" class="ghost" data-voice-discard disabled>丢弃</button>
-            <button type="submit" data-voice-send disabled>发送语音</button>
-        </div>
-        <audio controls data-voice-preview hidden aria-label="试听语音"></audio>
-        <p class="control-note" data-voice-status role="status">先在上方勾选班级，录制后点击发送即同时广播到所有勾选班级。</p>
-    </form>
-</section>
+@* 动作卡片、参数弹窗与目标选择复用班级控制页共享的局部视图；此处保留完整的目标选择。 *@
+@await Html.PartialAsync("_BatchControlActions", Model)

@@ -20,8 +20,10 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | 128 | `RunExtensions` |
 | 256 | `MainMenuControl` |
 | 512 | `SendVoiceMessages`（发送语音） |
+| 1024 | `ChangeDisplayName`（修改用户名） |
+| 2048 | `ApiAccess`（REST API Key；插件协议仅透传该位） |
 
-管理员的有效权限固定为 1023。普通用户固定包含值 1，其余权限来自服务端授权。权限设置界面将值 2 显示为“概览”；七日课表查看和手动拉取只要求账号已登录，值 16 保护换课和自动拉取设置。`TeacherComing` 单独保护“老师来了”，`SendNotifications` 只保护自定义通知与清除提醒，`SendVoiceMessages` 独立保护语音消息，`RunExtensions` 是所有插件扩展的独立权限，`MainMenuControl` 保护主界面显隐，`PowerControl` 保护音量和 Windows 电源操作。
+管理员的有效权限固定为 4095。普通用户固定包含值 1，其余权限来自服务端授权。权限设置界面将值 2 显示为“概览”；七日课表查看和手动拉取只要求账号已登录，值 16 保护换课和自动拉取设置。`TeacherComing` 单独保护“老师来了”，`SendNotifications` 只保护自定义通知与清除提醒，`SendVoiceMessages` 独立保护语音消息，`RunExtensions` 是所有插件扩展的独立权限，`MainMenuControl` 保护主界面显隐，`PowerControl` 保护音量和 Windows 电源操作，`ChangeDisplayName` 允许账号在“个人账号”页自行修改自己的用户可见用户名（DisplayName，登录 ID 不变），`ApiAccess` 允许账号创建 API Key 并调用 REST API；`ChangeDisplayName` 和 `ApiAccess` 默认不授予学生角色，管理员与班管理员默认拥有 API 访问。
 
 账号密码只出现在第一次 `POST /api/auth/login` 的请求内。生产环境必须使用 HTTPS；Android 手机端为兼容尚未配置 TLS 的现有部署，允许用户在持续显示风险提示的情况下明确连接 HTTP 云服务器。响应包含 1 小时 `accessToken`、30 天 `deviceSessionId/deviceSecret` 和用户有效权限。`POST /api/auth/refresh` 会同时轮换访问令牌和设备密钥；旧值立即失效。
 
@@ -53,13 +55,14 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | `account_sync` | 服务端 → 插件 | 账号元数据、有效权限、设备验证器、`serverVersion`、可选服务端能力、镜像版本和生成时间 |
 | `peer_capabilities` | 插件/手表 → 服务端 | 当前端的 `softwareVersion` 和稳定字符串能力列表 |
 | `capabilities_sync` | 服务端/插件 → 手表 | 服务端能力和当前主插件能力快照 |
+| `software_inventory` | 插件 → 服务端 | 设备名称、ClassIsland 主程序与当前已加载插件的版本、可用更新和最近升级状态 |
 | `state_push` | 插件 → 服务端/手表 | 高频当前课程、提醒播放、主界面显隐与可用电源状态，不含完整课表 |
 | `schedule_sync` | 插件 → 服务端/手表 | 今天起七天的日期、课程、科目清单和每日修订号 |
 | `schedule_pull` | 服务端/手表/手机 → 插件 | 只读请求，载荷可含 `{taskId, source, requestedAt}`，要求插件立即重新生成并推送七日课表；手机端 `source` 为 6 |
 | `schedule_sync_status` | 插件 → 服务端/手表 | 全局课表任务状态：Running、Completed、Failed 或 Busy，以及任务来源和占用任务 ID |
 | `extensions_sync` | 插件 → 服务端/手表 | 扩展功能清单（id、displayName、icon、requiredPermission、parameters） |
 | `event_notify` | 插件 → 服务端/手表 | 上课、下课、放学、课表变更、自定义消息、ClassIsland 自动化或第三方插件通知 |
-| `command` | 手表/服务端 → 插件 | 结构化换课、老师来了、通知、主界面、音量或电源命令 |
+| `command` | 手表/服务端 → 插件 | 结构化换课、老师来了、通知、主界面、音量、电源、软件升级、插件管理、档案分发、时间表与集控命令 |
 | `command_result` | 插件 → 发起者 | 真实成功、失败码、消息和可选新修订号 |
 | `settings_sync` | 服务端 → 手表 | 全局通知设置快照（目前含 `forceSenderInTitle`） |
 | `plugin_network_info` | 插件 → 服务端 → 手表 | 插件局域网直连地址与端口（每次云端重连时重新发现网卡） |
@@ -83,7 +86,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 ## 能力协商
 
-V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
+V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`schedule.time-layout` 和 `management.join` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
 
 WebUI 的有效能力是“服务端 ∩ 当前主插件”，手表的有效能力是“手表本地 ∩ 服务端 ∩ 当前主插件”。多插件时，当前主插件仍是最早接入的健康插件；主插件切换、断开或能力更新后，服务端重新广播能力快照。界面应隐藏缺失能力的入口，服务端转发命令前仍需按统一映射复核主插件能力，缺少能力时返回 `CAPABILITY_UNSUPPORTED`。能力声明不能绕过账号权限或扩展策略检查。
 
@@ -111,6 +114,7 @@ WebUI 的有效能力是“服务端 ∩ 当前主插件”，手表的有效能
 - `targetIndex`：交换模式必填。
 - `replacementSubjectId`：替换模式必填。
 - `expectedRevision`：客户端读取当天课表时的修订号。
+- `permanent`：为 `true` 时直接修改 ClassIsland 源课表，本周及以后每周持续生效；默认 `false`，只写入当天临时课表层。
 
 插件发现修订号已变化时返回 `SCHEDULE_STALE` 和最新修订号，不覆盖别人刚完成的修改。
 
@@ -134,6 +138,23 @@ WebUI 通过 `POST /Control?handler=VoiceMessage` 上传 `application/octet-stre
 
 Windows 插件自动播放录音，并显示上述 ClassIsland 通知：强调特效开启、通知音效关闭、朗读关闭（仍遵循宿主全局提醒限制）。底部浮窗上滑出现，拖动标题可移动；顶部显示发送人和总时长，中间使用 ClassIsland 原生 Slider 拖动播放位置，底部三个无底色的 ClassIsland Fluent 图标分开放置，分别用于暂停/继续、后退 5 秒和关闭，关闭图标使用系统危险色，播完后可重新播放。浮窗使用宿主 Fluent 浮层背景、描边、圆角、深浅色主题和 UI 字体；点击浮窗外部也会关闭并停止播放。关闭或插件停止时立即释放音频资源。已有浮窗时返回 `BUSY`，不排队、不打断现有语音；离线不缓存重发。成功回执表示播放器已启动，不表示整条语音已经播放完毕。音频不写入文件或通知历史，广播事件仅包含发送人提示。
 
+## 远程软件升级
+
+RemoteCI 插件在云端连接建立后通过 `software_inventory` 上报设备名称、ClassIsland 主程序版本和当前已加载插件版本。服务端按插件长期凭据保存最后一份清单，因此设备离线时 WebUI 仍能显示最近一次版本；重新上线后由新清单覆盖。
+
+命令值 10 为 `UpgradePlugins`，命令值 11 为 `UpgradeClassIsland`，命令值 12 为 `RefreshSoftwareInventory`，命令值 20 为 `RestartClassIsland`。前三者都要求账号具有 `ManageUsers` 权限，并分别要求插件声明 `software.upgrade-plugins`、`software.upgrade-classisland`、`software.inventory` 能力；`RestartClassIsland` 仅允许系统管理员使用，不重启 Windows。WebUI 的“批量控制”页按在线插件连接逐台下发，避免同一班级多台设备只收到最早连接的一条命令。
+
+升级命令只表示任务已被设备接受；实际下载、部署和重启由 ClassIsland 官方插件市场或官方 `UpdateService` 在后台完成。插件升级写入宿主的 `.cipx` 缓存并在重启后安装；ClassIsland 升级使用官方文件图校验和部署流程。完成后设备会主动重启并重新连接，服务端以新的 `software_inventory` 更新版本和最近升级状态。失败或已是最新版本时不会重启，状态随清单回传。
+## 插件管理、档案分发与集控
+
+命令值 13 为 `InstallPlugins`、14 为 `UninstallPlugins`、15 为 `SetPluginEnabled`、16 为 `SetPluginManagementPolicy`、17 为 `DistributeProfile`、18 为 `UpdateTimeLayout`、19 为 `JoinManagement`。这些命令都要求 `ManageUsers` 权限，并在服务端和插件端再次确认系统管理员身份；能力标识分别为 `plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`schedule.time-layout` 和 `management.join`。
+
+- 插件安装使用 ClassIsland 官方插件市场解析依赖并下载 `.cipx` 缓存，卸载和启停使用宿主公开的 `PluginInfo` 状态接口；RemoteCI 拒绝操作自身，避免远程控制链路被卸载或禁用。
+- `DistributeProfile` 只接收 ClassIsland 档案 JSON 和分发范围（时间表、课表、科目），不接收任意文件路径；`UpdateTimeLayout` 接收结构化时间点并由插件在 UI 线程写入档案。
+- `JoinManagement` 由管理员上传 ClassIsland 集控配置文件 `ManagementPreset.json`（即宿主 ManagementSettings 的 JSON）发起。插件解析后按配置文件里的服务器类型（Serverless manifest 模板或 ManagementServer 的 API + gRPC）注册，先校验集控清单核心版本，再写入宿主的 Management 配置并重启；配置文件里的 ID（ClassIdentity）由服务端按目标设备所属班级名自动填充，不需要管理员填写。
+- `SetPluginManagementPolicy` 只约束 RemoteCI 后续发起的远程插件安装或卸载。ClassIsland 当前没有公开的宿主级“禁止本地安装/卸载插件”策略 API，因此该策略不阻止用户在 ClassIsland 本地设置页操作。
+
+WebUI 批量控制页把功能参数和目标设备分成两步：先填写参数，再选择班级、分组或具体设备。班级级选择只投递到该班最早接入的在线设备；具体设备选择按插件连接逐台投递。命令下发成功只表示设备端已接受任务，下载、部署、重启或档案拉取的最终结果由后续 `software_inventory`、连接状态或用户再次查看时体现。
 ## REST API
 
 主要端点：

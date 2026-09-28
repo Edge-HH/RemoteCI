@@ -16,6 +16,10 @@ public sealed class CommandHandler
     private readonly IProfileWriteOperations _profileOps;
     private readonly RemoteNotificationProvider _notifications;
     private readonly ClassIslandHostControlService _hostControl;
+    private readonly SoftwareInventoryService _softwareInventory;
+    private readonly PluginManagementService _pluginManagement;
+    private readonly ProfileManagementService _profileManagement;
+    private readonly ManagementJoinService _managementJoin;
     private readonly ILogger _logger;
     private readonly ExtensionCommandRouter _extensionRouter;
     private readonly VoiceMessagePlayer _voiceMessages;
@@ -25,6 +29,10 @@ public sealed class CommandHandler
         IScheduleBackend scheduleBackend,
         IProfileWriteOperations profileOps,
         ClassIslandHostControlService hostControl,
+        SoftwareInventoryService softwareInventory,
+        PluginManagementService pluginManagement,
+        ProfileManagementService profileManagement,
+        ManagementJoinService managementJoin,
         IEnumerable<IHostedService> hostedServices,
         IRemoteCiExtensionRegistry extensions,
         ILoggerFactory loggerFactory,
@@ -34,6 +42,10 @@ public sealed class CommandHandler
         _scheduleBackend = scheduleBackend;
         _profileOps = profileOps;
         _hostControl = hostControl;
+        _softwareInventory = softwareInventory;
+        _pluginManagement = pluginManagement;
+        _profileManagement = profileManagement;
+        _managementJoin = managementJoin;
         _notifications = hostedServices.OfType<RemoteNotificationProvider>().Single();
         _logger = loggerFactory.CreateLogger<CommandHandler>();
         _extensionRouter = new ExtensionCommandRouter(extensions, loggerFactory);
@@ -54,6 +66,12 @@ public sealed class CommandHandler
         if (command.Command == CommandKind.RunExtension)
             return await _extensionRouter.RunAsync(command);
 
+        // 远程升级、插件管理和集控操作属于宿主级维护，即使账号被授予 ManageUsers 也只允许系统管理员执行。
+        if (command.Command is (CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
+            CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
+            CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
+            CommandKind.JoinManagement or CommandKind.RestartClassIsland) && command.RequestedBy?.Role != UserRole.Admin)
+            return CommandResult.Failure(CommandResultCodes.Forbidden, "仅系统管理员可以执行远程维护操作");
         var required = CommandPermissions.Required(command.Command);
         if (required == UserPermissions.None)
             return CommandResult.Failure(CommandResultCodes.InvalidRequest, $"未知指令：{command.Command}");
@@ -75,6 +93,16 @@ public sealed class CommandHandler
                 CommandKind.SetMainMenuVisibility => await HandleMainMenuVisibilityAsync(command.MainMenuVisible),
                 CommandKind.Power => HandlePowerAction(command.PowerAction),
                 CommandKind.Volume => HandleVolume(command.Volume),
+                CommandKind.RefreshSoftwareInventory => _softwareInventory.Refresh(),
+                CommandKind.UpgradePlugins => _softwareInventory.StartPluginUpgrade(command.SoftwareUpgrade),
+                CommandKind.UpgradeClassIsland => _softwareInventory.StartClassIslandUpgrade(command.SoftwareUpgrade),
+                CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled =>
+                    await _pluginManagement.HandleAsync(command.Command, command.PluginManagement),
+                CommandKind.SetPluginManagementPolicy => _pluginManagement.SetPolicy(command.PluginManagementPolicy),
+                CommandKind.UpdateTimeLayout => await _profileManagement.UpdateTimeLayoutAsync(command.TimeLayoutUpdate),
+                CommandKind.DistributeProfile => await _profileManagement.DistributeProfileAsync(command.ProfileDistribution),
+                CommandKind.JoinManagement => await _managementJoin.JoinAsync(command.ManagementJoin),
+                CommandKind.RestartClassIsland => HandleClassIslandRestart(),
                 _ => CommandResult.Failure(CommandResultCodes.InvalidRequest, $"未知指令：{command.Command}"),
             };
         }
@@ -128,7 +156,10 @@ public sealed class CommandHandler
             message,
             request.IsNotificationEffectEnabled,
             request.IsNotificationSoundEnabled,
-            request.IsSpeechEnabled);
+            request.IsSpeechEnabled,
+            request.IsNotificationTopmostEnabled,
+            request.EffectiveDurationSeconds,
+            request.EffectiveRepeatCounts);
         NotificationSent?.Invoke(new ClassEvent
         {
             Event = ClassEventKind.Custom,
@@ -212,6 +243,12 @@ public sealed class CommandHandler
             PowerActionKind.Hibernate => "Windows 即将进入休眠",
             _ => "电源操作已提交",
         });
+    }
+
+    private CommandResult HandleClassIslandRestart()
+    {
+        _hostControl.ScheduleClassIslandRestart();
+        return Success("ClassIsland 即将重启");
     }
 
     private CommandResult HandleVolume(VolumeControlRequest? request)

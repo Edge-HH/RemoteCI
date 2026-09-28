@@ -1,0 +1,62 @@
+@model ClassesModel.ClassGroupTreeNode
+@{
+    var group = Model.Group;
+    var hasChildren = Model.Children.Count > 0;
+}
+<li class="class-tree-item">
+    <div class="class-tree-row @(Model.IsSelected ? "active" : null)">
+        @if (hasChildren)
+        {
+            <button type="button" class="tree-toggle" data-class-tree-toggle aria-expanded="true" aria-label="折叠 @group.Name">
+                <i class="bi bi-chevron-down" aria-hidden="true"></i>
+            </button>
+        }
+        else
+        {
+            <span class="tree-toggle-placeholder" aria-hidden="true"></span>
+        }
+        <i class="bi @(hasChildren ? "bi-folder2-open" : "bi-folder") tree-icon" aria-hidden="true"></i>
+        <a class="tree-label" href="@Url.Page("/Classes", new { groupId = group.Id })" title="@group.Name">@group.Name</a>
+        <span class="tree-count" title="直接班级 @group.ClassCount 个，含子分组 @Model.TotalClassCount 个">@Model.TotalClassCount</span>
+        <details class="tree-node-menu">
+            <summary aria-label="管理分组 @group.Name"><i class="bi bi-three-dots" aria-hidden="true"></i></summary>
+            <div class="tree-node-menu-panel">
+                <form method="post" asp-page="/Classes" asp-page-handler="RenameGroup" class="tree-menu-form">
+                    <input type="hidden" name="id" value="@group.Id" />
+                    <input type="hidden" name="groupId" value="@group.Id" />
+                    <label>分组名称<input type="text" name="name" value="@group.Name" required maxlength="40" /></label>
+                    <label>上级分组
+                        <select name="parentGroupId">
+                            <option value="">（根分组）</option>
+                            @foreach (var candidate in Model.ParentCandidates.Where(x => !Model.SubtreeGroupIds.Contains(x.Id)))
+                            {
+                                <option value="@candidate.Id" selected="@(candidate.Id == group.ParentId)">@(string.Concat(Enumerable.Repeat("　", Math.Max(0, candidate.Depth - 1))) + candidate.Name)</option>
+                            }
+                        </select>
+                    </label>
+                    <button type="submit" class="ghost">保存分组</button>
+                </form>
+                <form method="post" asp-page="/Classes" asp-page-handler="CreateGroup" class="tree-menu-form">
+                    <input type="hidden" name="parentGroupId" value="@group.Id" />
+                    <input type="hidden" name="groupId" value="@group.Id" />
+                    <label>新建子分组<input type="text" name="NewGroupName" required maxlength="40" placeholder="子分组名称" /></label>
+                    <button type="submit" class="ghost">创建子分组</button>
+                </form>
+                <form method="post" asp-page="/Classes" asp-page-handler="DeleteGroup" class="tree-menu-form" onsubmit="return confirm('删除分组后，子分组会上移一级，班级本身不受影响。确定继续？')">
+                    <input type="hidden" name="id" value="@group.Id" />
+                    <input type="hidden" name="groupId" value="@group.Id" />
+                    <button type="submit" class="danger ghost">删除分组</button>
+                </form>
+            </div>
+        </details>
+    </div>
+    @if (hasChildren)
+    {
+        <ul class="class-tree-children" data-class-tree-children>
+            @foreach (var child in Model.Children)
+            {
+                <partial name="_ClassGroupTreeNode" model="child" />
+            }
+        </ul>
+    }
+</li>

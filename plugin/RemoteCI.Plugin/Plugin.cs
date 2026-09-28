@@ -66,6 +66,12 @@ public class Plugin : PluginBase
         services.AddSingleton<IStateSource, StateSourceAdapter>();
         services.AddSingleton<ScheduleCatalog>();
         services.AddSingleton<ClassIslandHostControlService>();
+        services.AddSingleton<SoftwareInventoryService>();
+        services.AddSingleton(sp => new PluginManagementService(
+            PluginConfigFolder,
+            sp.GetRequiredService<ILogger<PluginManagementService>>()));
+        services.AddSingleton<ProfileManagementService>();
+        services.AddSingleton<ManagementJoinService>();
         services.AddSingleton<VoiceMessagePlayer>();
         services.AddSingleton<CommandHandler>();
         services.AddSingleton<ClassIslandNotificationBridge>();

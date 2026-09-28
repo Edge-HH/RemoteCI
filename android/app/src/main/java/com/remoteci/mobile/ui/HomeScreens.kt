@@ -53,6 +53,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -568,6 +569,7 @@ fun SwapScreen(date: String?, index: Int?, onBack: () -> Unit, snackbar: Snackba
     var sourceIndex by remember { mutableIntStateOf(index ?: courses.firstOrNull()?.index ?: 0) }
     var targetIndex by remember { mutableIntStateOf(courses.firstOrNull { it.index != sourceIndex }?.index ?: sourceIndex) }
     var exchange by remember { mutableStateOf(true) }
+    var permanent by remember { mutableStateOf(false) }
     var replacementId by remember { mutableStateOf(bundle?.subjects?.firstOrNull()?.id.orEmpty()) }
     val source = courses.firstOrNull { it.index == sourceIndex }
     val target = courses.firstOrNull { it.index == targetIndex }
@@ -627,6 +629,13 @@ fun SwapScreen(date: String?, index: Int?, onBack: () -> Unit, snackbar: Snackba
                     }
                 }
                 TextButton(onClick = { exchange = !exchange }) { Text(if (exchange) "改为替换课程" else "改为交换课程") }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("永久换课", style = MaterialTheme.typography.bodyLarge)
+                        Text("写入源课表，之后每周继续生效", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Switch(checked = permanent, onCheckedChange = { permanent = it })
+                }
                 DropdownMenu(expanded = showSource, onDismissRequest = { showSource = false }) {
                     courses.forEach {
                         DropdownMenuItem({ Text("${it.label} ${it.subject}") }, {
@@ -674,6 +683,7 @@ fun SwapScreen(date: String?, index: Int?, onBack: () -> Unit, snackbar: Snackba
                                 targetIndex = if (exchange) target?.index else null,
                                 replacementSubjectId = if (exchange) null else replacementId,
                                 expectedRevision = currentDay.revision,
+                                permanent = permanent,
                             ),
                         )
                     },

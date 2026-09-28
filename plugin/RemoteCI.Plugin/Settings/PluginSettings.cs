@@ -14,6 +14,7 @@ public sealed class PluginSettings : INotifyPropertyChanged
     private bool _enableCloud = true;
     private string _cloudServerUrl = "http://localhost:8080";
     private string _pluginPairCode = string.Empty;
+    private string _classNameRemark = string.Empty;
     private string? _cloudToken;
     private bool _showDeveloperSettingsMenu;
 
@@ -50,6 +51,13 @@ public sealed class PluginSettings : INotifyPropertyChanged
     {
         get => _pluginPairCode;
         set => SetField(ref _pluginPairCode, value);
+    }
+
+    /// <summary>使用统一连接码时显示在服务端“未分配”列表中的班级名备注。</summary>
+    public string ClassNameRemark
+    {
+        get => _classNameRemark;
+        set => SetField(ref _classNameRemark, value);
     }
 
     /// <summary>是否在 ClassIsland 设置导航中注册 RemoteCI 开发者设置页；默认隐藏。</summary>

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using RemoteCI.Server.Data;
 using RemoteCI.Shared;
 using RemoteCI.Shared.Models;
@@ -86,6 +87,22 @@ public sealed class PeerRegistry(
             await BroadcastCapabilitiesToWatchesAsync(ct);
     }
 
+    /// <summary>保存插件上报的软件清单，并持久化到插件凭据，供设备离线时继续查看。</summary>
+    public async Task ReportSoftwareInventoryAsync(
+        Guid connectionId,
+        SoftwareInventory report,
+        CancellationToken ct = default)
+    {
+        var peer = FindPeer(connectionId);
+        if (peer is null || !peer.Principal.IsPlugin) return;
+        if (NormalizeSoftwareInventory(report) is not { } inventory) return;
+
+        var now = timeProvider.GetUtcNow();
+        peer.SoftwareInventory = inventory;
+        peer.SoftwareInventoryAt = now;
+        await PersistSoftwareInventoryAsync(peer, inventory, now, ct);
+    }
+
     public Task SendCurrentCapabilitiesToWatchAsync(Guid connectionId, CancellationToken ct = default) =>
         SendToWatchAsync(connectionId, Envelope.CapabilitiesSync(CreateCapabilitiesSync()), ct);
 
@@ -124,6 +141,24 @@ public sealed class PeerRegistry(
             .ToArray();
     }
 
+    /// <summary>返回在线插件连接及最近软件清单，包含尚未分配班级的设备。</summary>
+    public IReadOnlyList<PluginDeviceSnapshot> GetPluginDeviceSnapshots() =>
+        _pluginPeers.Values
+            .Where(IsLocallyAuthorized)
+            .OrderBy(peer => peer.Principal.ClassId)
+            .ThenBy(peer => peer.RegisteredAt)
+            .Select(peer => new PluginDeviceSnapshot(
+                peer.Id,
+                peer.Principal.PluginCredentialId,
+                peer.Principal.ClassId ?? Classroom.DefaultId,
+                peer.SoftwareInventory?.DeviceName ?? "ClassIsland 插件",
+                peer.SoftwareVersion,
+                peer.SoftwareInventoryAt,
+                peer.SoftwareInventory,
+                peer.HasExplicitCapabilities,
+                EffectiveCapabilities(peer),
+                peer.Principal.ClassId is not null))
+            .ToArray();
     /// <summary>读取握手或后台刷新后缓存的连接身份，不访问数据库。</summary>
     public AuthPrincipal? GetPrincipal(Guid connectionId)
     {
@@ -164,6 +199,37 @@ public sealed class PeerRegistry(
             ct.ThrowIfCancellationRequested();
             await UnregisterAsync(peer.Id, WebSocketCloseStatus.PolicyViolation);
         }
+    }
+
+    /// <summary>班级配对码只允许一台设备：新连接完成注册后主动断开旧连接。</summary>
+    public async Task DisconnectOtherPluginClassAsync(Guid classId, Guid keepConnectionId, CancellationToken ct = default)
+    {
+        foreach (var peer in _pluginPeers.Values
+                     .Where(peer => peer.Id != keepConnectionId && peer.Principal.ClassId == classId)
+                     .ToList())
+        {
+            ct.ThrowIfCancellationRequested();
+            await UnregisterAsync(peer.Id, WebSocketCloseStatus.PolicyViolation);
+        }
+    }
+
+    /// <summary>
+    /// 未分配设备绑定班级后：断开该班其他设备、更新本连接归属并补发授权镜像，
+    /// 让设备无需重连即可立即获得对应班级的账号与数据能力。
+    /// </summary>
+    public async Task ReassignPluginConnectionsAsync(
+        Guid credentialId, Guid classId, AccountSync sync, CancellationToken ct = default)
+    {
+        foreach (var peer in _pluginPeers.Values
+                     .Where(peer => peer.Principal.PluginCredentialId == credentialId)
+                     .ToList())
+        {
+            ct.ThrowIfCancellationRequested();
+            await DisconnectOtherPluginClassAsync(classId, peer.Id, ct);
+            peer.Principal = peer.Principal with { ClassId = classId };
+            await SendToPluginConnectionAsync(peer.Id, Envelope.AccountSync(sync), ct);
+        }
+        await BroadcastCapabilitiesToWatchesAsync(ct);
     }
 
     public async Task DisconnectPluginClassAsync(IReadOnlyCollection<Guid> classIds, CancellationToken ct = default)
@@ -385,6 +451,43 @@ public sealed class PeerRegistry(
         }
     }
 
+    /// <summary>
+    /// 向指定插件连接发送命令并等待回执。设备页按连接批量升级时必须定向投递，
+    /// 否则同一班级多台设备会重复执行或只执行最早接入的一台。
+    /// </summary>
+    public async Task<CommandResult> SendCommandAndWaitToConnectionAsync(
+        CommandMessage command,
+        Guid connectionId,
+        TimeSpan timeout,
+        CancellationToken ct = default)
+    {
+        if (!_pluginPeers.TryGetValue(connectionId, out var peer) || !IsLocallyAuthorized(peer))
+            return CommandResult.Failure(CommandResultCodes.PluginOffline, "插件未在线，操作未执行");
+        if (RemoteCiCapabilities.Required(command.Command) is { } capability &&
+            !EffectiveCapabilities(peer).Contains(capability, StringComparer.Ordinal))
+            return CommandResult.Failure(
+                CommandResultCodes.CapabilityUnsupported,
+                $"当前设备插件未声明能力 {capability}");
+
+        var envelope = Envelope.Command(command);
+        var completion = new TaskCompletionSource<CommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _pendingCommands[envelope.MessageId] = new PendingCommand(null, completion);
+        if (!await SendToPluginConnectionAsync(connectionId, envelope, ct))
+        {
+            _pendingCommands.TryRemove(envelope.MessageId, out _);
+            return CommandResult.Failure(CommandResultCodes.PluginOffline, "插件未在线，操作未执行");
+        }
+
+        try
+        {
+            return await completion.Task.WaitAsync(timeout, ct);
+        }
+        catch (TimeoutException)
+        {
+            _pendingCommands.TryRemove(envelope.MessageId, out _);
+            return CommandResult.Failure(CommandResultCodes.Timeout, "等待插件回执超时，操作结果未知");
+        }
+    }
     public async Task<bool> CompleteCommandAsync(Envelope envelope, CommandResult result, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(envelope.ReplyToMessageId) ||
@@ -477,17 +580,20 @@ public sealed class PeerRegistry(
 
     private CapabilitiesSync CreateCapabilitiesSync()
     {
-        var plugin = PrimaryPlugin();
         return new CapabilitiesSync
         {
             Server = AppVersion.Capabilities(),
-            Plugin = plugin is null
-                ? null
-                : new PeerCapabilities
-                {
-                    SoftwareVersion = plugin.SoftwareVersion ?? string.Empty,
-                    Capabilities = EffectiveCapabilities(plugin),
-                },
+            Plugin = BuildPrimaryPluginCapabilities(),
+        };
+    }
+
+    private PeerCapabilities? BuildPrimaryPluginCapabilities()
+    {
+        var plugin = PrimaryPlugin();
+        return plugin is null ? null : new PeerCapabilities
+        {
+            SoftwareVersion = plugin.SoftwareVersion ?? string.Empty,
+            Capabilities = EffectiveCapabilities(plugin),
         };
     }
 
@@ -495,6 +601,83 @@ public sealed class PeerRegistry(
     {
         var normalized = value?.Trim();
         return string.IsNullOrEmpty(normalized) ? null : normalized[..Math.Min(normalized.Length, 64)];
+    }
+
+    /// <summary>限制上报清单大小与字段长度，避免恶意或异常插件把持久化数据撑爆。</summary>
+    private static SoftwareInventory? NormalizeSoftwareInventory(SoftwareInventory? value)
+    {
+        if (value is null) return null;
+        return new SoftwareInventory
+        {
+            DeviceName = CleanInventoryText(value.DeviceName, 80),
+            OperatingSystem = CleanInventoryText(value.OperatingSystem, 200),
+            Architecture = CleanInventoryText(value.Architecture, 40),
+            GeneratedAt = value.GeneratedAt == default ? DateTimeOffset.UtcNow : value.GeneratedAt,
+            Applications = CleanPackages(value.Applications),
+            Plugins = CleanPackages(value.Plugins),
+            LastUpdate = BuildSoftwareUpdateStatus(value.LastUpdate),
+        };
+    }
+
+    private static string CleanInventoryText(string? text, int maxLength)
+    {
+        var normalized = text?.Trim() ?? string.Empty;
+        return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
+    }
+
+    private static List<SoftwarePackageInfo> CleanPackages(IEnumerable<SoftwarePackageInfo>? packages) =>
+        (packages ?? [])
+            .Where(package => package is not null && !string.IsNullOrWhiteSpace(package.Id))
+            .Take(200)
+            .Select(package => new SoftwarePackageInfo
+            {
+                Id = CleanInventoryText(package.Id, 200),
+                Name = CleanInventoryText(package.Name, 120),
+                Version = CleanInventoryText(package.Version, 64),
+                LatestVersion = string.IsNullOrWhiteSpace(package.LatestVersion)
+                    ? null
+                    : CleanInventoryText(package.LatestVersion, 64),
+                IsUpdateAvailable = package.IsUpdateAvailable,
+                IsEnabled = package.IsEnabled,
+                CanUpgrade = package.CanUpgrade,
+            }).ToList();
+
+    private static SoftwareUpdateStatus? BuildSoftwareUpdateStatus(SoftwareUpdateStatus? value) =>
+        value is null ? null : new SoftwareUpdateStatus
+        {
+            Operation = value.Operation,
+            State = value.State,
+            Message = CleanInventoryText(value.Message, 1000),
+            StartedAt = value.StartedAt == default ? DateTimeOffset.UtcNow : value.StartedAt,
+            CompletedAt = value.CompletedAt,
+        };
+
+    private async Task PersistSoftwareInventoryAsync(
+        WsPeer peer,
+        SoftwareInventory inventory,
+        DateTimeOffset updatedAt,
+        CancellationToken ct)
+    {
+        if (peer.Principal.PluginCredentialId is not { } credentialId) return;
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var credential = await db.PluginCredentials.SingleOrDefaultAsync(x => x.Id == credentialId, ct);
+            if (credential is null) return;
+            credential.SoftwareInventoryJson = JsonSerializer.Serialize(inventory, JsonDefaults.Options);
+            credential.SoftwareInventoryAt = updatedAt;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 连接断开导致的取消不需要记录为故障。
+        }
+        catch (Exception ex)
+        {
+            // 版本清单是诊断数据，持久化失败不能影响插件连接与命令通道。
+            logger.LogWarning(ex, "持久化插件软件版本清单失败：{ConnectionId}", peer.Id);
+        }
     }
 
     private static IReadOnlyList<string> NormalizeCapabilities(IEnumerable<string>? values) =>
@@ -559,11 +742,25 @@ public sealed class PeerRegistry(
         public SemaphoreSlim RefreshLock { get; } = new(1, 1);
         public string? SoftwareVersion { get; set; }
         public IReadOnlyList<string> Capabilities { get; set; } = [];
+        public SoftwareInventory? SoftwareInventory { get; set; }
+        public DateTimeOffset? SoftwareInventoryAt { get; set; }
         public bool HasExplicitCapabilities { get; set; }
         /// <summary>接入时刻（UtcNow Ticks），用于“最早接入优先”的投递排序。</summary>
         public long RegisteredAt { get; } = DateTime.UtcNow.Ticks;
     }
 }
+
+public sealed record PluginDeviceSnapshot(
+    Guid ConnectionId,
+    Guid? PluginCredentialId,
+    Guid ClassId,
+    string DisplayName,
+    string? SoftwareVersion,
+    DateTimeOffset? SoftwareInventoryAt,
+    SoftwareInventory? SoftwareInventory,
+    bool HasExplicitCapabilities,
+    IReadOnlyList<string> EffectiveCapabilities,
+    bool Assigned);
 
 public sealed record PeerCapabilityDiagnostic(
     Guid ConnectionId,

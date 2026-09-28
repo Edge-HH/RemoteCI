@@ -41,6 +41,36 @@ public sealed class CommandMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, string?>? ExtensionArgs { get; set; }
 
+    /// <summary>插件或 ClassIsland 远程升级参数；仅升级命令使用。</summary>
+    [JsonPropertyName("softwareUpgrade")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SoftwareUpgradeRequest? SoftwareUpgrade { get; set; }
+
+    /// <summary>插件安装、卸载、启用或禁用参数。</summary>
+    [JsonPropertyName("pluginManagement")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PluginManagementRequest? PluginManagement { get; set; }
+
+    /// <summary>RemoteCI 远程插件管理策略。</summary>
+    [JsonPropertyName("pluginManagementPolicy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PluginManagementPolicyRequest? PluginManagementPolicy { get; set; }
+
+    /// <summary>新增或整体替换 ClassIsland 时间表。</summary>
+    [JsonPropertyName("timeLayoutUpdate")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TimeLayoutUpdateRequest? TimeLayoutUpdate { get; set; }
+
+    /// <summary>ClassIsland 档案分发参数。</summary>
+    [JsonPropertyName("profileDistribution")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ProfileDistributionRequest? ProfileDistribution { get; set; }
+
+    /// <summary>加入 ClassIsland 内置集控的参数。</summary>
+    [JsonPropertyName("managementJoin")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ManagementJoinRequest? ManagementJoin { get; set; }
+
     /// <summary>命令目标班级；缺省时由服务端路由到默认班级或用户唯一成员班级。</summary>
     [JsonPropertyName("classId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

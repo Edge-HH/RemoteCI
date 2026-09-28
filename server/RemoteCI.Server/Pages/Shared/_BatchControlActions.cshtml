@@ -1,0 +1,639 @@
+@model BatchControlModel
+<div data-single-control="@(Model.IsSingleControl ? "true" : "false")">
+@if (Model.HasClassroomOperations)
+{
+<section class="panel batch-section">
+    <div class="panel-heading">
+        <div>
+            <h2>课堂控制</h2>
+            <p class="muted">通知、清除提醒、电源和语音广播。</p>
+        </div>
+    </div>
+    <div class="batch-action-grid">
+        @if (Model.CanUseOperation(BatchOperationKind.Notify))
+        {
+            <button type="button" class="batch-action-card" id="send-notification" data-batch-open="Notify" data-batch-title="通知广播" data-batch-risk="false">
+                <span class="batch-action-icon"><i class="bi bi-megaphone" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>通知广播</strong><small>向选中的班级或设备发送一条通知。</small></span>
+            </button>
+        }
+        @if (Model.CanUseOperation(BatchOperationKind.ClearNotifications))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="ClearNotifications" data-batch-title="清除通知" data-batch-risk="false">
+                <span class="batch-action-icon"><i class="bi bi-bell-slash" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>清除通知</strong><small>清除设备当前显示的提醒。</small></span>
+            </button>
+        }
+        @if (Model.CanUseOperation(BatchOperationKind.Power))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="Power" data-batch-title="电源控制" data-batch-risk="true">
+                <span class="batch-action-icon danger"><i class="bi bi-power" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>电源控制</strong><small>关机、重启、睡眠或休眠教室端设备。</small></span>
+            </button>
+        }
+        @if (Model.CanUseOperation(BatchOperationKind.VoiceMessage))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="VoiceMessage" data-batch-title="语音消息" data-batch-risk="false">
+                <span class="batch-action-icon"><i class="bi bi-mic" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>语音消息</strong><small>先录制语音，再选择要广播的设备。</small></span>
+            </button>
+        }
+    </div>
+</section>
+}
+
+@if (Model.HasProfileOperations)
+{
+<section class="panel batch-section">
+    <div class="panel-heading">
+        <div>
+            <h2>档案与集控</h2>
+            <p class="muted">时间表、档案分发和 ClassIsland 内置集控。</p>
+        </div>
+    </div>
+    <div class="batch-action-grid">
+        @if (Model.CanUseOperation(BatchOperationKind.UpdateTimeLayout))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="UpdateTimeLayout" data-batch-title="修改时间表" data-batch-risk="false">
+                <span class="batch-action-icon"><i class="bi bi-clock-history" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>修改时间表</strong><small>新建或替换一张时间表，并可设为当前启用。</small></span>
+            </button>
+        }
+        @if (Model.CanUseOperation(BatchOperationKind.DistributeProfile))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="DistributeProfile" data-batch-title="远程分发" data-batch-risk="true">
+                <span class="batch-action-icon"><i class="bi bi-box-arrow-up" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>远程分发</strong><small>上传档案 JSON，分发时间表、课表或科目。</small></span>
+            </button>
+        }
+        @if (Model.CanUseOperation(BatchOperationKind.JoinManagement))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="JoinManagement" data-batch-title="加入集控" data-batch-risk="true">
+                <span class="batch-action-icon danger"><i class="bi bi-diagram-3" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>加入集控</strong><small>让设备加入 ClassIsland 内置集控服务器。</small></span>
+            </button>
+        }
+        @if (Model.CanUseOperation(BatchOperationKind.SetPluginManagementPolicy))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="SetPluginManagementPolicy" data-batch-title="插件管理策略" data-batch-risk="true">
+                <span class="batch-action-icon danger"><i class="bi bi-shield-lock" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>插件管理策略</strong><small>限制 RemoteCI 发起的远程插件安装或卸载。</small></span>
+            </button>
+        }
+    </div>
+</section>
+}
+
+@if (Model.HasSoftwareOperations)
+{
+<section class="panel batch-section">
+    <div class="panel-heading">
+        <div>
+            <h2>插件与软件</h2>
+            <p class="muted">安装、卸载、启停插件，以及更新插件和 ClassIsland 主程序。</p>
+        </div>
+    </div>
+    <div class="batch-action-grid">
+        @if (Model.CanUseOperation(BatchOperationKind.InstallPlugins))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="InstallPlugins" data-batch-title="安装插件" data-batch-risk="false">
+                <span class="batch-action-icon"><i class="bi bi-plus-square" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>安装插件</strong><small>从 ClassIsland 插件市场下载并安装。</small></span>
+            </button>
+        }
+        @if (Model.CanUseOperation(BatchOperationKind.UninstallPlugins))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="UninstallPlugins" data-batch-title="卸载插件" data-batch-risk="true">
+                <span class="batch-action-icon danger"><i class="bi bi-trash3" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>卸载插件</strong><small>标记卸载并重启 ClassIsland 生效。</small></span>
+            </button>
+        }
+        @if (Model.CanUseOperation(BatchOperationKind.SetPluginEnabled))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="SetPluginEnabled" data-batch-title="启用或禁用插件" data-batch-risk="false">
+                <span class="batch-action-icon"><i class="bi bi-toggle2-on" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>启用或禁用插件</strong><small>批量切换本地插件状态，重启后生效。</small></span>
+            </button>
+        }
+        @if (Model.CanUseOperation(BatchOperationKind.RefreshSoftwareInventory))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="RefreshSoftwareInventory" data-batch-title="刷新版本清单" data-batch-risk="false">
+                <span class="batch-action-icon"><i class="bi bi-arrow-repeat" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>刷新版本清单</strong><small>重新采集应用和插件版本。</small></span>
+            </button>
+        }
+        @if (Model.CanUseOperation(BatchOperationKind.UpgradePlugins))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="UpgradePlugins" data-batch-title="升级插件" data-batch-risk="true">
+                <span class="batch-action-icon danger"><i class="bi bi-cloud-arrow-up" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>升级插件</strong><small>通过插件市场更新全部或指定插件。</small></span>
+            </button>
+        }
+        @if (Model.CanUseOperation(BatchOperationKind.UpgradeClassIsland))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="UpgradeClassIsland" data-batch-title="升级 ClassIsland" data-batch-risk="true">
+                <span class="batch-action-icon danger"><i class="bi bi-window-stack" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>升级 ClassIsland</strong><small>下载并部署宿主更新，完成后自动重启。</small></span>
+            </button>
+        }
+        @if (Model.CanUseOperation(BatchOperationKind.RestartClassIsland))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="RestartClassIsland" data-batch-title="重启 ClassIsland" data-batch-risk="true">
+                <span class="batch-action-icon danger"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>重启 ClassIsland</strong><small>只重启 ClassIsland 实例，不重启 Windows。</small></span>
+            </button>
+        }
+    </div>
+</section>
+}
+
+@* 第 1 步：各功能的参数弹窗。参数会被 batch-control.js 复制到目标弹窗。 *@
+@if (Model.CanUseOperation(BatchOperationKind.Notify))
+{
+<dialog id="batch-settings-notify" class="batch-dialog" data-batch-settings="Notify" data-batch-title="通知广播" data-batch-risk="false">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>通知广播</h2><p class="muted">通知会按设备逐台发送，离线设备会单独回报。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <label>标题<input name="BroadcastTitle" maxlength="60" placeholder="RemoteCI 通知" /></label>
+            <label>正文<textarea name="BroadcastMessage" maxlength="500" rows="4" placeholder="输入通知内容"></textarea></label>
+            <div class="two-column">
+                <label>持续时间（秒）<input type="number" name="BroadcastDurationSeconds" min="1" max="3600" value="5" /></label>
+                <label>重复次数<input type="number" name="BroadcastRepeatCounts" min="1" max="10" value="1" /></label>
+            </div>
+            <fieldset class="batch-check-group">
+                <legend>提醒选项</legend>
+                <label class="check"><input type="checkbox" name="BroadcastIsSpeechEnabled" data-batch-bool /> 启用语音</label>
+                <label class="check"><input type="checkbox" name="BroadcastIsSoundEnabled" data-batch-bool /> 启用提醒音效</label>
+                <label class="check"><input type="checkbox" name="BroadcastIsEffectEnabled" data-batch-bool checked /> 启用提醒特效</label>
+                <label class="check"><input type="checkbox" name="BroadcastIsTopmostEnabled" data-batch-bool /> 提醒时置顶主界面</label>
+            </fieldset>
+            <p class="muted">重复次数让正文横向滚动指定遍数，总显示时长为“持续时间 × 重复次数”。</p>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseOperation(BatchOperationKind.RestartClassIsland))
+{
+<dialog id="batch-settings-restart-classisland" class="batch-dialog" data-batch-settings="RestartClassIsland" data-batch-title="重启 ClassIsland" data-batch-risk="true">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header"><div><span class="batch-step">第 1 步 / 共 2 步</span><h2>重启 ClassIsland</h2><p class="muted">只重启 ClassIsland 实例，不会重启 Windows。</p></div><button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button></header>
+        <div class="batch-dialog-body"><p class="batch-summary">重启后设备会自动重新连接 RemoteCI。</p></div>
+        <footer class="batch-dialog-actions"><button type="button" class="ghost" data-batch-close>取消</button><button type="button" data-batch-next>下一步：选择设备</button></footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseOperation(BatchOperationKind.ClearNotifications))
+{
+<dialog id="batch-settings-clear" class="batch-dialog" data-batch-settings="ClearNotifications" data-batch-title="清除通知" data-batch-risk="false">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>清除通知</h2><p class="muted">清除所选设备当前显示的提醒。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body"><p class="batch-summary">该操作不需要额外参数，下一步选择设备即可。</p></div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseOperation(BatchOperationKind.Power))
+{
+<dialog id="batch-settings-power" class="batch-dialog" data-batch-settings="Power" data-batch-title="电源控制" data-batch-risk="true">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>电源控制</h2><p class="muted">电源操作会影响教室端设备，请谨慎选择。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <label>操作
+                <select name="PowerAction">
+                    <option value="Shutdown">关机</option>
+                    <option value="Restart">重启</option>
+                    <option value="Sleep">睡眠</option>
+                    <option value="Hibernate">休眠</option>
+                </select>
+            </label>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseOperation(BatchOperationKind.UpdateTimeLayout))
+{
+<dialog id="batch-settings-time-layout" class="batch-dialog batch-dialog-wide" data-batch-settings="UpdateTimeLayout" data-batch-title="修改时间表" data-batch-risk="false">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>修改时间表</h2><p class="muted">时间点会按开始时间排序后写入 ClassIsland。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <div class="two-column">
+                <label>时间表名称<input name="TimeLayoutName" maxlength="80" value="RemoteCI 时间表" /></label>
+                <label>现有时间表 Id（可选）<input name="TimeLayoutId" placeholder="留空则新建" /></label>
+            </div>
+            <label class="check"><input type="checkbox" name="TimeLayoutActivate" data-batch-bool /> 设为当前启用的时间表</label>
+            <div class="time-layout-editor" data-time-layout-editor>
+                <div class="time-layout-row time-layout-head" aria-hidden="true">
+                    <span>开始</span><span>结束</span><span>类型</span><span>课间名称</span><span></span>
+                </div>
+                <div data-time-layout-rows></div>
+                <button type="button" class="ghost" data-time-layout-add>添加时间点</button>
+                <input type="hidden" name="TimeLayoutPointsJson" data-time-layout-json />
+            </div>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseOperation(BatchOperationKind.DistributeProfile))
+{
+<dialog id="batch-settings-distribute" class="batch-dialog batch-dialog-wide" data-batch-settings="DistributeProfile" data-batch-title="分发档案" data-batch-risk="true">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>分发档案</h2><p class="muted">只接收 ClassIsland 档案 JSON，不会写入任意文件路径。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <label>选择档案 JSON<input type="file" accept=".json,application/json" data-profile-file /></label>
+            <label>档案 JSON<textarea name="ProfileJson" rows="8" placeholder="粘贴 ClassIsland 档案 JSON，或选择文件后自动填入"></textarea></label>
+            <fieldset class="batch-check-group">
+                <legend>分发内容</legend>
+                <label class="check"><input type="checkbox" name="ProfileSections" value="TimeLayouts" checked /> 时间表</label>
+                <label class="check"><input type="checkbox" name="ProfileSections" value="ClassPlans" /> 课表</label>
+                <label class="check"><input type="checkbox" name="ProfileSections" value="Subjects" /> 科目</label>
+            </fieldset>
+            <label class="check"><input type="checkbox" name="ProfileReplaceExisting" data-batch-bool /> 替换设备上同 Id 的现有数据</label>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseOperation(BatchOperationKind.InstallPlugins))
+{
+<dialog id="batch-settings-plugins" class="batch-dialog batch-dialog-wide" data-batch-settings="InstallPlugins" data-batch-title="插件管理" data-batch-risk="false">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>插件管理</h2><p class="muted">安装会从插件市场解析依赖；卸载、启用和禁用会在重启后生效。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <input type="hidden" name="PluginAction" value="Install" />
+            <p class="batch-summary">安装操作会从 ClassIsland 插件市场解析依赖并下载，重启后生效。</p>
+            <fieldset class="batch-check-group batch-plugin-list">
+                <legend>已上报插件</legend>
+                @if (Model.KnownPlugins.Count == 0)
+                {
+                    <p class="muted">当前设备还没有上报插件清单，可在下方手动填写插件 Id。</p>
+                }
+                else
+                {
+                    @foreach (var plugin in Model.KnownPlugins)
+                    {
+                        <label class="check batch-plugin-option">
+                            <input type="checkbox" name="PluginIds" value="@plugin.Id" />
+                            <span>
+                                <strong>@plugin.Name</strong>
+                                <code>@plugin.Id</code>
+                                <small>@plugin.Version · @(plugin.Enabled ? "已启用" : "已禁用") · @string.Join("、", plugin.DeviceNames)</small>
+                            </span>
+                        </label>
+                    }
+                }
+            </fieldset>
+            <label>手动输入插件 Id<textarea name="PluginIdsText" rows="3" placeholder="每行一个插件 Id，例如 remoteci.plugin"></textarea></label>
+            <p class="muted">为避免设备失去远程控制，RemoteCI 会拒绝安装、卸载、启用或禁用自身。</p>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseOperation(BatchOperationKind.UninstallPlugins))
+{
+<dialog id="batch-settings-uninstall" class="batch-dialog batch-dialog-wide" data-batch-settings="UninstallPlugins" data-batch-title="卸载插件" data-batch-risk="true">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>卸载插件</h2><p class="muted">卸载会在下次启动 ClassIsland 时删除插件目录。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <fieldset class="batch-check-group batch-plugin-list">
+                <legend>选择要卸载的插件</legend>
+                @foreach (var plugin in Model.KnownPlugins)
+                {
+                    <label class="check batch-plugin-option">
+                        <input type="checkbox" name="PluginIds" value="@plugin.Id" />
+                        <span><strong>@plugin.Name</strong><code>@plugin.Id</code><small>@plugin.Version · @string.Join("、", plugin.DeviceNames)</small></span>
+                    </label>
+                }
+            </fieldset>
+            <label>手动输入插件 Id<textarea name="PluginIdsText" rows="3" placeholder="每行一个插件 Id"></textarea></label>
+            <input type="hidden" name="PluginAction" value="Uninstall" />
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseOperation(BatchOperationKind.SetPluginEnabled))
+{
+<dialog id="batch-settings-enable" class="batch-dialog batch-dialog-wide" data-batch-settings="SetPluginEnabled" data-batch-title="启用或禁用插件" data-batch-risk="false">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>启用或禁用插件</h2><p class="muted">切换插件目录中的 .disabled 标记，重启后生效。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <label>操作
+                <select name="PluginAction">
+                    <option value="Enable">启用插件</option>
+                    <option value="Disable">禁用插件</option>
+                </select>
+            </label>
+            <fieldset class="batch-check-group batch-plugin-list">
+                <legend>选择插件</legend>
+                @foreach (var plugin in Model.KnownPlugins)
+                {
+                    <label class="check batch-plugin-option">
+                        <input type="checkbox" name="PluginIds" value="@plugin.Id" />
+                        <span><strong>@plugin.Name</strong><code>@plugin.Id</code><small>@plugin.Version · @(plugin.Enabled ? "已启用" : "已禁用")</small></span>
+                    </label>
+                }
+            </fieldset>
+            <label>手动输入插件 Id<textarea name="PluginIdsText" rows="3" placeholder="每行一个插件 Id"></textarea></label>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseOperation(BatchOperationKind.UpgradePlugins))
+{
+<dialog id="batch-settings-upgrade-plugins" class="batch-dialog" data-batch-settings="UpgradePlugins" data-batch-title="升级插件" data-batch-risk="true">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>升级插件</h2><p class="muted">通过 ClassIsland 插件市场更新插件，完成后自动重启。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <label class="check"><input type="checkbox" name="Force" data-batch-bool /> 强制重新下载，即使已经是最新版本</label>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseOperation(BatchOperationKind.UpgradeClassIsland))
+{
+<dialog id="batch-settings-upgrade-classisland" class="batch-dialog" data-batch-settings="UpgradeClassIsland" data-batch-title="升级 ClassIsland" data-batch-risk="true">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>升级 ClassIsland</h2><p class="muted">下载并部署宿主更新，完成后自动重启。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <label class="check"><input type="checkbox" name="Force" data-batch-bool /> 强制重新下载，即使已经是最新版本</label>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseOperation(BatchOperationKind.JoinManagement))
+{
+<dialog id="batch-settings-join-management" class="batch-dialog batch-dialog-wide" data-batch-settings="JoinManagement" data-batch-title="加入集控" data-batch-risk="true">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>加入 ClassIsland 内置集控</h2><p class="muted">设备加入后会按集控服务器下发的档案、策略和凭据重启生效。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <label>选择集控配置文件<input type="file" accept=".json,application/json" data-management-preset-file /></label>
+            <label>集控配置文件 JSON<textarea name="ManagementPresetJson" rows="8" placeholder="粘贴 ClassIsland 集控配置文件（ManagementPreset.json），或选择文件后自动填入"></textarea></label>
+            <p class="muted">配置文件为 ClassIsland 的 ManagementPreset.json（加入集控弹窗使用的配置）。设备 ID 会自动使用所选班级名，无需手动填写；加入集控会清空设备上已有的集控档案缓存，并自动重启 ClassIsland。</p>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseOperation(BatchOperationKind.SetPluginManagementPolicy))
+{
+<dialog id="batch-settings-policy" class="batch-dialog" data-batch-settings="SetPluginManagementPolicy" data-batch-title="插件管理策略" data-batch-risk="true">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>插件管理策略</h2><p class="muted">限制 RemoteCI 后续发起的远程插件安装和卸载。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <label class="check"><input type="checkbox" name="AllowRemotePluginInstall" data-batch-bool checked /> 允许 RemoteCI 远程安装插件</label>
+            <label class="check"><input type="checkbox" name="AllowRemotePluginUninstall" data-batch-bool checked /> 允许 RemoteCI 远程卸载插件</label>
+            <p class="batch-warning">ClassIsland 目前没有公开的宿主级“禁止本地安装/卸载插件”策略 API；此设置只约束 RemoteCI 自己发起的远程操作。</p>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@* 第 2 步：共享目标选择弹窗。班级/分组只取该班主设备，具体设备可多选。 *@
+@if (Model.HasAnyOperations)
+{
+<dialog id="batch-target-dialog" class="batch-dialog batch-dialog-wide" data-batch-target-dialog>
+    <form method="post" id="batch-execute-form" data-batch-execute-form>
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="Operation" data-batch-operation />
+        <div data-batch-settings-payload></div>
+        <div class="batch-dialog-shell">
+            <header class="batch-dialog-header">
+                <div><span class="batch-step">@(Model.IsSingleControl ? "确认执行" : "第 2 步 / 共 2 步")</span><h2 data-batch-target-title>@(Model.IsSingleControl ? "确认执行" : "选择设备")</h2><p class="muted" data-batch-target-description>选择要执行该功能的班级、分组或具体设备。</p></div>
+                <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+            </header>
+            <div class="batch-dialog-body">
+                @if (!Model.IsSingleControl)
+                {
+                <div class="batch-target-tabs" role="tablist">
+                    <button type="button" class="ghost active" data-batch-target-tab="classes">按班级 / 分组</button>
+                    <button type="button" class="ghost" data-batch-target-tab="devices">按具体设备</button>
+                </div>
+                }
+                <section data-batch-target-panel="classes">
+                    @if (Model.IsSingleControl)
+                    {
+                        <p class="muted">此操作将执行于当前班级：<strong>@Model.CurrentClass?.Name</strong>。</p>
+                    }
+                    else
+                    {
+                    @if (Model.Groups.Count > 0)
+                    {
+                        <h3>整组执行</h3>
+                        <div class="broadcast-targets">
+                            @foreach (var group in Model.Groups)
+                            {
+                                <label class="check">
+                                    <input type="checkbox" name="SelectedGroupIds" value="@group.Id" data-voice-query="groupIds" />
+                                    @group.Name（@group.ClassCount 个班级）
+                                </label>
+                            }
+                        </div>
+                    }
+                    <h3>逐班选择</h3>
+                    <div class="broadcast-targets">
+                        @foreach (var classroom in Model.Classes)
+                        {
+                            <label class="check">
+                                <input type="checkbox" name="SelectedClassIds" value="@classroom.Id" data-voice-query="classIds" />
+                                @classroom.Name
+                                <span class="muted">@(classroom.PluginCount > 0 ? "在线" : "离线")</span>
+                                @if (classroom.GroupNames is { Count: > 0 })
+                                {
+                                    @foreach (var groupName in classroom.GroupNames)
+                                    {
+                                        <span class="group-name">@groupName</span>
+                                    }
+                                }
+                            </label>
+                        }
+                    </div>
+                    <p class="muted">班级级选择只会投递到该班最早接入的在线设备，避免同班多设备重复执行。</p>
+                    }
+                </section>
+                @if (!Model.IsSingleControl)
+                {
+                <section data-batch-target-panel="devices" hidden>
+                    <div class="batch-target-toolbar">
+                        <span class="muted">@Model.Devices.Count(device => device.Online) 台在线设备</span>
+                        <button type="button" class="ghost" data-batch-select-online>选择全部在线设备</button>
+                    </div>
+                    <div class="device-upgrade-list batch-device-list">
+                        @foreach (var device in Model.Devices)
+                        {
+                            <article class="device-upgrade-card @(device.Online ? "" : "offline")">
+                                <div class="device-card-head">
+                                    <label class="device-select">
+                                        <input type="checkbox" name="SelectedConnectionIds" value="@device.ConnectionId" data-voice-query="connectionIds" @(device.Online ? null : "disabled") />
+                                        <span class="device-icon"><i class="bi bi-pc-display" aria-hidden="true"></i></span>
+                                        <span>
+                                            <strong>@device.DeviceName</strong>
+                                            <small>@device.ClassName · @device.ClassIslandVersion · @device.RemoteCiVersion</small>
+                                        </span>
+                                    </label>
+                                    <div class="device-card-status">
+                                        <span class="status-pill @(device.Online ? "online" : "offline")">@(device.Online ? "在线" : "离线")</span>
+                                        @if (device.Plugins.Count > 0)
+                                        {
+                                            <span class="status-pill">@device.Plugins.Count 个插件</span>
+                                        }
+                                    </div>
+                                </div>
+                            </article>
+                        }
+                    </div>
+                </section>
+                }
+                <label class="batch-risk-confirm" data-batch-risk-confirm hidden>
+                    <input type="checkbox" name="ConfirmHighRisk" value="true" />
+                    我已确认该操作会影响教室端设备，并理解可能造成重启、程序替换或连接中断。
+                </label>
+                <p class="batch-target-feedback" data-batch-target-feedback role="status"></p>
+            </div>
+            <footer class="batch-dialog-actions">
+                <button type="button" class="ghost" data-batch-close>取消</button>
+                <button type="button" class="ghost" data-batch-back>上一步</button>
+                <button type="button" data-batch-voice-send hidden>发送语音</button>
+                <button type="submit" data-batch-submit>执行</button>
+            </footer>
+        </div>
+    </form>
+</dialog>
+}
+
+@* 语音录制弹窗：语音消息先录制再选目标。录制完成后由 batch-control.js 打开共享目标弹窗，
+   voice-message.js 负责录音与上传，发送时读取目标弹窗里勾选的设备。 *@
+@if (Model.CanUseOperation(BatchOperationKind.VoiceMessage))
+{
+<dialog id="batch-voice-dialog" class="batch-dialog" data-batch-voice-dialog>
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">@(Model.IsSingleControl ? "语音消息" : "第 1 步 / 共 2 步")</span><h2>录制语音</h2><p class="muted" data-batch-voice-targets>@(Model.IsSingleControl ? "录制并试听后直接发送到当前班级。" : "先录制语音，再选择要广播的班级或设备。")</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body">
+            <form method="post" asp-page-handler="@(Model.IsSingleControl ? "SingleVoice" : "BroadcastVoice")" class="stack" data-voice-form data-worklet-url="@Url.Content("~/voice-recorder-worklet.js")">
+                @Html.AntiForgeryToken()
+                <div class="control-actions">
+                    <button type="button" data-voice-record>开始录音</button>
+                    <button type="button" class="ghost" data-voice-stop disabled>停止录音</button>
+                    <button type="button" class="ghost" data-voice-discard disabled>丢弃</button>
+                    @* 保留 data-voice-send：voice-message.js 用它判断是否已有可继续的录音。 *@
+                    <button type="button" data-voice-send data-voice-next-to-targets disabled>@(Model.IsSingleControl ? "发送语音" : "下一步：选择设备")</button>
+                </div>
+                <audio controls data-voice-preview hidden aria-label="试听语音"></audio>
+                <p class="control-note" data-voice-status role="status">@(Model.IsSingleControl ? "录制完成后点击“发送语音”，发送到当前班级。" : "录制完成后点击“下一步：选择设备”，再确认广播目标。")</p>
+            </form>
+        </div>
+    </div>
+</dialog>
+}
+
+<template id="time-layout-row-template">
+    <div class="time-layout-row">
+        <input type="time" data-time-layout-start value="08:00" aria-label="开始时间" />
+        <input type="time" data-time-layout-end value="08:45" aria-label="结束时间" />
+        <select data-time-layout-type aria-label="时间点类型">
+            <option value="0">上课</option>
+            <option value="1">课间</option>
+            <option value="2">分割线</option>
+            <option value="3">行动</option>
+        </select>
+        <input type="text" data-time-layout-break maxlength="40" placeholder="可选" aria-label="课间名称" />
+        <button type="button" class="ghost time-layout-remove" data-time-layout-remove aria-label="删除时间点">×</button>
+    </div>
+</template>
+
+<script src="~/batch-control.js" asp-append-version="true" defer></script>
+</div>

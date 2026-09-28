@@ -9,13 +9,32 @@
     </div>
     <a class="ghost button" asp-page="/Login" asp-route-from="visitor">返回登录</a>
 </header>
+@if (Model.VisitorGroups.Count > 0)
+{
+    <nav class="visitor-group-filter" aria-label="按分组筛选班级">
+        <span class="visitor-filter-label">分组</span>
+        <a class="visitor-filter-chip@(Model.SelectedGroupId is null ? " active" : string.Empty)"
+           asp-page="/Visitor">全部</a>
+        @foreach (var group in Model.VisitorGroups)
+        {
+            <a class="visitor-filter-chip@(group.Id == Model.SelectedGroupId ? " active" : string.Empty)"
+               asp-page="/Visitor" asp-route-group="@group.Id" data-depth="@group.Depth">
+                @if (group.Depth > 1)
+                {
+                    <span class="visitor-filter-branch" aria-hidden="true">↳</span>
+                }
+                @group.Name
+            </a>
+        }
+    </nav>
+}
 @if (Model.VisitorClasses.Count > 0)
 {
     <nav class="class-switcher visitor-switcher" aria-label="选择班级">
         @foreach (var classroom in Model.VisitorClasses)
         {
             <a class="class-chip@(classroom.Id == Model.CurrentClassId ? " active" : string.Empty)"
-               asp-page="/Visitor" asp-route-class="@classroom.Id">
+               asp-page="/Visitor" asp-route-class="@classroom.Id" asp-route-group="@Model.SelectedGroupId">
                 @if (classroom.Avatar is not null)
                 {
                     <img class="class-avatar small" src="/api/classes/@classroom.Id/avatar" alt="" />

@@ -11,6 +11,28 @@
     </div>
 </div>
 
+@if (Model.CreatedApiKey is { } createdApiKey)
+{
+    <section class="panel api-key-reveal-panel">
+        <div class="panel-heading">
+            <div>
+                <h2>API Key 已生成</h2>
+                <p class="muted">密钥只显示一次，请立即复制并通过安全渠道交给目标账号。</p>
+            </div>
+        </div>
+        <div class="api-key-reveal" role="status">
+            <div>
+                <strong>@createdApiKey.Username · @createdApiKey.ApiKey.Name</strong>
+                <p>创建时间 @createdApiKey.ApiKey.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</p>
+            </div>
+            <div class="api-key-secret">
+                <code>@createdApiKey.Key</code>
+                <button type="button" class="ghost" data-copy-value="@createdApiKey.Key" aria-label="复制 API Key" title="复制 API Key"><i class="bi bi-copy" aria-hidden="true"></i></button>
+            </div>
+        </div>
+    </section>
+}
+
 <section class="panel">
     <h2>访客访问</h2>
     <p class="muted">在<a asp-page="/Classes">班级管理</a>中逐班开启访客功能后，登录页会出现「仅查看」，未登录访客只能浏览开放班级的课表。自动进入访客页默认关闭，且仅在存在开放访客的班级时可开启。</p>
@@ -22,32 +44,105 @@
 
 @if (Model.CurrentUser.Role == UserRole.Admin)
 {
-<section class="panel">
-    <h2>批量导入人员</h2>
-    <p class="muted">每行一个账号，推荐格式：<code>ID,用户名,班级,角色,密码</code>（班级不存在会自动创建；角色按名称匹配角色预设；<b>密码可留空</b>，该账号首次登录时会被要求设置密码；也支持制表符分隔，# 开头的行忽略）。旧 3 列格式 <code>ID,用户名,密码</code> 仍可用，班级与角色取下方默认值。</p>
-    <form method="post" asp-page-handler="BatchImport" class="stack">
-        <label>账号清单<textarea asp-for="ImportText" rows="6" placeholder="zhang.san,张三,高一（1）班,学生,&#10;li.si,李四,高一（1）班,班管理员,Passw0rd-2026&#10;wang.wu,王五,高一（2）班,学生,"></textarea></label>
-        <label>默认班级（仅 3 列旧格式行使用）
-            <select asp-for="ImportClassId">
-                <option value="">（不导入 3 列旧格式行）</option>
-                @foreach (var classroom in Model.ImportClasses)
-                {
-                    <option value="@classroom.Id">@classroom.Name</option>
-                }
-            </select>
-        </label>
-        <label>默认角色（仅 3 列旧格式行使用）
-            <select asp-for="ImportRoleId">
-                @foreach (var role in Model.RoleDefinitions.Where(x => x.Kind != nameof(AccountRoleKind.Administrator)))
-                {
-                    <option value="@role.Id" selected="@(role.Id == AccountRole.StudentId)">@role.Name</option>
-                }
-            </select>
-        </label>
-        <button type="submit">批量导入</button>
-    </form>
-</section>
+<section class="panel member-excel-panel">
+    <div class="panel-heading">
+        <div>
+            <h2>批量导入与导出</h2>
+            <p class="muted">普通导入只新增账号；覆盖导入使用 RemoteCI 导出的 Excel，按导出时选定的班级范围替换成员关系，不包含也不会修改密码。</p>
+        </div>
+    </div>
+    <div class="member-excel-grid">
+        <article class="member-excel-card">
+            <h3>1. 下载模板</h3>
+            <p>模板包含“用户 ID、用户名、班级、角色、密码”五列。密码可留空，账号首次登录时会要求设置密码。</p>
+            <a class="button" asp-page-handler="Template">下载 Excel 模板</a>
+        </article>
+        <article class="member-excel-card">
+            <h3>2. 导入新成员</h3>
+            <p>填写模板后上传。已存在的用户 ID、非法字段或文件内重复项会逐条列出，其他合法行仍会导入。</p>
+            <form method="post" asp-page-handler="ImportExcel" enctype="multipart/form-data" class="stack">
+                <label>填写后的 Excel<input type="file" name="excelFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required /></label>
+                <button type="submit">上传并导入</button>
+            </form>
+        </article>
+        <article class="member-excel-card">
+            <h3>3. 导出并覆盖修改</h3>
+            <p>导出文件不含密码列。可修改用户名、班级和班级角色，再上传同一文件覆盖导出范围内的成员关系。</p>
+            <form method="get" asp-page-handler="Export" class="stack">
+                <label>导出范围
+                    <select name="groupId">
+                        <option value="">全部班级</option>
+                        @foreach (var group in Model.ImportGroups)
+                        {
+                            <option value="@group.Id">@(string.Concat(Enumerable.Repeat("　", Math.Max(0, group.Depth - 1))) + group.Name)</option>
+                        }
+                    </select>
+                </label>
+                <button type="submit">导出 Excel</button>
+            </form>
+            <form method="post" asp-page-handler="OverwriteExcel" enctype="multipart/form-data" class="stack">
+                <label>修改后的导出文件<input type="file" name="excelFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required /></label>
+                <button type="submit" class="ghost" onclick="return confirm('覆盖导入会按导出范围替换成员关系，确定继续吗？')">上传并覆盖</button>
+            </form>
+        </article>
+    </div>
 
+    @if (Model.ExcelImportResult is { } report)
+    {
+        <div class="member-import-result">
+            <div class="notice @(report.HasFailures ? "warning" : "ok")">
+                <div>
+                    <strong>@(report.Overwrite ? "覆盖导入结果" : "导入结果")</strong>
+                    <span>@report.Summary</span>
+                </div>
+            </div>
+            @if (report.HasFailures)
+            {
+                <div class="user-account-table-wrap member-import-failures">
+                    <table class="user-account-table">
+                        <thead><tr><th scope="col">Excel 行</th><th scope="col">用户 ID</th><th scope="col">失败原因</th></tr></thead>
+                        <tbody>
+                        @foreach (var failure in report.Failures)
+                        {
+                            <tr>
+                                <td data-label="Excel 行">@failure.RowNumber</td>
+                                <td data-label="用户 ID"><code>@failure.Username</code></td>
+                                <td data-label="失败原因">@failure.Message</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+
+    <details class="member-text-import">
+        <summary>文本导入（兼容旧格式）</summary>
+        <p class="muted">每行一个账号，推荐格式：<code>ID,用户名,班级,角色,密码</code>（班级不存在会自动创建；角色按名称匹配角色预设；<b>密码可留空</b>，该账号首次登录时会被要求设置密码；也支持制表符分隔，# 开头的行忽略）。旧 3 列格式 <code>ID,用户名,密码</code> 仍可用，班级与角色取下方默认值。</p>
+        <form method="post" asp-page-handler="BatchImport" class="stack">
+            <label>账号清单<textarea asp-for="ImportText" rows="6" placeholder="zhang.san,张三,高一（1）班,学生,&#10;li.si,李四,高一（1）班,班管理员,Passw0rd-2026&#10;wang.wu,王五,高一（2）班,学生,"></textarea></label>
+            <label>默认班级（仅 3 列旧格式行使用）
+                <select asp-for="ImportClassId">
+                    <option value="">（不导入 3 列旧格式行）</option>
+                    @foreach (var classroom in Model.Classes)
+                    {
+                        <option value="@classroom.Id">@classroom.Name</option>
+                    }
+                </select>
+            </label>
+            <label>默认角色（仅 3 列旧格式行使用）
+                <select asp-for="ImportRoleId">
+                    @foreach (var role in Model.RoleDefinitions.Where(x => x.Kind != nameof(AccountRoleKind.Administrator)))
+                    {
+                        <option value="@role.Id" selected="@(role.Id == AccountRole.StudentId)">@role.Name</option>
+                    }
+                </select>
+            </label>
+            <button type="submit">批量导入</button>
+        </form>
+    </details>
+</section>
 <section class="panel">
     <div class="panel-heading">
         <div><h2>角色配置</h2><p class="muted">角色默认权限会统一应用到所有同角色账号。</p></div>
@@ -79,7 +174,7 @@
                 }
                 else
                 {
-                    <form method="post" asp-page-handler="UpdateRole" class="stack role-edit-dialog-form"><input type="hidden" name="RoleEdit.Id" value="@role.Id" /><label>角色名称<input name="RoleEdit.Name" value="@role.Name" readonly="@(role.Kind != "Custom")" /></label><fieldset class="permissions"><legend>默认权限</legend><label><input type="checkbox" name="RoleEdit.AccessWebUi" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.AccessWebUi)" /> 概览</label><label><input type="checkbox" name="RoleEdit.ManageUsers" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.ManageUsers)" /> 人员管理</label><label><input type="checkbox" name="RoleEdit.SendNotifications" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.SendNotifications)" /> 发送与清除通知</label><label><input type="checkbox" name="RoleEdit.SendVoiceMessages" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.SendVoiceMessages)" /> 发送语音</label><label><input type="checkbox" name="RoleEdit.TeacherComing" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.TeacherComing)" /> 老师来了</label><label><input type="checkbox" name="RoleEdit.ManageSchedule" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.ManageSchedule)" /> 换课</label><label><input type="checkbox" name="RoleEdit.RunExtensions" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.RunExtensions)" /> 扩展功能</label><label><input type="checkbox" name="RoleEdit.MainMenuControl" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.MainMenuControl)" /> 主界面</label><label><input type="checkbox" name="RoleEdit.PowerControl" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.PowerControl)" /> 电源控制</label></fieldset><div class="dialog-actions"><button type="button" class="ghost" data-user-edit-close>取消</button><button type="submit">保存角色</button></div></form>
+                    <form method="post" asp-page-handler="UpdateRole" class="stack role-edit-dialog-form"><input type="hidden" name="RoleEdit.Id" value="@role.Id" /><label>角色名称<input name="RoleEdit.Name" value="@role.Name" readonly="@(role.Kind != "Custom")" /></label><fieldset class="permissions"><legend>默认权限</legend><label><input type="checkbox" name="RoleEdit.AccessWebUi" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.AccessWebUi)" /> 概览</label><label><input type="checkbox" name="RoleEdit.ManageUsers" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.ManageUsers)" /> 人员管理</label><label><input type="checkbox" name="RoleEdit.SendNotifications" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.SendNotifications)" /> 发送与清除通知</label><label><input type="checkbox" name="RoleEdit.SendVoiceMessages" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.SendVoiceMessages)" /> 发送语音</label><label><input type="checkbox" name="RoleEdit.TeacherComing" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.TeacherComing)" /> 老师来了</label><label><input type="checkbox" name="RoleEdit.ManageSchedule" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.ManageSchedule)" /> 换课</label><label><input type="checkbox" name="RoleEdit.RunExtensions" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.RunExtensions)" /> 扩展功能</label><label><input type="checkbox" name="RoleEdit.MainMenuControl" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.MainMenuControl)" /> 主界面</label><label><input type="checkbox" name="RoleEdit.PowerControl" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.PowerControl)" /> 电源控制</label><label><input type="checkbox" name="RoleEdit.ChangeDisplayName" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.ChangeDisplayName)" /> 修改用户名</label><label><input type="checkbox" name="RoleEdit.ApiAccess" value="true" checked="@role.DefaultPermissions.HasFlag(UserPermissions.ApiAccess)" /> API 访问</label></fieldset><div class="dialog-actions"><button type="button" class="ghost" data-user-edit-close>取消</button><button type="submit">保存角色</button></div></form>
                     @if (role.Kind == "Custom") { <section class="user-danger-zone"><div><h3>删除角色</h3><p>只有未被账号使用的角色才能删除。</p></div><form method="post" asp-page-handler="DeleteRole" class="delete-user-form" onsubmit="return confirm('确定删除此角色？')"><input type="hidden" name="id" value="@role.Id" /><button type="submit" class="danger ghost">删除角色</button></form></section> }
                 }
             </div>
@@ -87,7 +182,7 @@
     }
 
     <dialog id="role-create-dialog" class="user-edit-dialog" data-user-edit-dialog aria-labelledby="role-create-dialog-title">
-        <div class="user-edit-dialog-shell"><header class="user-edit-dialog-header"><div><p class="eyebrow">新建角色</p><h2 id="role-create-dialog-title">创建角色</h2></div><button type="button" class="ghost dialog-close-button" data-user-edit-close aria-label="关闭创建窗口"><i class="bi bi-x-lg" aria-hidden="true"></i></button></header><form method="post" asp-page-handler="CreateRole" class="stack role-edit-dialog-form"><label>角色名称<input name="RoleEdit.Name" maxlength="40" required /></label><fieldset class="permissions"><legend>默认权限</legend><label><input type="checkbox" name="RoleEdit.AccessWebUi" value="true" /> 概览</label><label><input type="checkbox" name="RoleEdit.ManageUsers" value="true" /> 人员管理</label><label><input type="checkbox" name="RoleEdit.SendNotifications" value="true" /> 发送与清除通知</label><label><input type="checkbox" name="RoleEdit.SendVoiceMessages" value="true" /> 发送语音</label><label><input type="checkbox" name="RoleEdit.TeacherComing" value="true" /> 老师来了</label><label><input type="checkbox" name="RoleEdit.ManageSchedule" value="true" /> 换课</label><label><input type="checkbox" name="RoleEdit.RunExtensions" value="true" /> 扩展功能</label><label><input type="checkbox" name="RoleEdit.MainMenuControl" value="true" /> 主界面</label><label><input type="checkbox" name="RoleEdit.PowerControl" value="true" /> 电源控制</label></fieldset><div class="dialog-actions"><button type="button" class="ghost" data-user-edit-close>取消</button><button type="submit">创建角色</button></div></form></div>
+        <div class="user-edit-dialog-shell"><header class="user-edit-dialog-header"><div><p class="eyebrow">新建角色</p><h2 id="role-create-dialog-title">创建角色</h2></div><button type="button" class="ghost dialog-close-button" data-user-edit-close aria-label="关闭创建窗口"><i class="bi bi-x-lg" aria-hidden="true"></i></button></header><form method="post" asp-page-handler="CreateRole" class="stack role-edit-dialog-form"><label>角色名称<input name="RoleEdit.Name" maxlength="40" required /></label><fieldset class="permissions"><legend>默认权限</legend><label><input type="checkbox" name="RoleEdit.AccessWebUi" value="true" /> 概览</label><label><input type="checkbox" name="RoleEdit.ManageUsers" value="true" /> 人员管理</label><label><input type="checkbox" name="RoleEdit.SendNotifications" value="true" /> 发送与清除通知</label><label><input type="checkbox" name="RoleEdit.SendVoiceMessages" value="true" /> 发送语音</label><label><input type="checkbox" name="RoleEdit.TeacherComing" value="true" /> 老师来了</label><label><input type="checkbox" name="RoleEdit.ManageSchedule" value="true" /> 换课</label><label><input type="checkbox" name="RoleEdit.RunExtensions" value="true" /> 扩展功能</label><label><input type="checkbox" name="RoleEdit.MainMenuControl" value="true" /> 主界面</label><label><input type="checkbox" name="RoleEdit.PowerControl" value="true" /> 电源控制</label><label><input type="checkbox" name="RoleEdit.ChangeDisplayName" value="true" /> 修改用户名</label><label><input type="checkbox" name="RoleEdit.ApiAccess" value="true" /> API 访问</label></fieldset><div class="dialog-actions"><button type="button" class="ghost" data-user-edit-close>取消</button><button type="submit">创建角色</button></div></form></div>
     </dialog>
 </section>
 }
@@ -102,7 +197,16 @@
         <label>
             角色
             <select asp-for="Create.RoleId" data-role-select>
-                @foreach (var role in Model.RoleDefinitions.Where(role => Model.CurrentUser.Role == UserRole.Admin || role.Kind != "Administrator")) { <option value="@role.Id" data-admin="@(role.Kind == "Administrator" ? "true" : "false")">@role.Name</option> }
+                @foreach (var role in Model.RoleDefinitions.Where(role => Model.CurrentUser.Role == UserRole.Admin || role.Kind != "Administrator")) { <option value="@role.Id" data-admin="@(role.Kind == "Administrator" ? "true" : "false")" selected="@(role.Id == Model.Create.RoleId)">@role.Name</option> }
+            </select>
+        </label>
+        <label class="create-class-field" data-create-class-field hidden="@createIsAdmin">
+            班级
+            <select asp-for="Create.ClassId" data-create-class-select required="@(!createIsAdmin)">
+                @foreach (var classroom in Model.Classes)
+                {
+                    <option value="@classroom.Id">@classroom.Name</option>
+                }
             </select>
         </label>
         <fieldset class="permissions" data-role-permissions hidden="@createIsAdmin">
@@ -115,6 +219,8 @@
             <label><input asp-for="Create.RunExtensions" disabled="@createIsAdmin" /> 扩展功能</label>
             <label><input asp-for="Create.MainMenuControl" disabled="@createIsAdmin" /> 主界面</label>
             <label><input asp-for="Create.PowerControl" disabled="@createIsAdmin" /> 电源控制</label>
+            <label><input asp-for="Create.ChangeDisplayName" disabled="@createIsAdmin" /> 修改用户名</label>
+            <label><input asp-for="Create.ApiAccess" disabled="@createIsAdmin" /> API 访问</label>
         </fieldset>
         <p class="admin-permission-note" data-admin-permission-note hidden="@(!createIsAdmin)">
             管理员默认拥有全部权限，无需配置附加权限。
@@ -164,6 +270,8 @@
     @foreach (var user in Model.Accounts)
     {
         var isAdmin = user.Role == UserRole.Admin;
+        var canUseApi = user.EffectivePermissions.HasFlag(UserPermissions.ApiAccess);
+        var apiKeys = Model.GetApiKeys(user.Id);
         var dialogId = $"user-edit-{user.Id:N}";
         <dialog id="@dialogId" class="user-edit-dialog" data-user-edit-dialog aria-labelledby="@($"{dialogId}-title")">
             <div class="user-edit-dialog-shell">
@@ -201,6 +309,8 @@
                         <label><input type="checkbox" name="Edit.RunExtensions" value="true" checked="@user.GrantedPermissions.HasFlag(UserPermissions.RunExtensions)" disabled="@isAdmin" /> 扩展功能</label>
                         <label><input type="checkbox" name="Edit.MainMenuControl" value="true" checked="@user.GrantedPermissions.HasFlag(UserPermissions.MainMenuControl)" disabled="@isAdmin" /> 主界面</label>
                         <label><input type="checkbox" name="Edit.PowerControl" value="true" checked="@user.GrantedPermissions.HasFlag(UserPermissions.PowerControl)" disabled="@isAdmin" /> 电源控制</label>
+                        <label><input type="checkbox" name="Edit.ChangeDisplayName" value="true" checked="@user.GrantedPermissions.HasFlag(UserPermissions.ChangeDisplayName)" disabled="@isAdmin" /> 修改用户名</label>
+                        <label><input type="checkbox" name="Edit.ApiAccess" value="true" checked="@user.GrantedPermissions.HasFlag(UserPermissions.ApiAccess)" disabled="@isAdmin" /> API 访问</label>
                     </fieldset>
                     <p class="admin-permission-note" data-admin-permission-note hidden="@(!isAdmin)">
                         管理员默认拥有全部权限，附加权限不可修改。
@@ -210,6 +320,93 @@
                         <button type="submit">保存修改</button>
                     </div>
                 </form>
+
+                <section class="api-key-user-section" aria-labelledby="@($"{dialogId}-api-title")">
+                    <div class="api-key-user-heading">
+                        <div>
+                            <h3 id="@($"{dialogId}-api-title")">API Key</h3>
+                            <p>API Key 继承该账号当前权限；吊销或移除 API 访问权限后立即失效。</p>
+                        </div>
+                    </div>
+                    @if (user.Role == UserRole.Admin && Model.CurrentUser.Role != UserRole.Admin)
+                    {
+                        <p class="muted">仅系统管理员可管理管理员账号的 API Key。</p>
+                    }
+                    else
+                    {
+                        @if (!canUseApi)
+                        {
+                            <p class="muted">该账号当前没有 API 访问权限，已有密钥已失效；仍可吊销不再使用的密钥。</p>
+                        }
+                        else
+                        {
+                            <form method="post" asp-page-handler="CreateApiKey" class="api-key-create user-api-key-create">
+                                <input type="hidden" name="id" value="@user.Id" />
+                                <label>密钥名称<input name="name" maxlength="40" placeholder="例如：自动化脚本" /></label>
+                                <button type="submit">生成 API Key</button>
+                            </form>
+                        }
+                        @if (apiKeys.Count == 0)
+                        {
+                            @if (canUseApi)
+                            {
+                                <p class="muted">暂无 API Key。</p>
+                            }
+                        }
+                        else
+                        {
+                            <div class="user-account-table-wrap">
+                                <table class="user-account-table api-key-table">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">名称</th>
+                                            <th scope="col">前缀</th>
+                                            <th scope="col">创建时间</th>
+                                            <th scope="col">最近使用</th>
+                                            <th scope="col">状态</th>
+                                            <th scope="col"><span class="visually-hidden">操作</span></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                    @foreach (var key in apiKeys)
+                                    {
+                                        <tr>
+                                            <td data-label="名称"><strong>@key.Name</strong></td>
+                                            <td data-label="前缀"><code>@key.Prefix…</code></td>
+                                            <td data-label="创建时间">@key.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                                            <td data-label="最近使用">@(key.LastUsedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "从未使用")</td>
+                                            <td data-label="状态">
+                                                @if (key.RevokedAt is not null)
+                                                {
+                                                    <span class="role-badge muted">已吊销</span>
+                                                }
+                                                else if (key.ExpiresAt is { } expiresAt && expiresAt <= DateTimeOffset.UtcNow)
+                                                {
+                                                    <span class="role-badge muted">已过期</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="role-badge">有效</span>
+                                                }
+                                            </td>
+                                            <td class="user-account-action">
+                                                @if (key.RevokedAt is null)
+                                                {
+                                                    <form method="post" asp-page-handler="RevokeApiKey" onsubmit="return confirm('吊销后使用该密钥的脚本会立即失效，确定继续吗？')">
+                                                        <input type="hidden" name="id" value="@user.Id" />
+                                                        <input type="hidden" name="keyId" value="@key.Id" />
+                                                        <button type="submit" class="danger ghost">吊销</button>
+                                                    </form>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    }
+                </section>
 
                 <section class="user-danger-zone" aria-labelledby="@($"{dialogId}-danger-title")">
                     <div>

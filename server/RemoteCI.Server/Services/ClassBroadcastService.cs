@@ -70,6 +70,12 @@ public sealed class ClassBroadcastService(
                         Title = notification.Title,
                         Message = notification.Message,
                         ForceSenderInTitle = forceSender,
+                        IsNotificationEffectEnabled = notification.IsNotificationEffectEnabled,
+                        IsNotificationSoundEnabled = notification.IsNotificationSoundEnabled,
+                        IsSpeechEnabled = notification.IsSpeechEnabled,
+                        IsNotificationTopmostEnabled = notification.IsNotificationTopmostEnabled,
+                        DurationSeconds = notification.DurationSeconds,
+                        RepeatCounts = notification.RepeatCounts,
                     }
                     : null,
                 PowerAction = request.PowerAction,

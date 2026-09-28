@@ -143,6 +143,42 @@ public sealed class VisitorAccessTests
     }
 
     [Fact]
+    public async Task VisitorPage_FiltersClassesByGroupAndIncludesChildGroups()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var admin = CreateBrowser(factory);
+        await LoginWebUiAsync(admin, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
+
+        Guid rootGroupId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var classrooms = scope.ServiceProvider.GetRequiredService<ClassroomService>();
+            var rootGroup = await classrooms.CreateGroupAsync("访客筛选根组", null);
+            var childGroup = await classrooms.CreateGroupAsync("访客筛选子组", rootGroup.Id);
+            var otherGroup = await classrooms.CreateGroupAsync("访客筛选其他组", null);
+            var childClass = await classrooms.CreateAsync("访客筛选一班");
+            var otherClass = await classrooms.CreateAsync("访客筛选二班");
+
+            await classrooms.SetVisitorAccessAsync(childClass.Id, true);
+            await classrooms.SetVisitorAccessAsync(otherClass.Id, true);
+            await classrooms.SetClassGroupsAsync(childClass.Id, [childGroup.Id]);
+            await classrooms.SetClassGroupsAsync(otherClass.Id, [otherGroup.Id]);
+            rootGroupId = rootGroup.Id;
+        }
+
+        using var guest = CreateBrowser(factory);
+        var response = await guest.GetAsync($"/Visitor?group={rootGroupId}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var html = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+
+        // 选择父分组时包含子分组中的班级；其他分组的班级不应出现在班级选项卡中。
+        Assert.Contains("按分组筛选班级", html);
+        Assert.Contains("访客筛选子组", html);
+        Assert.Contains("访客筛选一班", html);
+        Assert.DoesNotContain("访客筛选二班", html);
+    }
+
+    [Fact]
     public async Task VisitorPage_RedirectsToLoginWhenNoClassEnabled()
     {
         await using var factory = new TestWebApplicationFactory();
@@ -242,7 +278,7 @@ public sealed class VisitorAccessTests
             await scope.ServiceProvider.GetRequiredService<VisitorAccessSettings>()
                 .SetAutoEnterAsync(true);
             var snapshot = await scope.ServiceProvider.GetRequiredService<ConfigurationArchiveService>().CaptureAsync();
-            Assert.Equal(3, snapshot.Version);
+            Assert.Equal(4, snapshot.Version);
             Assert.NotNull(snapshot.Classrooms);
             Assert.Contains(snapshot.Classrooms!, x => x.Id == Classroom.DefaultId && x.VisitorAccessEnabled);
             Assert.True(snapshot.Metadata.AutoEnterVisitorPage);

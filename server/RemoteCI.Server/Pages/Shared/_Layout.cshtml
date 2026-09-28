@@ -1,6 +1,7 @@
 @using Microsoft.AspNetCore.Identity
 @using Microsoft.EntityFrameworkCore
 @inject UserManager<AppUser> UserManager
+@inject RemoteCI.Server.Services.LoginPageSettings loginPageSettings
 @inject AppDbContext Db
 @{
     var current = User.Identity?.IsAuthenticated == true ? await UserManager.GetUserAsync(User) : null;
@@ -33,14 +34,16 @@
         accessibleClasses = current.Role == UserRole.Admin
             ? (await Db.Classrooms.AsNoTracking().ToListAsync())
                 .OrderBy(x => x.CreatedAt)
-                .Select(x => new RemoteCI.Shared.Models.ClassSummary { Id = x.Id, Name = x.Name, VisitorEnabled = x.VisitorAccessEnabled })
+                // 带上 HasAvatar：侧边栏左上角按班级头像优先展示，未设置时回退 RemoteCI logo。
+                .Select(x => new RemoteCI.Shared.Models.ClassSummary { Id = x.Id, Name = x.Name, VisitorEnabled = x.VisitorAccessEnabled, HasAvatar = x.Avatar != null })
                 .ToList()
             : (await Db.ClassMemberships.AsNoTracking()
                 .Where(x => x.UserId == current.Id)
-                .Join(Db.Classrooms, x => x.ClassroomId, y => y.Id, (x, y) => new { y.Id, y.Name, y.VisitorAccessEnabled, y.CreatedAt })
+                .Join(Db.Classrooms, x => x.ClassroomId, y => y.Id, (x, y) => new { y.Id, y.Name, y.VisitorAccessEnabled, y.CreatedAt, HasAvatar = y.Avatar != null })
                 .ToListAsync())
                 .OrderBy(x => x.CreatedAt)
-                .Select(x => new RemoteCI.Shared.Models.ClassSummary { Id = x.Id, Name = x.Name, VisitorEnabled = x.VisitorAccessEnabled })
+                // 带上 HasAvatar：侧边栏左上角按班级头像优先展示，未设置时回退 RemoteCI logo。
+                .Select(x => new RemoteCI.Shared.Models.ClassSummary { Id = x.Id, Name = x.Name, VisitorEnabled = x.VisitorAccessEnabled, HasAvatar = x.HasAvatar })
                 .ToList();
         currentClassId = Guid.TryParse(Context.Request.Cookies[RemoteCI.Server.Pages.WebPageModel.CurrentClassCookie], out var cookieClass)
             && accessibleClasses.Any(x => x.Id == cookieClass)
@@ -48,9 +51,40 @@
             : accessibleClasses.FirstOrDefault()?.Id ?? RemoteCI.Server.Data.Classroom.DefaultId;
     }
     var currentClassName = accessibleClasses.FirstOrDefault(x => x.Id == currentClassId)?.Name ?? "默认班级";
+    // 侧边栏左上角是否显示当前班级头像：仅在当前用户已登录、当前班级存在且已上传头像时为 true；
+    // 未登录或当前班级未设置头像时保持 false，渲染端会回退到 RemoteCI logo。
+    var currentClassHasAvatar = current is not null
+        && accessibleClasses.FirstOrDefault(x => x.Id == currentClassId)?.HasAvatar == true;
+    // 登录页外观由系统管理员配置：未登录页面（登录/设置密码等）按此渲染主题与背景，
+    // 访客页与已登录页面继续沿用浏览器本地主题，互不影响。
+    var loginAppearance = current is null && currentPage != "/Visitor"
+        ? await loginPageSettings.GetAppearanceAsync()
+        : null;
+    var forcedLoginTheme = loginAppearance?.Theme switch
+    {
+        RemoteCI.Server.Data.LoginTheme.Light => "light",
+        RemoteCI.Server.Data.LoginTheme.Dark => "dark",
+        _ => string.Empty,
+    };
+    // 登录卡片位置映射到 grid 的水平对齐；未登录页面之外的布局不受影响。
+    var loginCardAlign = loginAppearance?.CardPosition switch
+    {
+        RemoteCI.Server.Data.LoginCardPosition.Left => "start",
+        RemoteCI.Server.Data.LoginCardPosition.Right => "end",
+        _ => "center",
+    };
+    var loginStyleParts = new List<string>();
+    if (loginAppearance?.HasBackground == true)
+    {
+        loginStyleParts.Add($"--login-bg-image:url('{Url.Content("~/api/settings/login-background")}?v={loginAppearance.BackgroundUpdatedAt?.Ticks ?? 0}')");
+        loginStyleParts.Add($"--login-bg-opacity:{Math.Clamp(loginAppearance.Opacity, 0, 100) / 100d:0.##}");
+    }
+    if (loginAppearance is not null) loginStyleParts.Add($"--login-card-align:{loginCardAlign}");
+    var hasLoginBackground = loginAppearance?.HasBackground == true;
+    var loginBackgroundStyle = loginStyleParts.Count == 0 ? null : string.Join(';', loginStyleParts);
 }
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-login-theme-forced="@forcedLoginTheme">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -58,9 +92,12 @@
     <link rel="icon" href="~/favicon.ico" sizes="16x16 32x32 48x48" asp-append-version="true" />
     <link rel="icon" type="image/svg+xml" href="~/favicon.svg" asp-append-version="true" />
     <link rel="stylesheet" href="~/vendor/bootstrap-icons/font/bootstrap-icons.min.css" asp-append-version="true" />
+    @* 主题在样式表之前确定，避免登录页出现明暗闪烁；管理员强制主题优先于本地偏好。 *@
+    <script>try { document.documentElement.dataset.theme = "@forcedLoginTheme" || (localStorage.getItem("remoteci-theme") === "light" ? "light" : "dark"); } catch { document.documentElement.dataset.theme = "dark"; }</script>
     <link rel="stylesheet" href="~/app.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/premium.css" asp-append-version="true" />
 </head>
-<body class="@(currentPage == "/Visitor" ? "visitor-layout" : current is null ? "auth-layout" : "app-layout")">
+<body class="@(currentPage == "/Visitor" ? "visitor-layout" : current is null ? "auth-layout" : "app-layout")@(hasLoginBackground ? " has-login-background" : "")" style="@loginBackgroundStyle">
     @if (currentPage == "/Visitor")
     {
         <main class="shell visitor-shell">
@@ -72,49 +109,67 @@
     else if (current is not null)
     {
         <aside class="sidebar" aria-label="主导航" data-sidebar>
-            <a class="brand" href="@(permissions.HasFlag(UserPermissions.AccessWebUi) ? Url.Page("/Index") : Url.Page("/Account"))">
-                <span class="brand-badge"><img class="brand-logo" src="~/logo-mark.svg" alt="" asp-append-version="true" /></span>
-                <span class="brand-copy"><strong>RemoteCI</strong><small>课堂控制中心</small></span>
-            </a>
+            <div class="brand">
+                <a class="brand-link" href="@(permissions.HasFlag(UserPermissions.AccessWebUi) ? Url.Page("/Index") : Url.Page("/Account"))">
+                    @* 左上角优先展示当前班级头像；未设置头像时保持原有 RemoteCI logo。
+                       头像走 .brand-badge-avatar（铺满圆形、保留 alpha），不受 .brand-logo 的灰度提亮滤镜影响。 *@
+                    @if (currentClassHasAvatar)
+                    {
+                        <span class="brand-badge brand-badge-avatar"><img class="brand-avatar" src="/api/classes/@currentClassId/avatar" alt="" /></span>
+                    }
+                    else
+                    {
+                        <span class="brand-badge"><img class="brand-logo" src="~/logo-mark.svg" alt="" asp-append-version="true" /></span>
+                    }
+                    <span class="brand-copy"><strong>RemoteCI</strong><small>课堂控制中心</small></span>
+                </a>
+                <button class="sidebar-collapse-button" type="button" data-sidebar-toggle aria-label="展开或收起侧边栏" title="展开或收起侧边栏"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18m7-6l-3-3l3-3"/></g></svg></button>
+            </div>
             <nav class="side-nav">
                 @if (permissions.HasFlag(UserPermissions.AccessWebUi))
                 {
-                    <a class="@NavClass("/Index")" aria-current="@CurrentPage("/Index")" asp-page="/Index" data-search-label="概览 仪表盘 课堂状态"><i class="bi bi-grid" aria-hidden="true"></i><span>概览</span></a>
+                    <a class="@NavClass("/Index")" aria-current="@CurrentPage("/Index")" asp-page="/Index" data-search-label="概览 仪表盘 课堂状态"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></g></svg><span>概览</span></a>
                 }
-                <a class="@NavClass("/Schedule")" aria-current="@CurrentPage("/Schedule")" asp-page="/Schedule" data-search-label="课表 换课 课程安排"><i class="bi bi-calendar-week" aria-hidden="true"></i><span>课表</span></a>
+                <a class="@NavClass("/Schedule")" aria-current="@CurrentPage("/Schedule")" asp-page="/Schedule" data-search-label="课表 换课 课程安排"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M8 2v3m8-3v3"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01M16 17h.01"/></g></svg><span>课表</span></a>
                 @if (showControlMenu)
                 {
-                    <a class="@(controlMenuActive ? "nav-link active" : "nav-link")" aria-current="@(controlMenuActive ? "page" : null)" asp-page="/Control" data-search-label="控制 老师来了 发送通知 清除通知 主界面 音量 电源 扩展"><i class="bi bi-toggles" aria-hidden="true"></i><span>控制</span></a>
+                    <a class="@(controlMenuActive ? "nav-link active" : "nav-link")" aria-current="@(controlMenuActive ? "page" : null)" asp-page="/Control" data-search-label="控制 老师来了 发送通知 清除通知 主界面 音量 电源 扩展"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 5H3m9 14H3M14 3v4m2 10v4m5-9h-9m9 7h-5m5-14h-7m-6 5v4m0-2H3"/></svg><span>控制</span></a>
                 }
-                @* 管理员专属管理器与“选中班级的操作”用分割线分区：上面是当前班级的操作，下面是全局管理。 *@
+                @* 管理员专属管理器与“选中班级的操作”用分组标签分区：上面是当前班级的操作，下面是全局管理。 *@
                 @if (permissions.HasFlag(UserPermissions.ManageUsers) || current.Role == UserRole.Admin)
                 {
-                    <hr class="nav-divider" role="separator" aria-label="管理员功能区" />
+                    <div class="nav-section-label" role="presentation">管理</div>
                     @if (permissions.HasFlag(UserPermissions.ManageUsers))
                     {
-                        <a class="@NavClass("/Users")" aria-current="@CurrentPage("/Users")" asp-page="/Users" data-search-label="人员权限 用户 账号管理 批量导入"><i class="bi bi-people" aria-hidden="true"></i><span>人员权限</span></a>
+                        <a class="@NavClass("/Users")" aria-current="@CurrentPage("/Users")" asp-page="/Users" data-search-label="人员权限 用户 账号管理 批量导入"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3.128a4 4 0 0 1 0 7.744M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></g></svg><span>人员权限</span></a>
                     }
                     @if (current.Role == UserRole.Admin)
                     {
-                        <a class="@NavClass("/BatchControl")" aria-current="@CurrentPage("/BatchControl")" asp-page="/BatchControl" data-search-label="批量控制 广播 通知 开关机 电源 语音"><i class="bi bi-broadcast" aria-hidden="true"></i><span>批量控制</span></a>
-                        <a class="@NavClass("/Classes")" aria-current="@CurrentPage("/Classes")" asp-page="/Classes" data-search-label="班级管理 班级 分组 成员 访客"><i class="bi bi-collection" aria-hidden="true"></i><span>班级管理</span></a>
-                        <a class="@NavClass("/SystemConfig")" aria-current="@CurrentPage("/SystemConfig")" asp-page="/SystemConfig" data-search-label="系统配置 系统更新 服务端维护"><i class="bi bi-sliders" aria-hidden="true"></i><span>系统配置</span></a>
+                        <a class="@NavClass("/BatchControl")" aria-current="@CurrentPage("/BatchControl")" asp-page="/BatchControl" data-search-label="批量控制 广播 通知 开关机 电源 语音"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M4.9 16.1C1 12.2 1 5.8 4.9 1.9m2.9 2.8a6.14 6.14 0 0 0-.8 7.5"/><circle cx="12" cy="9" r="2"/><path d="M16.2 4.8c2 2 2.26 5.11.8 7.47M19.1 1.9a9.96 9.96 0 0 1 0 14.1m-9.6 2h5M8 22l4-11l4 11"/></g></svg><span>批量控制</span></a>
+                        <a class="@NavClass("/Classes")" aria-current="@CurrentPage("/Classes")" asp-page="/Classes" data-search-label="班级管理 班级 分组 成员 访客"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m6.08 9.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/><path d="m6.08 14.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/></g></svg><span>班级管理</span></a>
+                        <a class="@NavClass("/SystemConfig")" aria-current="@CurrentPage("/SystemConfig")" asp-page="/SystemConfig" data-search-label="系统配置 系统更新 服务端维护"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M14 17H5M19 7h-9"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></g></svg><span>系统配置</span></a>
+                        <a class="@NavClass("/LoginSettings")" aria-current="@CurrentPage("/LoginSettings")" asp-page="/LoginSettings" data-search-label="登录页设置 登录页 主题 深色 浅色 背景 背景图 透明度 外观 卡片位置 左 右"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15l-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></g></svg><span>登录页设置</span></a>
                     }
-                    <hr class="nav-divider" role="separator" aria-label="个人功能区" />
+                    <div class="nav-section-label" role="presentation">账户</div>
                 }
-                <a class="@NavClass("/Account")" aria-current="@CurrentPage("/Account")" asp-page="/Account" data-search-label="个人账号 密码 设备 会话"><i class="bi bi-person" aria-hidden="true"></i><span>个人账号</span></a>
+                <a class="@NavClass("/Account")" aria-current="@CurrentPage("/Account")" asp-page="/Account" data-search-label="个人账号 密码 设备 会话"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M17.925 20.056a6 6 0 0 0-11.851.001"/><circle cx="12" cy="11" r="4"/><circle cx="12" cy="12" r="10"/></g></svg><span>个人账号</span></a>
             </nav>
-            <div class="sidebar-note"><strong>RemoteCI v2</strong><span>清晰查看状态，并安全执行课堂操作。</span></div>
-            <form class="logout-form" method="post" asp-page="/Logout">
-                <button class="logout-button" type="submit" title="退出登录"><i class="bi bi-box-arrow-right" aria-hidden="true"></i><span>退出登录</span></button>
-            </form>
+            <div class="sidebar-footer">
+                <a class="sidebar-user" asp-page="/Account" aria-label="打开 @current.DisplayName 的个人账号" title="@current.DisplayName">
+                    <span class="sidebar-user-avatar">@userInitial</span>
+                    <span class="sidebar-user-copy"><strong>@current.DisplayName</strong><small>@current.Role</small></span>
+                </a>
+                <form class="logout-form" method="post" asp-page="/Logout">
+                    <button class="logout-button" type="submit" title="退出登录"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m16 17l5-5l-5-5m5 5H9m0 9H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/></svg><span>退出登录</span></button>
+                </form>
+            </div>
         </aside>
         <div class="sidebar-backdrop" data-sidebar-backdrop></div>
         <div class="app-frame">
             <header class="topbar">
-                <button class="topbar-button menu-button" type="button" data-sidebar-toggle aria-label="展开或收起导航" title="展开或收起导航"><i class="bi bi-list" aria-hidden="true"></i></button>
+                <button class="topbar-button menu-button" type="button" data-sidebar-toggle aria-label="展开或收起导航" title="展开或收起导航"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h16M4 12h16M4 19h16"/></svg></button>
                 <div class="app-search" role="search">
-                    <i class="bi bi-search" aria-hidden="true"></i>
+                    <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m21 21l-4.34-4.34"/><circle cx="11" cy="11" r="8"/></g></svg>
                     <input type="search" data-app-search placeholder="搜索页面或功能" autocomplete="off" aria-label="搜索页面或功能" />
                     <span class="search-feedback" data-search-feedback aria-live="polite"></span>
                 </div>
@@ -123,7 +178,7 @@
                     {
                         <form class="class-switcher" method="post" asp-page="/Account" asp-page-handler="SwitchClass">
                             <input type="hidden" name="returnUrl" value="@(currentPage ?? "/Index")" />
-                            <i class="bi bi-collection" aria-hidden="true"></i>
+                            <svg class="switcher-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m6.08 9.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/><path d="m6.08 14.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/></g></svg>
                             <select name="classId" aria-label="切换班级" onchange="this.form.submit()">
                                 @foreach (var classroom in accessibleClasses)
                                 {
@@ -134,11 +189,11 @@
                     }
                     else if (accessibleClasses.Count == 1)
                     {
-                        <span class="class-switcher current" title="当前班级"><i class="bi bi-collection" aria-hidden="true"></i><span>@currentClassName</span></span>
+                        <span class="class-switcher current" title="当前班级"><svg class="switcher-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m6.08 9.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/><path d="m6.08 14.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/></g></svg><span>@currentClassName</span></span>
                     }
-                    <button class="topbar-button" type="button" data-theme-toggle aria-label="切换明暗主题" title="切换明暗主题"><i class="bi bi-circle-half" aria-hidden="true"></i></button>
-                    <button class="topbar-button" type="button" data-page-refresh aria-label="刷新当前页面" title="刷新当前页面"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i></button>
-                    <a class="topbar-button" asp-page="/Account" aria-label="打开个人账号" title="个人账号"><i class="bi bi-gear" aria-hidden="true"></i></a>
+                    <button class="topbar-button" type="button" data-theme-toggle aria-label="切换明暗主题" title="切换明暗主题"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2v2m2.837 12.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715M16 12a4 4 0 0 0-4-4m7-3l-1.256 1.256M20 12h2"/></svg></button>
+                    <button class="topbar-button" type="button" data-page-refresh aria-label="刷新当前页面" title="刷新当前页面"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></g></svg></button>
+                    <a class="topbar-button" asp-page="/Account" aria-label="打开个人账号" title="个人账号"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0a2.34 2.34 0 0 0 3.319 1.915a2.34 2.34 0 0 1 2.33 4.033a2.34 2.34 0 0 0 0 3.831a2.34 2.34 0 0 1-2.33 4.033a2.34 2.34 0 0 0-3.319 1.915a2.34 2.34 0 0 1-4.659 0a2.34 2.34 0 0 0-3.32-1.915a2.34 2.34 0 0 1-2.33-4.033a2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></g></svg></a>
                     <a class="user-avatar" asp-page="/Account" aria-label="打开 @current.DisplayName 的个人账号" title="@current.DisplayName">@userInitial</a>
                 </div>
             </header>

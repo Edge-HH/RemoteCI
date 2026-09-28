@@ -553,6 +553,8 @@ internal fun SwapScreen(
     replacementSubject: String?,
     connectionReady: Boolean,
     resultText: String?,
+    permanent: Boolean,
+    onPermanentChange: (Boolean) -> Unit,
     onModeChange: (SwapMode) -> Unit,
     onPickSource: () -> Unit,
     onPickTarget: () -> Unit,
@@ -561,6 +563,7 @@ internal fun SwapScreen(
     item { ModeSelector(mode, onModeChange) }
     item { LessonButton(stringResource(R.string.swap_source_label), sourceLesson?.subject ?: stringResource(R.string.pick_placeholder), onPickSource) }
     item { LessonButton(stringResource(R.string.swap_target_label), if (mode == SwapMode.Exchange) targetLesson?.subject ?: stringResource(R.string.pick_placeholder) else replacementSubject ?: stringResource(R.string.pick_subject_placeholder), onPickTarget) }
+    item { Toggle("永久换课", permanent, onPermanentChange) }
     val validTarget = if (mode == SwapMode.Exchange) targetLesson != null && targetLesson.index != sourceLesson?.index else replacementSubject != null
     item { ActionButton(stringResource(if (mode == SwapMode.Exchange) R.string.confirm_exchange else R.string.confirm_replace), Icons.Rounded.Check, connectionReady && sourceLesson != null && validTarget, onSubmit) }
     if (!resultText.isNullOrBlank()) item { Hint(resultText) }

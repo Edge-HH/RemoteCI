@@ -149,6 +149,10 @@ public sealed class ScheduleChangeRequest
 
     [JsonPropertyName("expectedRevision")]
     public string ExpectedRevision { get; set; } = string.Empty;
+
+    /// <summary>写入 ClassIsland 源课表，使本周及以后每周持续生效。</summary>
+    [JsonPropertyName("permanent")]
+    public bool Permanent { get; set; }
 }
 
 public sealed class NotificationRequest
@@ -172,4 +176,28 @@ public sealed class NotificationRequest
 
     [JsonPropertyName("isSpeechEnabled")]
     public bool IsSpeechEnabled { get; set; }
+
+    /// <summary>是否在提醒时置顶 ClassIsland 主界面（对齐 ClassIsland 集控的 IsTopmost）。</summary>
+    [JsonPropertyName("isNotificationTopmostEnabled")]
+    public bool IsNotificationTopmostEnabled { get; set; }
+
+    /// <summary>单条提醒的显示秒数；null 或 &lt;= 0 时插件按 ClassIsland 集控默认 5 秒处理。</summary>
+    [JsonPropertyName("durationSeconds")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? DurationSeconds { get; set; }
+
+    /// <summary>正文滚动重复次数；null 或 &lt; 1 时按 1 次处理（对齐 ClassIsland 集控的 RepeatCounts）。</summary>
+    [JsonPropertyName("repeatCounts")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RepeatCounts { get; set; }
+
+    /// <summary>把“持续时间（秒）”和“重复次数”归一化为插件可直接使用的取值。</summary>
+    public int EffectiveDurationSeconds => DurationSeconds is null or <= 0
+        ? DefaultDurationSeconds
+        : DurationSeconds.Value;
+
+    public int EffectiveRepeatCounts => RepeatCounts is null or < 1 ? 1 : RepeatCounts.Value;
+
+    /// <summary>与 ClassIsland 集控 SendNotification 一致的默认显示秒数。</summary>
+    public const int DefaultDurationSeconds = 5;
 }

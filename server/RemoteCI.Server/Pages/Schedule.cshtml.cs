@@ -124,6 +124,7 @@ public sealed class ScheduleModel(
                 TargetIndex = targetIndex,
                 ReplacementSubjectId = Input.Mode == ScheduleChangeMode.Replace ? Input.ReplacementSubjectId : null,
                 ExpectedRevision = sourceDay.Revision,
+                Permanent = Input.Permanent,
             },
         }, CurrentClassId, TimeSpan.FromSeconds(15), ct);
         TempData[result.Success ? "Message" : "Error"] = result.Message;
@@ -138,5 +139,6 @@ public sealed class ScheduleModel(
         public ScheduleChangeMode Mode { get; set; } = ScheduleChangeMode.Exchange;
         public int? TargetIndex { get; set; }
         public Guid? ReplacementSubjectId { get; set; }
+        public bool Permanent { get; set; }
     }
 }

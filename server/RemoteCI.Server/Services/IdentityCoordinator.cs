@@ -41,11 +41,14 @@ public sealed partial class IdentityCoordinator(
     /// <summary>每个账号同时保持的设备会话上限，超出时撤销最早创建的会话。</summary>
     private const int MaxActiveSessionsPerUser = 20;
 
+    /// <summary>API Key 的固定前缀，便于与设备访问令牌区分且不改变现有 Bearer 鉴权格式。</summary>
+    public const string ApiKeyPrefix = "rci_";
+
     /// <summary>内置“班管理员”角色的默认权限：班内日常管理，不含用户管理、电源/主菜单控制等系统级权限。</summary>
     public const UserPermissions ClassAdministratorDefaultPermissions =
         UserPermissions.ViewCurrentCourse | UserPermissions.AccessWebUi | UserPermissions.ManageSchedule |
         UserPermissions.SendNotifications | UserPermissions.SendVoiceMessages | UserPermissions.TeacherComing |
-        UserPermissions.RunExtensions;
+        UserPermissions.RunExtensions | UserPermissions.ApiAccess;
 
     /// <summary>确保默认班级存在；迁移或首次启动都依赖它承接升级前的全部数据。</summary>
     private async Task SeedDefaultClassroomAsync(CancellationToken ct)
@@ -101,8 +104,7 @@ public sealed partial class IdentityCoordinator(
         await db.AccountRoles.Where(x => x.Id == AccountRole.ClassAdministratorId).ExecuteUpdateAsync(setters => setters
             .SetProperty(x => x.Name, "班管理员")
             .SetProperty(x => x.NormalizedName, "班管理员")
-            .SetProperty(x => x.Kind, AccountRoleKind.ClassAdministrator)
-            .SetProperty(x => x.DefaultPermissions, ClassAdministratorDefaultPermissions), ct);
+            .SetProperty(x => x.Kind, AccountRoleKind.ClassAdministrator), ct);
         await SeedDefaultClassroomAsync(ct);
 
         // 启动时清理过期超过 30 天的会话行，避免 DeviceSessions 表长期无界增长。
@@ -275,6 +277,49 @@ public sealed partial class IdentityCoordinator(
             AccessibleClassIds: await classAccess.GetAccessibleClassIdsAsync(session.User.Id, session.User.Role, ct));
     }
 
+    /// <summary>
+    /// 校验用户 API Key。密钥只用于识别账号，权限始终从账号当前角色与授权实时计算；
+    /// 撤销、过期、账号禁用或失去 ApiAccess 权限后立即失效。
+    /// </summary>
+    public async Task<AuthPrincipal?> ValidateApiKeyAsync(string token, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(token) || !token.StartsWith(ApiKeyPrefix, StringComparison.Ordinal))
+            return null;
+        var hash = Hash(token);
+        var key = await db.UserApiKeys.Include(x => x.User).ThenInclude(x => x.RoleDefinition)
+            .SingleOrDefaultAsync(x => x.KeyHash == hash, ct);
+        var now = DateTimeOffset.UtcNow;
+        if (key is null || !IsApiKeyActive(key, now))
+            return null;
+
+        var profile = await ToProfileAsync(key.User, ct);
+        if (!profile.Permissions.HasFlag(UserPermissions.ApiAccess)) return null;
+
+        // API Key 通常由脚本高频调用；与设备会话一样，LastUsedAt 最多每分钟落库一次。
+        await TouchApiKeyAsync(key, now, ct);
+
+        return new AuthPrincipal(
+            PeerRole.Watch,
+            profile,
+            DeviceSessionId: null,
+            PluginCredentialId: null,
+            ValidUntil: key.ExpiresAt,
+            AccessibleClassIds: await classAccess.GetAccessibleClassIdsAsync(key.User.Id, key.User.Role, ct),
+            ApiKeyId: key.Id);
+    }
+
+    private static bool IsApiKeyActive(UserApiKey? key, DateTimeOffset now) =>
+        key is not null && key.RevokedAt is null &&
+        (key.ExpiresAt is not { } expires || expires > now) && key.User.Enabled;
+
+    private async Task TouchApiKeyAsync(UserApiKey key, DateTimeOffset now, CancellationToken ct)
+    {
+        if (key.LastUsedAt is not null && now - key.LastUsedAt <= TimeSpan.FromMinutes(1))
+            return;
+        key.LastUsedAt = now;
+        await db.SaveChangesAsync(ct);
+    }
+
     public async Task<AuthPrincipal?> ValidatePluginTokenAsync(string token, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(token)) return null;
@@ -293,7 +338,7 @@ public sealed partial class IdentityCoordinator(
             DeviceSessionId: null,
             PluginCredentialId: credential.Id,
             ValidUntil: null,
-            ClassId: credential.ClassroomId);
+            ClassId: credential.Assigned ? credential.ClassroomId : null);
     }
 
     public async Task<AuthPrincipal?> ValidateAnyTokenAsync(string token, CancellationToken ct = default) =>
@@ -310,6 +355,8 @@ public sealed partial class IdentityCoordinator(
                 Id = x.Id,
                 Name = x.Name,
                 ClassName = x.Classroom?.Name,
+                ClassNameRemark = x.ClassNameRemark,
+                Assigned = x.Assigned,
                 CreatedAt = x.CreatedAt,
                 LastSeenAt = x.LastSeenAt,
                 Enabled = x.Enabled,
@@ -332,17 +379,23 @@ public sealed partial class IdentityCoordinator(
         var now = DateTimeOffset.UtcNow;
         // SQLite 不支持 DateTimeOffset 比较的 SQL 翻译，先按哈希取候选再在内存过滤过期。
         var candidates = await db.PluginPairingCodes.Where(x => x.CodeHash == hash).ToListAsync(ct);
-        var candidate = candidates.FirstOrDefault(x => x.UsedAt is null && x.ExpiresAt > now)
+        var candidate = candidates.FirstOrDefault(x =>
+                x.ExpiresAt > now && (x.IsShared || x.IsPersistent || x.UsedAt is null))
             ?? throw new IdentityOperationException(ApiErrorCodes.PairCodeInvalid, "插件配对码无效、已使用或已过期");
-        // 原子消费配对码：并发请求中只有一个能把 UsedAt 从未置位更新为当前时间，
-        // 防止两个请求同时读到“未使用”的配对码并各自签发插件凭证。
-        var consumed = await db.PluginPairingCodes
-            .Where(x => x.Id == candidate.Id && x.UsedAt == null)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.UsedAt, now), ct);
-        if (consumed == 0)
-            throw new IdentityOperationException(ApiErrorCodes.PairCodeInvalid, "插件配对码无效、已使用或已过期");
+        if (!candidate.IsShared && !candidate.IsPersistent)
+        {
+            // 原子消费一次性配对码：并发请求中只有一个能把 UsedAt 从未置位更新为当前时间。
+            var consumed = await db.PluginPairingCodes
+                .Where(x => x.Id == candidate.Id && x.UsedAt == null)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.UsedAt, now), ct);
+            if (consumed == 0)
+                throw new IdentityOperationException(ApiErrorCodes.PairCodeInvalid, "插件配对码无效、已使用或已过期");
+        }
 
-        // 配对码创建时已绑定班级；旧版请求不携带班级信息的配对码统一归属默认班级。
+        var remark = NormalizeClassNameRemark(request.ClassNameRemark);
+
+        // 班级配对码（一次性或固定）直接归属班级；统一连接码创建的设备先进入未分配，
+        // 由管理员在班级管理页确认后再绑定班级。
         var token = CreateSecret(32);
         db.PluginCredentials.Add(new PluginCredential
         {
@@ -350,6 +403,8 @@ public sealed partial class IdentityCoordinator(
             Name = "ClassIsland 插件",
             TokenHash = Hash(token),
             ClassroomId = candidate.ClassroomId,
+            Assigned = !candidate.IsShared,
+            ClassNameRemark = candidate.IsShared ? remark : null,
             CreatedAt = now,
             LastSeenAt = now,
             Enabled = true,
@@ -358,6 +413,7 @@ public sealed partial class IdentityCoordinator(
         return new PairResponse { Token = token, Role = "plugin", ExpiresAt = null };
     }
 
+    /// <summary>生成绑定班级的一次性配对码；插件使用后立即失效。</summary>
     public async Task<string> CreatePluginPairingCodeAsync(Guid classroomId, CancellationToken ct = default)
     {
         if (!await db.Classrooms.AnyAsync(x => x.Id == classroomId, ct))
@@ -367,10 +423,167 @@ public sealed partial class IdentityCoordinator(
         return code;
     }
 
+    /// <summary>
+    /// 设置班级固定配对码：可重复使用，插件用该码连接后自动绑定到本班。
+    /// 同一班级只保留一个固定码，重复设置会替换旧码；留空则自动生成。
+    /// </summary>
+    public async Task<string> SetClassPairingCodeAsync(Guid classroomId, string? requestedCode, CancellationToken ct = default)
+    {
+        if (!await db.Classrooms.AnyAsync(x => x.Id == classroomId, ct))
+            throw new IdentityOperationException(ApiErrorCodes.NotFound, "班级不存在");
+        var code = NormalizePairingCode(requestedCode) ?? CreateReadableSecret(12);
+        await db.PluginPairingCodes
+            .Where(x => x.ClassroomId == classroomId && x.IsPersistent)
+            .ExecuteDeleteAsync(ct);
+        await AddPairingCodeAsync(code, ct, classroomId: classroomId, timeLimited: false, isPersistent: true);
+        return code;
+    }
+
+    /// <summary>创建可重复使用的统一连接码；使用该码生成的设备进入未分配列表。</summary>
+    public async Task<string> CreateSharedPluginPairingCodeAsync(string? requestedCode = null, CancellationToken ct = default)
+    {
+        var code = NormalizePairingCode(requestedCode) ?? CreateReadableSecret(12);
+        await db.PluginPairingCodes.Where(x => x.IsShared).ExecuteDeleteAsync(ct);
+        await AddPairingCodeAsync(code, ct, classroomId: Classroom.DefaultId, timeLimited: false, isShared: true);
+        return code;
+    }
+
+    /// <summary>是否已设置统一连接码；用于班级管理页显示当前状态（不返回明文）。</summary>
+    public async Task<bool> HasSharedPluginPairingCodeAsync(CancellationToken ct = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var expiries = await db.PluginPairingCodes
+            .Where(x => x.IsShared)
+            .Select(x => x.ExpiresAt)
+            .ToListAsync(ct);
+        return expiries.Any(expiresAt => expiresAt > now);
+    }
+
+    /// <summary>未分配设备：使用统一连接码接入、尚未绑定班级的插件凭据。</summary>
+    public async Task<IReadOnlyList<PluginCredentialInfo>> ListUnassignedPluginCredentialsAsync(CancellationToken ct = default)
+    {
+        var credentials = await db.PluginCredentials.AsNoTracking()
+            .Where(x => !x.Assigned)
+            .ToListAsync(ct);
+        return credentials
+            .OrderByDescending(x => x.LastSeenAt)
+            .Select(x => new PluginCredentialInfo
+            {
+                Id = x.Id,
+                Name = x.Name,
+                ClassName = null,
+                ClassNameRemark = x.ClassNameRemark,
+                Assigned = false,
+                CreatedAt = x.CreatedAt,
+                LastSeenAt = x.LastSeenAt,
+                Enabled = x.Enabled,
+            }).ToList();
+    }
+
+    /// <summary>把未分配设备绑定到班级；绑定后由调用方刷新在线连接并推送新的授权镜像。</summary>
+    public async Task AssignPluginCredentialAsync(Guid credentialId, Guid classroomId, CancellationToken ct = default)
+    {
+        if (!await db.Classrooms.AnyAsync(x => x.Id == classroomId, ct))
+            throw new IdentityOperationException(ApiErrorCodes.NotFound, "班级不存在");
+        var credential = await db.PluginCredentials.SingleOrDefaultAsync(x => x.Id == credentialId, ct)
+            ?? throw new IdentityOperationException(ApiErrorCodes.NotFound, "插件凭据不存在");
+        credential.ClassroomId = classroomId;
+        credential.Assigned = true;
+        await db.SaveChangesAsync(ct);
+    }
+
     public async Task<UserProfile?> GetProfileAsync(Guid id, CancellationToken ct = default)
     {
         var user = await users.FindByIdAsync(id.ToString());
         return user is null || !user.Enabled ? null : await ToProfileAsync(user, ct);
+    }
+
+    /// <summary>创建用户 API Key；调用方必须已经完成目标账号管理或本人权限校验。</summary>
+    public async Task<ApiKeyCreationResult> CreateApiKeyAsync(
+        Guid userId, string? name, CancellationToken ct = default)
+    {
+        var user = await RequireUserAsync(userId);
+        if (!user.Enabled)
+            throw new IdentityOperationException(ApiErrorCodes.Forbidden, "账号已禁用，不能创建 API Key");
+        var profile = await ToProfileAsync(user, ct);
+        if (!profile.Permissions.HasFlag(UserPermissions.ApiAccess))
+            throw new IdentityOperationException(ApiErrorCodes.Forbidden, "账号没有 API 访问权限");
+
+        var key = CreateApiKeySecret();
+        var now = DateTimeOffset.UtcNow;
+        var entity = new UserApiKey
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            Name = NormalizeApiKeyName(name),
+            KeyHash = Hash(key),
+            Prefix = key[..Math.Min(12, key.Length)],
+            CreatedAt = now,
+        };
+        db.UserApiKeys.Add(entity);
+        await db.SaveChangesAsync(ct);
+        return new ApiKeyCreationResult
+        {
+            UserId = user.Id,
+            Username = user.UserName ?? string.Empty,
+            ApiKey = ToApiKeyInfo(entity),
+            Key = key,
+        };
+    }
+
+    /// <summary>列出指定账号的 API Key 管理信息，不返回任何明文或摘要。</summary>
+    public async Task<IReadOnlyList<ApiKeyInfo>> ListApiKeysAsync(Guid userId, CancellationToken ct = default) =>
+        (await db.UserApiKeys.AsNoTracking().Where(x => x.UserId == userId).ToListAsync(ct))
+            .OrderByDescending(x => x.CreatedAt)
+            .Select(ToApiKeyInfo)
+            .ToList();
+
+    /// <summary>批量读取多个账号的 API Key，供人员管理页一次性渲染，避免逐账号查询。</summary>
+    public async Task<IReadOnlyDictionary<Guid, IReadOnlyList<ApiKeyInfo>>> ListApiKeysByUsersAsync(
+        IReadOnlyCollection<Guid> userIds, CancellationToken ct = default)
+    {
+        if (userIds.Count == 0)
+            return new Dictionary<Guid, IReadOnlyList<ApiKeyInfo>>();
+        var keys = await db.UserApiKeys.AsNoTracking()
+            .Where(x => userIds.Contains(x.UserId))
+            .ToListAsync(ct);
+        return keys
+            .GroupBy(x => x.UserId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<ApiKeyInfo>)group
+                    .OrderByDescending(x => x.CreatedAt)
+                    .Select(ToApiKeyInfo)
+                    .ToList());
+    }
+
+    /// <summary>吊销指定账号的 API Key；重复吊销保持幂等。</summary>
+    public async Task RevokeApiKeyAsync(Guid userId, Guid keyId, CancellationToken ct = default)
+    {
+        var key = await db.UserApiKeys.SingleOrDefaultAsync(x => x.Id == keyId && x.UserId == userId, ct)
+            ?? throw new IdentityOperationException(ApiErrorCodes.NotFound, "API Key 不存在");
+        if (key.RevokedAt is not null) return;
+        key.RevokedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static ApiKeyInfo ToApiKeyInfo(UserApiKey key) => new()
+    {
+        Id = key.Id,
+        Name = key.Name,
+        Prefix = key.Prefix,
+        CreatedAt = key.CreatedAt,
+        LastUsedAt = key.LastUsedAt,
+        ExpiresAt = key.ExpiresAt,
+        RevokedAt = key.RevokedAt,
+    };
+
+    private static string NormalizeApiKeyName(string? value)
+    {
+        var name = string.IsNullOrWhiteSpace(value) ? "默认密钥" : value.Trim();
+        if (name.Length > 40)
+            throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "API Key 名称不能超过 40 个字符");
+        return name;
     }
 
     /// <summary>
@@ -508,6 +721,17 @@ public sealed partial class IdentityCoordinator(
         user.Version = await NextVersionAsync(ct);
         EnsureIdentitySucceeded(await users.UpdateAsync(user));
         await RevokeAllSessionsAsync(id, ct);
+    }
+
+    /// <summary>账号自助修改用户可见用户名（DisplayName）；登录 ID 与设备会话保持不变，仅同步账号版本。</summary>
+    public async Task ChangeDisplayNameAsync(Guid id, ChangeDisplayNameRequest request, CancellationToken ct = default)
+    {
+        ValidateDisplayName(request.DisplayName);
+        var user = await RequireUserAsync(id);
+        user.DisplayName = request.DisplayName.Trim();
+        user.UpdatedAt = DateTimeOffset.UtcNow;
+        user.Version = await NextVersionAsync(ct);
+        EnsureIdentitySucceeded(await users.UpdateAsync(user));
     }
 
     public async Task<IReadOnlyList<DeviceSessionSummary>> ListSessionsAsync(Guid userId, Guid? currentId, CancellationToken ct = default)
@@ -680,19 +904,48 @@ public sealed partial class IdentityCoordinator(
     }
 
     private async Task AddPairingCodeAsync(
-        string code, CancellationToken ct, bool timeLimited = true, Guid? classroomId = null)
+        string code, CancellationToken ct, bool timeLimited = true, Guid? classroomId = null,
+        bool isShared = false, bool isPersistent = false)
     {
         var now = DateTimeOffset.UtcNow;
+        var codeHash = Hash(code);
+        // SQLite stores DateTimeOffset as TEXT and cannot translate this comparison reliably.
+        var duplicateExpiries = await db.PluginPairingCodes
+            .Where(x => x.CodeHash == codeHash)
+            .Select(x => x.ExpiresAt)
+            .ToListAsync(ct);
+        if (duplicateExpiries.Any(expiresAt => expiresAt > now))
+            throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "插件配对码已存在，请换一个值。");
         db.PluginPairingCodes.Add(new PluginPairingCode
         {
             Id = Guid.NewGuid(),
-            CodeHash = Hash(code),
+            CodeHash = codeHash,
             ClassroomId = classroomId ?? Classroom.DefaultId,
+            IsShared = isShared,
+            IsPersistent = isPersistent,
             CreatedAt = now,
             // WebUI 生成的配对码限时 30 分钟；一次性消费仍由 UsedAt 原子控制。
             ExpiresAt = timeLimited ? now.Add(PairCodeLifetime) : DateTimeOffset.MaxValue,
         });
         await db.SaveChangesAsync(ct);
+    }
+
+    private static string? NormalizePairingCode(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var normalized = value.Trim();
+        if (normalized.Length is < 6 or > 64)
+            throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "插件配对码需为 6-64 个字符。");
+        if (normalized.Any(char.IsWhiteSpace))
+            throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "插件配对码不能包含空白字符。");
+        return normalized;
+    }
+
+    private static string? NormalizeClassNameRemark(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var normalized = value.Trim();
+        return normalized.Length > 40 ? normalized[..40] : normalized;
     }
 
     private async Task<AppUser> RequireUserAsync(Guid id) => await users.FindByIdAsync(id.ToString())
@@ -802,6 +1055,10 @@ public sealed partial class IdentityCoordinator(
         : value.Trim()[..Math.Min(value.Trim().Length, 80)];
 
     private static string CreateSecret(int bytes) => Convert.ToBase64String(RandomNumberGenerator.GetBytes(bytes));
+    /// <summary>生成 URL 安全的 API Key，固定带前缀以便服务端快速区分设备访问令牌。</summary>
+    private static string CreateApiKeySecret() =>
+        ApiKeyPrefix + Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
     private static string CreateReadableSecret(int bytes) => Convert.ToHexString(RandomNumberGenerator.GetBytes(bytes)).ToLowerInvariant();
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
     private static bool FixedEquals(string left, string right) => CryptographicOperations.FixedTimeEquals(
@@ -873,9 +1130,11 @@ public sealed record AuthPrincipal(
     Guid? PluginCredentialId,
     DateTimeOffset? ValidUntil,
     Guid? ClassId = null,
-    IReadOnlyList<Guid>? AccessibleClassIds = null)
+    IReadOnlyList<Guid>? AccessibleClassIds = null,
+    Guid? ApiKeyId = null)
 {
     public bool IsPlugin => PeerRole == PeerRole.Plugin;
+    public bool IsApiKey => ApiKeyId is not null;
     public bool IsAdmin => User?.Role == UserRole.Admin;
 
     /// <summary>该主体的连接是否覆盖指定班级（插件看归属班，用户看成员/管理范围）。</summary>

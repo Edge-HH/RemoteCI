@@ -75,15 +75,14 @@ public static class WebSocketHub
 
     private static async Task InitializePluginAsync(ConnectionSession session)
     {
-        var classId = session.Principal.ClassId ?? Classroom.DefaultId;
-        var sameClassPlugins = session.Registry.GetOnlinePluginConnections()
-            .Count(x => x.ClassId == classId);
-        if (sameClassPlugins > 1)
+        // 统一连接码设备尚未分配班级，不接收账号镜像，也不参与班级数据流。
+        if (session.Principal.ClassId is not { } classId)
         {
-            session.Logger.LogWarning(
-                "班级 {ClassId} 检测到 {Count} 个插件同时在线，命令将只投递给最早接入的插件，请确认是否为预期部署",
-                classId, sameClassPlugins);
+            await session.Registry.BroadcastCapabilitiesToWatchesAsync(session.CancellationToken);
+            return;
         }
+
+        await session.Registry.DisconnectOtherPluginClassAsync(classId, session.ConnectionId, session.CancellationToken);
 
         var ct = session.CancellationToken;
         // 授权镜像按班级生成并定向发给本连接：插件只需要自己班级的账号。
@@ -160,10 +159,11 @@ public static class WebSocketHub
         }
         finally
         {
-            if (session.Principal.IsPlugin)
+            // 未分配设备没有班级，也不会启动课表任务，断开时不应误伤默认班级的进行中任务。
+            if (session.Principal.IsPlugin && session.Principal.ClassId is { } activeClassId)
                 await session.ScheduleSync.FailActiveAsync(
                     "插件连接已断开，课表任务未完成",
-                    session.Principal.ClassId ?? Classroom.DefaultId);
+                    activeClassId);
             await session.Registry.UnregisterAsync(session.ConnectionId);
             session.Logger.LogInformation("WebSocket disconnected: {Id}", session.ConnectionId);
         }
@@ -310,78 +310,105 @@ public static class WebSocketHub
         ConnectionSession session)
     {
         var ct = session.CancellationToken;
-        var classId = session.Principal.ClassId ?? Classroom.DefaultId;
+        if (session.Principal.ClassId is not { } classId)
+        {
+            await HandleUnassignedPluginStateAsync(envelope, session);
+            return true;
+        }
         switch (envelope.Type)
         {
-            case Protocol.MessageTypeStatePush:
-                if (ConvertPayload<ClassStateSnapshot>(envelope.Payload) is { } snapshot)
-                {
-                    // 负载携带班级标识，客户端据此区分多个班级的推送。
-                    snapshot.ClassId = classId;
-                    session.Store.SaveSnapshot(classId, snapshot);
-                    await session.Registry.SendSnapshotToWatchesAsync(classId, snapshot, ct);
-                }
-                return true;
-            case Protocol.MessageTypeScheduleSync:
-                if (ConvertPayload<ScheduleBundle>(envelope.Payload) is { } schedule)
-                {
-                    schedule.ClassId = classId;
-                    session.Store.SaveSchedule(classId, schedule);
-                    await session.Registry.SendScheduleToWatchesAsync(classId, schedule, ct);
-                    await session.ScheduleSync.CompleteFromScheduleAsync(classId, ct);
-                }
-                return true;
-            case Protocol.MessageTypeEventNotify:
-                if (ConvertPayload<ClassEvent>(envelope.Payload) is { } value)
-                {
-                    value.ClassId = classId;
-                    session.Store.SaveEvent(classId, value);
-                    await session.Registry.SendEventToWatchesAsync(classId, value, ct);
-                }
-                return true;
-            case Protocol.MessageTypeExtensionsSync:
-                if (ConvertPayload<List<ExtensionDefinition>>(envelope.Payload) is { } extensions)
-                {
-                    foreach (var definition in extensions) definition.ClassId = classId;
-                    var accessChanged = await session.ExtensionPolicies.EnsureRegisteredAsync(extensions, ct);
-                    session.Store.SaveExtensions(classId, extensions);
-                    if (accessChanged)
-                        await session.AuthorizationSync.SyncAsync(ct);
-                    await session.Registry.SendExtensionsToWatchesAsync(classId, extensions, ct);
-                }
-                return true;
+            case Protocol.MessageTypeStatePush: await HandleStatePushAsync(envelope, session, classId); return true;
+            case Protocol.MessageTypeScheduleSync: await HandleScheduleSyncAsync(envelope, session, classId); return true;
+            case Protocol.MessageTypeEventNotify: await HandleEventNotifyAsync(envelope, session, classId); return true;
+            case Protocol.MessageTypeSoftwareInventory: await HandleSoftwareInventoryAsync(envelope, session); return true;
+            case Protocol.MessageTypeExtensionsSync: await HandleExtensionsSyncAsync(envelope, session, classId); return true;
             default:
                 return false;
         }
+    }
+
+    private static async Task HandleUnassignedPluginStateAsync(Envelope envelope, ConnectionSession session)
+    {
+        if (envelope.Type == Protocol.MessageTypeSoftwareInventory &&
+            ConvertPayload<SoftwareInventory>(envelope.Payload) is { } inventory)
+            await session.Registry.ReportSoftwareInventoryAsync(session.ConnectionId, inventory, session.CancellationToken);
+    }
+
+    private static async Task HandleStatePushAsync(Envelope envelope, ConnectionSession session, Guid classId)
+    {
+        if (ConvertPayload<ClassStateSnapshot>(envelope.Payload) is not { } snapshot) return;
+        snapshot.ClassId = classId;
+        session.Store.SaveSnapshot(classId, snapshot);
+        await session.Registry.SendSnapshotToWatchesAsync(classId, snapshot, session.CancellationToken);
+    }
+
+    private static async Task HandleScheduleSyncAsync(Envelope envelope, ConnectionSession session, Guid classId)
+    {
+        if (ConvertPayload<ScheduleBundle>(envelope.Payload) is not { } schedule) return;
+        schedule.ClassId = classId;
+        session.Store.SaveSchedule(classId, schedule);
+        await session.Registry.SendScheduleToWatchesAsync(classId, schedule, session.CancellationToken);
+        await session.ScheduleSync.CompleteFromScheduleAsync(classId, session.CancellationToken);
+    }
+
+    private static async Task HandleEventNotifyAsync(Envelope envelope, ConnectionSession session, Guid classId)
+    {
+        if (ConvertPayload<ClassEvent>(envelope.Payload) is not { } value) return;
+        value.ClassId = classId;
+        session.Store.SaveEvent(classId, value);
+        await session.Registry.SendEventToWatchesAsync(classId, value, session.CancellationToken);
+    }
+
+    private static async Task HandleSoftwareInventoryAsync(Envelope envelope, ConnectionSession session)
+    {
+        if (ConvertPayload<SoftwareInventory>(envelope.Payload) is { } inventory)
+            await session.Registry.ReportSoftwareInventoryAsync(session.ConnectionId, inventory, session.CancellationToken);
+    }
+
+    private static async Task HandleExtensionsSyncAsync(Envelope envelope, ConnectionSession session, Guid classId)
+    {
+        if (ConvertPayload<List<ExtensionDefinition>>(envelope.Payload) is not { } extensions) return;
+        foreach (var definition in extensions) definition.ClassId = classId;
+        var accessChanged = await session.ExtensionPolicies.EnsureRegisteredAsync(extensions, session.CancellationToken);
+        session.Store.SaveExtensions(classId, extensions);
+        if (accessChanged) await session.AuthorizationSync.SyncAsync(session.CancellationToken);
+        await session.Registry.SendExtensionsToWatchesAsync(classId, extensions, session.CancellationToken);
     }
 
     private static async Task<bool> TryDispatchPluginControlAsync(
         Envelope envelope,
         ConnectionSession session)
     {
-        var ct = session.CancellationToken;
         switch (envelope.Type)
         {
-            case Protocol.MessageTypePluginNetworkInfo:
-                if (NormalizePluginNetworkInfo(ConvertPayload<PluginNetworkInfo>(envelope.Payload)) is { } info)
-                {
-                    info.ClassId = session.Principal.ClassId ?? Classroom.DefaultId;
-                    await session.Registry.PublishPluginNetworkInfoAsync(info, ct);
-                }
-                else
-                    session.Logger.LogWarning("插件上报了无效的局域网地址或端口");
-                return true;
-            case Protocol.MessageTypeScheduleSyncStatus:
-                if (ConvertPayload<ScheduleSyncStatus>(envelope.Payload) is { } status)
-                    await session.ScheduleSync.ObserveFromPluginAsync(status, ct);
-                return true;
-            case Protocol.MessageTypeCommandResult:
-                if (ConvertPayload<CommandResult>(envelope.Payload) is { } result)
-                    await session.Registry.CompleteCommandAsync(envelope, result, ct);
-                return true;
+            case Protocol.MessageTypePluginNetworkInfo: await HandlePluginNetworkInfoAsync(envelope, session); return true;
+            case Protocol.MessageTypeScheduleSyncStatus: await HandleScheduleSyncStatusAsync(envelope, session); return true;
+            case Protocol.MessageTypeCommandResult: await HandleCommandResultAsync(envelope, session); return true;
             default:
                 return false;
         }
+    }
+
+    private static async Task HandlePluginNetworkInfoAsync(Envelope envelope, ConnectionSession session)
+    {
+        if (NormalizePluginNetworkInfo(ConvertPayload<PluginNetworkInfo>(envelope.Payload)) is { } info)
+        {
+            info.ClassId = session.Principal.ClassId ?? Classroom.DefaultId;
+            await session.Registry.PublishPluginNetworkInfoAsync(info, session.CancellationToken);
+        }
+        else session.Logger.LogWarning("插件上报了无效的局域网地址或端口");
+    }
+
+    private static async Task HandleScheduleSyncStatusAsync(Envelope envelope, ConnectionSession session)
+    {
+        if (ConvertPayload<ScheduleSyncStatus>(envelope.Payload) is { } status)
+            await session.ScheduleSync.ObserveFromPluginAsync(status, session.CancellationToken);
+    }
+
+    private static async Task HandleCommandResultAsync(Envelope envelope, ConnectionSession session)
+    {
+        if (ConvertPayload<CommandResult>(envelope.Payload) is { } result)
+            await session.Registry.CompleteCommandAsync(envelope, result, session.CancellationToken);
     }
 
     private static async Task DispatchUserAsync(
@@ -470,7 +497,17 @@ public static class WebSocketHub
             return;
         }
         command.ClassId = classId;
-
+        // 远程升级、插件管理和集控操作属于宿主级维护，即使普通角色被授予 ManageUsers 也仅允许系统管理员执行。
+        if ((command.Command is CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
+            CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
+            CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
+            CommandKind.JoinManagement or CommandKind.RestartClassIsland) && session.Principal.User!.Role != UserRole.Admin)
+        {
+            await SendFailureAsync(
+                envelope, session.ConnectionId, session.Registry,
+                CommandResultCodes.Forbidden, "仅系统管理员可以执行远程维护操作", session.CancellationToken);
+            return;
+        }
         if (command.Notification is not null)
         {
             command.Notification.ForceSenderInTitle =
@@ -519,9 +556,49 @@ public static class WebSocketHub
             return new CommandError(CommandResultCodes.InvalidRequest, "未知命令");
         if (!classPermissions.HasFlag(required))
             return new CommandError(CommandResultCodes.Forbidden, "权限不足");
-        if (command.Command == CommandKind.SendVoiceMessage && !VoiceMessageRequest.TryDecode(command.VoiceMessage, out _))
+        return ValidateCommandParameters(command);
+    }
+
+    private static CommandError? ValidateCommandParameters(CommandMessage command)
+    {
+        if (command.Command == CommandKind.SendVoiceMessage &&
+            !VoiceMessageRequest.TryDecode(command.VoiceMessage, out _))
             return new CommandError(CommandResultCodes.InvalidRequest, "语音格式无效或超过 60 秒");
-        return null;
+        if (command.Command is CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled)
+            return ValidatePluginManagement(command);
+        return ValidateOptionalCommandPayload(command);
+    }
+
+    private static CommandError? ValidatePluginManagement(CommandMessage command)
+    {
+        if (command.PluginManagement is not { PluginIds.Count: > 0 } pluginRequest)
+            return new CommandError(CommandResultCodes.InvalidRequest, "缺少插件管理参数");
+        var validAction = command.Command switch
+        {
+            CommandKind.InstallPlugins => pluginRequest.Action == PluginActionKind.Install,
+            CommandKind.UninstallPlugins => pluginRequest.Action == PluginActionKind.Uninstall,
+            CommandKind.SetPluginEnabled => pluginRequest.Action is PluginActionKind.Enable or PluginActionKind.Disable,
+            _ => false,
+        };
+        return validAction ? null : new CommandError(
+            CommandResultCodes.InvalidRequest, "插件操作与命令类型不匹配");
+    }
+
+    private static CommandError? ValidateOptionalCommandPayload(CommandMessage command)
+    {
+        if (command.Command == CommandKind.SetPluginManagementPolicy && command.PluginManagementPolicy is null)
+            return new CommandError(CommandResultCodes.InvalidRequest, "缺少插件管理策略");
+        if (command.Command == CommandKind.UpdateTimeLayout &&
+            (command.TimeLayoutUpdate is null || command.TimeLayoutUpdate.Points.Count == 0))
+            return new CommandError(CommandResultCodes.InvalidRequest, "缺少时间表参数");
+        if (command.Command == CommandKind.DistributeProfile &&
+            (command.ProfileDistribution is null ||
+             command.ProfileDistribution.Sections == ProfileDistributionSection.None ||
+             string.IsNullOrWhiteSpace(command.ProfileDistribution.ProfileJson)))
+            return new CommandError(CommandResultCodes.InvalidRequest, "缺少档案分发参数");
+        return command.Command == CommandKind.JoinManagement && command.ManagementJoin is null
+            ? new CommandError(CommandResultCodes.InvalidRequest, "缺少加入集控参数")
+            : null;
     }
 
     private static CommandError? GetExtensionValidationError(

@@ -78,6 +78,7 @@ fun RemoteCiApp(context: Context) {
     var sourceIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     var targetIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     var replacementSubjectId by rememberSaveable { mutableStateOf<String?>(null) }
+    var permanentSwap by rememberSaveable { mutableStateOf(false) }
     // 主界面课程按钮直达换课页时标记来源，返回键直接回主页而不是先回日期选择。
     var quickSwapFromHome by rememberSaveable { mutableStateOf(false) }
     var noticeTitle by rememberSaveable { mutableStateOf("") }
@@ -334,6 +335,8 @@ fun RemoteCiApp(context: Context) {
                     context.getString(if (it.success) R.string.result_success else R.string.result_failure, it.message)
                 },
                 onModeChange = { swapMode = it },
+                permanent = permanentSwap,
+                onPermanentChange = { permanentSwap = it },
                 onPickSource = { pickerTarget = LessonTarget.Source; screen = Screen.LessonPicker },
                 onPickTarget = {
                     screen = if (swapMode == SwapMode.Exchange) {
@@ -352,6 +355,7 @@ fun RemoteCiApp(context: Context) {
                             targetIndex = if (swapMode == SwapMode.Exchange) targetIndex else null,
                             replacementSubjectId = if (swapMode == SwapMode.Replace) replacementSubjectId else null,
                             expectedRevision = day.revision,
+                            permanent = permanentSwap,
                         ),
                     )
                 },

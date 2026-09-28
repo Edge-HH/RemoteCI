@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Avalonia.Threading;
+using ClassIsland.Core;
 using ClassIsland.Core.Abstractions.Services;
 using Microsoft.Extensions.Logging;
 using NAudio.CoreAudioApi;
@@ -136,6 +137,16 @@ public sealed class ClassIslandHostControlService(
             {
                 // 插件停止或新的电源操作到达，取消待执行的睡眠。
             }
+        });
+    }
+
+    /// <summary>延迟重启 ClassIsland 宿主，确保远程命令回执先发出。</summary>
+    public void ScheduleClassIslandRestart()
+    {
+        Dispatcher.UIThread.Post(async () =>
+        {
+            await Task.Delay(750);
+            AppBase.Current.Restart();
         });
     }
 
