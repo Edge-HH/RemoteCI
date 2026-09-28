@@ -289,7 +289,7 @@ public sealed partial class IdentityCoordinator(
         var key = await db.UserApiKeys.Include(x => x.User).ThenInclude(x => x.RoleDefinition)
             .SingleOrDefaultAsync(x => x.KeyHash == hash, ct);
         var now = DateTimeOffset.UtcNow;
-        if (key is null || key.RevokedAt is not null || key.ExpiresAt is { } expires && expires <= now || !key.User.Enabled)
+        if (key is null || key.RevokedAt is not null || (key.ExpiresAt is { } expires && expires <= now) || !key.User.Enabled)
             return null;
 
         var profile = await ToProfileAsync(key.User, ct);

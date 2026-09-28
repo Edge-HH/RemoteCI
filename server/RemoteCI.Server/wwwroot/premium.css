@@ -1375,13 +1375,12 @@ input[type="checkbox"][form] { accent-color: var(--accent); }
 @media (max-width: 520px) {
     .metric-grid { grid-template-columns: 1fr; }
     .metric-card { min-height: 98px; }
-    .topbar-button { width: 38px; height: 38px; flex-basis: 38px; }
+    .topbar-button { width: 38px; height: 38px; min-height: 38px; flex-basis: 38px; }
     .user-avatar { display: none; }
     .class-switcher { max-width: 122px; }
     .class-switcher select { min-width: 72px; max-width: 88px; }
     button, .button { min-height: 44px; padding-inline: 14px; }
     .copy-button { width: 36px; min-height: 36px; }
-    .topbar-button { min-height: 38px; }
     .schedule-table { min-width: 980px; }
 }
 

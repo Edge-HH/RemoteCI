@@ -229,93 +229,8 @@ public sealed partial class MemberExcelService(
             .GroupBy(x => x.UserName!, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
 
-        var plans = new List<OverwritePlan>();
-        var seenUserIds = new HashSet<Guid>();
-        var seenLoginIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var group in rows.GroupBy(x => string.IsNullOrWhiteSpace(x.SystemId) ? $"name:{x.UserId}" : $"id:{x.SystemId}", StringComparer.OrdinalIgnoreCase))
-        {
-            var first = group.First();
-            var groupFailures = new List<string>();
-            if (group.Any(x => !string.Equals(x.UserId, first.UserId, StringComparison.OrdinalIgnoreCase)))
-                groupFailures.Add("同一系统标识的用户 ID 必须保持一致。");
-            if (group.Any(x => !string.Equals(x.DisplayName.Trim(), first.DisplayName.Trim(), StringComparison.Ordinal)))
-                groupFailures.Add("同一系统标识的用户名必须保持一致。");
-
-            AppUser? existingUser = null;
-            if (!string.IsNullOrWhiteSpace(first.SystemId))
-            {
-                if (!Guid.TryParse(first.SystemId, out var userId) || !userById.TryGetValue(userId, out existingUser))
-                    groupFailures.Add("系统标识对应的账号不存在，请重新导出后再修改。");
-            }
-            else if (userByName.TryGetValue(first.UserId, out var matchedUser))
-            {
-                existingUser = matchedUser;
-            }
-
-            if (existingUser is not null && !seenUserIds.Add(existingUser.Id))
-                groupFailures.Add("同一账号在文件中出现多次。");
-            if (!seenLoginIds.Add(first.UserId.Trim()))
-                groupFailures.Add("文件内存在重复的用户 ID。");
-            if (userByName.TryGetValue(first.UserId.Trim(), out var loginOwner) &&
-                loginOwner.Id != existingUser?.Id)
-                groupFailures.Add("用户 ID 已被其他账号使用。");
-
-            var memberships = new List<PlannedMembership>();
-            var classIds = new HashSet<Guid>();
-            foreach (var row in group)
-            {
-                try
-                {
-                    ValidateRow(row, allowPassword: false, allowSystemId: true);
-                }
-                catch (IdentityOperationException ex)
-                {
-                    groupFailures.Add(ex.Message);
-                    continue;
-                }
-
-                if (!classByName.TryGetValue(row.ClassName.Trim(), out var classroom))
-                {
-                    groupFailures.Add($"班级“{row.ClassName}”不存在。");
-                    continue;
-                }
-                if (!scopeIds.Contains(classroom.Id))
-                {
-                    groupFailures.Add($"班级“{row.ClassName}”不在本次导出范围内。");
-                    continue;
-                }
-                if (!roleByKey.TryGetValue(row.RoleName.Trim(), out var role))
-                {
-                    groupFailures.Add($"角色“{row.RoleName}”不存在。");
-                    continue;
-                }
-                if (!classIds.Add(classroom.Id))
-                {
-                    groupFailures.Add($"班级“{row.ClassName}”在同一账号下重复。");
-                    continue;
-                }
-                memberships.Add(new PlannedMembership(classroom.Id, role.Id));
-            }
-
-            if (groupFailures.Count > 0)
-            {
-                foreach (var row in group)
-                    result.Failures.Add(new MemberExcelImportFailure(row.RowNumber, row.UserId, string.Join("；", groupFailures.Distinct())));
-                continue;
-            }
-
-            var globalRole = memberships.Count > 0
-                ? allRoles.Single(x => x.Id == memberships[0].RoleId)
-                : allRoles.Single(x => x.Id == AccountRole.StudentId);
-            plans.Add(new OverwritePlan(
-                existingUser,
-                existingUser?.Id ?? Guid.NewGuid(),
-                first.UserId.Trim(),
-                first.DisplayName.Trim(),
-                globalRole,
-                memberships));
-        }
+        var plans = BuildOverwritePlans(
+            rows, scopeIds, classByName, roleByKey, allRoles, userById, userByName, result);
 
         if (result.Failures.Count > 0)
             return result;
@@ -335,86 +250,154 @@ public sealed partial class MemberExcelService(
             .SelectMany(plan => plan.Memberships.Select(m => (plan.UserId, m.ClassroomId, m.RoleId)))
             .Count(x => existingByKey.TryGetValue((x.UserId, x.ClassroomId), out var existing) && existing.RoleDefinitionId != x.RoleId);
 
+        await ApplyOverwriteChangesAsync(plans, existingMemberships, existingByKey, desiredKeys, ct);
+
+        return result;
+    }
+
+    private static List<OverwritePlan> BuildOverwritePlans(
+        IReadOnlyList<ParsedMemberRow> rows,
+        IReadOnlySet<Guid> scopeIds,
+        IReadOnlyDictionary<string, Classroom> classByName,
+        IReadOnlyDictionary<string, AccountRole> roleByKey,
+        IReadOnlyList<AccountRole> allRoles,
+        IReadOnlyDictionary<Guid, AppUser> userById,
+        IReadOnlyDictionary<string, AppUser> userByName,
+        MemberExcelImportResult result)
+    {
+        var plans = new List<OverwritePlan>();
+        var seenUserIds = new HashSet<Guid>();
+        var seenLoginIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in rows.GroupBy(x => string.IsNullOrWhiteSpace(x.SystemId) ? $"name:{x.UserId}" : $"id:{x.SystemId}", StringComparer.OrdinalIgnoreCase))
+        {
+            var plan = BuildOverwritePlan(group, scopeIds, classByName, roleByKey, allRoles, userById, userByName, seenUserIds, seenLoginIds, result);
+            if (plan is not null)
+                plans.Add(plan);
+        }
+        return plans;
+    }
+
+    private static OverwritePlan? BuildOverwritePlan(
+        IGrouping<string, ParsedMemberRow> group,
+        IReadOnlySet<Guid> scopeIds,
+        IReadOnlyDictionary<string, Classroom> classByName,
+        IReadOnlyDictionary<string, AccountRole> roleByKey,
+        IReadOnlyList<AccountRole> allRoles,
+        IReadOnlyDictionary<Guid, AppUser> userById,
+        IReadOnlyDictionary<string, AppUser> userByName,
+        ISet<Guid> seenUserIds,
+        ISet<string> seenLoginIds,
+        MemberExcelImportResult result)
+    {
+        var first = group.First();
+        var failures = new List<string>();
+        if (group.Any(x => !string.Equals(x.UserId, first.UserId, StringComparison.OrdinalIgnoreCase)))
+            failures.Add("同一系统标识的用户 ID 必须保持一致。");
+        if (group.Any(x => !string.Equals(x.DisplayName.Trim(), first.DisplayName.Trim(), StringComparison.Ordinal)))
+            failures.Add("同一系统标识的用户名必须保持一致。");
+
+        var existingUser = FindExistingUser(first, userById, userByName, failures);
+        if (existingUser is not null && !seenUserIds.Add(existingUser.Id))
+            failures.Add("同一账号在文件中出现多次。");
+        if (!seenLoginIds.Add(first.UserId.Trim()))
+            failures.Add("文件内存在重复的用户 ID。");
+        if (userByName.TryGetValue(first.UserId.Trim(), out var loginOwner) && loginOwner.Id != existingUser?.Id)
+            failures.Add("用户 ID 已被其他账号使用。");
+
+        var memberships = BuildMemberships(group, scopeIds, classByName, roleByKey, failures);
+        if (failures.Count > 0)
+        {
+            foreach (var row in group)
+                result.Failures.Add(new MemberExcelImportFailure(row.RowNumber, row.UserId, string.Join("；", failures.Distinct())));
+            return null;
+        }
+
+        var globalRole = memberships.Count > 0
+            ? allRoles.Single(x => x.Id == memberships[0].RoleId)
+            : allRoles.Single(x => x.Id == AccountRole.StudentId);
+        return new OverwritePlan(existingUser, existingUser?.Id ?? Guid.NewGuid(), first.UserId.Trim(),
+            first.DisplayName.Trim(), globalRole, memberships);
+    }
+
+    private static AppUser? FindExistingUser(
+        ParsedMemberRow row,
+        IReadOnlyDictionary<Guid, AppUser> userById,
+        IReadOnlyDictionary<string, AppUser> userByName,
+        ICollection<string> failures)
+    {
+        if (!string.IsNullOrWhiteSpace(row.SystemId))
+        {
+            if (!Guid.TryParse(row.SystemId, out var userId) || !userById.TryGetValue(userId, out var user))
+                failures.Add("系统标识对应的账号不存在，请重新导出后再修改。");
+            else
+                return user;
+        }
+        else if (userByName.TryGetValue(row.UserId, out var matchedUser))
+        {
+            return matchedUser;
+        }
+        return null;
+    }
+
+    private static List<PlannedMembership> BuildMemberships(
+        IGrouping<string, ParsedMemberRow> group,
+        IReadOnlySet<Guid> scopeIds,
+        IReadOnlyDictionary<string, Classroom> classByName,
+        IReadOnlyDictionary<string, AccountRole> roleByKey,
+        ICollection<string> failures)
+    {
+        var memberships = new List<PlannedMembership>();
+        var classIds = new HashSet<Guid>();
+        foreach (var row in group)
+        {
+            try { ValidateRow(row, allowPassword: false, allowSystemId: true); }
+            catch (IdentityOperationException ex) { failures.Add(ex.Message); continue; }
+            if (!classByName.TryGetValue(row.ClassName.Trim(), out var classroom))
+            {
+                failures.Add($"班级“{row.ClassName}”不存在。");
+                continue;
+            }
+            if (!scopeIds.Contains(classroom.Id))
+            {
+                failures.Add($"班级“{row.ClassName}”不在本次导出范围内。");
+                continue;
+            }
+            if (!roleByKey.TryGetValue(row.RoleName.Trim(), out var role))
+            {
+                failures.Add($"角色“{row.RoleName}”不存在。");
+                continue;
+            }
+            if (!classIds.Add(classroom.Id))
+            {
+                failures.Add($"班级“{row.ClassName}”在同一账号下重复。");
+                continue;
+            }
+            memberships.Add(new PlannedMembership(classroom.Id, role.Id));
+        }
+        return memberships;
+    }
+
+    private async Task ApplyOverwriteChangesAsync(
+        IReadOnlyList<OverwritePlan> plans,
+        IReadOnlyList<ClassMembership> existingMemberships,
+        IReadOnlyDictionary<(Guid UserId, Guid ClassroomId), ClassMembership> existingByKey,
+        IReadOnlySet<(Guid UserId, Guid ClassroomId)> desiredKeys,
+        CancellationToken ct)
+    {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
-            var metadataRow = await db.SystemMetadata.SingleAsync(x => x.Id == 1, ct);
-            metadataRow.AccountVersion++;
-            var version = metadataRow.AccountVersion;
+            var metadata = await db.SystemMetadata.SingleAsync(x => x.Id == 1, ct);
+            metadata.AccountVersion++;
+            var version = metadata.AccountVersion;
             var now = DateTimeOffset.UtcNow;
-
             foreach (var plan in plans)
-            {
-                if (plan.ExistingUser is not null)
-                {
-                    var user = await db.Users.SingleAsync(x => x.Id == plan.UserId, ct);
-                    user.UpdatedAt = now;
-                    user.Version = version;
-                    if (!string.Equals(user.UserName, plan.Username, StringComparison.OrdinalIgnoreCase))
-                    {
-                        var rename = await users.SetUserNameAsync(user, plan.Username);
-                        if (!rename.Succeeded)
-                        {
-                            var duplicate = rename.Errors.Any(x => x.Code.Contains("Duplicate", StringComparison.OrdinalIgnoreCase));
-                            throw new IdentityOperationException(
-                                duplicate ? ApiErrorCodes.UsernameExists : ApiErrorCodes.InvalidRequest,
-                                string.Join("；", rename.Errors.Select(x => x.Description)));
-                        }
-                    }
-                    user.DisplayName = plan.DisplayName;
-                    var update = await users.UpdateAsync(user);
-                    if (!update.Succeeded)
-                        throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, string.Join("；", update.Errors.Select(x => x.Description)));
-                }
-                else
-                {
-                    var user = new AppUser
-                    {
-                        Id = plan.UserId,
-                        UserName = plan.Username,
-                        DisplayName = plan.DisplayName,
-                        Role = plan.GlobalRole.Kind == AccountRoleKind.Administrator ? UserRole.Admin : UserRole.User,
-                        RoleDefinitionId = plan.GlobalRole.Id,
-                        GrantedPermissions = UserPermissions.None,
-                        Enabled = true,
-                        PasswordPending = true,
-                        UpdatedAt = now,
-                        Version = version,
-                    };
-                    var create = await users.CreateAsync(user);
-                    if (!create.Succeeded)
-                    {
-                        var duplicate = create.Errors.Any(x => x.Code.Contains("Duplicate", StringComparison.OrdinalIgnoreCase));
-                        throw new IdentityOperationException(
-                            duplicate ? ApiErrorCodes.UsernameExists : ApiErrorCodes.InvalidRequest,
-                            string.Join("；", create.Errors.Select(x => x.Description)));
-                    }
-                }
-            }
-
+                await ApplyUserPlanAsync(plan, version, now, ct);
             foreach (var existing in existingMemberships.Where(x => !desiredKeys.Contains((x.UserId, x.ClassroomId))))
                 db.ClassMemberships.Remove(existing);
-
             foreach (var plan in plans)
-            {
                 foreach (var membership in plan.Memberships)
-                {
-                    if (existingByKey.TryGetValue((plan.UserId, membership.ClassroomId), out var existing))
-                    {
-                        existing.RoleDefinitionId = membership.RoleId;
-                    }
-                    else
-                    {
-                        db.ClassMemberships.Add(new ClassMembership
-                        {
-                            UserId = plan.UserId,
-                            ClassroomId = membership.ClassroomId,
-                            RoleDefinitionId = membership.RoleId,
-                        });
-                    }
-                }
-            }
-
+                    ApplyMembershipPlan(plan.UserId, membership, existingByKey);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
@@ -423,8 +406,62 @@ public sealed partial class MemberExcelService(
             await transaction.RollbackAsync(ct);
             throw;
         }
+    }
 
-        return result;
+    private async Task ApplyUserPlanAsync(OverwritePlan plan, long version, DateTimeOffset now, CancellationToken ct)
+    {
+        if (plan.ExistingUser is null)
+        {
+            var user = new AppUser
+            {
+                Id = plan.UserId, UserName = plan.Username, DisplayName = plan.DisplayName,
+                Role = plan.GlobalRole.Kind == AccountRoleKind.Administrator ? UserRole.Admin : UserRole.User,
+                RoleDefinitionId = plan.GlobalRole.Id, GrantedPermissions = UserPermissions.None,
+                Enabled = true, PasswordPending = true, UpdatedAt = now, Version = version,
+            };
+            var create = await users.CreateAsync(user);
+            EnsureIdentitySucceeded(create.Succeeded, create.Errors);
+            return;
+        }
+
+        var existing = await db.Users.SingleAsync(x => x.Id == plan.UserId, ct);
+        existing.UpdatedAt = now;
+        existing.Version = version;
+        if (!string.Equals(existing.UserName, plan.Username, StringComparison.OrdinalIgnoreCase))
+        {
+            var rename = await users.SetUserNameAsync(existing, plan.Username);
+            EnsureIdentitySucceeded(rename.Succeeded, rename.Errors);
+        }
+        existing.DisplayName = plan.DisplayName;
+        var update = await users.UpdateAsync(existing);
+        EnsureIdentitySucceeded(update.Succeeded, update.Errors);
+    }
+
+    private void ApplyMembershipPlan(
+        Guid userId,
+        PlannedMembership membership,
+        IReadOnlyDictionary<(Guid UserId, Guid ClassroomId), ClassMembership> existingByKey)
+    {
+        if (existingByKey.TryGetValue((userId, membership.ClassroomId), out var existing))
+        {
+            existing.RoleDefinitionId = membership.RoleId;
+            return;
+        }
+        db.ClassMemberships.Add(new ClassMembership
+        {
+            UserId = userId,
+            ClassroomId = membership.ClassroomId,
+            RoleDefinitionId = membership.RoleId,
+        });
+    }
+
+    private static void EnsureIdentitySucceeded(bool succeeded, IEnumerable<IdentityError> errors)
+    {
+        if (succeeded) return;
+        var duplicate = errors.Any(x => x.Code.Contains("Duplicate", StringComparison.OrdinalIgnoreCase));
+        throw new IdentityOperationException(
+            duplicate ? ApiErrorCodes.UsernameExists : ApiErrorCodes.InvalidRequest,
+            string.Join("；", errors.Select(x => x.Description)));
     }
 
     private async Task<List<Classroom>> ResolveScopeAsync(Guid? groupId, CancellationToken ct)
