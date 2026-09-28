@@ -607,50 +607,50 @@ public sealed class PeerRegistry(
     private static SoftwareInventory? NormalizeSoftwareInventory(SoftwareInventory? value)
     {
         if (value is null) return null;
-        static string Clean(string? text, int maxLength)
-        {
-            var normalized = text?.Trim() ?? string.Empty;
-            return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
-        }
-
-        static List<SoftwarePackageInfo> CleanPackages(IEnumerable<SoftwarePackageInfo>? packages) =>
-            (packages ?? [])
-                .Where(package => package is not null && !string.IsNullOrWhiteSpace(package.Id))
-                .Take(200)
-                .Select(package => new SoftwarePackageInfo
-                {
-                    Id = Clean(package.Id, 200),
-                    Name = Clean(package.Name, 120),
-                    Version = Clean(package.Version, 64),
-                    LatestVersion = string.IsNullOrWhiteSpace(package.LatestVersion)
-                        ? null
-                        : Clean(package.LatestVersion, 64),
-                    IsUpdateAvailable = package.IsUpdateAvailable,
-                    IsEnabled = package.IsEnabled,
-                    CanUpgrade = package.CanUpgrade,
-                })
-                .ToList();
-
         return new SoftwareInventory
         {
-            DeviceName = Clean(value.DeviceName, 80),
-            OperatingSystem = Clean(value.OperatingSystem, 200),
-            Architecture = Clean(value.Architecture, 40),
+            DeviceName = CleanInventoryText(value.DeviceName, 80),
+            OperatingSystem = CleanInventoryText(value.OperatingSystem, 200),
+            Architecture = CleanInventoryText(value.Architecture, 40),
             GeneratedAt = value.GeneratedAt == default ? DateTimeOffset.UtcNow : value.GeneratedAt,
             Applications = CleanPackages(value.Applications),
             Plugins = CleanPackages(value.Plugins),
-            LastUpdate = value.LastUpdate is null
-                ? null
-                : new SoftwareUpdateStatus
-                {
-                    Operation = value.LastUpdate.Operation,
-                    State = value.LastUpdate.State,
-                    Message = Clean(value.LastUpdate.Message, 1000),
-                    StartedAt = value.LastUpdate.StartedAt == default ? DateTimeOffset.UtcNow : value.LastUpdate.StartedAt,
-                    CompletedAt = value.LastUpdate.CompletedAt,
-                },
+            LastUpdate = BuildSoftwareUpdateStatus(value.LastUpdate),
         };
     }
+
+    private static string CleanInventoryText(string? text, int maxLength)
+    {
+        var normalized = text?.Trim() ?? string.Empty;
+        return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
+    }
+
+    private static List<SoftwarePackageInfo> CleanPackages(IEnumerable<SoftwarePackageInfo>? packages) =>
+        (packages ?? [])
+            .Where(package => package is not null && !string.IsNullOrWhiteSpace(package.Id))
+            .Take(200)
+            .Select(package => new SoftwarePackageInfo
+            {
+                Id = CleanInventoryText(package.Id, 200),
+                Name = CleanInventoryText(package.Name, 120),
+                Version = CleanInventoryText(package.Version, 64),
+                LatestVersion = string.IsNullOrWhiteSpace(package.LatestVersion)
+                    ? null
+                    : CleanInventoryText(package.LatestVersion, 64),
+                IsUpdateAvailable = package.IsUpdateAvailable,
+                IsEnabled = package.IsEnabled,
+                CanUpgrade = package.CanUpgrade,
+            }).ToList();
+
+    private static SoftwareUpdateStatus? BuildSoftwareUpdateStatus(SoftwareUpdateStatus? value) =>
+        value is null ? null : new SoftwareUpdateStatus
+        {
+            Operation = value.Operation,
+            State = value.State,
+            Message = CleanInventoryText(value.Message, 1000),
+            StartedAt = value.StartedAt == default ? DateTimeOffset.UtcNow : value.StartedAt,
+            CompletedAt = value.CompletedAt,
+        };
 
     private async Task PersistSoftwareInventoryAsync(
         WsPeer peer,

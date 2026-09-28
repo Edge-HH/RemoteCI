@@ -556,22 +556,36 @@ public static class WebSocketHub
             return new CommandError(CommandResultCodes.InvalidRequest, "未知命令");
         if (!classPermissions.HasFlag(required))
             return new CommandError(CommandResultCodes.Forbidden, "权限不足");
-        if (command.Command == CommandKind.SendVoiceMessage && !VoiceMessageRequest.TryDecode(command.VoiceMessage, out _))
+        return ValidateCommandParameters(command);
+    }
+
+    private static CommandError? ValidateCommandParameters(CommandMessage command)
+    {
+        if (command.Command == CommandKind.SendVoiceMessage &&
+            !VoiceMessageRequest.TryDecode(command.VoiceMessage, out _))
             return new CommandError(CommandResultCodes.InvalidRequest, "语音格式无效或超过 60 秒");
         if (command.Command is CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled)
+            return ValidatePluginManagement(command);
+        return ValidateOptionalCommandPayload(command);
+    }
+
+    private static CommandError? ValidatePluginManagement(CommandMessage command)
+    {
+        if (command.PluginManagement is not { PluginIds.Count: > 0 } pluginRequest)
+            return new CommandError(CommandResultCodes.InvalidRequest, "缺少插件管理参数");
+        var validAction = command.Command switch
         {
-            if (command.PluginManagement is not { PluginIds.Count: > 0 } pluginRequest)
-                return new CommandError(CommandResultCodes.InvalidRequest, "缺少插件管理参数");
-            var validAction = command.Command switch
-            {
-                CommandKind.InstallPlugins => pluginRequest.Action == PluginActionKind.Install,
-                CommandKind.UninstallPlugins => pluginRequest.Action == PluginActionKind.Uninstall,
-                CommandKind.SetPluginEnabled => pluginRequest.Action is PluginActionKind.Enable or PluginActionKind.Disable,
-                _ => false,
-            };
-            if (!validAction)
-                return new CommandError(CommandResultCodes.InvalidRequest, "插件操作与命令类型不匹配");
-        }
+            CommandKind.InstallPlugins => pluginRequest.Action == PluginActionKind.Install,
+            CommandKind.UninstallPlugins => pluginRequest.Action == PluginActionKind.Uninstall,
+            CommandKind.SetPluginEnabled => pluginRequest.Action is PluginActionKind.Enable or PluginActionKind.Disable,
+            _ => false,
+        };
+        return validAction ? null : new CommandError(
+            CommandResultCodes.InvalidRequest, "插件操作与命令类型不匹配");
+    }
+
+    private static CommandError? ValidateOptionalCommandPayload(CommandMessage command)
+    {
         if (command.Command == CommandKind.SetPluginManagementPolicy && command.PluginManagementPolicy is null)
             return new CommandError(CommandResultCodes.InvalidRequest, "缺少插件管理策略");
         if (command.Command == CommandKind.UpdateTimeLayout &&
@@ -582,9 +596,9 @@ public static class WebSocketHub
              command.ProfileDistribution.Sections == ProfileDistributionSection.None ||
              string.IsNullOrWhiteSpace(command.ProfileDistribution.ProfileJson)))
             return new CommandError(CommandResultCodes.InvalidRequest, "缺少档案分发参数");
-        if (command.Command == CommandKind.JoinManagement && command.ManagementJoin is null)
-            return new CommandError(CommandResultCodes.InvalidRequest, "缺少加入集控参数");
-        return null;
+        return command.Command == CommandKind.JoinManagement && command.ManagementJoin is null
+            ? new CommandError(CommandResultCodes.InvalidRequest, "缺少加入集控参数")
+            : null;
     }
 
     private static CommandError? GetExtensionValidationError(

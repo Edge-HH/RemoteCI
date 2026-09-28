@@ -365,20 +365,9 @@ public sealed class ClassExcelService(AppDbContext db, ClassroomService classroo
     {
         var name = row.Name.Trim();
         var failures = new List<string>();
-        if (name.Length is < 1 or > 40) failures.Add("分组名称需为 1-40 个字符。");
-        var id = Guid.NewGuid();
-        ClassGroup? existing = null;
-        if (!string.IsNullOrWhiteSpace(row.SystemId))
-        {
-            if (!Guid.TryParse(row.SystemId, out id) || !groupById.TryGetValue(id, out existing))
-            {
-                failures.Add("系统标识对应的分组不存在，请重新导出后再修改。");
-                id = Guid.Empty;
-            }
-            else if (!seenIds.Add(id)) failures.Add("同一分组在文件中出现多次。");
-        }
-        if (name.Length is >= 1 and <= 40 && !seenNames.Add(name))
-            failures.Add("文件内存在重复的分组名称。");
+        ValidatePlanName(name, "分组", failures);
+        var (id, existing) = ResolveGroupIdentity(row, groupById, seenIds, failures);
+        ValidatePlanNameDuplicate(name, seenNames, "分组", failures);
         if (failures.Count > 0)
         {
             plan = null;
@@ -388,6 +377,34 @@ public sealed class ClassExcelService(AppDbContext db, ClassroomService classroo
         plan = new GroupPlan(existing, id, name, row.ParentName.Trim(), row.RowNumber);
         failure = null;
         return true;
+    }
+
+    private static void ValidatePlanName(string name, string kind, ICollection<string> failures)
+    {
+        if (name.Length is < 1 or > 40) failures.Add($"{kind}名称需为 1-40 个字符。");
+    }
+
+    private static void ValidatePlanNameDuplicate(
+        string name, ISet<string> seenNames, string kind, ICollection<string> failures)
+    {
+        if (name.Length is >= 1 and <= 40 && !seenNames.Add(name))
+            failures.Add($"文件内存在重复的{kind}名称。");
+    }
+
+    private static (Guid Id, ClassGroup? Existing) ResolveGroupIdentity(
+        GroupRow row,
+        IReadOnlyDictionary<Guid, ClassGroup> groupById,
+        ISet<Guid> seenIds,
+        ICollection<string> failures)
+    {
+        if (string.IsNullOrWhiteSpace(row.SystemId)) return (Guid.NewGuid(), null);
+        if (!Guid.TryParse(row.SystemId, out var id) || !groupById.TryGetValue(id, out var existing))
+        {
+            failures.Add("系统标识对应的分组不存在，请重新导出后再修改。");
+            return (Guid.Empty, null);
+        }
+        if (!seenIds.Add(id)) failures.Add("同一分组在文件中出现多次。");
+        return (id, existing);
     }
 
     private static List<ClassPlan> BuildClassPlans(
@@ -420,32 +437,12 @@ public sealed class ClassExcelService(AppDbContext db, ClassroomService classroo
     {
         var name = row.Name.Trim();
         var failures = new List<string>();
-        if (name.Length is < 1 or > 40) failures.Add("班级名称需为 1-40 个字符。");
-        var id = Guid.NewGuid();
-        Classroom? existing = null;
-        if (!string.IsNullOrWhiteSpace(row.SystemId))
-        {
-            if (!Guid.TryParse(row.SystemId, out id) || !classById.TryGetValue(id, out existing))
-            {
-                failures.Add("系统标识对应的班级不存在，请重新导出后再修改。");
-                id = Guid.Empty;
-            }
-            else if (!seenIds.Add(id)) failures.Add("同一班级在文件中出现多次。");
-        }
-        if (name.Length is >= 1 and <= 40 && !seenNames.Add(name))
-            failures.Add("文件内存在重复的班级名称。");
-        var visitorAccess = false;
-        try { visitorAccess = ParseVisitorAccess(row.VisitorText); }
-        catch (IdentityOperationException ex) { failures.Add(ex.Message); }
-        var groupIds = new List<Guid>();
-        foreach (var groupName in SplitGroups(row.GroupsText))
-        {
-            if (!idByGroupName.TryGetValue(groupName, out var groupId)) failures.Add($"分组“{groupName}”不存在。");
-            else groupIds.Add(groupId);
-        }
-        var pairCode = row.PairCode.Trim();
-        if (pairCode.Length > 0 && (pairCode.Length is < 6 or > 64 || pairCode.Any(char.IsWhiteSpace)))
-            failures.Add("配对码需为 6-64 个不含空白的字符。");
+        ValidatePlanName(name, "班级", failures);
+        var (id, existing) = ResolveClassIdentity(row, classById, seenIds, failures);
+        ValidatePlanNameDuplicate(name, seenNames, "班级", failures);
+        var visitorAccess = ParseVisitorAccessSafe(row.VisitorText, failures);
+        var groupIds = ResolveClassGroupIds(row.GroupsText, idByGroupName, failures);
+        var pairCode = ValidatePairCodeText(row.PairCode, failures);
         if (failures.Count > 0)
         {
             plan = null;
@@ -456,6 +453,51 @@ public sealed class ClassExcelService(AppDbContext db, ClassroomService classroo
             pairCode.Length == 0 ? null : pairCode);
         failure = null;
         return true;
+    }
+
+    private static (Guid Id, Classroom? Existing) ResolveClassIdentity(
+        ClassRow row,
+        IReadOnlyDictionary<Guid, Classroom> classById,
+        ISet<Guid> seenIds,
+        ICollection<string> failures)
+    {
+        if (string.IsNullOrWhiteSpace(row.SystemId)) return (Guid.NewGuid(), null);
+        if (!Guid.TryParse(row.SystemId, out var id) || !classById.TryGetValue(id, out var existing))
+        {
+            failures.Add("系统标识对应的班级不存在，请重新导出后再修改。");
+            return (Guid.Empty, null);
+        }
+        if (!seenIds.Add(id)) failures.Add("同一班级在文件中出现多次。");
+        return (id, existing);
+    }
+
+    private static bool ParseVisitorAccessSafe(string value, ICollection<string> failures)
+    {
+        try { return ParseVisitorAccess(value); }
+        catch (IdentityOperationException ex) { failures.Add(ex.Message); return false; }
+    }
+
+    private static List<Guid> ResolveClassGroupIds(
+        string value,
+        IReadOnlyDictionary<string, Guid> idByGroupName,
+        ICollection<string> failures)
+    {
+        var groupIds = new List<Guid>();
+        foreach (var groupName in SplitGroups(value))
+        {
+            if (!idByGroupName.TryGetValue(groupName, out var groupId))
+                failures.Add($"分组“{groupName}”不存在。");
+            else groupIds.Add(groupId);
+        }
+        return groupIds;
+    }
+
+    private static string ValidatePairCodeText(string value, ICollection<string> failures)
+    {
+        var pairCode = value.Trim();
+        if (pairCode.Length > 0 && (pairCode.Length is < 6 or > 64 || pairCode.Any(char.IsWhiteSpace)))
+            failures.Add("配对码需为 6-64 个不含空白的字符。");
+        return pairCode;
     }
 
     /// <summary>把现有名称与计划名称合并成“最终名称 → Id”表，并报告重名冲突。</summary>
