@@ -62,7 +62,6 @@ public sealed class PluginManagementService
 
             return CommandResult.Failure(CommandResultCodes.InvalidRequest, "插件操作与命令类型不匹配");
 
-
         var policy = LoadPolicy();
         return request.Action switch
         {
