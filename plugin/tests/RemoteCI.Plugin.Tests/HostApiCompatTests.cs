@@ -56,6 +56,18 @@ public sealed class HostApiCompatTests
     }
 
     [Fact]
+    public void ReadPropertySupportsMutableDictionaryAccessForProfileWrites()
+    {
+        var id = Guid.NewGuid();
+        var profile = new Profile();
+
+        var subjects = HostApiCompat.ReadProperty<IDictionary<Guid, Subject>>(profile, "Subjects");
+        subjects[id] = new Subject { Name = "数学" };
+
+        Assert.Equal("数学", HostApiCompat.ReadProperty<IReadOnlyDictionary<Guid, Subject>>(profile, "Subjects")[id].Name);
+    }
+
+    [Fact]
     public void ReadPropertyThrowsWhenMemberIsMissing()
     {
         var profile = new Profile();

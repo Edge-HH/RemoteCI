@@ -614,6 +614,7 @@
                 </div>
                 <audio controls data-voice-preview hidden aria-label="试听语音"></audio>
                 <p class="control-note" data-voice-status role="status">@(Model.IsSingleControl ? "录制完成后点击“发送语音”，发送到当前班级。" : "录制完成后点击“下一步：选择设备”，再确认广播目标。")</p>
+                <p class="control-note" data-voice-transport-warning hidden>（当前使用不安全的HTTP连接）</p>
             </form>
         </div>
     </div>

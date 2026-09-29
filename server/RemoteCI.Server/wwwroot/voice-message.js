@@ -4,9 +4,14 @@
     const find = name => form.querySelector(`[data-voice-${name}]`);
     const record = find("record"), stop = find("stop"), discard = find("discard"), send = find("send");
     const preview = find("preview"), status = find("status");
+    const transportWarning = find("transport-warning");
     const offline = record.disabled;
     let stream, context, node, timer, previewUrl, pcm;
     let chunks = [], bytes = 0, recording = false, starting = false, generation = 0;
+
+    // HTTP 页面仍可用于发送已有录音，但浏览器通常会在非安全上下文禁用麦克风。
+    if (transportWarning && window.location?.protocol === "http:")
+        transportWarning.hidden = false;
 
     function release() {
         clearTimeout(timer);
@@ -57,8 +62,8 @@
         record.disabled = true;
         status.textContent = "正在请求麦克风…";
         try {
-            if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
-                throw new Error("浏览器录音需要 HTTPS 或 localhost，请使用安全地址访问");
+            if (!navigator.mediaDevices?.getUserMedia)
+                throw new Error("当前浏览器未提供麦克风录音能力；请使用 HTTPS、localhost，或允许明文 HTTP 麦克风的浏览器策略");
             const captured = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true } });
             if (current !== generation) { captured.getTracks().forEach(track => track.stop()); return; }
             stream = captured;

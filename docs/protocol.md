@@ -134,7 +134,7 @@ WebUI 的有效能力是“服务端 ∩ 当前主插件”，手表的有效能
 
 音频为 16 kHz、16 位有符号小端、单声道 PCM，最多 60 秒（1,920,000 字节），不能为空或包含半个采样；`audioBase64` 使用标准 Base64。服务端和插件校验音频格式与大小，不接收音频 URL 或本地路径。WebSocket 信封接收上限为 16 MiB，覆盖 Base64 中 `+` 被 JSON 转义成 `\u002B` 的最坏情况；解码后仍受上述音频上限约束。
 
-WebUI 通过 `POST /Control?handler=VoiceMessage` 上传 `application/octet-stream` 原始 PCM，携带 Cookie 和 `X-CSRF-TOKEN` 防伪头；服务端在内存中转为同一命令并等待插件回执。手表通过已认证的云端或局域网 WebSocket 发送。所有接入端覆盖 `requestedBy`，插件使用认证账号的 `displayName` 生成“来自xxx的语音消息”，不受文本通知署名开关影响。
+WebUI 通过 `POST /Control?handler=VoiceMessage` 上传 `application/octet-stream` 原始 PCM，携带 Cookie 和 `X-CSRF-TOKEN` 防伪头；服务端在内存中转为同一命令并等待插件回执。HTTP 页面会显示“（当前使用不安全的HTTP连接）”；但浏览器通常只在 HTTPS、localhost 或管理员明确放行明文麦克风的策略下提供 `getUserMedia`。手表通过已认证的云端或局域网 WebSocket 发送。所有接入端覆盖 `requestedBy`，插件使用认证账号的 `displayName` 生成“来自xxx的语音消息”，不受文本通知署名开关影响。
 
 Windows 插件自动播放录音，并显示上述 ClassIsland 通知：强调特效开启、通知音效关闭、朗读关闭（仍遵循宿主全局提醒限制）。底部浮窗上滑出现，拖动标题可移动；顶部显示发送人和总时长，中间使用 ClassIsland 原生 Slider 拖动播放位置，底部三个无底色的 ClassIsland Fluent 图标分开放置，分别用于暂停/继续、后退 5 秒和关闭，关闭图标使用系统危险色，播完后可重新播放。浮窗使用宿主 Fluent 浮层背景、描边、圆角、深浅色主题和 UI 字体；点击浮窗外部也会关闭并停止播放。关闭或插件停止时立即释放音频资源。已有浮窗时返回 `BUSY`，不排队、不打断现有语音；离线不缓存重发。成功回执表示播放器已启动，不表示整条语音已经播放完毕。音频不写入文件或通知历史，广播事件仅包含发送人提示。
 
@@ -151,6 +151,7 @@ RemoteCI 插件在云端连接建立后通过 `software_inventory` 上报设备�
 
 - 插件安装使用 ClassIsland 官方插件市场解析依赖并下载 `.cipx` 缓存，卸载和启停使用宿主公开的 `PluginInfo` 状态接口；RemoteCI 拒绝操作自身，避免远程控制链路被卸载或禁用。
 - `DistributeProfile` 只接收 ClassIsland 档案 JSON 和分发范围（时间表、课表、科目），不接收任意文件路径；`UpdateTimeLayout` 接收结构化时间点并由插件在 UI 线程写入档案。
+- 插件对 `Profile` 的字典属性按属性名运行时读取，以兼容 ClassIsland 2.0 的 `ObservableDictionary` 与后续 2.x 的字典实现；因此升级宿主后无需重新生成档案 JSON。
 - `JoinManagement` 由管理员上传 ClassIsland 集控配置文件 `ManagementPreset.json`（即宿主 ManagementSettings 的 JSON）发起。插件解析后按配置文件里的服务器类型（Serverless manifest 模板或 ManagementServer 的 API + gRPC）注册，先校验集控清单核心版本，再写入宿主的 Management 配置并重启；配置文件里的 ID（ClassIdentity）由服务端按目标设备所属班级名自动填充，不需要管理员填写。
 - `SetPluginManagementPolicy` 只约束 RemoteCI 后续发起的远程插件安装或卸载。ClassIsland 当前没有公开的宿主级“禁止本地安装/卸载插件”策略 API，因此该策略不阻止用户在 ClassIsland 本地设置页操作。
 

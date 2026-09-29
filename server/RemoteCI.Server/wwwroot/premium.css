@@ -503,6 +503,12 @@ body.sidebar-collapsed .logout-button { justify-content: center; padding-inline:
     padding: 30px 40px 56px;
 }
 
+/* 登录页需要保留窄卡片宽度，否则通用 shell 宽度会吞掉左右对齐效果。 */
+.auth-shell {
+    width: min(430px, 100%);
+    padding: 0;
+}
+
 .dashboard-head,
 .page-head {
     gap: 20px;

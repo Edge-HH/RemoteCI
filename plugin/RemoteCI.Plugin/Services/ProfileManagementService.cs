@@ -95,9 +95,12 @@ public sealed class ProfileManagementService(ILogger<ProfileManagementService> l
         {
             var profileService = IAppHost.GetService<IProfileService>();
             var profile = profileService.Profile;
+            // ClassIsland 2.2 更换了 Profile 字典的具体返回类型。
+            // 不能在这里直接绑定旧版 getter，否则新宿主会抛 MissingMethodException。
+            var timeLayouts = HostApiCompat.ReadProperty<IDictionary<Guid, TimeLayout>>(profile, "TimeLayouts");
             var id = request.TimeLayoutId ?? Guid.NewGuid();
             if (request.Activate)
-                foreach (var existing in profile.TimeLayouts.Values)
+                foreach (var existing in timeLayouts.Values)
                     existing.IsActivated = false;
 
             var layout = new TimeLayout
@@ -108,7 +111,7 @@ public sealed class ProfileManagementService(ILogger<ProfileManagementService> l
             };
             foreach (var point in points.OrderBy(point => point.StartTime).ThenBy(point => point.EndTime))
                 layout.Layouts.Add(point);
-            profile.TimeLayouts[id] = layout;
+            timeLayouts[id] = layout;
             profileService.SaveProfile();
         });
     }
@@ -143,12 +146,19 @@ public sealed class ProfileManagementService(ILogger<ProfileManagementService> l
             {
                 var profileService = IAppHost.GetService<IProfileService>();
                 var target = profileService.Profile;
+                // 通过反射读取属性，兼容旧版 ObservableDictionary 与新版实现。
+                var targetTimeLayouts = HostApiCompat.ReadProperty<IDictionary<Guid, TimeLayout>>(target, "TimeLayouts");
+                var targetClassPlans = HostApiCompat.ReadProperty<IDictionary<Guid, ClassPlan>>(target, "ClassPlans");
+                var targetSubjects = HostApiCompat.ReadProperty<IDictionary<Guid, Subject>>(target, "Subjects");
+                var sourceTimeLayouts = HostApiCompat.ReadProperty<IReadOnlyDictionary<Guid, TimeLayout>>(source, "TimeLayouts");
+                var sourceClassPlans = HostApiCompat.ReadProperty<IReadOnlyDictionary<Guid, ClassPlan>>(source, "ClassPlans");
+                var sourceSubjects = HostApiCompat.ReadProperty<IReadOnlyDictionary<Guid, Subject>>(source, "Subjects");
                 if (request.Sections.HasFlag(ProfileDistributionSection.TimeLayouts))
-                    ApplyDictionary(target.TimeLayouts, source.TimeLayouts, request.ReplaceExisting);
+                    ApplyDictionary(targetTimeLayouts, sourceTimeLayouts, request.ReplaceExisting);
                 if (request.Sections.HasFlag(ProfileDistributionSection.ClassPlans))
-                    ApplyDictionary(target.ClassPlans, source.ClassPlans, request.ReplaceExisting);
+                    ApplyDictionary(targetClassPlans, sourceClassPlans, request.ReplaceExisting);
                 if (request.Sections.HasFlag(ProfileDistributionSection.Subjects))
-                    ApplyDictionary(target.Subjects, source.Subjects, request.ReplaceExisting);
+                    ApplyDictionary(targetSubjects, sourceSubjects, request.ReplaceExisting);
                 profileService.SaveProfile();
             });
         }
@@ -166,7 +176,7 @@ public sealed class ProfileManagementService(ILogger<ProfileManagementService> l
 
     private static void ApplyDictionary<T>(
         IDictionary<Guid, T> target,
-        IDictionary<Guid, T> source,
+        IReadOnlyDictionary<Guid, T> source,
         bool replaceExisting)
     {
         if (replaceExisting)

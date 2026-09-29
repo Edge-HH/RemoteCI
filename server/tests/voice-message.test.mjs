@@ -35,24 +35,29 @@ test("recorder caps exactly 60 seconds and sends no more PCM after stop", () => 
     assert.equal(manuallyStopped.port.messages[0].stopped, true);
 });
 
-function browser(getUserMedia) {
-    const elements = Object.fromEntries(["record", "stop", "discard", "send", "preview", "status"].map(name => [name, {
+function browser(getUserMedia, protocol = "https:") {
+    const elements = Object.fromEntries(["record", "stop", "discard", "send", "preview", "status", "transport-warning"].map(name => [name, {
         disabled: name !== "record", hidden: true, handlers: {},
         addEventListener(type, fn) { this.handlers[type] = fn; },
         pause() {}, load() {}, removeAttribute() {},
     }]));
     const form = {
         handlers: {}, dataset: { workletUrl: "/voice-recorder-worklet.js" },
-        querySelector: query => elements[query.match(/data-voice-(\w+)/)?.[1]],
+        querySelector: query => elements[query.match(/data-voice-([\w-]+)/)?.[1]],
         addEventListener(type, fn) { this.handlers[type] = fn; },
     };
     const document = { hidden: false, handlers: {}, querySelector: () => form,
         addEventListener(type, fn) { this.handlers[type] = fn; } };
-    const window = { isSecureContext: true, handlers: {}, addEventListener(type, fn) { this.handlers[type] = fn; } };
+    const window = { isSecureContext: protocol === "https:", location: { protocol }, handlers: {}, addEventListener(type, fn) { this.handlers[type] = fn; } };
     vm.runInNewContext(script("voice-message"), { document, window, navigator: { mediaDevices: { getUserMedia } },
         URL, Blob, setTimeout, clearTimeout });
     return { elements, document, window };
 }
+
+test("HTTP pages show the explicit insecure transport warning", () => {
+    const app = browser(() => Promise.reject(new Error("unused")), "http:");
+    assert.equal(app.elements["transport-warning"].hidden, false);
+});
 
 test("a late microphone permission result cannot start recording after leaving the page", async () => {
     let grant;
