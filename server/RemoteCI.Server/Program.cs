@@ -90,6 +90,7 @@ builder.Services.AddScoped<ConfigurationArchiveService>();
 builder.Services.AddScoped<SchedulePullSettings>();
 builder.Services.AddScoped<VisitorAccessSettings>();
 builder.Services.AddScoped<LoginPageSettings>();
+builder.Services.AddScoped<TeacherBindingService>();
 builder.Services.AddScoped<ClassAccessService>();
 builder.Services.AddScoped<ClassBroadcastService>();
  builder.Services.AddScoped<DeviceInventoryService>();
@@ -172,6 +173,7 @@ app.Map("/ws", async context =>
         context.RequestServices.GetRequiredService<AuthorizationSyncService>(),
         context.RequestServices.GetRequiredService<ScheduleSyncService>(),
         context.RequestServices.GetRequiredService<ClassAccessService>(),
+        context.RequestServices.GetRequiredService<TeacherBindingService>(),
         logger);
 });
 
@@ -253,6 +255,34 @@ app.MapPost("/api/me/password", async (
         return Results.NoContent();
     }
     catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+
+// 老师填写自己的显示名（姓名）以绑定课表科目教师名；与 Web 端账号页同一套校验与版本推进。
+app.MapPost("/api/me/display-name", async (
+    HttpContext ctx, ChangeDisplayNameRequest request, IdentityCoordinator identities,
+    AuthorizationSyncService authorizationSync, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.IsApiKey) return Forbidden();
+    if (MissingFields(request.DisplayName) is { } bad) return bad;
+    if (!HasPermission(principal, UserPermissions.ChangeDisplayName)) return Forbidden();
+    try
+    {
+        await identities.ChangeDisplayNameAsync(principal.User.Id, request, ct);
+        await authorizationSync.SyncAsync(ct);
+        return Results.NoContent();
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+
+// “我的日程”：当前老师账号按显示名绑定课表后，跨班级聚合出的个人课表。
+app.MapGet("/api/me/schedule", async (
+    HttpContext ctx, IdentityCoordinator identities, TeacherBindingService teachers, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    return Results.Ok(await teachers.BuildMyScheduleAsync(principal.User.DisplayName, ct));
 });
 
 app.MapGet("/api/me/sessions", async (HttpContext ctx, IdentityCoordinator identities, CancellationToken ct) =>
@@ -841,7 +871,7 @@ app.MapPut("/api/settings/notifications", async (SettingsSync body, HttpContext 
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (!HasPermission(principal, UserPermissions.SendNotifications) && principal.User.Role != UserRole.Admin)
+    if (principal.User.Role != UserRole.Admin)
         return Forbidden();
     var updated = await identities.SetForceSenderInTitleAsync(body.ForceSenderInTitle, ct);
     await peers.SendSettingsToWatchesAsync(updated, ct);

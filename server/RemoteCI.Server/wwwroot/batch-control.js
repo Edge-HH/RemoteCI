@@ -12,11 +12,117 @@
     const submitButton = document.querySelector("[data-batch-submit]");
     const voiceDialog = document.querySelector("[data-batch-voice-dialog]");
     const voiceForm = document.querySelector("[data-voice-form]");
-    const singleControl = document.querySelector("[data-single-control]")?.dataset.singleControl === "true";
+    const remoteResults = document.querySelector("[data-batch-remote-results]");
+    const remoteList = document.querySelector("[data-batch-remote-list]");
+    const singleControlRoot = document.querySelector("[data-single-control]");
+    const singleControl = singleControlRoot?.dataset.singleControl === "true";
+    const singleClassName = singleControlRoot?.dataset.singleClassName || "当前班级";
     if (!targetDialog || !targetForm || !payload || !operationInput) return;
 
     let currentOperation = null;
     let currentSettingsDialog = null;
+    let selectedFile = null;
+
+    // 远程维护操作不走表单提交：结果需要逐设备带回输出或保存路径，由本脚本用 fetch 上报并渲染。
+    const remoteOps = {
+        ExecuteTerminalCommand: {
+            handler: () => (singleControl ? "SingleTerminal" : "ExecuteTerminal"),
+            buildBody: () => {
+                const dialog = settingsDialogFor("ExecuteTerminalCommand");
+                const body = new URLSearchParams();
+                body.set("command", dialog?.querySelector("[data-terminal-command]")?.value ?? "");
+                body.set("timeoutSeconds", dialog?.querySelector("[data-terminal-timeout]")?.value || "10");
+                const workdir = dialog?.querySelector("[data-terminal-workdir]")?.value.trim() || "";
+                if (workdir) body.set("workingDirectory", workdir);
+                return body;
+            },
+            ready: () => true,
+        },
+        SendFile: {
+            handler: () => (singleControl ? "SingleDistributeFile" : "DistributeFile"),
+            buildBody: () => {
+                const dialog = settingsDialogFor("SendFile");
+                const formData = new FormData();
+                formData.append("file", selectedFile);
+                formData.append("targetFolder", dialog?.querySelector("[data-file-target-folder]")?.value || "Desktop");
+                formData.append("overwrite", dialog?.querySelector("[data-file-overwrite]")?.checked ? "true" : "false");
+                return formData;
+            },
+            ready: () => selectedFile !== null,
+        },
+    };
+
+    const renderRemoteResults = results => {
+        if (!remoteResults || !remoteList) return;
+        remoteList.innerHTML = "";
+        results.forEach(item => {
+            const li = document.createElement("li");
+            const icon = document.createElement("i");
+            icon.className = `bi ${item.success ? "bi-check-circle ok" : "bi-x-circle bad"}`;
+            icon.setAttribute("aria-hidden", "true");
+            const text = document.createElement("span");
+            const name = document.createElement("strong");
+            name.textContent = item.name;
+            text.appendChild(name);
+            if (item.message) {
+                const pre = document.createElement("pre");
+                pre.className = "batch-remote-output";
+                pre.textContent = item.message;
+                text.appendChild(pre);
+            } else {
+                text.appendChild(document.createTextNode(" — 成功"));
+            }
+            li.appendChild(icon);
+            li.appendChild(text);
+            remoteList.appendChild(li);
+        });
+        remoteResults.hidden = results.length === 0;
+    };
+
+    const runRemoteOp = async operation => {
+        const op = remoteOps[operation];
+        if (!op) return;
+        if (!validateTargets()) return;
+        if (!op.ready()) {
+            const feedback = singleControl
+                ? currentSettingsDialog?.querySelector("[data-single-control-feedback]")
+                : targetFeedback;
+            feedback.textContent = operation === "SendFile"
+                ? "请先返回上一步选择要分发的文件。"
+                : "参数不完整，请返回上一步检查。";
+            return;
+        }
+        const action = new URL(location.pathname, window.location.origin);
+        action.searchParams.set("handler", op.handler());
+        if (!singleControl) {
+            targetDialog.querySelectorAll("input[data-voice-query]:checked:not(:disabled)").forEach(input => {
+                action.searchParams.append(input.dataset.voiceQuery || input.name, input.value);
+            });
+        }
+        const token = targetForm.querySelector('[name="__RequestVerificationToken"]')?.value;
+        submitButton.disabled = true;
+        const feedback = singleControl
+            ? currentSettingsDialog?.querySelector("[data-single-control-feedback]")
+            : targetFeedback;
+        feedback.textContent = "正在执行，等待设备回执…";
+        if (remoteResults) remoteResults.hidden = true;
+        try {
+            const response = await fetch(action, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: token ? { "X-CSRF-TOKEN": token } : undefined,
+                body: op.buildBody(),
+            });
+            if (!response.ok || response.redirected) throw new Error("会话失效或执行失败，请刷新后重试");
+            const result = await response.json();
+            feedback.textContent = result.message || "";
+            renderRemoteResults(result.results || []);
+        } catch (error) {
+            feedback.textContent = `执行失败：${error.message}`;
+        } finally {
+            submitButton.disabled = false;
+        }
+    };
 
     const openDialog = dialog => {
         if (!dialog) return;
@@ -30,6 +136,39 @@
     };
     const closeNearest = element => closeDialog(element?.closest("dialog"));
     const settingsDialogFor = operation => settingsDialogs.find(dialog => dialog.dataset.batchSettings === operation);
+
+    // 单班控制不需要再打开目标选择弹窗；把执行范围和风险确认放回参数页，
+    // 让用户在填写参数后能直接看到“执行于哪个班级”。
+    const prepareSingleDialog = (dialog, risk) => {
+        if (!singleControl || !dialog) return;
+        dialog.querySelectorAll(".batch-step").forEach(step => { step.textContent = "确认执行"; });
+        dialog.querySelectorAll("[data-batch-next]").forEach(button => { button.textContent = "执行"; });
+        const body = dialog.querySelector(".batch-dialog-body");
+        if (!body || body.querySelector("[data-single-control-context]")) return;
+
+        const context = document.createElement("div");
+        context.className = "single-control-context";
+        context.dataset.singleControlContext = "";
+        context.innerHTML = `<div class="single-control-context-icon" aria-hidden="true"><i class="bi bi-broadcast-pin"></i></div>
+            <div><span class="single-control-context-label">执行范围</span><strong></strong><p>仅发送到当前班级的在线设备。</p></div>`;
+        context.querySelector("strong").textContent = singleClassName;
+        body.prepend(context);
+
+        const feedback = document.createElement("p");
+        feedback.className = "batch-target-feedback";
+        feedback.dataset.singleControlFeedback = "";
+        feedback.setAttribute("role", "status");
+        body.append(feedback);
+
+        if (risk) {
+            const confirmation = document.createElement("label");
+            confirmation.className = "batch-risk-confirm single-control-risk";
+            confirmation.dataset.singleRiskConfirm = "";
+            confirmation.innerHTML = `<input type="checkbox" name="ConfirmHighRisk" value="true" data-batch-bool />
+                <span><strong>高风险操作</strong><small>我确认该操作可能造成重启、程序替换或连接中断。</small></span>`;
+            body.append(confirmation);
+        }
+    };
 
     const addHidden = (name, value) => {
         const input = document.createElement("input");
@@ -112,6 +251,7 @@
             ? "选择要广播语音的班级、分组或具体设备。"
             : `选择要执行“${title || "该功能"}”的班级、分组或具体设备。`;
         targetFeedback.textContent = "";
+        if (remoteResults) remoteResults.hidden = true;
         riskConfirm.hidden = !risk;
         const riskCheckbox = riskConfirm.querySelector('input[type="checkbox"]');
         if (riskCheckbox) riskCheckbox.checked = false;
@@ -162,6 +302,7 @@
         currentOperation = operation;
         currentSettingsDialog = settingsDialogFor(operation);
         openDialog(currentSettingsDialog);
+        prepareSingleDialog(currentSettingsDialog, risk);
         if (operation === "UpdateTimeLayout" && currentSettingsDialog.querySelectorAll("[data-time-layout-rows] .time-layout-row").length === 0) {
             addTimeLayoutRow(currentSettingsDialog);
         }
@@ -188,6 +329,26 @@
         currentOperation = dialog.dataset.batchSettings;
         currentSettingsDialog = dialog;
         copySettings();
+        if (singleControl) {
+            operationInput.value = currentOperation;
+            targetForm.action = `${location.pathname}?handler=SingleExecute`;
+            const singleRisk = dialog.querySelector("[data-single-risk-confirm] input[type=checkbox]");
+            if (singleRisk && !singleRisk.checked) {
+                let feedback = dialog.querySelector("[data-single-control-feedback]");
+                if (!feedback) {
+                    feedback = document.createElement("p");
+                    feedback.className = "batch-target-feedback";
+                    feedback.dataset.singleControlFeedback = "";
+                    dialog.querySelector(".batch-dialog-body")?.append(feedback);
+                }
+                feedback.textContent = "请先勾选高风险操作确认。";
+                singleRisk.focus();
+                return true;
+            }
+            if (!validateTargets()) return true;
+            targetForm.requestSubmit();
+            return true;
+        }
         openTargetDialog(currentOperation, dialog.dataset.batchTitle, dialog.dataset.batchRisk === "true", dialog);
         return true;
     };
@@ -249,6 +410,11 @@
     });
 
     targetForm.addEventListener("submit", event => {
+        if (remoteOps[currentOperation]) {
+            event.preventDefault();
+            void runRemoteOp(currentOperation);
+            return;
+        }
         if (!validateTargets()) event.preventDefault();
     });
 
@@ -270,6 +436,18 @@
             const textarea = input.closest("dialog")?.querySelector('textarea[name="ManagementPresetJson"]');
             if (!textarea) return;
             textarea.value = await file.text();
+        });
+    });
+
+    // 文件分发：文件保存在脚本内存中，提交时经 fetch 以 multipart 上传，不塞进表单隐藏字段。
+    document.querySelectorAll("[data-batch-file]").forEach(input => {
+        input.addEventListener("change", () => {
+            selectedFile = input.files?.[0] ?? null;
+            const status = input.closest("dialog")?.querySelector("[data-batch-file-status]");
+            if (!status) return;
+            status.textContent = selectedFile
+                ? `已选择 ${selectedFile.name}（${(selectedFile.size / 1024 / 1024).toFixed(2)} MB）${selectedFile.size > 10 * 1024 * 1024 ? "，超过 10 MB 上限" : ""}`
+                : "尚未选择文件。";
         });
     });
 })();

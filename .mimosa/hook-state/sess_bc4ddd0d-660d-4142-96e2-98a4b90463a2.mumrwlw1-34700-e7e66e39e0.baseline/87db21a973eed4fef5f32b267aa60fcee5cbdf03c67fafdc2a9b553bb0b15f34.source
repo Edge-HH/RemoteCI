@@ -1,0 +1,412 @@
+name: Release
+
+# 推送 ClassIsland 四段稳定标签或保留的 Beta 标签时构建四端产物并发布 GitHub Release。
+# 产物：服务端压缩包、插件 CIPX、手表 APK、三种飞牛 fnOS 应用（在线/双架构离线）与 GHCR 多架构镜像。
+# 手表 APK 使用仓库 Secrets 中的签名密钥（ANDROID_KEYSTORE_B64 等）。
+
+on:
+  push:
+    tags:
+      - "3.*.*.*"
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-server:
+    name: 服务端 (linux-x64 / win-x64)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rid: [linux-x64, win-x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Publish 服务端压缩包
+        run: |
+          source .github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
+          grep -Fq 'public const int Version = 3;' shared/RemoteCI.Shared/Protocol.cs
+          dotnet publish server/RemoteCI.Server/RemoteCI.Server.csproj -c Release -r ${{ matrix.rid }} \
+            --self-contained false -p:Version="$version" -o "publish/${{ matrix.rid }}"
+          grep -Fq "\"RemoteCI.Server/$version\"" "publish/${{ matrix.rid }}/RemoteCI.Server.deps.json"
+          actual_version="$(pwsh -NoProfile -Command "[Diagnostics.FileVersionInfo]::GetVersionInfo('$PWD/publish/${{ matrix.rid }}/RemoteCI.Server.dll').ProductVersion.Split('+')[0]")"
+          test "$actual_version" = "$version"
+          cd "publish/${{ matrix.rid }}"
+          zip -r "../RemoteCI.Server-${version}-${{ matrix.rid }}.zip" .
+          cd ..
+          # 同名校验和文件随包发布；服务端更新前按此校验完整性。
+          sha256sum "RemoteCI.Server-${version}-${{ matrix.rid }}.zip" > "RemoteCI.Server-${version}-${{ matrix.rid }}.zip.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.rid }}
+          path: |
+            publish/RemoteCI.Server-*-${{ matrix.rid }}.zip
+            publish/RemoteCI.Server-*-${{ matrix.rid }}.zip.sha256
+
+  build-plugin:
+    name: 插件 CIPX
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: 打包 CIPX
+        run: |
+          source .github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
+          grep -Fq 'public const int Version = 3;' shared/RemoteCI.Shared/Protocol.cs
+          sed -i "s/^version: .*/version: ${version}/" plugin/RemoteCI.Plugin/manifest.yml
+          grep -Fxq "version: ${version}" plugin/RemoteCI.Plugin/manifest.yml
+          dotnet build plugin/RemoteCI.Plugin/RemoteCI.Plugin.csproj -c Release -t:Rebuild \
+            -p:Version="$version" -p:CreateCipx=true
+          grep -Fq "RemoteCI.Plugin/${version}" plugin/RemoteCI.Plugin/bin/Release/net8.0/RemoteCI.Plugin.deps.json
+          actual_version="$(pwsh -NoProfile -Command "[Diagnostics.FileVersionInfo]::GetVersionInfo('$PWD/plugin/RemoteCI.Plugin/bin/Release/net8.0/RemoteCI.Plugin.dll').ProductVersion.Split('+')[0]")"
+          test "$actual_version" = "$version"
+          unzip -p plugin/RemoteCI.Plugin/cipx/RemoteCI.Plugin.cipx manifest.yml | grep -Fxq "version: ${version}"
+          cp plugin/RemoteCI.Plugin/cipx/RemoteCI.Plugin.cipx RemoteCI.Plugin.cipx
+          cp plugin/RemoteCI.Plugin/cipx/checksums.md checksums.md
+          cp plugin/RemoteCI.Plugin/manifest.yml remoteci.plugin.yml
+          if [[ "$channel" == "stable" ]]; then
+            pwsh -NoProfile -File plugin/RemoteCI.Plugin/scripts/Test-ClassIslandMarketPackage.ps1 \
+              -PackagePath RemoteCI.Plugin.cipx \
+              -ChecksumPath checksums.md \
+              -ExpectedVersion "$version"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-cipx
+          path: |
+            RemoteCI.Plugin.cipx
+            checksums.md
+            remoteci.plugin.yml
+
+  build-wearos:
+    name: 手表 APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: 配置签名密钥
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for name in ANDROID_KEYSTORE_B64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::未配置 $name，拒绝发布无法覆盖正式版的 APK"
+              exit 1
+            fi
+          done
+          mkdir -p wearos/keystore
+          echo "$ANDROID_KEYSTORE_B64" | base64 -d > wearos/keystore/remoteci-release.jks
+          {
+            echo "storeFile=keystore/remoteci-release.jks"
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "keyPassword=$ANDROID_KEY_PASSWORD"
+          } > wearos/keystore.properties
+      - name: 构建 Release APK
+        working-directory: wearos
+        run: |
+          source ../.github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
+          grep -Fq 'const val VERSION = 3' app/src/main/java/com/remoteci/watch/data/Protocol.kt
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease -PreleaseVersion="$version" --console=plain
+          grep -Fq "\"versionName\": \"$version\"" app/build/outputs/apk/release/output-metadata.json
+      - name: 按版本重命名 APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          source .github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
+          cp wearos/app/build/outputs/apk/release/app-release.apk "RemoteCI.Watch-${version}.apk"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          "$apksigner" verify --print-certs "RemoteCI.Watch-${version}.apk"
+          mkdir previous-watch
+          # 不使用 GitHub 的“latest”快捷入口：当历史 Release 全是预发布时，该入口会返回 404。
+          # Release 页面可能先创建当前标签对应的空 Release；必须排除当前标签，
+          # 才能下载真正上一版 APK 并校验签名证书是否延续。
+          previous_tag="$(
+            gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+              --json tagName,isDraft \
+              --jq '.[] | select(.isDraft == false) | .tagName' \
+              | bash .github/scripts/select-previous-release-tag.sh "$GITHUB_REF_NAME"
+          )"
+          test -n "$previous_tag" || {
+            echo "::error::找不到可用于校验签名的上一已发布版本"
+            exit 1
+          }
+          gh release download "$previous_tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'RemoteCI.Watch-*.apk' --dir previous-watch
+          previous_apk="$(find previous-watch -type f -name 'RemoteCI.Watch-*.apk' | head -n 1)"
+          certificate_digest() {
+            "$apksigner" verify --print-certs "$1" \
+              | sed -n 's/^.*certificate SHA-256 digest: //p' \
+              | head -n 1
+          }
+          previous_digest="$(certificate_digest "$previous_apk")"
+          current_digest="$(certificate_digest "RemoteCI.Watch-${version}.apk")"
+          test -n "$previous_digest" || { echo "::error::无法读取上一正式版 APK 的签名证书摘要"; exit 1; }
+          test -n "$current_digest" || { echo "::error::无法读取当前 APK 的签名证书摘要"; exit 1; }
+          test "$current_digest" = "$previous_digest" || {
+            echo "::error::当前 APK 与上一正式版签名证书不一致，拒绝发布"
+            exit 1
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: watch-apk
+          path: RemoteCI.Watch-*.apk
+
+
+  build-android:
+    name: Phone APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Prepare signing key
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for name in ANDROID_KEYSTORE_B64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::missing $name"
+              exit 1
+            fi
+          done
+          mkdir -p android/keystore
+          echo "$ANDROID_KEYSTORE_B64" | base64 -d > android/keystore/remoteci-release.jks
+          {
+            echo "storeFile=keystore/remoteci-release.jks"
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "keyPassword=$ANDROID_KEY_PASSWORD"
+          } > android/keystore.properties
+      - name: Build Release APK
+        working-directory: android
+        run: |
+          source ../.github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
+          grep -Fq 'const val VERSION = 3' app/src/main/java/com/remoteci/mobile/data/Protocol.kt
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease -PreleaseVersion="$version" --console=plain
+          grep -Fq "\"versionName\": \"$version\"" app/build/outputs/apk/release/output-metadata.json
+      - name: Rename APK
+        run: |
+          source .github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
+          cp android/app/build/outputs/apk/release/app-release.apk "RemoteCI.Mobile-${version}.apk"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          "$apksigner" verify --print-certs "RemoteCI.Mobile-${version}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-apk
+          path: RemoteCI.Mobile-*.apk
+
+  build-fnos:
+    name: fnOS 应用 (镜像 + fpk)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: 提取版本号
+        id: meta
+        run: |
+          source .github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
+          grep -Fq 'public const int Version = 3;' shared/RemoteCI.Shared/Protocol.cs
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 构建并推送多架构镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: server/RemoteCI.Server/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          # 用 GitHub Actions 缓存，避免 buildx 默认把缓存作为 artifact 上传，
+          # 否则 release 作业下载全部 artifact 时会连带下载 *.dockerbuild 缓存。
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            REMOTECI_VERSION=${{ steps.meta.outputs.version }}
+          tags: |
+            ghcr.io/edge-hh/remoteci:${{ steps.meta.outputs.version }}
+            ghcr.io/edge-hh/remoteci:latest
+      - name: 确保 GHCR 镜像包公开
+        run: |
+          # 仓库 GITHUB_TOKEN 无权访问用户级 Packages API，不能据此读写可见性。
+          # 改用匿名拉取令牌验证公开性；私有镜像取不到令牌或 manifest，发布会直接失败。
+          version="${{ steps.meta.outputs.version }}"
+          token="$(curl -fsSL \
+            'https://ghcr.io/token?service=ghcr.io&scope=repository%3Aedge-hh%2Fremoteci%3Apull' \
+            | python3 -c 'import json, sys; print(json.load(sys.stdin).get("token", ""))')"
+          test -n "$token" || {
+            echo "::error::无法匿名获取 GHCR 拉取令牌，镜像可能不是公开包"
+            exit 1
+          }
+          curl -fsSL \
+            -H "Authorization: Bearer $token" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json' \
+            "https://ghcr.io/v2/edge-hh/remoteci/manifests/$version" \
+            >/dev/null || {
+              echo "::error::GHCR 镜像 $version 无法匿名拉取，fnOS 在线 FPK 将无法安装"
+              exit 1
+            }
+      - name: 验证两种架构镜像并导出离线归档
+        run: |
+          set -euo pipefail
+          version="${{ steps.meta.outputs.version }}"
+          image="ghcr.io/edge-hh/remoteci:${version}"
+          mkdir -p artifacts/fnos-images
+          container=""
+          cleanup() {
+            if [ -n "$container" ]; then docker rm -f "$container" >/dev/null 2>&1 || true; fi
+            docker image rm "$image" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for arch in amd64 arm64; do
+            docker pull --platform "linux/${arch}" "$image"
+            test "$(docker image inspect --format '{{.Architecture}}' "$image")" = "$arch"
+
+            container="remoteci-release-${arch}"
+            docker run --rm -d --platform "linux/${arch}" --name "$container" \
+              -e REMOTECI_ADMIN_PASSWORD=ReleaseSmokeAdmin \
+              -e REMOTECI_PLUGIN_PAIR_CODE=ReleaseSmokePair \
+              -p 127.0.0.1::8080 "$image"
+            host_port="$(docker port "$container" 8080/tcp | sed -n 's/.*://p' | head -n 1)"
+            ready=0
+            for _ in $(seq 1 90); do
+              if curl -fsS "http://127.0.0.1:${host_port}/api/health" >/dev/null; then
+                ready=1
+                break
+              fi
+              sleep 1
+            done
+            if [ "$ready" -ne 1 ]; then
+              docker logs "$container"
+              echo "::error::${arch} 容器未在 90 秒内通过 /api/health"
+              exit 1
+            fi
+            docker rm -f "$container" >/dev/null
+            container=""
+
+            docker save "$image" | gzip -1 > "artifacts/fnos-images/remoteci-${version}-${arch}.tar.gz"
+            gzip -t "artifacts/fnos-images/remoteci-${version}-${arch}.tar.gz"
+            docker image rm "$image" >/dev/null
+          done
+      - name: 下载 fnpack 并打包三种 fpk
+        run: |
+          mkdir -p .tools
+          curl -fsSL -o .tools/fnpack https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64
+          chmod +x .tools/fnpack
+          version="${{ steps.meta.outputs.version }}"
+          REMOTECI_VERSION="$version" bash fnos/build.sh
+          REMOTECI_VERSION="$version" REMOTECI_FPK_MODE=offline \
+            REMOTECI_FPK_ARCH=amd64 \
+            REMOTECI_IMAGE_ARCHIVE="artifacts/fnos-images/remoteci-${version}-amd64.tar.gz" \
+            bash fnos/build.sh
+          REMOTECI_VERSION="$version" REMOTECI_FPK_MODE=offline \
+            REMOTECI_FPK_ARCH=arm64 \
+            REMOTECI_IMAGE_ARCHIVE="artifacts/fnos-images/remoteci-${version}-arm64.tar.gz" \
+            bash fnos/build.sh
+
+          bash fnos/tests/test-arch-compat.sh
+          python3 fnos/tests/verify-package.py "artifacts/release/RemoteCI-${version}.fpk" "$version" online all
+          python3 fnos/tests/verify-package.py \
+            "artifacts/release/RemoteCI-${version}-fnos-x86_64-offline.fpk" "$version" offline amd64
+          python3 fnos/tests/verify-package.py \
+            "artifacts/release/RemoteCI-${version}-fnos-arm64-offline.fpk" "$version" offline arm64
+          REMOTECI_TEST_FAILURE_CASES=0 bash fnos/tests/test-offline-lifecycle.sh \
+            "artifacts/release/RemoteCI-${version}.fpk" \
+            "artifacts/release/RemoteCI-${version}-fnos-x86_64-offline.fpk" \
+            "artifacts/release/RemoteCI-${version}-fnos-arm64-offline.fpk" \
+            "$version"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fnos-fpk
+          path: artifacts/release/RemoteCI-*.fpk
+
+  release:
+    name: 创建 GitHub Release
+    needs: [build-server, build-plugin, build-wearos, build-android, build-fnos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-linux-x64
+          path: artifacts/server-linux-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-win-x64
+          path: artifacts/server-win-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: plugin-cipx
+          path: artifacts/plugin-cipx
+      - uses: actions/download-artifact@v4
+        with:
+          name: watch-apk
+          path: artifacts/watch-apk
+      - uses: actions/download-artifact@v4
+        with:
+          name: mobile-apk
+          path: artifacts/mobile-apk
+      - uses: actions/download-artifact@v4
+        with:
+          name: fnos-fpk
+          path: artifacts/fnos-fpk
+      - name: 校验发布产物版本一致
+        run: |
+          source .github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
+          test -f "artifacts/server-linux-x64/RemoteCI.Server-${version}-linux-x64.zip"
+          test -f "artifacts/server-win-x64/RemoteCI.Server-${version}-win-x64.zip"
+          test -f artifacts/plugin-cipx/RemoteCI.Plugin.cipx
+          test -f artifacts/plugin-cipx/checksums.md
+          test -f artifacts/plugin-cipx/remoteci.plugin.yml
+          test -f "artifacts/watch-apk/RemoteCI.Watch-${version}.apk"
+          test -f "artifacts/mobile-apk/RemoteCI.Mobile-${version}.apk"
+          test -f "artifacts/fnos-fpk/RemoteCI-${version}.fpk"
+          test -f "artifacts/fnos-fpk/RemoteCI-${version}-fnos-x86_64-offline.fpk"
+          test -f "artifacts/fnos-fpk/RemoteCI-${version}-fnos-arm64-offline.fpk"
+          grep -Fq '<!-- CLASSISLAND_PKG_MD5 {"RemoteCI.Plugin.cipx":"' artifacts/plugin-cipx/checksums.md
+      - name: 发布
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/server-linux-x64/**
+            artifacts/server-win-x64/**
+            artifacts/plugin-cipx/RemoteCI.Plugin.cipx
+            artifacts/plugin-cipx/checksums.md
+            artifacts/plugin-cipx/remoteci.plugin.yml
+            artifacts/watch-apk/**
+            artifacts/mobile-apk/**
+            artifacts/fnos-fpk/**
+          body_path: artifacts/plugin-cipx/checksums.md
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          # 只有 v3.x.x-beta.y 是预发布，稳定四段标签必须进入正式渠道。
+          prerelease: ${{ contains(github.ref_name, '-') }}

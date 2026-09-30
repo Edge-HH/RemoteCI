@@ -71,6 +71,21 @@ public sealed class CommandMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ManagementJoinRequest? ManagementJoin { get; set; }
 
+    /// <summary>设置科目授课教师的参数；仅 SetSubjectTeacher 命令使用。</summary>
+    [JsonPropertyName("subjectTeacher")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SubjectTeacherRequest? SubjectTeacher { get; set; }
+
+    /// <summary>远程终端命令执行参数；仅 ExecuteTerminalCommand 命令使用。</summary>
+    [JsonPropertyName("terminalCommand")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TerminalCommandRequest? TerminalCommand { get; set; }
+
+    /// <summary>文件分发参数；仅 SendFile 命令使用。</summary>
+    [JsonPropertyName("fileDistribution")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public FileDistributionRequest? FileDistribution { get; set; }
+
     /// <summary>命令目标班级；缺省时由服务端路由到默认班级或用户唯一成员班级。</summary>
     [JsonPropertyName("classId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -107,6 +122,11 @@ public sealed class CommandResult
     [JsonPropertyName("scheduleRevision")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ScheduleRevision { get; set; }
+
+    /// <summary>可选附加数据：终端命令的标准输出/错误，或文件在设备上的保存路径。</summary>
+    [JsonPropertyName("data")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Data { get; set; }
 
     /// <summary>失败回执统一工厂，服务端与插件端共用，避免各处重复同一辅助实现。</summary>
     public static CommandResult Failure(string code, string message) => new()

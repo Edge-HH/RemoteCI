@@ -15,6 +15,8 @@
     <span class="status @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "插件在线" : "插件离线")</span>
 </div>
 
+@await Html.PartialAsync("_BatchResults", Model)
+
 @* 复用批量控制页的动作卡片与参数弹窗；SingleControl 模式下目标固定为当前班级。 *@
 @await Html.PartialAsync("_BatchControlActions", Model)
 
@@ -37,54 +39,50 @@
         }
         @if (Model.CanControlVolume)
         {
-            <a class="batch-action-card" href="#volume"><span class="batch-action-icon"><i class="bi bi-volume-up" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>音量调节</strong><small>打开当前班级设备音量控制。</small></span></a>
+            <button type="button" class="batch-action-card" data-user-edit-open="volume-dialog" aria-controls="volume-dialog"><span class="batch-action-icon"><i class="bi bi-volume-up" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>音量调节</strong><small>打开当前班级设备音量控制。</small></span></button>
         }
         @if (Model.CanManageClassInfo)
         {
-            <a class="batch-action-card" href="#class-info"><span class="batch-action-icon"><i class="bi bi-collection" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>班级设置</strong><small>修改当前班级名称与头像。</small></span></a>
+            <button type="button" class="batch-action-card" data-user-edit-open="class-info-dialog" aria-controls="class-info-dialog"><span class="batch-action-icon"><i class="bi bi-collection" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>班级设置</strong><small>修改当前班级名称与头像。</small></span></button>
         }
     </div>
 </section>
 
-<div class="control-grid">
-    @if (Model.CanManageClassInfo)
-    {
-    <section class="panel control-card control-card-full" id="class-info">
-        <div class="control-card-head">
-            <span class="feature-icon"><i class="bi bi-collection" aria-hidden="true"></i></span>
-            <div><h2>班级设置</h2><p class="muted">修改当前班级的名称与头像；头像会展示在选班页、访客页与客户端班级列表。</p></div>
-        </div>
-        <div class="class-info-body">
-            @if (Model.HasAvatar)
-            {
-                <img class="class-avatar" src="/api/classes/@Model.CurrentClassId/avatar" alt="班头像" />
-            }
-            <form method="post" asp-page-handler="ClassInfo" class="stack">
-                <label>班名<input asp-for="ClassNameInput" maxlength="40" placeholder="@Model.CurrentClass?.Name" /></label>
-                <button type="submit">保存班名</button>
-            </form>
-            <form method="post" asp-page-handler="Avatar" enctype="multipart/form-data" class="stack">
-                <label>班头像（PNG/JPEG/WebP，≤256KB）<input type="file" asp-for="AvatarFile" accept="image/png,image/jpeg,image/webp" /></label>
-                <button type="submit">上传头像</button>
-            </form>
-            @if (Model.HasAvatar)
-            {
-                <form method="post" asp-page-handler="RemoveAvatar">
-                    <button type="submit" class="ghost">清除头像</button>
+@if (Model.CanManageClassInfo)
+{
+    <dialog id="class-info-dialog" class="user-edit-dialog" data-user-edit-dialog aria-labelledby="class-info-dialog-title">
+        <div class="user-edit-dialog-shell">
+            <header class="user-edit-dialog-header"><div><p class="eyebrow">当前班级</p><h2 id="class-info-dialog-title">班级设置</h2><p class="muted">修改当前班级的名称与头像；头像会展示在选班页、访客页与客户端班级列表。</p></div><button type="button" class="ghost dialog-close-button" data-user-edit-close aria-label="关闭班级设置"><i class="bi bi-x-lg" aria-hidden="true"></i></button></header>
+            <div class="class-info-body user-edit-form">
+                @if (Model.HasAvatar)
+                {
+                    <img class="class-avatar" src="/api/classes/@Model.CurrentClassId/avatar" alt="班头像" />
+                }
+                <form method="post" asp-page-handler="ClassInfo" class="stack">
+                    <label>班名<input asp-for="ClassNameInput" maxlength="40" placeholder="@Model.CurrentClass?.Name" /></label>
+                    <button type="submit">保存班名</button>
                 </form>
-            }
-        </div>
-    </section>
-    }
-
-    @if (Model.CanControlVolume)
-    {
-        <section class="panel control-card control-card-wide" id="volume">
-            <div class="control-card-head">
-                <span class="feature-icon"><i class="bi @(snapshot?.IsMuted == true ? "bi-volume-mute" : "bi-volume-up")" aria-hidden="true" data-volume-icon></i></span>
-                <div><h2>音量</h2><p class="muted" data-volume-summary>当前音量 @(snapshot?.VolumePercent ?? 0)% · @(snapshot?.IsMuted == true ? "已静音" : "未静音")</p></div>
+                <form method="post" asp-page-handler="Avatar" enctype="multipart/form-data" class="stack">
+                    <label>班头像（PNG/JPEG/WebP，≤256KB）<input type="file" asp-for="AvatarFile" accept="image/png,image/jpeg,image/webp" /></label>
+                    <button type="submit">上传头像</button>
+                </form>
+                @if (Model.HasAvatar)
+                {
+                    <form method="post" asp-page-handler="RemoveAvatar">
+                        <button type="submit" class="ghost">清除头像</button>
+                    </form>
+                }
             </div>
-            <div class="control-actions">
+        </div>
+    </dialog>
+}
+
+@if (Model.CanControlVolume)
+{
+    <dialog id="volume-dialog" class="user-edit-dialog" data-user-edit-dialog aria-labelledby="volume-dialog-title">
+        <div class="user-edit-dialog-shell">
+            <header class="user-edit-dialog-header"><div><p class="eyebrow"><i class="bi @(snapshot?.IsMuted == true ? "bi-volume-mute" : "bi-volume-up")" aria-hidden="true" data-volume-icon></i> 当前班级</p><h2 id="volume-dialog-title">音量调节</h2><p class="muted" data-volume-summary>当前音量 @(snapshot?.VolumePercent ?? 0)% · @(snapshot?.IsMuted == true ? "已静音" : "未静音")</p></div><button type="button" class="ghost dialog-close-button" data-user-edit-close aria-label="关闭音量调节"><i class="bi bi-x-lg" aria-hidden="true"></i></button></header>
+            <div class="control-actions user-edit-form">
                 <form method="post" asp-page-handler="Volume" class="volume-form" data-volume-form>
                     <label>Windows 主音量
                         <span class="range-field">
@@ -105,25 +103,13 @@
             {
                 <p class="control-note">插件尚未报告可用的 Windows 默认播放设备。</p>
             }
-        </section>
-    }
+        </div>
+    </dialog>
+}
 
-    @if (Model.CanSendNotifications)
+<div class="control-grid">
+    @if (Model.CanSendNotifications && Model.ShowBroadcast)
     {
-        <section class="panel control-card" id="notification-settings">
-            <div class="control-card-head">
-                <span class="feature-icon"><i class="bi bi-person-badge" aria-hidden="true"></i></span>
-                <div><h2>发送人显示</h2><p class="muted">自定义通知是否在标题中附带发送人。</p></div>
-            </div>
-            <form method="post" asp-page-handler="NotificationSettings" class="stack notification-settings-form">
-                <label class="check"><input type="checkbox" asp-for="ForceSenderInTitle" /> 强制在标题显示发送人</label>
-                <p class="muted">此设置对 WebUI 和手表发送的自定义通知全局生效。</p>
-                <button class="ghost" type="submit">保存设置</button>
-            </form>
-        </section>
-
-        @if (Model.ShowBroadcast)
-        {
         <section class="panel control-card control-card-full" id="broadcast-notification">
             <div class="panel-heading">
                 <div><h2>广播通知（集控）</h2><p class="muted">一次向多个班级同时发送通知；逐班校验权限并回报各班插件的执行结果。</p></div>
@@ -164,7 +150,6 @@
                 </div>
             </form>
         </section>
-        }
     }
 
     @if (Model.CanUseExtensions)

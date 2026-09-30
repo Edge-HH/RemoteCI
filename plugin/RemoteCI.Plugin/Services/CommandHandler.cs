@@ -20,6 +20,8 @@ public sealed class CommandHandler
     private readonly PluginManagementService _pluginManagement;
     private readonly ProfileManagementService _profileManagement;
     private readonly ManagementJoinService _managementJoin;
+    private readonly TerminalCommandService _terminal;
+    private readonly FileReceiveService _files;
     private readonly ILogger _logger;
     private readonly ExtensionCommandRouter _extensionRouter;
     private readonly VoiceMessagePlayer _voiceMessages;
@@ -36,7 +38,9 @@ public sealed class CommandHandler
         IEnumerable<IHostedService> hostedServices,
         IRemoteCiExtensionRegistry extensions,
         ILoggerFactory loggerFactory,
-        VoiceMessagePlayer? voiceMessages = null)
+        VoiceMessagePlayer? voiceMessages = null,
+        TerminalCommandService? terminal = null,
+        FileReceiveService? files = null)
     {
         _schedules = schedules;
         _scheduleBackend = scheduleBackend;
@@ -47,6 +51,8 @@ public sealed class CommandHandler
         _profileManagement = profileManagement;
         _managementJoin = managementJoin;
         _notifications = hostedServices.OfType<RemoteNotificationProvider>().Single();
+        _terminal = terminal ?? new TerminalCommandService(loggerFactory.CreateLogger<TerminalCommandService>());
+        _files = files ?? new FileReceiveService(loggerFactory.CreateLogger<FileReceiveService>());
         _logger = loggerFactory.CreateLogger<CommandHandler>();
         _extensionRouter = new ExtensionCommandRouter(extensions, loggerFactory);
         _voiceMessages = voiceMessages ?? new VoiceMessagePlayer();
@@ -66,11 +72,12 @@ public sealed class CommandHandler
         if (command.Command == CommandKind.RunExtension)
             return await _extensionRouter.RunAsync(command);
 
-        // 远程升级、插件管理和集控操作属于宿主级维护，即使账号被授予 ManageUsers 也只允许系统管理员执行。
+        // 远程升级、插件管理、集控、终端与文件分发属于宿主级维护，即使账号被授予 ManageUsers 也只允许系统管理员执行。
         if (command.Command is (CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
             CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
             CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
-            CommandKind.JoinManagement or CommandKind.RestartClassIsland) && command.RequestedBy?.Role != UserRole.Admin)
+            CommandKind.JoinManagement or CommandKind.RestartClassIsland or
+            CommandKind.ExecuteTerminalCommand or CommandKind.SendFile) && command.RequestedBy?.Role != UserRole.Admin)
             return CommandResult.Failure(CommandResultCodes.Forbidden, "仅系统管理员可以执行远程维护操作");
         var required = CommandPermissions.Required(command.Command);
         if (required == UserPermissions.None)
@@ -83,6 +90,7 @@ public sealed class CommandHandler
             return command.Command switch
             {
                 CommandKind.ChangeSchedule => await HandleScheduleChangeAsync(command.ScheduleChange),
+                CommandKind.SetSubjectTeacher => await HandleSetSubjectTeacherAsync(command.SubjectTeacher),
                 CommandKind.SendNotification => await HandleNotificationAsync(
                     command.Notification,
                     GetNotificationSenderName(command.RequestedBy)),
@@ -103,6 +111,8 @@ public sealed class CommandHandler
                 CommandKind.DistributeProfile => await _profileManagement.DistributeProfileAsync(command.ProfileDistribution),
                 CommandKind.JoinManagement => await _managementJoin.JoinAsync(command.ManagementJoin),
                 CommandKind.RestartClassIsland => HandleClassIslandRestart(),
+                CommandKind.ExecuteTerminalCommand => await _terminal.ExecuteAsync(command.TerminalCommand),
+                CommandKind.SendFile => await _files.SaveAsync(command.FileDistribution),
                 _ => CommandResult.Failure(CommandResultCodes.InvalidRequest, $"未知指令：{command.Command}"),
             };
         }
@@ -119,6 +129,18 @@ public sealed class CommandHandler
             return CommandResult.Failure(CommandResultCodes.InvalidRequest, validationError);
 
         var result = await Dispatcher.UIThread.InvokeAsync(() => ApplyScheduleChange(date, request!));
+        if (result.Success) ScheduleChanged?.Invoke();
+        return result;
+    }
+
+    private async Task<CommandResult> HandleSetSubjectTeacherAsync(SubjectTeacherRequest? request)
+    {
+        if (SubjectTeacherExecutor.Validate(request) is { } validationError)
+            return validationError;
+
+        var result = await Dispatcher.UIThread.InvokeAsync(() =>
+            SubjectTeacherExecutor.Apply(request!, _profileOps,
+                ex => _logger.LogError(ex, "保存科目教师失败：{SubjectId}", request!.SubjectId)));
         if (result.Success) ScheduleChanged?.Invoke();
         return result;
     }

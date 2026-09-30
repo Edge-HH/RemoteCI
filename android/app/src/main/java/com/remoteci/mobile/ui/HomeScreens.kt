@@ -83,8 +83,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import com.remoteci.mobile.data.AdminApi
 import com.remoteci.mobile.data.ConnectionManager
 import com.remoteci.mobile.data.CourseEntry
+import com.remoteci.mobile.data.MyScheduleResponse
 import com.remoteci.mobile.data.Protocol
 import com.remoteci.mobile.data.ScheduleChangeRequest
 import com.remoteci.mobile.data.ScheduleDay
@@ -489,6 +491,24 @@ fun ScheduleScreen(
     var selected by remember { mutableIntStateOf(0) }
     if (selected >= days.size) selected = 0
     val canChange = user?.has(Protocol.PERMISSION_MANAGE_SCHEDULE) == true && ConnectionManager.supports(Protocol.CAP_SCHEDULE_CHANGE)
+
+    // 老师：显示名与课表教师名绑定后，可跨班级查看“我的日程”；null 表示尚未手动切换。
+    var mineChoice by remember { mutableStateOf<Boolean?>(null) }
+    val mineMode = mineChoice ?: (user?.isTeacher == true)
+    var mySchedule by remember { mutableStateOf<MyScheduleResponse?>(null) }
+    var myScheduleStatus by remember { mutableStateOf<String?>(null) }
+    var myScheduleRefresh by remember { mutableIntStateOf(0) }
+    var mySelected by remember { mutableIntStateOf(0) }
+    LaunchedEffect(user?.id, mineMode, myScheduleRefresh) {
+        if (mineMode && user != null) {
+            runCatching { AdminApi.mySchedule() }
+                .onSuccess { mySchedule = it; myScheduleStatus = null }
+                .onFailure { myScheduleStatus = it.message ?: "暂时无法读取我的日程" }
+        }
+    }
+    val myDays = mySchedule?.days.orEmpty()
+    if (mySelected >= myDays.size) mySelected = 0
+
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text("课表", style = MaterialTheme.typography.titleLarge) },
@@ -498,11 +518,65 @@ fun ScheduleScreen(
                 }
             },
             actions = {
-                IconButton(onClick = { ConnectionManager.requestSchedulePull() }, enabled = schedulePullActionEnabled(pull)) {
+                IconButton(
+                    onClick = { if (mineMode) myScheduleRefresh++ else ConnectionManager.requestSchedulePull() },
+                    enabled = mineMode || schedulePullActionEnabled(pull),
+                ) {
                     Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
                 }
             },
         )
+        if (user?.isTeacher == true) {
+            Row(
+                Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(selected = mineMode, onClick = { mineChoice = true }, label = { Text("我的日程") })
+                FilterChip(selected = !mineMode, onClick = { mineChoice = false }, label = { Text("本班课表") })
+            }
+        }
+        if (mineMode) {
+            when {
+                myDays.isEmpty() -> EmptyState(
+                    if (myScheduleStatus != null) "暂时无法读取我的日程" else "还没有与你关联的课程",
+                    myScheduleStatus
+                        ?: "请确认“账号与设置 → 姓名”与课表中的教师名一致；绑定后这里会显示你在各班的课程。",
+                )
+                else -> {
+                    PrimaryScrollableTabRow(selectedTabIndex = mySelected) {
+                        myDays.forEachIndexed { index, day ->
+                            val date = parseScheduleDate(day.date)
+                            val label = if (date == null) day.date.takeLast(5) else {
+                                val week = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.CHINA)
+                                "$week ${date.dayOfMonth}"
+                            }
+                            Tab(selected = index == mySelected, onClick = { mySelected = index }, text = { Text(label, style = MaterialTheme.typography.titleSmall) })
+                        }
+                    }
+                    val myDay = myDays[mySelected]
+                    Column(
+                        Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        myDay.items.forEach { item ->
+                            Text(item.className, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                            ConnectedListCard {
+                                item.courses.forEachIndexed { index, course ->
+                                    val time = listOfNotNull(course.startTime, course.endTime).joinToString("–")
+                                    AppListItem(
+                                        title = "${course.label} · ${course.subject}",
+                                        supporting = listOfNotNull(time.ifEmpty { null }, course.teacher).joinToString(" · "),
+                                        leading = subjectIcon(course.subject),
+                                        index = index,
+                                        count = item.courses.size,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
         if (days.isEmpty()) {
             EmptyState("还没有课表", "连接成功后会显示未来七日课程。也可以点击右上角刷新。")
         } else {
@@ -524,9 +598,10 @@ fun ScheduleScreen(
                 } else {
                     ConnectedListCard {
                         courses.forEachIndexed { index, course ->
+                            val time = listOfNotNull(course.startTime, course.endTime).joinToString("–")
                             AppListItem(
                                 title = "${course.label} · ${course.subject}",
-                                supporting = listOfNotNull(course.startTime, course.endTime).joinToString("–"),
+                                supporting = listOfNotNull(time.ifEmpty { null }, course.teacher).joinToString(" · "),
                                 leading = subjectIcon(course.subject),
                                 trailing = if (canChange) Icons.Rounded.Edit else null,
                                 index = index,
@@ -551,6 +626,7 @@ fun ScheduleScreen(
                 }
                 pullText?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
+        }
         }
     }
 }

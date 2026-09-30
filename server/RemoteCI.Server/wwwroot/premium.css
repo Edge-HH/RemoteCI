@@ -1812,6 +1812,49 @@ input[type="checkbox"][form] { accent-color: var(--accent); }
     padding: 22px;
 }
 
+/* 单班模式的确认信息与参数同页呈现，避免再打开一个只有“当前班级”内容的目标弹窗。 */
+.single-control-context {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+    padding: 13px 15px;
+    border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--accent-faint) 58%, var(--surface));
+}
+
+.single-control-context-icon {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    place-items: center;
+    border-radius: 10px;
+    background: var(--accent);
+    color: var(--surface);
+    font-size: 17px;
+}
+
+.single-control-context-label {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.single-control-context strong {
+    display: block;
+    font-size: 16px;
+    letter-spacing: -.01em;
+}
+
+.single-control-context p {
+    margin: 2px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+
 .batch-dialog-actions {
     position: sticky;
     bottom: 0;
@@ -1916,6 +1959,22 @@ input[type="checkbox"][form] { accent-color: var(--accent); }
     font-size: 13px;
 }
 
+.single-control-risk {
+    align-items: center;
+    margin-top: 18px;
+    padding: 13px 15px;
+}
+
+.single-control-risk span {
+    display: grid;
+    gap: 2px;
+}
+
+.single-control-risk small {
+    color: var(--muted);
+    font-size: 12px;
+}
+
 .batch-target-feedback {
     min-height: 20px;
     margin: 10px 0 0;
@@ -2010,4 +2069,34 @@ input[type="checkbox"][form] { accent-color: var(--accent); }
 
 @media (max-width: 520px) {
     .batch-action-grid { grid-template-columns: 1fr; }
+}
+
+/* ---------- 远程维护（远程终端 / 文件分发）逐设备回执 ---------- */
+.batch-remote-results {
+    max-height: 40vh;
+    margin-top: 12px;
+    overflow-y: auto;
+    padding-right: 4px;
+    scrollbar-gutter: stable;
+}
+
+.batch-remote-results .broadcast-result li span {
+    display: grid;
+    min-width: 0;
+    gap: 4px;
+}
+
+.batch-remote-output {
+    max-height: 180px;
+    margin: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface-inset);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
 }

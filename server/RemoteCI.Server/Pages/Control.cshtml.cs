@@ -31,9 +31,6 @@ public sealed class ControlModel(
     public NoticeInput Input { get; set; } = new();
 
     [BindProperty]
-    public bool ForceSenderInTitle { get; set; }
-
-    [BindProperty]
     public List<ExtensionInput> ExtensionInputs { get; set; } = [];
 
     [BindProperty]
@@ -72,6 +69,7 @@ public sealed class ControlModel(
     public override async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         if (await LoadAsync(ct) is { } denied) return denied;
+        RestoreResults();
         return Page();
     }
 
@@ -137,15 +135,6 @@ public sealed class ControlModel(
         return RedirectWithResult(result);
     }
 
-    public async Task<IActionResult> OnPostNotificationSettingsAsync(CancellationToken ct)
-    {
-        if (await RequireAsync() is { } denied) return denied;
-        if (RequireClass(UserPermissions.SendNotifications) is { } classDenied) return classDenied;
-        var settings = await identities.SetForceSenderInTitleAsync(ForceSenderInTitle, ct);
-        await peers.SendSettingsToWatchesAsync(settings, ct);
-        TempData["Message"] = ForceSenderInTitle ? "已开启强制显示发送人" : "已关闭强制显示发送人";
-        return RedirectToPage();
-    }
 
     public async Task<IActionResult> OnPostClearNotificationsAsync(CancellationToken ct)
     {
@@ -406,7 +395,6 @@ public sealed class ControlModel(
         await LoadBatchAsync(ct);
         Snapshot = store.GetLatestSnapshot(CurrentClassId);
         VolumeLevel = Snapshot?.VolumePercent ?? 0;
-        if (CanSendNotifications) ForceSenderInTitle = await identities.GetForceSenderInTitleAsync();
         // 广播候选：有通知权限的可访问班级，排除当前班级（当前班用上方单班表单）。
         BroadcastTargets = AccessibleClasses
             .Where(x => x.Id != CurrentClassId && x.Permissions?.HasFlag(UserPermissions.SendNotifications) == true)
@@ -419,7 +407,7 @@ public sealed class ControlModel(
             store.GetLatestExtensions(CurrentClassId) ?? [],
             ct);
         return !CanTeacherComing && !CanSendNotifications && !CanSendVoiceMessages && !CanClearNotifications && !CanControlMainMenu &&
-            !CanControlPower && !CanControlVolume && !CanUseExtensions
+            !CanControlPower && !CanControlVolume && !CanUseExtensions && !HasMaintenanceOperations
             ? RedirectToPage("/Denied")
             : null;
     }

@@ -41,6 +41,32 @@ else
     @if (Model.CanManageSchedule)
     {
     <section class="panel">
+        <h2>科目教师</h2>
+        <p class="muted">为科目分配授课教师并写入教室端档案；老师账号的显示名与此处（或教室端课表）的教师名一致时，即绑定该班级的课程并自动进入“我的日程”。</p>
+        @if (!Model.CanSetSubjectTeacher)
+        {
+            <div class="notice warning">当前班级的插件不支持设置科目教师，请升级教室端插件后重试。</div>
+        }
+        else
+        {
+            <div class="form-grid subject-teacher-grid">
+                @foreach (var subject in Model.Subjects)
+                {
+                    <form method="post" asp-page-handler="SubjectTeacher" class="subject-teacher-row">
+                        <input type="hidden" name="SubjectTeacher.SubjectId" value="@subject.Id" />
+                        <label>@subject.Name
+                            <input type="text" name="SubjectTeacher.TeacherName" value="@subject.Teacher" maxlength="@RemoteCI.Shared.Models.SubjectTeacherRequest.MaxTeacherNameLength" placeholder="授课教师名（留空清除）" />
+                        </label>
+                        <button type="submit">保存</button>
+                    </form>
+                }
+            </div>
+        }
+    </section>
+    }
+    @if (Model.CanManageSchedule)
+    {
+    <section class="panel">
         <h2>提交修改</h2>
         <form method="post" class="form-grid schedule-change-form" data-schedule-change-form>
             <label>日期与原节次

@@ -22,6 +22,8 @@ public enum BatchOperationKind
     UpgradeClassIsland = 32,
     JoinManagement = 40,
     RestartClassIsland = 41,
+    ExecuteTerminalCommand = 50,
+    SendFile = 51,
 }
 
 public enum PluginActionKind
@@ -118,6 +120,18 @@ public sealed class ProfileDistributionRequest
 
     [JsonPropertyName("sections")]
     public ProfileDistributionSection Sections { get; set; } = ProfileDistributionSection.None;
+
+    /// <summary>导入到新档案时使用的文件名（不含或可含 .json）。为空时使用源档案名称。</summary>
+    [JsonPropertyName("importProfileName")]
+    public string? ImportProfileName { get; set; }
+
+    /// <summary>是否把选中的内容写入当前档案；关闭时会创建一个独立档案，默认关闭。</summary>
+    [JsonPropertyName("replaceCurrentProfile")]
+    public bool ReplaceCurrentProfile { get; set; }
+
+    /// <summary>创建新档案后是否将其设为 ClassIsland 下次启动使用的档案，默认开启。</summary>
+    [JsonPropertyName("enableImportedProfile")]
+    public bool EnableImportedProfile { get; set; } = true;
 
     [JsonPropertyName("replaceExisting")]
     public bool ReplaceExisting { get; set; }

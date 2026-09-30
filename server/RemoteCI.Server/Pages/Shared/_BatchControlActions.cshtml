@@ -1,5 +1,5 @@
 @model BatchControlModel
-<div data-single-control="@(Model.IsSingleControl ? "true" : "false")">
+<div data-single-control="@(Model.IsSingleControl ? "true" : "false")" data-single-class-name="@(Model.IsSingleControl ? Model.CurrentClass?.Name : "")">
 @if (Model.HasClassroomOperations)
 {
 <section class="panel batch-section">
@@ -147,6 +147,34 @@
 </section>
 }
 
+@if (Model.HasMaintenanceOperations)
+{
+<section class="panel batch-section">
+    <div class="panel-heading">
+        <div>
+            <h2>远程维护</h2>
+            <p class="muted">在设备上执行终端命令，或把文件分发到设备的用户文件夹。</p>
+        </div>
+    </div>
+    <div class="batch-action-grid">
+        @if (Model.CanUseMaintenanceOperation(BatchOperationKind.ExecuteTerminalCommand))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="ExecuteTerminalCommand" data-batch-title="远程终端" data-batch-risk="true">
+                <span class="batch-action-icon danger"><i class="bi bi-terminal" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>远程终端</strong><small>在设备上执行命令并取回输出。</small></span>
+            </button>
+        }
+        @if (Model.CanUseMaintenanceOperation(BatchOperationKind.SendFile))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="SendFile" data-batch-title="文件分发" data-batch-risk="true">
+                <span class="batch-action-icon"><i class="bi bi-file-earmark-arrow-up" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>文件分发</strong><small>把文件分发到设备的桌面或下载文件夹。</small></span>
+            </button>
+        }
+    </div>
+</section>
+}
+
 @* 第 1 步：各功能的参数弹窗。参数会被 batch-control.js 复制到目标弹窗。 *@
 @if (Model.CanUseOperation(BatchOperationKind.Notify))
 {
@@ -275,6 +303,7 @@
         </header>
         <div class="batch-dialog-body stack">
             <label>选择档案 JSON<input type="file" accept=".json,application/json" data-profile-file /></label>
+            <label>导入档案名<input type="text" name="ProfileImportName" maxlength="100" placeholder="留空使用 JSON 中的档案名称" /></label>
             <label>档案 JSON<textarea name="ProfileJson" rows="8" placeholder="粘贴 ClassIsland 档案 JSON，或选择文件后自动填入"></textarea></label>
             <fieldset class="batch-check-group">
                 <legend>分发内容</legend>
@@ -282,7 +311,9 @@
                 <label class="check"><input type="checkbox" name="ProfileSections" value="ClassPlans" /> 课表</label>
                 <label class="check"><input type="checkbox" name="ProfileSections" value="Subjects" /> 科目</label>
             </fieldset>
-            <label class="check"><input type="checkbox" name="ProfileReplaceExisting" data-batch-bool /> 替换设备上同 Id 的现有数据</label>
+            <label class="check"><input type="checkbox" name="ProfileReplaceCurrent" data-batch-bool /> 覆盖当前档案</label>
+            <label class="check"><input type="checkbox" name="ProfileEnableImported" data-batch-bool checked /> 启用此档案</label>
+            <label class="check"><input type="checkbox" name="ProfileReplaceExisting" data-batch-bool /> 替换档案中同 Id 的现有数据</label>
         </div>
         <footer class="batch-dialog-actions">
             <button type="button" class="ghost" data-batch-close>取消</button>
@@ -480,6 +511,60 @@
 </dialog>
 }
 
+@if (Model.CanUseMaintenanceOperation(BatchOperationKind.ExecuteTerminalCommand))
+{
+<dialog id="batch-settings-terminal" class="batch-dialog" data-batch-settings="ExecuteTerminalCommand" data-batch-title="远程终端" data-batch-risk="true">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>远程终端</h2><p class="muted">命令会在设备上以当前登录用户执行并取回输出。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <label>命令<textarea data-terminal-command rows="4" maxlength="4000" placeholder="例如：ipconfig /all" required></textarea></label>
+            <div class="two-column">
+                <label>超时（秒，1-10）<input type="number" data-terminal-timeout min="1" max="10" value="10" /></label>
+                <label>工作目录（可选）<input data-terminal-workdir maxlength="260" placeholder="留空使用设备用户目录" /></label>
+            </div>
+            <p class="muted">每条命令独立执行，等价于 <code>cmd /d /c</code>，进程之间不保留状态；输出上限 64KB，超时的进程会被强制结束。</p>
+            <p class="batch-warning">远程终端可以执行任意命令，请确认命令内容适合教室端设备后再选择目标。</p>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseMaintenanceOperation(BatchOperationKind.SendFile))
+{
+<dialog id="batch-settings-sendfile" class="batch-dialog" data-batch-settings="SendFile" data-batch-title="文件分发" data-batch-risk="true">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>文件分发</h2><p class="muted">单个文件最大 10 MB，只会写入选择的用户文件夹。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <label>选择文件<input type="file" data-batch-file /></label>
+            <p class="control-note" data-batch-file-status>尚未选择文件。</p>
+            <label>保存位置
+                <select data-file-target-folder>
+                    <option value="Desktop">桌面</option>
+                    <option value="Downloads">下载</option>
+                    <option value="Documents">文档</option>
+                </select>
+            </label>
+            <label class="check"><input type="checkbox" data-file-overwrite /> 覆盖同名文件（不勾选时自动追加序号）</label>
+            <p class="batch-warning">文件会保存到每台选中设备的用户文件夹，请确认内容适合教室端设备。</p>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
 @* 第 2 步：共享目标选择弹窗。班级/分组只取该班主设备，具体设备可多选。 *@
 @if (Model.HasAnyOperations)
 {
@@ -580,6 +665,9 @@
                     我已确认该操作会影响教室端设备，并理解可能造成重启、程序替换或连接中断。
                 </label>
                 <p class="batch-target-feedback" data-batch-target-feedback role="status"></p>
+                <div class="batch-remote-results" data-batch-remote-results hidden>
+                    <ul class="broadcast-result" data-batch-remote-list></ul>
+                </div>
             </div>
             <footer class="batch-dialog-actions">
                 <button type="button" class="ghost" data-batch-close>取消</button>

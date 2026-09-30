@@ -92,6 +92,15 @@ public class BatchControlModel(
     public ProfileDistributionSection ProfileSections { get; set; }
 
     [BindProperty]
+    public string? ProfileImportName { get; set; }
+
+    [BindProperty]
+    public bool ProfileReplaceCurrent { get; set; }
+
+    [BindProperty]
+    public bool ProfileEnableImported { get; set; } = true;
+
+    [BindProperty]
     public bool ProfileReplaceExisting { get; set; }
 
     /// <summary>管理员上传的 ClassIsland 集控配置文件（ManagementPreset.json）内容。</summary>
@@ -142,7 +151,8 @@ public class BatchControlModel(
     }
 
     /// <summary>是否存在任一可见操作：无权限时连目标选择弹窗也不渲染，避免把设备清单泄露到页面。</summary>
-    public bool HasAnyOperations => HasClassroomOperations || HasProfileOperations || HasSoftwareOperations;
+    public bool HasAnyOperations => HasClassroomOperations || HasProfileOperations || HasSoftwareOperations ||
+        HasMaintenanceOperations;
 
     /// <summary>分组可见性：某一组全部操作都无权限时整组隐藏，避免出现空面板。</summary>
     public bool HasClassroomOperations =>
@@ -166,6 +176,20 @@ public class BatchControlModel(
         CanUseOperation(BatchOperationKind.UpgradeClassIsland) ||
         CanUseOperation(BatchOperationKind.RestartClassIsland);
 
+    /// <summary>远程维护组：终端与文件分发只会影响设备文件系统，单班页还要求系统管理员。</summary>
+    public bool HasMaintenanceOperations =>
+        CanUseMaintenanceOperation(BatchOperationKind.ExecuteTerminalCommand) ||
+        CanUseMaintenanceOperation(BatchOperationKind.SendFile);
+
+    /// <summary>终端与文件分发的可见性：批量页整体已限定管理员；单班页要求系统管理员加班级维护权限。</summary>
+    public bool CanUseMaintenanceOperation(BatchOperationKind operation) =>
+        IsSingleControl
+            ? IsAdmin && CommandForOperation(operation) is { } command &&
+              CommandPermissions.Required(command) is var required &&
+              required != UserPermissions.None &&
+              ClassPermissions.HasFlag(required)
+            : CanUseOperation(operation);
+
     /// <summary>批量操作对应的协议命令，用于复用 CommandPermissions 的权限口径。</summary>
     private static CommandKind? CommandForOperation(BatchOperationKind operation) => operation switch
     {
@@ -184,6 +208,8 @@ public class BatchControlModel(
         BatchOperationKind.UpgradeClassIsland => CommandKind.UpgradeClassIsland,
         BatchOperationKind.RestartClassIsland => CommandKind.RestartClassIsland,
         BatchOperationKind.JoinManagement => CommandKind.JoinManagement,
+        BatchOperationKind.ExecuteTerminalCommand => CommandKind.ExecuteTerminalCommand,
+        BatchOperationKind.SendFile => CommandKind.SendFile,
         _ => null,
     };
 
@@ -256,6 +282,7 @@ public class BatchControlModel(
                     BatchCommandTimeout,
                     ct)).Select(ToItemResult))
                 .ToList();
+            SaveResults(results);
             TempData[results.Any(x => x.Success) ? "Message" : "Error"] = Summarize(results);
             return RedirectToPage("/Control");
         }
@@ -343,8 +370,166 @@ public class BatchControlModel(
             "语音消息",
             BatchCommandTimeout,
             ct)).Select(ToItemResult)).ToList();
+        SaveResults(results);
         var ok = results.Count(x => x.Success);
         return new JsonResult(new { success = ok > 0, message = $"语音消息已发送到当前班级 {ok} 台设备。" });
+    }
+
+    // ---------- 远程终端与文件分发（AJAX：回执包含逐设备输出或保存路径） ----------
+
+    /// <summary>批量终端执行：命令文本经表单体提交，目标复用共享弹窗的查询参数。</summary>
+    public async Task<IActionResult> OnPostExecuteTerminalAsync(CancellationToken ct)
+    {
+        if (await RequireAdminAsync() is { } denied) return denied;
+        return await ExecuteTerminalCoreAsync(
+            ParseGuidQuery("classIds"), ParseGuidQuery("groupIds"), ParseGuidQuery("connectionIds"), ct);
+    }
+
+    /// <summary>单班终端执行：目标固定为当前班级，且要求系统管理员加班级维护权限。</summary>
+    public async Task<IActionResult> OnPostSingleTerminalAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (!IsSingleControl || !CanRunMaintenanceInCurrentClass()) return RemoteOpDenied();
+        return await ExecuteTerminalCoreAsync([CurrentClassId], [], [], ct);
+    }
+
+    /// <summary>批量文件分发：multipart 上传单个文件，目标复用共享弹窗的查询参数。</summary>
+    public async Task<IActionResult> OnPostDistributeFileAsync(CancellationToken ct)
+    {
+        if (await RequireAdminAsync() is { } denied) return denied;
+        return await DistributeFileCoreAsync(
+            ParseGuidQuery("classIds"), ParseGuidQuery("groupIds"), ParseGuidQuery("connectionIds"), ct);
+    }
+
+    /// <summary>单班文件分发：目标固定为当前班级，且要求系统管理员加班级维护权限。</summary>
+    public async Task<IActionResult> OnPostSingleDistributeFileAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (!IsSingleControl || !CanRunMaintenanceInCurrentClass()) return RemoteOpDenied();
+        return await DistributeFileCoreAsync([CurrentClassId], [], [], ct);
+    }
+
+    /// <summary>单班页执行远程维护的前置复核，与卡片可见性使用同一口径。</summary>
+    private bool CanRunMaintenanceInCurrentClass() =>
+        IsAdmin && ClassPermissions.HasFlag(UserPermissions.ManageUsers);
+
+    private IActionResult RemoteOpDenied() => new JsonResult(CommandResult.Failure(
+        CommandResultCodes.Forbidden, "没有远程维护权限"));
+
+    private async Task<IActionResult> ExecuteTerminalCoreAsync(
+        IReadOnlyCollection<Guid> classIds,
+        IReadOnlyCollection<Guid> groupIds,
+        IReadOnlyCollection<Guid> connectionIds,
+        CancellationToken ct)
+    {
+        var commandText = Request.Form["command"].ToString().Trim();
+        if (commandText.Length == 0)
+            return RemoteOpJson(false, "请输入要执行的命令。", []);
+        if (commandText.Length > TerminalCommandRequest.MaxCommandLength)
+            return RemoteOpJson(false, $"命令不能超过 {TerminalCommandRequest.MaxCommandLength} 个字符。", []);
+        if (!int.TryParse(Request.Form["timeoutSeconds"], out var timeoutSeconds) ||
+            timeoutSeconds is < 1 or > TerminalCommandRequest.MaxTimeoutSeconds)
+            timeoutSeconds = TerminalCommandRequest.DefaultTimeoutSeconds;
+        var workingDirectory = Request.Form["workingDirectory"].ToString().Trim();
+        if (workingDirectory.Length > TerminalCommandRequest.MaxWorkingDirectoryLength)
+            return RemoteOpJson(false, "工作目录路径过长。", []);
+
+        var plan = await DevicesService.ResolveAsync(classIds, groupIds, connectionIds, ct);
+        if (plan.Targets.Count == 0 && plan.Failures.Count == 0)
+            return RemoteOpJson(false, "没有找到可用的在线设备。", []);
+        var profile = await Identities.GetProfileAsync(CurrentUser.Id, ct);
+        var dispatch = await DevicesService.DispatchAsync(
+            plan.Targets,
+            _ => new CommandMessage
+            {
+                Command = CommandKind.ExecuteTerminalCommand,
+                TerminalCommand = new TerminalCommandRequest
+                {
+                    Command = commandText,
+                    TimeoutSeconds = timeoutSeconds,
+                    WorkingDirectory = workingDirectory.Length > 0 ? workingDirectory : null,
+                },
+                RequestedBy = profile,
+            },
+            "远程终端",
+            BatchCommandTimeout,
+            ct,
+            result => result.Data ?? result.Message);
+        return RemoteOpResultsJson(
+            plan.Failures.Select(ToItemResult).Concat(dispatch.Select(ToItemResult)).ToList());
+    }
+
+    private async Task<IActionResult> DistributeFileCoreAsync(
+        IReadOnlyCollection<Guid> classIds,
+        IReadOnlyCollection<Guid> groupIds,
+        IReadOnlyCollection<Guid> connectionIds,
+        CancellationToken ct)
+    {
+        var file = Request.Form.Files["file"];
+        if (file is null || file.Length == 0)
+            return RemoteOpJson(false, "请选择要分发的文件。", []);
+        if (file.Length > FileDistributionRequest.MaxFileBytes)
+            return RemoteOpJson(false, "文件不能超过 10 MB。", []);
+        var fileName = FileDistributionRequest.SanitizeFileName(file.FileName);
+        if (fileName is null)
+            return RemoteOpJson(false, "文件名无效。", []);
+        if (!Enum.TryParse(Request.Form["targetFolder"].ToString(), out FileTargetFolder targetFolder) ||
+            !Enum.IsDefined(targetFolder))
+            return RemoteOpJson(false, "目标文件夹无效。", []);
+        var overwrite = string.Equals(Request.Form["overwrite"].ToString(), "true", StringComparison.OrdinalIgnoreCase);
+
+        using var content = new MemoryStream();
+        await file.CopyToAsync(content, ct);
+
+        var plan = await DevicesService.ResolveAsync(classIds, groupIds, connectionIds, ct);
+        if (plan.Targets.Count == 0 && plan.Failures.Count == 0)
+            return RemoteOpJson(false, "没有找到可用的在线设备。", []);
+        var profile = await Identities.GetProfileAsync(CurrentUser.Id, ct);
+        var dispatch = await DevicesService.DispatchAsync(
+            plan.Targets,
+            _ => new CommandMessage
+            {
+                Command = CommandKind.SendFile,
+                FileDistribution = new FileDistributionRequest
+                {
+                    FileName = fileName,
+                    ContentBase64 = Convert.ToBase64String(content.ToArray()),
+                    TargetFolder = targetFolder,
+                    Overwrite = overwrite,
+                },
+                RequestedBy = profile,
+            },
+            "文件分发",
+            BatchCommandTimeout,
+            ct,
+            result => result.Data ?? result.Message);
+        return RemoteOpResultsJson(
+            plan.Failures.Select(ToItemResult).Concat(dispatch.Select(ToItemResult)).ToList());
+    }
+
+    private static IActionResult RemoteOpJson(bool success, string message, IReadOnlyList<object> results) =>
+        new JsonResult(new { success, message, results });
+
+    /// <summary>统一回执形状：前端按 name/success/message 逐设备渲染，message 可能是输出、保存路径或失败原因。</summary>
+    private static IActionResult RemoteOpResultsJson(IReadOnlyList<BatchDeviceItemResult> results)
+    {
+        var ok = results.Count(x => x.Success);
+        var message = results.Count == 0
+            ? "没有可执行的设备。"
+            : ok == results.Count
+                ? $"操作已完成（{ok} 台设备）。"
+                : $"操作完成 {ok} 台，失败 {results.Count - ok} 台。";
+        return new JsonResult(new
+        {
+            success = ok > 0,
+            message,
+            results = results.Select(x => new
+            {
+                name = x.TargetName,
+                success = x.Success,
+                message = x.Message ?? string.Empty,
+            }),
+        });
     }
 
     protected async Task<Func<DeviceInventory, CommandMessage>> BuildCommandFactoryAsync(CancellationToken ct)
@@ -449,6 +634,9 @@ public class BatchControlModel(
                 ManagementJoin = BuildManagementJoinRequest(device),
                 RequestedBy = profile,
             },
+            // 终端与文件分发走 AJAX 处理器（需要逐设备带回输出或保存路径），不走标准表单投递。
+            BatchOperationKind.ExecuteTerminalCommand or BatchOperationKind.SendFile =>
+                throw new InvalidOperationException("该操作请通过远程维护面板执行。"),
             _ => throw new InvalidOperationException("不支持的批量操作。"),
         };
     }
@@ -525,6 +713,9 @@ public class BatchControlModel(
         {
             ProfileJson = ProfileJson,
             Sections = ProfileSections,
+            ImportProfileName = ProfileImportName,
+            ReplaceCurrentProfile = ProfileReplaceCurrent,
+            EnableImportedProfile = ProfileEnableImported,
             ReplaceExisting = ProfileReplaceExisting,
             RestartAfter = true,
         };
@@ -605,7 +796,9 @@ public class BatchControlModel(
         BatchOperationKind.UpgradePlugins or
         BatchOperationKind.UpgradeClassIsland or
         BatchOperationKind.RestartClassIsland or
-        BatchOperationKind.JoinManagement;
+        BatchOperationKind.JoinManagement or
+        BatchOperationKind.ExecuteTerminalCommand or
+        BatchOperationKind.SendFile;
 
     protected static string OperationName(BatchOperationKind operation) => operation switch
     {
@@ -624,6 +817,8 @@ public class BatchControlModel(
         BatchOperationKind.UpgradeClassIsland => "ClassIsland 升级",
         BatchOperationKind.RestartClassIsland => "重启 ClassIsland",
         BatchOperationKind.JoinManagement => "加入集控",
+        BatchOperationKind.ExecuteTerminalCommand => "远程终端",
+        BatchOperationKind.SendFile => "文件分发",
         _ => "批量操作",
     };
 
@@ -649,7 +844,7 @@ public class BatchControlModel(
     private void SaveResults(IReadOnlyList<BatchDeviceItemResult> results) =>
         TempData[ResultsKey] = JsonSerializer.Serialize(results, JsonDefaults.Options);
 
-    private void RestoreResults()
+    protected void RestoreResults()
     {
         if (TempData[ResultsKey] is not string json) return;
         try
@@ -661,6 +856,11 @@ public class BatchControlModel(
             LastResults = [];
         }
     }
+
+    /// <summary>按结果中的班级 Id 解析当前页面可见的班级名称，供批量与单班结果共用。</summary>
+    public string ResultClassName(BatchDeviceItemResult result) =>
+        Classes.FirstOrDefault(x => x.Id == result.ClassId)?.Name
+        ?? (CurrentClass?.Id == result.ClassId ? CurrentClass.Name : "未知班级");
 
     private async Task<IActionResult?> RequireAdminAsync()
     {

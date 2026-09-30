@@ -449,9 +449,12 @@ textarea { resize: vertical; }
 .schedule-period-cell { background: var(--accent-faint); color: var(--accent-strong); text-align: center !important; }
 .schedule-course-name, .schedule-course-time { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .schedule-course-name { color: var(--text); font-weight: 750; }
+.schedule-course-teacher { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
 .schedule-course-time { margin-top: 2px; color: var(--muted); font-size: 11px; }
 .schedule-empty { display: block; color: var(--muted); text-align: center; }
 
+.subject-teacher-grid { gap: 10px 18px; }
+.subject-teacher-row { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 10px; margin: 0; }
 .schedule-pull-layout { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 14px 24px; }
 .schedule-pull-copy h2, .schedule-pull-copy p { margin: 0; }
 .schedule-pull-copy p { margin-top: 8px; }

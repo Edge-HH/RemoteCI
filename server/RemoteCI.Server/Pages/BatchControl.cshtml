@@ -13,27 +13,7 @@
     <span class="status-pill @(onlineDevices > 0 ? "online" : "offline")">@onlineDevices 台设备在线</span>
 </div>
 
-@if (Model.LastResults.Count > 0)
-{
-    <section class="panel">
-        <div class="panel-heading">
-            <div>
-                <h2>上次执行结果</h2>
-                <p class="muted">按设备回报；离线设备或没有在线设备的班级会单独列出。</p>
-            </div>
-            <span class="status-pill">@Model.LastResults.Count(x => x.Success) / @Model.LastResults.Count 成功</span>
-        </div>
-        <ul class="broadcast-result">
-            @foreach (var item in Model.LastResults)
-            {
-                <li>
-                    <i class="bi @(item.Success ? "bi-check-circle ok" : "bi-x-circle bad")" aria-hidden="true"></i>
-                    <span><strong>@item.TargetName</strong>@(item.Success ? " — 成功" : $" — {item.Message}")</span>
-                </li>
-            }
-        </ul>
-    </section>
-}
+@await Html.PartialAsync("_BatchResults", Model)
 
 @* 动作卡片、参数弹窗与目标选择复用班级控制页共享的局部视图；此处保留完整的目标选择。 *@
 @await Html.PartialAsync("_BatchControlActions", Model)

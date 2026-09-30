@@ -169,10 +169,10 @@
     @if (Model.IsAdmin)
     {
         <section class="dashboard-panel credential-panel">
-            <header class="panel-heading"><div><p class="eyebrow">CAPABILITIES</p><h2>连接能力诊断</h2></div><span class="status-pill">@Model.CapabilityDiagnostics.Count 个连接</span></header>
+            <header class="panel-heading"><div><p class="eyebrow">CAPABILITIES</p><h2>连接能力诊断</h2></div><span class="status-pill">@Model.CapabilityDiagnostics.Count 个插件</span></header>
             @if (Model.CapabilityDiagnostics.Count == 0)
             {
-                <div class="empty-state"><i class="bi bi-diagram-3" aria-hidden="true"></i><strong>暂无在线端</strong><span>插件或手表连接后将在这里显示版本和能力交集。</span></div>
+                <div class="empty-state"><i class="bi bi-diagram-3" aria-hidden="true"></i><strong>暂无当前班级插件</strong><span>当前班级插件连接后将在这里显示版本和能力交集。</span></div>
             }
             else
             {
