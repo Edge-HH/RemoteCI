@@ -495,17 +495,82 @@ body.sidebar-collapsed .logout-button { justify-content: center; padding-inline:
 }
 
 .class-switcher svg { width: 14px; height: 14px; color: var(--muted); fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.class-switcher select { min-height: 32px; font-size: 12px; font-weight: 600; }
 .class-switcher.current { font-size: 12px; font-weight: 600; }
+/* 班级切换菜单：与行菜单同一套浮层样式，替代系统绘制的原生下拉列表。 */
+form.class-switcher { position: relative; padding: 0; }
+/* 顶栏平时横向可滚动以防挤压；菜单展开时放开溢出，否则浮层会被裁掉。 */
+.topbar:has(.class-menu[open]) { overflow: visible; }
+.class-menu { min-width: 0; flex: 1 1 auto; }
+.class-menu > summary {
+    display: flex;
+    min-height: 34px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 9px 0 0;
+    color: var(--text);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    list-style: none;
+    user-select: none;
+}
+.class-menu > summary::-webkit-details-marker { display: none; }
+.class-menu > summary:focus-visible { outline: none; }
+form.class-switcher:has(summary:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+form.class-switcher:hover, form.class-switcher:has(.class-menu[open]) { border-color: var(--line-strong); background: var(--surface-soft); }
+.class-switcher > .switcher-icon { margin-left: 9px; flex: 0 0 auto; }
+.class-menu-label { min-width: 0; max-width: 150px; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.class-switcher .class-menu-chevron { width: 13px; height: 13px; flex: 0 0 auto; transition: transform var(--duration-fast) ease; }
+.class-menu[open] .class-menu-chevron { transform: rotate(180deg); }
+.class-menu-list {
+    position: absolute;
+    z-index: 40;
+    top: calc(100% + 6px);
+    right: -1px;
+    display: grid;
+    min-width: calc(100% + 2px);
+    max-width: min(280px, 80vw);
+    max-height: min(360px, 60vh);
+    gap: 2px;
+    padding: 4px;
+    overflow-y: auto;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-card);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+}
+.class-menu-list .class-menu-item {
+    display: flex;
+    width: 100%;
+    min-height: 32px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: var(--radius-button);
+    background: transparent;
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 500;
+    text-align: left;
+}
+.class-menu-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.class-menu-list .class-menu-item:hover,
+.class-menu-list .class-menu-item:focus-visible { background: var(--surface-soft); color: var(--text); outline: none; }
+.class-menu-list .class-menu-item.active { background: var(--accent-faint); color: var(--accent-strong); font-weight: 650; }
+.class-switcher .class-menu-check { width: 13px; height: 13px; flex: 0 0 auto; color: currentColor; visibility: hidden; }
+.class-menu-item.active .class-menu-check { visibility: visible; }
 /* 主内容区：紧凑但不拥挤，保持操作台的扫描节奏。 */
 .shell {
     width: min(100%, 1600px);
     padding: 30px 40px 56px;
 }
 
-/* 登录页需要保留窄卡片宽度，否则通用 shell 宽度会吞掉左右对齐效果。 */
+/* 登录页保留窄卡片，并清除 shell 的自动外边距，让 grid 的左右对齐设置生效。 */
 .auth-shell {
     width: min(430px, 100%);
+    margin: 0;
     padding: 0;
 }
 
@@ -1337,7 +1402,7 @@ input[type="checkbox"][form] { accent-color: var(--accent); }
     .app-search { display: none; }
     .topbar-actions { gap: 4px; }
     .class-switcher { max-width: 138px; }
-    .class-switcher select { min-width: 86px; max-width: 104px; }
+    .class-menu-label { max-width: 90px; }
     .dashboard-head, .page-head { align-items: stretch; flex-direction: column; gap: 14px; }
     .dashboard-actions, .connection-actions { width: 100%; justify-content: stretch; }
     .dashboard-actions form, .connection-actions form { flex: 1 1 0; }
@@ -1384,7 +1449,7 @@ input[type="checkbox"][form] { accent-color: var(--accent); }
     .topbar-button { width: 38px; height: 38px; min-height: 38px; flex-basis: 38px; }
     .user-avatar { display: none; }
     .class-switcher { max-width: 122px; }
-    .class-switcher select { min-width: 72px; max-width: 88px; }
+    .class-menu-label { max-width: 70px; }
     button, .button { min-height: 44px; padding-inline: 14px; }
     .copy-button { width: 36px; min-height: 36px; }
     .schedule-table { min-width: 980px; }

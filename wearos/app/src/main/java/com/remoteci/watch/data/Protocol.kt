@@ -62,6 +62,8 @@ object Protocol {
 
     const val ROLE_USER = 1
     const val ROLE_ADMIN = 2
+    const val ROLE_KIND_CLASS_ADMINISTRATOR = 4
+    const val ROLE_KIND_TEACHER = 5
     const val PERMISSION_VIEW_CURRENT = 1
     const val PERMISSION_ACCESS_WEB_UI = 2
     const val PERMISSION_MANAGE_USERS = 4
@@ -349,6 +351,7 @@ data class UserProfile(
     val username: String = "",
     @SerialName("displayName") val displayName: String = "",
     val role: Int = Protocol.ROLE_USER,
+    @SerialName("roleKind") val roleKind: Int? = null,
     @SerialName("grantedPermissions") val grantedPermissions: Int = 0,
     val permissions: Int = Protocol.PERMISSION_VIEW_CURRENT,
     @SerialName("allowedExtensionIds") val allowedExtensionIds: List<String>? = null,
@@ -357,6 +360,7 @@ data class UserProfile(
     val version: Long = 0,
 ) {
     val isAdmin: Boolean get() = role == Protocol.ROLE_ADMIN
+    val isClassAdministrator: Boolean get() = classes?.any { it.roleName == "班管理员" } == true
     fun has(permission: Int): Boolean = permissions and permission == permission
     fun canInvoke(extension: ExtensionDefinition): Boolean =
         has(Protocol.PERMISSION_RUN_EXTENSIONS) &&

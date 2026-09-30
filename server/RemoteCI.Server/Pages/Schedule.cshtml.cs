@@ -20,8 +20,10 @@ public sealed class ScheduleModel(
     public ScheduleInput Input { get; set; } = new();
     public ScheduleBundle? Bundle { get; private set; }
     public bool PluginOnline => peers.HasPluginFor(CurrentClassId);
-    public bool CanPullSchedule => !PluginOnline || peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.SchedulePull);
-    public bool CanConfigureSchedulePull => ClassPermissions.HasFlag(UserPermissions.ManageSchedule) && CanPullSchedule;
+    // 拉取课表会覆盖服务端缓存，只允许系统管理员或当前班级班管理员使用；其他账号不显示入口。
+    public bool CanPullSchedule => CanManageClassInfo &&
+        (!PluginOnline || peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.SchedulePull));
+    public bool CanConfigureSchedulePull => CanPullSchedule;
     public bool CanManageSchedule => ClassPermissions.HasFlag(UserPermissions.ManageSchedule) &&
         (!PluginOnline || peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.ScheduleChange));
     public ScheduleSyncStatus? CurrentTask => scheduleSync.Current(CurrentClassId);
@@ -48,7 +50,7 @@ public sealed class ScheduleModel(
     public async Task<IActionResult> OnPostPullAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (RequireClass(UserPermissions.ManageSchedule) is { } classDenied) return classDenied;
+        if (!CanManageClassInfo) return RedirectToPage("/Denied");
         if (PluginOnline && !peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.SchedulePull))
         {
             TempData["Error"] = $"{CommandResultCodes.CapabilityUnsupported}：当前班级的插件不支持拉取课表。";
@@ -65,7 +67,7 @@ public sealed class ScheduleModel(
     public async Task<IActionResult> OnPostPullIntervalAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (RequireClass(UserPermissions.ManageSchedule) is { } classDenied) return classDenied;
+        if (!CanManageClassInfo) return RedirectToPage("/Denied");
         if (PluginOnline && !peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.SchedulePull))
         {
             TempData["Error"] = $"{CommandResultCodes.CapabilityUnsupported}：当前班级的插件不支持拉取课表。";

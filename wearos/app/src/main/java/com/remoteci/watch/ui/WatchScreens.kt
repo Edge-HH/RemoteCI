@@ -465,6 +465,7 @@ internal fun ScheduleOverviewScreen(
     day: ScheduleDay?,
     today: LocalDate,
     connectionReady: Boolean,
+    canPullSchedule: Boolean = false,
     pullState: ConnectionManager.SchedulePullState,
     onRequestSchedule: () -> Unit,
     onPickDate: () -> Unit,
@@ -490,7 +491,7 @@ internal fun ScheduleOverviewScreen(
         is ConnectionManager.SchedulePullState.Error -> item { Hint(pullState.message) }
         ConnectionManager.SchedulePullState.Idle -> Unit
     }
-    if (shouldOfferSchedulePull(day, connectionReady)) {
+    if (shouldOfferSchedulePull(day, connectionReady, canPullSchedule)) {
         val pulling = !schedulePullActionEnabled(pullState)
         item {
             ActionButton(
@@ -505,7 +506,11 @@ internal fun ScheduleOverviewScreen(
 }
 
 /** 无论本地是否已有缓存，只要在线就允许强制拉取并覆盖旧课表。 */
-internal fun shouldOfferSchedulePull(day: ScheduleDay?, connectionReady: Boolean): Boolean = connectionReady
+internal fun shouldOfferSchedulePull(
+    day: ScheduleDay?,
+    connectionReady: Boolean,
+    canPullSchedule: Boolean = true,
+): Boolean = connectionReady && canPullSchedule
 
 /** 任一端的课表任务正在运行时，本端按钮禁用，避免重复提交。 */
 internal fun schedulePullActionEnabled(state: ConnectionManager.SchedulePullState): Boolean =

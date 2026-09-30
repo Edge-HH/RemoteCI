@@ -30,6 +30,15 @@
                         <span class="tree-menu-spacer" aria-hidden="true"></span>
                     </div>
                 </li>
+                <li class="class-tree-item">
+                    <div class="class-tree-row @(Model.IsUngroupedSelected ? "active" : null)">
+                        <span class="tree-toggle-placeholder" aria-hidden="true"></span>
+                        <i class="bi bi-inbox tree-icon" aria-hidden="true"></i>
+                        <a class="tree-label" href="@Url.Page("/Classes", new { groupId = ClassesModel.UnassignedGroupId })">未分组</a>
+                        <span class="tree-count">@Model.UnassignedClassCount</span>
+                        <span class="tree-menu-spacer" aria-hidden="true"></span>
+                    </div>
+                </li>
                 @foreach (var node in Model.GroupTree)
                 {
                     <partial name="_ClassGroupTreeNode" model="node" />

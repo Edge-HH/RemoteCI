@@ -74,6 +74,7 @@ object Protocol {
 
     const val ROLE_USER = 1
     const val ROLE_ADMIN = 2
+    const val ROLE_KIND_CLASS_ADMINISTRATOR = 4
 
     /** 服务端全局角色种类（AccountRoleKind）：内置“老师”角色按显示名与课表教师名绑定任教班级。 */
     const val ROLE_KIND_TEACHER = 5
@@ -400,6 +401,8 @@ data class UserProfile(
 
     /** 内置“老师”角色（按显示名绑定课表教师名），roleKind 免受角色改名影响。 */
     val isTeacher: Boolean get() = roleKind == Protocol.ROLE_KIND_TEACHER
+    /** 当前账号至少有一个班级的班管理员身份，可执行课表拉取。 */
+    val isClassAdministrator: Boolean get() = classes?.any { it.roleName == "班管理员" } == true
     val roleLabel: String
         get() = when {
             isAdmin -> "管理员"

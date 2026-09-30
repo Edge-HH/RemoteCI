@@ -67,7 +67,9 @@ public sealed class UsersModel(
                 GrantedPermissions = Create.Grants,
             }, ct);
             // 与批量导入、Excel 导入一致：账号保留默认班级成员关系，显式选择的班级另建一条成员关系。
-            if (Create.Role != UserRole.Admin && Create.ClassId is { } classId)
+            if (Create.Role != UserRole.Admin &&
+                Create.RoleId != AccountRole.TeacherId &&
+                Create.ClassId is { } classId)
                 await classrooms.AddMemberAsync(classId, created.Id, Create.RoleId ?? AccountRole.StudentId, ct);
             await authorizationSync.SyncAsync(ct);
             TempData["Message"] = "账号已创建。";
@@ -87,8 +89,9 @@ public sealed class UsersModel(
     {
         if (Create.Role == UserRole.Admin && CurrentUser.Role != UserRole.Admin)
             return await CreateFailureAsync("仅管理员可创建管理员账号。", Array.Empty<string>(), ct);
-        // 非管理员账号必须归属某个班级：没有班级成员关系就访问不到任何班级数据。
-        if (Create.Role != UserRole.Admin && Create.ClassId is null)
+        var isTeacher = Create.RoleId == AccountRole.TeacherId;
+        // 老师通过课表中的教师姓名动态绑定班级，建号时不分配班级；其他普通账号必须归属某个班级。
+        if (Create.Role != UserRole.Admin && !isTeacher && Create.ClassId is null)
             ModelState.AddModelError($"{nameof(Create)}.{nameof(UserInput.ClassId)}", "请为账号分配班级。");
         KeepModelStateEntries(nameof(Create));
         if (!ModelState.IsValid)
@@ -102,7 +105,7 @@ public sealed class UsersModel(
         }
 
         // 班级可能在页面打开后被删除；先校验，避免账号已创建但成员关系写入失败。
-        if (Create.Role != UserRole.Admin && Create.ClassId is { } assignedClassId)
+        if (Create.Role != UserRole.Admin && !isTeacher && Create.ClassId is { } assignedClassId)
         {
             try
             {
@@ -493,7 +496,6 @@ public sealed class UsersModel(
             (RunExtensions ? UserPermissions.RunExtensions : 0) |
             (MainMenuControl ? UserPermissions.MainMenuControl : 0) |
             (PowerControl ? UserPermissions.PowerControl : 0) |
-            (ChangeDisplayName ? UserPermissions.ChangeDisplayName : 0) |
             (ApiAccess ? UserPermissions.ApiAccess : 0);
     }
 

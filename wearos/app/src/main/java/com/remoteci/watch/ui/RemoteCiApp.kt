@@ -300,6 +300,7 @@ fun RemoteCiApp(context: Context) {
                 connectionReady = (connectionState is ConnectionManager.State.LanConnected ||
                     connectionState is ConnectionManager.State.CloudConnected) &&
                     Protocol.CAP_SCHEDULE_PULL in availableCapabilities,
+                canPullSchedule = currentUser?.isAdmin == true || currentUser?.isClassAdministrator == true,
                 pullState = schedulePullState,
                 onRequestSchedule = ConnectionManager::requestSchedulePull,
                 onPickDate = { screen = Screen.ScheduleDatePicker },

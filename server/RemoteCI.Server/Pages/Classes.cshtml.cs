@@ -22,6 +22,9 @@ public sealed class ClassesModel(
     PeerRegistry peers)
     : WebPageModel(users)
 {
+    /// <summary>虚拟树节点：用于筛选没有任何分组归属的班级。</summary>
+    public static readonly Guid UnassignedGroupId = Guid.Empty;
+
     [BindProperty]
     public string NewClassName { get; set; } = string.Empty;
 
@@ -62,9 +65,13 @@ public sealed class ClassesModel(
     public IReadOnlyList<ClassGroupTreeNode> GroupTree { get; private set; } = [];
     public IReadOnlyList<ClassDetail> VisibleClasses { get; private set; } = [];
     public ClassGroupInfo? SelectedGroup { get; private set; }
-    public string ScopeTitle => SelectedGroup?.Name ?? "全部班级";
+    public bool IsUngroupedSelected => SelectedGroupId == UnassignedGroupId;
+    public int UnassignedClassCount => Classes.Count(x => x.GroupIds is not { Count: > 0 });
+    public string ScopeTitle => IsUngroupedSelected ? "未分组" : SelectedGroup?.Name ?? "全部班级";
     public string ScopeDescription => SelectedGroup is null
-        ? "显示全部班级；勾选后可批量调整访客、分组或删除。"
+        ? IsUngroupedSelected
+            ? "显示尚未归入任何分组的班级；可直接批量加入分组或调整访客。"
+            : "显示全部班级；勾选后可批量调整访客、分组或删除。"
         : $"显示“{SelectedGroup.Name}”及其全部子分组中的班级；可直接批量管理。";
     public int OnlineClassCount => VisibleClasses.Count(x => x.PluginCount > 0);
     public int VisitorClassCount => VisibleClasses.Count(x => x.VisitorEnabled);
@@ -561,9 +568,9 @@ public sealed class ClassesModel(
     private void ResolveSelectionState()
     {
         // 无效的 query 值不应让页面停留在“已选中但无内容”的状态。
-        if (SelectedGroupId is { } selectedId && Groups.All(x => x.Id != selectedId))
+        if (SelectedGroupId is { } selectedId && selectedId != UnassignedGroupId && Groups.All(x => x.Id != selectedId))
             SelectedGroupId = null;
-        SelectedGroup = SelectedGroupId is { } id ? Groups.First(x => x.Id == id) : null;
+        SelectedGroup = SelectedGroupId is { } id && id != UnassignedGroupId ? Groups.First(x => x.Id == id) : null;
         GroupTree = BuildGroupTree(Groups, SelectedGroupId);
         VisibleClasses = ResolveVisibleClasses(Classes, GroupTree, SelectedGroupId);
     }
@@ -623,6 +630,9 @@ public sealed class ClassesModel(
     {
         if (selectedGroupId is not { } id)
             return classes;
+
+        if (id == UnassignedGroupId)
+            return classes.Where(classroom => classroom.GroupIds is not { Count: > 0 }).ToList();
 
         var node = FindGroupNode(tree, id);
         if (node is null)

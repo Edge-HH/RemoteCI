@@ -3,6 +3,7 @@
 @{
     ViewData["Title"] = "人员权限";
     var createIsAdmin = Model.Create.Role == UserRole.Admin;
+    var createIsTeacher = Model.Create.RoleId == AccountRole.TeacherId;
 }
 <div class="page-head">
     <div>
@@ -41,7 +42,6 @@
         <button type="submit">保存访客设置</button>
     </form>
 </section>
-
 @if (Model.CurrentUser.Role == UserRole.Admin)
 {
 <section class="panel member-excel-panel">
@@ -182,7 +182,7 @@
     }
 
     <dialog id="role-create-dialog" class="user-edit-dialog" data-user-edit-dialog aria-labelledby="role-create-dialog-title">
-        <div class="user-edit-dialog-shell"><header class="user-edit-dialog-header"><div><p class="eyebrow">新建角色</p><h2 id="role-create-dialog-title">创建角色</h2></div><button type="button" class="ghost dialog-close-button" data-user-edit-close aria-label="关闭创建窗口"><i class="bi bi-x-lg" aria-hidden="true"></i></button></header><form method="post" asp-page-handler="CreateRole" class="stack role-edit-dialog-form"><label>角色名称<input name="RoleEdit.Name" maxlength="40" required /></label><fieldset class="permissions"><legend>默认权限</legend><label><input type="checkbox" name="RoleEdit.AccessWebUi" value="true" /> 概览</label><label><input type="checkbox" name="RoleEdit.ManageUsers" value="true" /> 人员管理</label><label><input type="checkbox" name="RoleEdit.SendNotifications" value="true" /> 发送与清除通知</label><label><input type="checkbox" name="RoleEdit.SendVoiceMessages" value="true" /> 发送语音</label><label><input type="checkbox" name="RoleEdit.TeacherComing" value="true" /> 老师来了</label><label><input type="checkbox" name="RoleEdit.ManageSchedule" value="true" /> 换课</label><label><input type="checkbox" name="RoleEdit.RunExtensions" value="true" /> 扩展功能</label><label><input type="checkbox" name="RoleEdit.MainMenuControl" value="true" /> 主界面</label><label><input type="checkbox" name="RoleEdit.PowerControl" value="true" /> 电源控制</label><label><input type="checkbox" name="RoleEdit.ChangeDisplayName" value="true" /> 修改用户名</label><label><input type="checkbox" name="RoleEdit.ApiAccess" value="true" /> API 访问</label></fieldset><div class="dialog-actions"><button type="button" class="ghost" data-user-edit-close>取消</button><button type="submit">创建角色</button></div></form></div>
+        <div class="user-edit-dialog-shell"><header class="user-edit-dialog-header"><div><p class="eyebrow">新建角色</p><h2 id="role-create-dialog-title">创建角色</h2></div><button type="button" class="ghost dialog-close-button" data-user-edit-close aria-label="关闭创建窗口"><i class="bi bi-x-lg" aria-hidden="true"></i></button></header><form method="post" asp-page-handler="CreateRole" class="stack role-edit-dialog-form"><label>角色名称<input name="RoleEdit.Name" maxlength="40" required /></label><fieldset class="permissions"><legend>默认权限</legend><label><input type="checkbox" name="RoleEdit.AccessWebUi" value="true" /> 概览</label><label><input type="checkbox" name="RoleEdit.ManageUsers" value="true" /> 人员管理</label><label><input type="checkbox" name="RoleEdit.SendNotifications" value="true" /> 发送与清除通知</label><label><input type="checkbox" name="RoleEdit.SendVoiceMessages" value="true" /> 发送语音</label><label><input type="checkbox" name="RoleEdit.TeacherComing" value="true" /> 老师来了</label><label><input type="checkbox" name="RoleEdit.ManageSchedule" value="true" /> 换课</label><label><input type="checkbox" name="RoleEdit.RunExtensions" value="true" /> 扩展功能</label><label><input type="checkbox" name="RoleEdit.MainMenuControl" value="true" /> 主界面</label><label><input type="checkbox" name="RoleEdit.PowerControl" value="true" /> 电源控制</label><label><input type="checkbox" name="RoleEdit.ApiAccess" value="true" /> API 访问</label></fieldset><div class="dialog-actions"><button type="button" class="ghost" data-user-edit-close>取消</button><button type="submit">创建角色</button></div></form></div>
     </dialog>
 </section>
 }
@@ -192,23 +192,24 @@
     <form method="post" asp-page-handler="Create" class="form-grid" data-async-user-create data-role-form>
         <div class="form-error error" data-create-user-error role="alert" hidden></div>
         <label>ID<input asp-for="Create.Username" autocomplete="off" /></label>
-        <label>账号名<input asp-for="Create.DisplayName" autocomplete="off" /></label>
+        <label>账号名<input asp-for="Create.DisplayName" autocomplete="off" /><small class="muted teacher-username-note" data-teacher-username-note hidden>用户名会影响老师获取的日程信息。</small></label>
         <label>初始密码<input asp-for="Create.Password" type="password" autocomplete="new-password" /></label>
         <label>
             角色
             <select asp-for="Create.RoleId" data-role-select>
-                @foreach (var role in Model.RoleDefinitions.Where(role => Model.CurrentUser.Role == UserRole.Admin || role.Kind != "Administrator")) { <option value="@role.Id" data-admin="@(role.Kind == "Administrator" ? "true" : "false")" selected="@(role.Id == Model.Create.RoleId)">@role.Name</option> }
+                @foreach (var role in Model.RoleDefinitions.Where(role => Model.CurrentUser.Role == UserRole.Admin || role.Kind != "Administrator")) { <option value="@role.Id" data-admin="@(role.Kind == "Administrator" ? "true" : "false")" data-teacher="@(role.Kind == AccountRoleKind.Teacher.ToString() ? "true" : "false")" selected="@(role.Id == Model.Create.RoleId)">@role.Name</option> }
             </select>
         </label>
-        <label class="create-class-field" data-create-class-field hidden="@createIsAdmin">
+        <label class="create-class-field" data-create-class-field hidden="@(createIsAdmin || createIsTeacher)">
             班级
-            <select asp-for="Create.ClassId" data-create-class-select required="@(!createIsAdmin)">
+            <select asp-for="Create.ClassId" data-create-class-select required="@(!createIsAdmin && !createIsTeacher)" disabled="@createIsTeacher">
                 @foreach (var classroom in Model.Classes)
                 {
                     <option value="@classroom.Id">@classroom.Name</option>
                 }
             </select>
         </label>
+        <p class="muted create-teacher-note" data-create-teacher-note hidden="@(!createIsTeacher)">老师账号无需选择班级，登录后会按姓名自动关联所授课表中的班级。</p>
         <fieldset class="permissions" data-role-permissions hidden="@createIsAdmin">
             <legend>附加权限</legend>
             <label><input asp-for="Create.AccessWebUi" disabled="@createIsAdmin" /> 概览</label>
@@ -219,7 +220,6 @@
             <label><input asp-for="Create.RunExtensions" disabled="@createIsAdmin" /> 扩展功能</label>
             <label><input asp-for="Create.MainMenuControl" disabled="@createIsAdmin" /> 主界面</label>
             <label><input asp-for="Create.PowerControl" disabled="@createIsAdmin" /> 电源控制</label>
-            <label><input asp-for="Create.ChangeDisplayName" disabled="@createIsAdmin" /> 修改用户名</label>
             <label><input asp-for="Create.ApiAccess" disabled="@createIsAdmin" /> API 访问</label>
         </fieldset>
         <p class="admin-permission-note" data-admin-permission-note hidden="@(!createIsAdmin)">
@@ -293,7 +293,7 @@
                         角色
                         <select name="Edit.RoleId" data-role-select>
                             @foreach (var role in Model.RoleDefinitions.Where(role => Model.CurrentUser.Role == UserRole.Admin || role.Kind != "Administrator"))
-                            { if (user.RoleId == role.Id) { <option value="@role.Id" data-admin="@(role.Kind == "Administrator" ? "true" : "false")" selected>@role.Name</option> } else { <option value="@role.Id" data-admin="@(role.Kind == "Administrator" ? "true" : "false")">@role.Name</option> } }
+                            { if (user.RoleId == role.Id) { <option value="@role.Id" data-admin="@(role.Kind == "Administrator" ? "true" : "false")" data-teacher="@(role.Kind == AccountRoleKind.Teacher.ToString() ? "true" : "false")" selected>@role.Name</option> } else { <option value="@role.Id" data-admin="@(role.Kind == "Administrator" ? "true" : "false")" data-teacher="@(role.Kind == AccountRoleKind.Teacher.ToString() ? "true" : "false")">@role.Name</option> } }
                         </select>
                     </label>
                     <label class="check user-enabled-check">
@@ -309,7 +309,6 @@
                         <label><input type="checkbox" name="Edit.RunExtensions" value="true" checked="@user.GrantedPermissions.HasFlag(UserPermissions.RunExtensions)" disabled="@isAdmin" /> 扩展功能</label>
                         <label><input type="checkbox" name="Edit.MainMenuControl" value="true" checked="@user.GrantedPermissions.HasFlag(UserPermissions.MainMenuControl)" disabled="@isAdmin" /> 主界面</label>
                         <label><input type="checkbox" name="Edit.PowerControl" value="true" checked="@user.GrantedPermissions.HasFlag(UserPermissions.PowerControl)" disabled="@isAdmin" /> 电源控制</label>
-                        <label><input type="checkbox" name="Edit.ChangeDisplayName" value="true" checked="@user.GrantedPermissions.HasFlag(UserPermissions.ChangeDisplayName)" disabled="@isAdmin" /> 修改用户名</label>
                         <label><input type="checkbox" name="Edit.ApiAccess" value="true" checked="@user.GrantedPermissions.HasFlag(UserPermissions.ApiAccess)" disabled="@isAdmin" /> API 访问</label>
                     </fieldset>
                     <p class="admin-permission-note" data-admin-permission-note hidden="@(!isAdmin)">

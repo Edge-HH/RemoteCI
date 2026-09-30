@@ -51,13 +51,10 @@ public sealed partial class IdentityCoordinator(
         UserPermissions.SendNotifications | UserPermissions.SendVoiceMessages | UserPermissions.TeacherComing |
         UserPermissions.RunExtensions | UserPermissions.ApiAccess;
 
-    /// <summary>
-    /// 内置“老师”角色的默认权限：查看当前课程、发送通知与语音消息，以及修改自己的显示名——
-    /// 显示名是老师与课表科目教师名的绑定依据，必须允许自行填写。其余权限由管理员按需追加。
-    /// </summary>
+    /// <summary>内置“老师”角色的默认权限：查看当前课程、发送通知与语音消息。显示名由系统管理员维护。</summary>
     public const UserPermissions TeacherDefaultPermissions =
         UserPermissions.ViewCurrentCourse | UserPermissions.SendNotifications |
-        UserPermissions.SendVoiceMessages | UserPermissions.ChangeDisplayName;
+        UserPermissions.SendVoiceMessages;
 
     /// <summary>确保默认班级存在；迁移或首次启动都依赖它承接升级前的全部数据。</summary>
     private async Task SeedDefaultClassroomAsync(CancellationToken ct)
@@ -742,11 +739,13 @@ public sealed partial class IdentityCoordinator(
         await RevokeAllSessionsAsync(id, ct);
     }
 
-    /// <summary>账号自助修改用户可见用户名（DisplayName）；登录 ID 与设备会话保持不变，仅同步账号版本。</summary>
+    /// <summary>系统管理员修改用户可见用户名（DisplayName）；登录 ID 与设备会话保持不变，仅同步账号版本。</summary>
     public async Task ChangeDisplayNameAsync(Guid id, ChangeDisplayNameRequest request, CancellationToken ct = default)
     {
         ValidateDisplayName(request.DisplayName);
         var user = await RequireUserAsync(id);
+        if (user.Role != UserRole.Admin)
+            throw new IdentityOperationException(ApiErrorCodes.Forbidden, "仅系统管理员可以修改用户名。");
         user.DisplayName = request.DisplayName.Trim();
         user.UpdatedAt = DateTimeOffset.UtcNow;
         user.Version = await NextVersionAsync(ct);
@@ -1071,7 +1070,7 @@ public sealed partial class IdentityCoordinator(
 
     private static UserPermissions NormalizeGrants(UserRole role, UserPermissions grants) => role == UserRole.Admin
         ? UserPermissions.None
-        : grants & RolePermissions.Assignable;
+        : grants & (RolePermissions.Assignable & ~UserPermissions.ChangeDisplayName);
 
     private static string NormalizeDeviceName(string value) => string.IsNullOrWhiteSpace(value)
         ? "Wear OS"

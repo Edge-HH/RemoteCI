@@ -434,6 +434,13 @@ public static class WebSocketHub
                     : ScheduleSyncSource.Watch;
                 var classId = await ResolveClassAsync(request?.ClassId, session);
                 if (classId is null) return;
+                if (session.Principal.User!.Role != UserRole.Admin &&
+                    !await session.ClassAccess.IsClassAdminAsync(
+                        session.Principal.User.Id,
+                        session.Principal.User.Role,
+                        classId.Value,
+                        session.CancellationToken))
+                    return;
                 request ??= new ScheduleSyncRequest { Source = source };
                 request.ClassId = classId;
                 await session.ScheduleSync.StartAsync(

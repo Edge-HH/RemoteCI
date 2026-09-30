@@ -79,7 +79,7 @@ public static class RolePermissions
     public const UserPermissions Assignable = UserPermissions.AccessWebUi | UserPermissions.ManageUsers |
         UserPermissions.SendNotifications | UserPermissions.ManageSchedule | UserPermissions.PowerControl |
         UserPermissions.TeacherComing | UserPermissions.RunExtensions | UserPermissions.MainMenuControl |
-        UserPermissions.SendVoiceMessages | UserPermissions.ChangeDisplayName | UserPermissions.ApiAccess;
+        UserPermissions.SendVoiceMessages | UserPermissions.ApiAccess;
 
     public static UserPermissions Effective(
         UserRole role,

@@ -266,7 +266,7 @@ app.MapPost("/api/me/display-name", async (
     if (principal?.User is null) return Unauthorized();
     if (principal.IsApiKey) return Forbidden();
     if (MissingFields(request.DisplayName) is { } bad) return bad;
-    if (!HasPermission(principal, UserPermissions.ChangeDisplayName)) return Forbidden();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
     try
     {
         await identities.ChangeDisplayNameAsync(principal.User.Id, request, ct);
@@ -883,11 +883,15 @@ app.MapGet("/api/settings/schedule-pull", async (HttpContext ctx, IdentityCoordi
     if (principal?.User is null) return Unauthorized();
     return Results.Ok(new { intervalMinutes = (int)await pull.GetIntervalAsync(ct) });
 });
-app.MapPut("/api/settings/schedule-pull", async (HttpContext ctx, SchedulePullIntervalBody body, IdentityCoordinator identities, SchedulePullSettings pull, CancellationToken ct) =>
+app.MapPut("/api/settings/schedule-pull", async (HttpContext ctx, SchedulePullIntervalBody body, IdentityCoordinator identities, ClassAccessService access, SchedulePullSettings pull, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (!HasPermission(principal, UserPermissions.ManageSchedule)) return Forbidden();
+    var target = await ResolveClassAsync(principal, null, access, ct);
+    if (target is null ||
+        (principal.User.Role != UserRole.Admin &&
+         !await access.IsClassAdminAsync(principal.User.Id, principal.User.Role, target.Value, ct)))
+        return Forbidden();
     var interval = Enum.IsDefined(typeof(SchedulePullInterval), body.IntervalMinutes)
         ? (SchedulePullInterval)body.IntervalMinutes
         : SchedulePullInterval.Disabled;

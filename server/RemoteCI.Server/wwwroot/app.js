@@ -13,19 +13,27 @@ function syncRolePermissions(form) {
     const roleSelect = form.querySelector("[data-role-select]");
     const permissions = form.querySelector("[data-role-permissions]");
     const adminNote = form.querySelector("[data-admin-permission-note]");
+    const teacherUsernameNote = form.querySelector("[data-teacher-username-note]");
     if (!roleSelect) return;
 
     const isAdmin = roleSelect.selectedOptions[0]?.dataset.admin === "true" || roleSelect.value === "Admin" || roleSelect.value === "2";
+    const isTeacher = roleSelect.selectedOptions[0]?.dataset.teacher === "true";
     if (permissions) {
         permissions.hidden = isAdmin;
         permissions.querySelectorAll('input[type="checkbox"]').forEach(input => { input.disabled = isAdmin; });
     }
     if (adminNote) adminNote.hidden = !isAdmin;
-    // 非管理员账号必须分配班级：隐藏班级字段时同步解除 required，避免不可见控件阻塞提交。
+    if (teacherUsernameNote) teacherUsernameNote.hidden = roleSelect.selectedOptions[0]?.dataset.teacher !== "true";
+    // 老师按课表教师名动态绑定班级，不需要在建号时选择班级；隐藏字段时同步解除 required。
     const classField = form.querySelector("[data-create-class-field]");
     const classSelect = form.querySelector("[data-create-class-select]");
-    if (classField) classField.hidden = isAdmin;
-    if (classSelect) classSelect.required = !isAdmin;
+    const teacherNote = form.querySelector("[data-create-teacher-note]");
+    if (classField) classField.hidden = isAdmin || isTeacher;
+    if (classSelect) {
+        classSelect.required = !isAdmin && !isTeacher;
+        classSelect.disabled = isTeacher;
+    }
+    if (teacherNote) teacherNote.hidden = !isTeacher;
 }
 
 async function handleCopyClick(event) {
@@ -428,7 +436,15 @@ if (classBatchForm) {
 
 // 菜单只保留一个展开项，避免树节点和行操作菜单互相遮挡。
 document.addEventListener("click", event => {
-    document.querySelectorAll(".tree-node-menu[open], .row-menu[open]").forEach(menu => {
+    document.querySelectorAll(".tree-node-menu[open], .row-menu[open], .class-menu[open]").forEach(menu => {
         if (!menu.contains(event.target)) menu.removeAttribute("open");
     });
+});
+
+document.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    const openMenu = document.querySelector(".class-menu[open]");
+    if (!openMenu) return;
+    openMenu.removeAttribute("open");
+    openMenu.querySelector("summary")?.focus();
 });

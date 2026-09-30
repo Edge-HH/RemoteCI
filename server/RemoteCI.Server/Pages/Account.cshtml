@@ -22,7 +22,7 @@
                 {
                     <div class="validation" role="alert"><ul><li>@displayNameError</li></ul></div>
                 }
-                <label>用户名<input asp-for="DisplayName.DisplayName" minlength="1" maxlength="40" autocomplete="nickname" required /></label>
+                <label>用户名<input asp-for="DisplayName.DisplayName" minlength="1" maxlength="40" autocomplete="nickname" required /><small class="muted">用户名会影响老师获取的日程信息。</small></label>
                 <button type="submit">保存用户名</button>
             </form>
         </section>

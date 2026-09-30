@@ -491,6 +491,7 @@ fun ScheduleScreen(
     var selected by remember { mutableIntStateOf(0) }
     if (selected >= days.size) selected = 0
     val canChange = user?.has(Protocol.PERMISSION_MANAGE_SCHEDULE) == true && ConnectionManager.supports(Protocol.CAP_SCHEDULE_CHANGE)
+    val canPull = user?.isAdmin == true || user?.isClassAdministrator == true
 
     // 老师：显示名与课表教师名绑定后，可跨班级查看“我的日程”；null 表示尚未手动切换。
     var mineChoice by remember { mutableStateOf<Boolean?>(null) }
@@ -520,7 +521,7 @@ fun ScheduleScreen(
             actions = {
                 IconButton(
                     onClick = { if (mineMode) myScheduleRefresh++ else ConnectionManager.requestSchedulePull() },
-                    enabled = mineMode || schedulePullActionEnabled(pull),
+                    enabled = mineMode || (canPull && schedulePullActionEnabled(pull)),
                 ) {
                     Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
                 }
@@ -578,7 +579,7 @@ fun ScheduleScreen(
             }
         } else {
         if (days.isEmpty()) {
-            EmptyState("还没有课表", "连接成功后会显示未来七日课程。也可以点击右上角刷新。")
+            EmptyState("还没有课表", if (canPull) "连接成功后会显示未来七日课程。管理员或班管理员可刷新课表。" else "连接成功后会显示未来七日课程。")
         } else {
             PrimaryScrollableTabRow(selectedTabIndex = selected.coerceAtMost(days.lastIndex)) {
                 days.forEachIndexed { index, day ->
@@ -594,7 +595,7 @@ fun ScheduleScreen(
             val courses = day.courses.filter { it.enabled }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (courses.isEmpty()) {
-                    EmptyState("这一天没有课程", "可以拉取最新课表，或选择其他日期。")
+                    EmptyState("这一天没有课程", if (canPull) "管理员或班管理员可拉取最新课表，或选择其他日期。" else "请选择其他日期。")
                 } else {
                     ConnectedListCard {
                         courses.forEachIndexed { index, course ->
@@ -611,13 +612,20 @@ fun ScheduleScreen(
                         }
                     }
                 }
-                ConnectedButtons(
-                    firstLabel = "拉取课表",
-                    secondLabel = "换课",
-                    onFirst = { ConnectionManager.requestSchedulePull() },
-                    onSecond = { onOpen(Screen.Swap(day.date, courses.firstOrNull()?.index)) },
-                    firstFilled = false,
-                )
+                if (canPull) {
+                    ConnectedButtons(
+                        firstLabel = "拉取课表",
+                        secondLabel = "换课",
+                        onFirst = { ConnectionManager.requestSchedulePull() },
+                        onSecond = { onOpen(Screen.Swap(day.date, courses.firstOrNull()?.index)) },
+                        firstFilled = false,
+                    )
+                } else if (canChange) {
+                    Button(
+                        onClick = { onOpen(Screen.Swap(day.date, courses.firstOrNull()?.index)) },
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                    ) { Text("换课") }
+                }
                 val pullText = when (val currentPull = pull) {
                     is ConnectionManager.SchedulePullState.Pulling -> currentPull.message
                     is ConnectionManager.SchedulePullState.Success -> currentPull.message

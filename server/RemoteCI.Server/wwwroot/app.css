@@ -453,6 +453,21 @@ textarea { resize: vertical; }
 .schedule-course-time { margin-top: 2px; color: var(--muted); font-size: 11px; }
 .schedule-empty { display: block; color: var(--muted); text-align: center; }
 
+.my-schedule-list { display: grid; gap: 16px; }
+.my-schedule-day .panel-heading { margin-bottom: 16px; }
+.my-schedule-day .panel-heading h2 { margin: 0; }
+.my-schedule-classes { display: grid; gap: 12px; }
+.my-schedule-class { padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); }
+.my-schedule-class h3 { margin: 0 0 10px; font-size: 15px; }
+.my-schedule-courses { display: grid; gap: 8px; }
+.my-schedule-course { display: grid; grid-template-columns: minmax(82px, .7fr) minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 6px; background: var(--surface); }
+.my-schedule-course-index, .my-schedule-course-time { color: var(--muted); font-size: 12px; }
+.my-schedule-course-time { font-family: var(--font-mono); white-space: nowrap; }
+@media (max-width: 620px) {
+    .my-schedule-course { grid-template-columns: 1fr auto; }
+    .my-schedule-course-index { grid-column: 1 / -1; }
+}
+
 .subject-teacher-grid { gap: 10px 18px; }
 .subject-teacher-row { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 10px; margin: 0; }
 .schedule-pull-layout { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 14px 24px; }
@@ -499,8 +514,6 @@ textarea { resize: vertical; }
 /* ---------- 多班级：切换器 / 班级芯片 / 分组 / 成员 / 广播 ---------- */
 .class-switcher { display: flex; min-height: 42px; max-width: 220px; flex: 0 1 auto; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
 .class-switcher i { color: var(--muted); font-size: 13px; }
-.class-switcher select { min-height: 34px; width: auto; min-width: 120px; max-width: 150px; padding: 0 6px; border: 0; background: transparent; color: var(--text); font-weight: 700; text-overflow: ellipsis; }
-.class-switcher select:focus { outline: none; }
 .class-switcher.current { color: var(--text); font-weight: 700; }
 .class-switcher.current span { font-size: 13px; }
 
@@ -576,7 +589,6 @@ input[type="checkbox"][form] { width: 18px; height: 18px; min-height: 0; padding
 .user-account-table td form.inline-form select { max-width: 160px; }
 @media (max-width: 680px) {
     .class-switcher { max-width: 150px; }
-    .class-switcher select { max-width: 100px; }
     .class-info-body { flex-direction: column; }
     .compact-row { grid-template-columns: 1fr; }
 }
@@ -586,7 +598,7 @@ input[type="checkbox"][form] { width: 18px; height: 18px; min-height: 0; padding
 .class-manager {
     display: grid;
     grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-    align-items: start;
+    align-items: stretch;
     gap: 16px;
 }
 

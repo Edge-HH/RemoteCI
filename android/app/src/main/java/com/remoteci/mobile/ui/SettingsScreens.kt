@@ -172,10 +172,12 @@ fun AccountScreen(
             }
             if (editingName) DisplayNameEditorDialog(user, onDismiss = { editingName = false })
         }
-        val rows = listOf(
+        val rows = listOfNotNull(
             Triple("连接与服务器", "账号、云端地址、局域网插件发现与重新连接", Screen.Connection to Icons.Rounded.Wifi),
             Triple("通知设置", "课程、自动化和第三方插件提醒的同步开关", Screen.NotificationSettings to Icons.Rounded.Notifications),
-            Triple("自动拉取课表", "设置在线插件自动刷新课表的周期", Screen.ScheduleSettings to Icons.Rounded.Schedule),
+            if (user?.isAdmin == true || user?.isClassAdministrator == true)
+                Triple("自动拉取课表", "设置在线插件自动刷新课表的周期", Screen.ScheduleSettings to Icons.Rounded.Schedule)
+            else null,
             Triple("外观", "主题与显示偏好", Screen.Appearance to Icons.Rounded.Palette),
             Triple("更新", "检查更新与同版本强制覆盖", Screen.Updates to Icons.Rounded.SystemUpdate),
             Triple("开发者设置", "云端中转、局域网连接开关与重新连接", Screen.Developer to Icons.Rounded.Code),

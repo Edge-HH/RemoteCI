@@ -1511,7 +1511,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Equal(HttpStatusCode.OK, schedule.StatusCode);
         var scheduleHtml = WebUtility.HtmlDecode(await schedule.Content.ReadAsStringAsync());
         Assert.Contains("未来七日课表", scheduleHtml);
-        Assert.Contains("立即拉取课表", scheduleHtml);
+        Assert.DoesNotContain("立即拉取课表", scheduleHtml);
         Assert.DoesNotContain("提交修改", scheduleHtml);
         Assert.DoesNotContain("自动拉取课表", scheduleHtml);
         var pull = await PostRazorFormAsync(
