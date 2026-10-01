@@ -8,14 +8,14 @@
     <div>
         <p class="eyebrow">任教安排</p>
         <h1>我的日程</h1>
-        <p class="muted">只显示课表中与“@Model.CurrentUser.DisplayName”匹配的班级和课次。</p>
+        <p class="muted">课表中教师名为“@Model.CurrentUser.DisplayName”的课程。</p>
     </div>
 </div>
 
 @if (Model.Schedule.Days.Count == 0)
 {
     <div class="notice warning">
-        暂未找到与你姓名匹配的课程。请让管理员在班级课表中设置教师姓名，或修改你的账号名。
+        没有找到教师名与你用户名一致的课程。请让管理员在课表页设置科目教师，或修改你的用户名。
     </div>
 }
 else
@@ -26,7 +26,6 @@ else
             <section class="panel my-schedule-day">
                 <div class="panel-heading">
                     <div>
-                        <p class="eyebrow">课表日期</p>
                         <h2>@MyScheduleModel.FormatDate(day.Date)</h2>
                     </div>
                     <span class="muted">@day.Items.Sum(item => item.Courses.Count) 节</span>

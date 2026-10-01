@@ -555,7 +555,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Contains("class=\"schedule-pull-button\"", scheduleHtml);
         Assert.Contains("class=\"schedule-submit-button\"", scheduleHtml);
         Assert.Contains("<span>课表</span>", scheduleHtml);
-        Assert.Contains("强制覆盖服务端缓存", scheduleHtml);
+        Assert.Contains("覆盖服务端缓存", scheduleHtml);
         Assert.Contains("data-schedule-pull-progress", scheduleHtml);
         Assert.Contains("""class="schedule-table""", scheduleHtml);
         Assert.Contains("""class="schedule-period-heading">节次""", scheduleHtml);
@@ -1512,7 +1512,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var scheduleHtml = WebUtility.HtmlDecode(await schedule.Content.ReadAsStringAsync());
         Assert.Contains("未来七日课表", scheduleHtml);
         Assert.DoesNotContain("立即拉取课表", scheduleHtml);
-        Assert.DoesNotContain("提交修改", scheduleHtml);
+        Assert.DoesNotContain("提交换课", scheduleHtml);
         Assert.DoesNotContain("自动拉取课表", scheduleHtml);
         var pull = await PostRazorFormAsync(
             browser,

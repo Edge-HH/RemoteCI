@@ -264,7 +264,7 @@
         if (singleControl) {
             targetDialog.querySelector("[data-batch-target-panel=devices]")?.setAttribute("hidden", "");
             targetDialog.querySelector("[data-batch-target-panel=classes]")?.classList.add("single-control-target");
-            targetDialog.querySelector("[data-batch-target-description]").textContent = "确认后执行于当前班级，无需选择目标。";
+            targetDialog.querySelector("[data-batch-target-description]").textContent = "确认后在当前班级执行。";
         }
     };
 

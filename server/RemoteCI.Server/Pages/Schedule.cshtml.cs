@@ -58,7 +58,7 @@ public sealed class ScheduleModel(
         }
         var status = await scheduleSync.StartAndWaitAsync(ScheduleSyncSource.WebUi, CurrentClassId, ct);
         if (status.State == ScheduleSyncTaskState.Completed)
-            TempData["Message"] = "已从插件拉取最新课表，并强制覆盖服务端缓存。";
+            TempData["Message"] = "已从插件拉取最新课表。";
         else
             TempData["Error"] = status.Message;
         return RedirectToPage();

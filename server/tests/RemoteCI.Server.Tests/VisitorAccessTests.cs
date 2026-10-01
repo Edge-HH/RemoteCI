@@ -93,7 +93,7 @@ public sealed class VisitorAccessTests
         Assert.Contains("数学", visitorHtml);
         Assert.Contains("08:00–08:45", visitorHtml);
         Assert.DoesNotContain("立即拉取课表", visitorHtml);
-        Assert.DoesNotContain("提交修改", visitorHtml);
+        Assert.DoesNotContain("提交换课", visitorHtml);
         Assert.DoesNotContain("人员权限", visitorHtml);
         Assert.DoesNotContain("class=\"sidebar\"", visitorHtml);
     }

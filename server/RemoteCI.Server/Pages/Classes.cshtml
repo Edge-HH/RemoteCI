@@ -5,9 +5,7 @@
 }
 <div class="page-head">
     <div>
-        <p class="eyebrow">班级 · 分组 · 批量</p>
         <h1>班级管理</h1>
-        <p class="muted">按学校、年级或校区组织班级；选择左侧分组后，右侧可直接批量管理范围内班级。</p>
     </div>
 </div>
 
@@ -16,7 +14,7 @@
         <div class="class-tree-head">
             <div>
                 <h2>班级分组</h2>
-                <p class="muted">支持多层级与班级多归属。</p>
+                <p class="muted">分组可多层嵌套，一个班级可属于多个分组。</p>
             </div>
         </div>
         <nav class="class-tree" aria-label="班级分组树">
@@ -82,7 +80,7 @@
                         <input type="hidden" name="groupId" value="@Model.SelectedGroupId" />
                         <label>班级名称<input asp-for="NewClassName" required maxlength="40" placeholder="例如：高一（1）班" /></label>
                         <label>固定配对码（可选）<input asp-for="NewClassPairCode" maxlength="64" placeholder="留空则不设置；6-64 位不含空格" /></label>
-                        <p class="muted">每个班级只允许一台插件设备。设置固定配对码后，插件用该码连接会自动绑定到本班；连接新设备会断开旧设备。</p>
+                        <p class="muted">插件用固定配对码连接后自动绑定到本班。每个班级只保留一台设备，新设备会顶替旧设备。</p>
                         <button type="submit">创建班级</button>
                     </form>
                 </details>
@@ -315,14 +313,14 @@
     <div class="panel-heading">
         <div>
             <h2>连接码与设备分配</h2>
-            <p class="muted">班级固定配对码让插件连接后自动绑定到对应班级，每个班级同时只保留一台设备；统一连接码可连接无限台设备，但设备先进入“未分配”，需在此指派班级后才能操控该班设备。</p>
+            <p class="muted">班级固定配对码：插件连接后自动绑定到对应班级。统一连接码：可接入多台设备，设备先进入“未分配”，指派班级后才能操控。</p>
         </div>
         <span class="status-pill @(Model.HasUnifiedCode ? "online" : "offline")">统一连接码@(Model.HasUnifiedCode ? "已设置" : "未设置")</span>
     </div>
     <div class="member-excel-grid">
         <article class="member-excel-card">
             <h3>统一连接码</h3>
-            <p>使用统一连接码接入的设备会归入“未分配”，插件端可填写班级名备注，方便你在此对照。重新保存会替换旧的统一连接码。</p>
+            <p>插件端可填写班级名备注，便于指派。重新保存会替换旧的统一连接码。</p>
             <form method="post" asp-page-handler="SetUnifiedCode" class="stack">
                 <input type="hidden" name="groupId" value="@Model.SelectedGroupId" />
                 <label>自定义连接码（留空自动生成）<input asp-for="UnifiedPairCodeInput" maxlength="64" placeholder="6-64 位，不含空格" /></label>
@@ -333,7 +331,7 @@
             <h3>未分配设备（@Model.UnassignedDevices.Count）</h3>
             @if (Model.UnassignedDevices.Count == 0)
             {
-                <p class="muted">暂无未分配设备。使用统一连接码接入的插件会显示在这里。</p>
+                <p class="muted">暂无未分配设备。</p>
             }
             else
             {
@@ -380,7 +378,7 @@
     <div class="panel-heading">
         <div>
             <h2>批量导入与导出</h2>
-            <p class="muted">用 Excel 批量新建或修改班级与分组。普通导入只新建；覆盖导入使用 RemoteCI 导出的 Excel，按隐藏的“系统标识”更新已有对象并新增行，不会因为删除某一行而删除班级或分组。</p>
+            <p class="muted">普通导入只新建；覆盖导入使用 RemoteCI 导出的 Excel，只新增与修改，不会删除班级或分组。</p>
         </div>
     </div>
     <div class="member-excel-grid">
@@ -400,7 +398,7 @@
         </article>
         <article class="member-excel-card">
             <h3>3. 导出并覆盖修改</h3>
-            <p>导出当前范围内的班级和全部分组；可修改名称、分组归属与访客开关后上传同一文件覆盖。覆盖导入只新增与修改，不会删除。</p>
+            <p>导出所选范围内的班级和全部分组，修改名称、分组归属或访客开关后上传同一文件覆盖。</p>
             <form method="get" asp-page-handler="Export" class="stack">
                 <label>导出范围
                     <select name="groupId">
@@ -416,7 +414,7 @@
             <form method="post" asp-page-handler="OverwriteExcel" enctype="multipart/form-data" class="stack">
                 <input type="hidden" name="groupId" value="@Model.SelectedGroupId" />
                 <label>修改后的导出文件<input type="file" name="excelFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required /></label>
-                <button type="submit" class="ghost" onclick="return confirm('覆盖导入会按“系统标识”更新已存在的班级与分组并新增行，不会删除任何对象。确定继续吗？')">上传并覆盖</button>
+                <button type="submit" class="ghost" onclick="return confirm('覆盖导入会更新已有的班级与分组并新增行，不会删除。确定继续吗？')">上传并覆盖</button>
             </form>
         </article>
     </div>

@@ -5,8 +5,6 @@
     <div>
         <p class="eyebrow">服务端管理</p>
         <h1>系统配置</h1>
-        <p class="muted">管理 RemoteCI 服务端的全局配置与维护功能。</p>
-    <p class="muted">登录页外观（主题、背景图、背景不透明度与登录卡片位置）在<a asp-page="/LoginSettings">登录页设置</a>中单独维护。</p>
     </div>
 </div>
 <section class="panel update-panel">
@@ -66,7 +64,7 @@
 
 <section class="panel">
     <h2>通知人显示</h2>
-    <p class="muted">控制自定义通知是否在标题中附带发送人。此项为全局设置，仅系统管理员可修改。</p>
+    <p class="muted">自定义通知的标题是否附带发送人，对所有班级生效。</p>
     <form method="post" asp-page-handler="SaveNotificationSettings" class="stack system-config-form">
         <label class="check"><input asp-for="ForceSenderInTitle" /> 强制在标题显示发送人</label>
         <button type="submit">保存通知设置</button>
@@ -89,7 +87,7 @@
 <section class="panel">
     <h2>本地备份</h2>
     @if (Model.Backups.Count == 0) { <p class="muted">尚无本地备份。</p> }
-    else { <div class="backup-list">@foreach (var backup in Model.Backups) { <article><div><strong>@backup.Name</strong><small>@backup.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ? @Math.Ceiling(backup.Size / 1024d) KB</small></div><div class="row-actions"><a class="button ghost" asp-page-handler="DownloadBackup" asp-route-name="@backup.Name">下载</a><form method="post" asp-page-handler="RestoreBackup" onsubmit="return confirm('恢复会替换当前配置并重启服务，确定继续？')"><input type="hidden" name="name" value="@backup.Name" /><button type="submit" class="ghost">恢复</button></form><form method="post" asp-page-handler="DeleteBackup" onsubmit="return confirm('确定删除此备份？')"><input type="hidden" name="name" value="@backup.Name" /><button type="submit" class="danger ghost">删除</button></form></div></article> }</div> }
+    else { <div class="backup-list">@foreach (var backup in Model.Backups) { <article><div><strong>@backup.Name</strong><small>@backup.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") · @Math.Ceiling(backup.Size / 1024d) KB</small></div><div class="row-actions"><a class="button ghost" asp-page-handler="DownloadBackup" asp-route-name="@backup.Name">下载</a><form method="post" asp-page-handler="RestoreBackup" onsubmit="return confirm('恢复会替换当前配置并重启服务，确定继续？')"><input type="hidden" name="name" value="@backup.Name" /><button type="submit" class="ghost">恢复</button></form><form method="post" asp-page-handler="DeleteBackup" onsubmit="return confirm('确定删除此备份？')"><input type="hidden" name="name" value="@backup.Name" /><button type="submit" class="danger ghost">删除</button></form></div></article> }</div> }
 </section>
 <section class="panel two-column">
     <div><h2>导出加密配置</h2><p class="muted">包含课程、账号密码哈希、角色权限、插件长期凭据和可修改系统设置。</p><form method="post" asp-page-handler="ExportConfig" class="stack"><label>导出密码<input asp-for="ExportOptions.Password" type="password" minlength="8" required /></label><label>确认密码<input asp-for="ExportOptions.ConfirmPassword" type="password" minlength="8" required /></label><button type="submit">导出配置包</button></form></div>

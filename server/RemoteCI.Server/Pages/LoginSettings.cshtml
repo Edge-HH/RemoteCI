@@ -25,12 +25,10 @@
     <div>
         <p class="eyebrow">服务端管理</p>
         <h1>登录页设置</h1>
-        <p class="muted">自定义未登录访问时的登录页外观：主题、背景图、背景不透明度与登录卡片位置。</p>
     </div>
 </div>
 <section class="panel">
     <h2>登录页外观</h2>
-    <p class="muted">主题控制登录页整体明暗；背景图会铺满整屏，并按“背景不透明度”淡化，便于与登录卡片保持对比；登录卡片位置决定登录框贴在页面左侧、居中还是右侧。</p>
     <form method="post" asp-page-handler="Save" enctype="multipart/form-data" class="stack login-settings-form">
         <fieldset class="login-theme-fieldset">
             <legend>主题</legend>
@@ -60,7 +58,7 @@
         <button type="submit">保存设置</button>
     </form>
     <div class="login-preview" data-login-preview>
-        <p class="muted">登录页预览：按当前主题、背景不透明度与登录卡片位置实时呈现；选择新背景图时也会先在这里试看，点“保存设置”后才会写入服务端。</p>
+        <p class="muted">预览（保存后生效）</p>
         <div class="login-preview-stage" data-login-preview-stage data-preview-theme="@previewTheme" style="@previewStyle">
             <div class="login-preview-card" aria-hidden="true">
                 <span class="login-preview-logo"></span>
