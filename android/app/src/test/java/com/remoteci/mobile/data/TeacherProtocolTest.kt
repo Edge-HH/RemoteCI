@@ -24,6 +24,27 @@ class TeacherProtocolTest {
     }
 
     @Test
+    fun canPullScheduleFor_ChecksClassAdministratorOfThatClassOnly() {
+        val user = Json.decodeFromString<UserProfile>(
+            """
+            {"id":"u3","username":"li","displayName":"李","role":1,"classes":[
+              {"id":"class-a","name":"A 班","roleName":"自定义名称","roleKind":4},
+              {"id":"class-b","name":"B 班","roleName":"学生","roleKind":1},
+              {"id":"class-c","name":"C 班","roleName":"班管理员"}
+            ]}
+            """.trimIndent(),
+        )
+        assertTrue(user.canPullScheduleFor("class-a"))
+        assertFalse(user.canPullScheduleFor("class-b"))
+        // 旧版服务端不下发 roleKind 时退回内置角色名。
+        assertTrue(user.canPullScheduleFor("class-c"))
+        assertFalse(user.canPullScheduleFor(null))
+
+        val admin = Json.decodeFromString<UserProfile>("""{"id":"u4","username":"root","displayName":"管理员","role":2}""")
+        assertTrue(admin.canPullScheduleFor("class-b"))
+    }
+
+    @Test
     fun courseEntry_TeacherIsOptionalForLegacyPayloads() {
         val withTeacher = Json.decodeFromString<CourseEntry>(
             """{"index":0,"label":"第一节","subjectId":"11111111-1111-1111-1111-111111111111","subject":"数学","teacher":"王老师","enabled":true}""",

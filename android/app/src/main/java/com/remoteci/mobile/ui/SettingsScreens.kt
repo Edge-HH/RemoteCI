@@ -120,6 +120,7 @@ fun AccountScreen(
     onLoggedOut: () -> Unit,
 ) {
     val user by ConnectionManager.currentUser.collectAsState()
+    val currentClassId by ConnectionManager.currentClassId.collectAsState()
     val connection by ConnectionManager.state.collectAsState()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         TopAppBar(
@@ -152,8 +153,8 @@ fun AccountScreen(
                 )
             }
         }
-        // 老师填写姓名（显示名）即可与所有课表中教师名一致的课程绑定；有改名权限的账号都可自助修改。
-        if (user?.has(Protocol.PERMISSION_CHANGE_DISPLAY_NAME) == true) {
+        // 显示名是老师绑定课表教师名的依据，服务端只允许系统管理员修改，其他账号不显示入口。
+        if (user?.isAdmin == true) {
             var editingName by remember { mutableStateOf(false) }
             Card(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
@@ -162,9 +163,7 @@ fun AccountScreen(
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("姓名", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        if (user?.isTeacher == true)
-                            "${user?.displayName} · 需与课表中的教师名一致，才能关联自己的课程"
-                        else user?.displayName ?: "",
+                        user?.displayName ?: "",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -175,7 +174,7 @@ fun AccountScreen(
         val rows = listOfNotNull(
             Triple("连接与服务器", "账号、云端地址、局域网插件发现与重新连接", Screen.Connection to Icons.Rounded.Wifi),
             Triple("通知设置", "课程、自动化和第三方插件提醒的同步开关", Screen.NotificationSettings to Icons.Rounded.Notifications),
-            if (user?.isAdmin == true || user?.isClassAdministrator == true)
+            if (user?.canPullScheduleFor(currentClassId) == true)
                 Triple("自动拉取课表", "设置在线插件自动刷新课表的周期", Screen.ScheduleSettings to Icons.Rounded.Schedule)
             else null,
             Triple("外观", "主题与显示偏好", Screen.Appearance to Icons.Rounded.Palette),
@@ -200,7 +199,7 @@ fun AccountScreen(
     }
 }
 
-/** 姓名（显示名）编辑：保存后从服务端拉取最新档案，刷新班级列表与任教权限。 */
+/** 系统管理员的姓名（显示名）编辑：保存后从服务端拉取最新档案。 */
 @Composable
 private fun DisplayNameEditorDialog(user: UserProfile?, onDismiss: () -> Unit) {
     var name by remember(user) { mutableStateOf(user?.displayName ?: "") }
@@ -213,11 +212,6 @@ private fun DisplayNameEditorDialog(user: UserProfile?, onDismiss: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(name, { name = it }, label = { Text("姓名（显示名）") }, singleLine = true)
-                if (user?.isTeacher == true)
-                    Text(
-                        "需与课表中的教师名一字不差（多教师科目可填写其中之一），保存后即可在“我的日程”看到自己的课程。",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
         },

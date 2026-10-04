@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using RemoteCI.Server.Data;
 using RemoteCI.Shared.Models;
@@ -111,6 +112,51 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state)
             if (items.Count > 0) response.Days.Add(new MyScheduleDay { Date = date, Items = items });
         }
         return response;
+    }
+
+    /// <summary>
+    /// 在“我的日程”中找出指定时刻正在上的课与下一节课。课程时间是教室电脑的本地时间，
+    /// 按该班最近一次状态快照携带的时区偏移换算；尚无快照时退回服务端本地时区。
+    /// 没有起始时间或日期无法解析的课程不参与计算。
+    /// </summary>
+    public async Task<MyNextCourseResponse> BuildMyNextCourseAsync(
+        string? boundName, DateTimeOffset now, CancellationToken ct = default)
+    {
+        var slots = new List<MyCourseSlot>();
+        foreach (var taughtClass in await GetTaughtClassesAsync(boundName, ct))
+        {
+            var offset = state.GetLatestSnapshot(taughtClass.ClassId)?.TimeZoneOffsetMinutes is { } minutes
+                ? TimeSpan.FromMinutes(minutes)
+                : TimeZoneInfo.Local.GetUtcOffset(now);
+            foreach (var day in taughtClass.Bundle.Days)
+            {
+                if (!DateOnly.TryParseExact(day.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+                    continue;
+                foreach (var course in day.Courses.Where(x => x.Enabled && Matches(boundName, x.Teacher)))
+                {
+                    if (!TimeOnly.TryParse(course.StartTime, CultureInfo.InvariantCulture, out var start)) continue;
+                    var startsAt = new DateTimeOffset(date.ToDateTime(start), offset);
+                    var endsAt = TimeOnly.TryParse(course.EndTime, CultureInfo.InvariantCulture, out var end)
+                        ? new DateTimeOffset(date.ToDateTime(end), offset)
+                        : startsAt;
+                    slots.Add(new MyCourseSlot
+                    {
+                        Date = day.Date,
+                        ClassId = taughtClass.ClassId,
+                        ClassName = taughtClass.ClassName,
+                        Course = course,
+                        StartsAt = startsAt,
+                        EndsAt = endsAt,
+                    });
+                }
+            }
+        }
+        return new MyNextCourseResponse
+        {
+            At = now,
+            Current = slots.Where(x => x.StartsAt <= now && now < x.EndsAt).MinBy(x => x.StartsAt),
+            Next = slots.Where(x => x.StartsAt > now).MinBy(x => x.StartsAt),
+        };
     }
 
     private static bool HasMatchedCourse(string name, ScheduleBundle? bundle) => bundle?.Days

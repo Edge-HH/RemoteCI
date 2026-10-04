@@ -491,7 +491,8 @@ fun ScheduleScreen(
     var selected by remember { mutableIntStateOf(0) }
     if (selected >= days.size) selected = 0
     val canChange = user?.has(Protocol.PERMISSION_MANAGE_SCHEDULE) == true && ConnectionManager.supports(Protocol.CAP_SCHEDULE_CHANGE)
-    val canPull = user?.isAdmin == true || user?.isClassAdministrator == true
+    val scheduleClassId by ConnectionManager.currentClassId.collectAsState()
+    val canPull = user?.canPullScheduleFor(scheduleClassId) == true
 
     // 老师：显示名与课表教师名绑定后，可跨班级查看“我的日程”；null 表示尚未手动切换。
     var mineChoice by remember { mutableStateOf<Boolean?>(null) }
@@ -541,7 +542,7 @@ fun ScheduleScreen(
                 myDays.isEmpty() -> EmptyState(
                     if (myScheduleStatus != null) "暂时无法读取我的日程" else "还没有与你关联的课程",
                     myScheduleStatus
-                        ?: "请确认“账号与设置 → 姓名”与课表中的教师名一致；绑定后这里会显示你在各班的课程。",
+                        ?: "请联系管理员确认你的用户名与课表中的教师名一致；绑定后这里会显示你在各班的课程。",
                 )
                 else -> {
                     PrimaryScrollableTabRow(selectedTabIndex = mySelected) {

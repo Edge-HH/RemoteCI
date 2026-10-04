@@ -40,6 +40,7 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
                 Id = x.Id,
                 Name = x.Name,
                 RoleName = "管理员",
+                RoleKind = (int)AccountRoleKind.Administrator,
                 Permissions = UserPermissions.All,
                 VisitorEnabled = x.VisitorAccessEnabled,
                 GroupNames = x.GroupAssignments.Select(a => a.Group.Name).ToList(),
@@ -60,6 +61,7 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
                     x.Classroom.Avatar,
                     GroupNames = x.Classroom.GroupAssignments.Select(a => a.Group.Name).ToList(),
                     RoleName = y.Name,
+                    RoleKind = y.Kind,
                     RoleDefaults = y.DefaultPermissions,
                 })
             .ToListAsync(ct);
@@ -68,6 +70,7 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
             Id = x.Id,
             Name = x.Name,
             RoleName = x.RoleName,
+            RoleKind = (int)x.RoleKind,
             Permissions = EffectiveForMembership(role, x.RoleDefaults, granted),
             VisitorEnabled = x.VisitorAccessEnabled,
             GroupNames = x.GroupNames,
@@ -79,7 +82,6 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
         if (binding is not null)
         {
             var taught = await teachers.GetTaughtClassesAsync(binding.BoundName, ct);
-            var memberIds = results.Select(x => x.Id).ToHashSet();
             foreach (var taughtClass in taught)
             {
                 var taughtPermissions = EffectiveForMembership(role, binding.RoleDefaults, granted);
@@ -94,6 +96,7 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
                     Id = taughtClass.ClassId,
                     Name = taughtClass.ClassName,
                     RoleName = binding.RoleName,
+                    RoleKind = (int)AccountRoleKind.Teacher,
                     Permissions = taughtPermissions,
                     VisitorEnabled = taughtClass.VisitorEnabled,
                     GroupNames = [],

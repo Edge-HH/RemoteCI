@@ -337,10 +337,14 @@ data class ClassSummary(
     val id: String = "",
     val name: String = "",
     @SerialName("roleName") val roleName: String? = null,
+    @SerialName("roleKind") val roleKind: Int? = null,
     val permissions: Int? = null,
     @SerialName("visitorEnabled") val visitorEnabled: Boolean = false,
     @SerialName("groupName") val groupName: String? = null,
 ) {
+    /** 本班班管理员：优先按角色种类判断；旧版服务端或插件镜像未下发 roleKind 时退回内置角色名。 */
+    val isClassAdministrator: Boolean
+        get() = roleKind?.let { it == Protocol.ROLE_KIND_CLASS_ADMINISTRATOR } ?: (roleName == "班管理员")
     val effectivePermissions: Int
         get() = permissions ?: Protocol.PERMISSION_VIEW_CURRENT
 }
@@ -360,7 +364,9 @@ data class UserProfile(
     val version: Long = 0,
 ) {
     val isAdmin: Boolean get() = role == Protocol.ROLE_ADMIN
-    val isClassAdministrator: Boolean get() = classes?.any { it.roleName == "班管理员" } == true
+    /** 是否可管理指定班级的课表拉取：系统管理员，或该班级的班管理员（与服务端按班级校验一致）。 */
+    fun canPullScheduleFor(classId: String?): Boolean =
+        isAdmin || classes?.firstOrNull { it.id == classId }?.isClassAdministrator == true
     fun has(permission: Int): Boolean = permissions and permission == permission
     fun canInvoke(extension: ExtensionDefinition): Boolean =
         has(Protocol.PERMISSION_RUN_EXTENSIONS) &&

@@ -214,6 +214,44 @@ public sealed class MyScheduleItem
     public List<CourseEntry> Courses { get; set; } = [];
 }
 
+/// <summary>“我的日程”中的一节课：所在班级、课程以及换算成绝对时间的起止时刻。</summary>
+public sealed class MyCourseSlot
+{
+    [JsonPropertyName("date")]
+    public string Date { get; set; } = string.Empty;
+
+    [JsonPropertyName("classId")]
+    public Guid ClassId { get; set; }
+
+    [JsonPropertyName("className")]
+    public string ClassName { get; set; } = string.Empty;
+
+    [JsonPropertyName("course")]
+    public CourseEntry Course { get; set; } = new();
+
+    [JsonPropertyName("startsAt")]
+    public DateTimeOffset StartsAt { get; set; }
+
+    [JsonPropertyName("endsAt")]
+    public DateTimeOffset EndsAt { get; set; }
+}
+
+/// <summary>“下一节课”响应：指定时刻正在上的课与接下来的第一节课；没有时对应字段省略。</summary>
+public sealed class MyNextCourseResponse
+{
+    /// <summary>计算所依据的时刻；请求未指定 at 时为服务端当前时间。</summary>
+    [JsonPropertyName("at")]
+    public DateTimeOffset At { get; set; }
+
+    [JsonPropertyName("current")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MyCourseSlot? Current { get; set; }
+
+    [JsonPropertyName("next")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MyCourseSlot? Next { get; set; }
+}
+
 public sealed class NotificationRequest
 {
     [JsonPropertyName("title")]

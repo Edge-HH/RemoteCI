@@ -54,7 +54,8 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
         Assert.Equal(IdentityCoordinator.TeacherDefaultPermissions, teacher.DefaultPermissions);
         Assert.True(teacher.DefaultPermissions.HasFlag(UserPermissions.SendNotifications));
         Assert.True(teacher.DefaultPermissions.HasFlag(UserPermissions.SendVoiceMessages));
-        Assert.True(teacher.DefaultPermissions.HasFlag(UserPermissions.ChangeDisplayName));
+        Assert.True(teacher.DefaultPermissions.HasFlag(UserPermissions.ApiAccess));
+        Assert.False(teacher.DefaultPermissions.HasFlag(UserPermissions.ChangeDisplayName));
         Assert.False(teacher.DefaultPermissions.HasFlag(UserPermissions.ManageUsers));
     }
 
@@ -83,7 +84,8 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
         var scheduleResponse = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, "/api/me/schedule", teacher.AccessToken));
         scheduleResponse.EnsureSuccessStatusCode();
         var schedule = (await scheduleResponse.Content.ReadFromJsonAsync<MyScheduleResponse>())!;
-        var item = Assert.Single(schedule.Days.Single().Items);
+        // 同一测试类的其他班级也有“王老师”的课，这里只取本班。
+        var item = Assert.Single(schedule.Days.Single().Items, x => x.ClassId == classId);
         Assert.Equal(classId, item.ClassId);
         Assert.Equal("绑定班", item.ClassName);
         var course = Assert.Single(item.Courses);
@@ -126,25 +128,32 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
     }
 
     [Fact]
-    public async Task Teacher_CanUpdateDisplayNameAndBindingFollows()
+    public async Task DisplayNameEndpoint_IsAdminOnlyAndBindingFollowsAdminRename()
     {
         var (classId, _) = await SeedTaughtClassAsync("改名班");
-        await CreateUserAsync("rename.teacher", "Teacher-Password-2026", AccountRole.TeacherId, displayName: "占位名");
+        var teacherId = await CreateUserAsync("rename.teacher", "Teacher-Password-2026", AccountRole.TeacherId, displayName: "占位名");
         var teacher = await _factory.LoginAsync("rename.teacher", "Teacher-Password-2026");
         using var client = _factory.CreateClient();
 
-        Assert.Equal(HttpStatusCode.NoContent, (await client.SendAsync(TestWebApplicationFactory.Bearer(
+        // 显示名决定老师能看到哪些班级，老师不能自助修改。
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(TestWebApplicationFactory.Bearer(
             HttpMethod.Post, "/api/me/display-name", teacher.AccessToken,
             new ChangeDisplayNameRequest { DisplayName = "王老师" }))).StatusCode);
+        Assert.Empty((await GetMyScheduleAsync(client, teacher.AccessToken)).Days);
 
-        var scheduleResponse = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, "/api/me/schedule", teacher.AccessToken));
-        scheduleResponse.EnsureSuccessStatusCode();
-        var schedule = (await scheduleResponse.Content.ReadFromJsonAsync<MyScheduleResponse>())!;
+        // 管理员在人员管理中改名后，绑定随之生效。
+        var admin = await _factory.LoginAsync();
+        var renamed = await client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Put, $"/api/users/{teacherId}", admin.AccessToken,
+            new UpdateUserRequest { DisplayName = "王老师", Role = UserRole.User, RoleId = AccountRole.TeacherId, Enabled = true }));
+        renamed.EnsureSuccessStatusCode();
+        teacher = await _factory.LoginAsync("rename.teacher", "Teacher-Password-2026");
+        var schedule = await GetMyScheduleAsync(client, teacher.AccessToken);
         Assert.Contains(schedule.Days.SelectMany(x => x.Items), x => x.ClassId == classId);
     }
 
     [Fact]
-    public async Task DisplayNameEndpoint_RequiresChangeDisplayNamePermission()
+    public async Task DisplayNameEndpoint_RejectsNonAdminAccounts()
     {
         await CreateUserAsync("plain.rename", "Plain-User-Password-2026");
         var user = await _factory.LoginAsync("plain.rename", "Plain-User-Password-2026");
@@ -153,6 +162,79 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
             HttpMethod.Post, "/api/me/display-name", user.AccessToken,
             new ChangeDisplayNameRequest { DisplayName = "新名字" }));
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    // ---------- 我的日程 API：仅老师角色、支持 API Key、下一节课 ----------
+
+    [Fact]
+    public async Task MySchedule_IsEmptyForNonTeacherEvenWithSameName()
+    {
+        await SeedTaughtClassAsync("日程同名班");
+        await CreateUserAsync("same.name.schedule", "Student-Password-2026", AccountRole.StudentId, displayName: "王老师");
+        var student = await _factory.LoginAsync("same.name.schedule", "Student-Password-2026");
+        using var client = _factory.CreateClient();
+
+        Assert.Empty((await GetMyScheduleAsync(client, student.AccessToken)).Days);
+        var next = await GetNextCourseAsync(client, student.AccessToken, "2026-09-29T07:00:00%2B08:00");
+        Assert.Null(next.Current);
+        Assert.Null(next.Next);
+    }
+
+    [Fact]
+    public async Task NextCourse_ReturnsCurrentAndUpcomingCourseForTeacherApiKey()
+    {
+        // 使用独立的教师名：同一测试类里其他班级的“王老师”课程不应混入这位老师的日程。
+        var (classId, subjectId) = await SeedTaughtClassAsync("下节课班", "赵老师");
+        var teacherId = await CreateUserAsync("next.teacher", "Teacher-Password-2026", AccountRole.TeacherId, displayName: "赵老师");
+        string apiKey;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            // 课表时间是教室电脑本地时间；快照携带 +08:00 偏移，服务端据此换算绝对时间。
+            scope.ServiceProvider.GetRequiredService<IStateStore>()
+                .SaveSnapshot(classId, new ClassStateSnapshot { TimeZoneOffsetMinutes = 480 });
+            // 老师角色默认拥有 API 访问，可用 API Key 让脚本或 Agent 读取自己的日程。
+            apiKey = (await scope.ServiceProvider.GetRequiredService<IdentityCoordinator>()
+                .CreateApiKeyAsync(teacherId, "日程助手")).Key;
+        }
+        using var client = _factory.CreateClient();
+
+        var before = await GetNextCourseAsync(client, apiKey, "2026-09-29T07:30:00%2B08:00");
+        Assert.Null(before.Current);
+        Assert.NotNull(before.Next);
+        Assert.Equal(classId, before.Next!.ClassId);
+        Assert.Equal("下节课班", before.Next.ClassName);
+        Assert.Equal(subjectId, before.Next.Course.SubjectId);
+        Assert.Equal("2026-09-29", before.Next.Date);
+        Assert.Equal(new DateTimeOffset(2026, 9, 29, 8, 0, 0, TimeSpan.FromHours(8)), before.Next.StartsAt);
+        Assert.Equal(new DateTimeOffset(2026, 9, 29, 8, 45, 0, TimeSpan.FromHours(8)), before.Next.EndsAt);
+
+        var during = await GetNextCourseAsync(client, apiKey, "2026-09-29T08:10:00%2B08:00");
+        Assert.NotNull(during.Current);
+        Assert.Equal("数学", during.Current!.Course.Subject);
+
+        var after = await GetNextCourseAsync(client, apiKey, "2026-09-29T09:00:00%2B08:00");
+        Assert.Null(after.Current);
+        Assert.Null(after.Next);
+
+        // 班级列表下发角色种类，客户端不必比较角色名。
+        var classesResponse = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, "/api/me/classes", apiKey));
+        classesResponse.EnsureSuccessStatusCode();
+        var classes = (await classesResponse.Content.ReadFromJsonAsync<List<ClassSummary>>())!;
+        Assert.Equal((int)AccountRoleKind.Teacher, classes.Single(x => x.Id == classId).RoleKind);
+    }
+
+    private static async Task<MyScheduleResponse> GetMyScheduleAsync(HttpClient client, string token)
+    {
+        var response = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, "/api/me/schedule", token));
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<MyScheduleResponse>())!;
+    }
+
+    private static async Task<MyNextCourseResponse> GetNextCourseAsync(HttpClient client, string token, string at)
+    {
+        var response = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, $"/api/me/schedule/next?at={at}", token));
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<MyNextCourseResponse>())!;
     }
 
     // ---------- 授权镜像：任教老师即使不是班级成员也进入插件侧鉴权数据 ----------
@@ -176,8 +258,8 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
 
     // ---------- 辅助 ----------
 
-    /// <summary>创建一个新班级并向其 StateStore 缓存一份含“王老师”课程的课表。</summary>
-    private async Task<(Guid ClassId, Guid SubjectId)> SeedTaughtClassAsync(string className)
+    /// <summary>创建一个新班级并向其 StateStore 缓存一份含指定教师（默认“王老师”）课程的课表。</summary>
+    private async Task<(Guid ClassId, Guid SubjectId)> SeedTaughtClassAsync(string className, string teacherName = "王老师")
     {
         var admin = await _factory.LoginAsync();
         using var client = _factory.CreateClient();
@@ -207,7 +289,7 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
                             Label = "第一节",
                             SubjectId = subjectId,
                             Subject = "数学",
-                            Teacher = "王老师",
+                            Teacher = teacherName,
                             StartTime = "08:00",
                             EndTime = "08:45",
                             Enabled = true,
@@ -225,7 +307,7 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
                     ],
                 },
             ],
-            Subjects = [new SubjectEntry { Id = subjectId, Name = "数学", Teacher = "王老师" }],
+            Subjects = [new SubjectEntry { Id = subjectId, Name = "数学", Teacher = teacherName }],
         });
         return (classId, subjectId);
     }

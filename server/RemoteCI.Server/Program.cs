@@ -257,7 +257,7 @@ app.MapPost("/api/me/password", async (
     catch (IdentityOperationException ex) { return OperationError(ex); }
 });
 
-// 老师填写自己的显示名（姓名）以绑定课表科目教师名；与 Web 端账号页同一套校验与版本推进。
+// 系统管理员修改自己的显示名；显示名是老师绑定课表科目教师名的依据，其他账号不能自助修改。
 app.MapPost("/api/me/display-name", async (
     HttpContext ctx, ChangeDisplayNameRequest request, IdentityCoordinator identities,
     AuthorizationSyncService authorizationSync, CancellationToken ct) =>
@@ -282,7 +282,21 @@ app.MapGet("/api/me/schedule", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
+    // 只有内置“老师”角色按显示名绑定课表；其他账号即使同名也返回空日程，与 WebUI“我的日程”一致。
+    if (!IsTeacher(principal)) return Results.Ok(new MyScheduleResponse());
     return Results.Ok(await teachers.BuildMyScheduleAsync(principal.User.DisplayName, ct));
+});
+
+// “我的日程”的下一节课：返回老师正在上的课和接下来要上的课（含班级与起止时间），
+// 供脚本或 Agent 直接回答“下节课去哪个班上什么”。at 省略时取服务端当前时间。
+app.MapGet("/api/me/schedule/next", async (
+    HttpContext ctx, DateTimeOffset? at, IdentityCoordinator identities, TeacherBindingService teachers, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    var now = at ?? DateTimeOffset.UtcNow;
+    if (!IsTeacher(principal)) return Results.Ok(new MyNextCourseResponse { At = now });
+    return Results.Ok(await teachers.BuildMyNextCourseAsync(principal.User.DisplayName, now, ct));
 });
 
 app.MapGet("/api/me/sessions", async (HttpContext ctx, IdentityCoordinator identities, CancellationToken ct) =>
@@ -1020,6 +1034,10 @@ static async Task<AuthPrincipal?> AuthorizeAsync(HttpContext ctx, IdentityCoordi
 
 static bool HasPermission(AuthPrincipal? principal, UserPermissions permission) =>
     principal?.User?.Permissions.HasFlag(permission) == true;
+
+/// <summary>主体的全局角色是否为内置“老师”；按角色种类判断，不受角色改名影响。</summary>
+static bool IsTeacher(AuthPrincipal principal) =>
+    principal.User?.RoleKind == (int)AccountRoleKind.Teacher;
 
 /// <summary>
 /// 解析请求的目标班级：显式 classId 必须可访问（否则 null→403），缺省落到默认班级或第一个成员班级。

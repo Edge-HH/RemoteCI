@@ -23,7 +23,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | 1024 | `ChangeDisplayName`（修改用户名） |
 | 2048 | `ApiAccess`（REST API Key；插件协议仅透传该位） |
 
-管理员的有效权限固定为 4095。普通用户固定包含值 1，其余权限来自服务端授权。权限设置界面将值 2 显示为“概览”；七日课表查看只要求账号已登录，课表拉取和自动拉取仅允许系统管理员或当前班级班管理员，值 16 保护换课。`TeacherComing` 单独保护“老师来了”，`SendNotifications` 只保护自定义通知与清除提醒，`SendVoiceMessages` 独立保护语音消息，`RunExtensions` 是所有插件扩展的独立权限，`MainMenuControl` 保护主界面显隐，`PowerControl` 保护音量和 Windows 电源操作，`ChangeDisplayName` 仅保留为兼容旧权限数据，实际只有系统管理员可以修改用户可见用户名（DisplayName，登录 ID 不变）；用户名会影响老师获取的日程信息。`ApiAccess` 允许账号创建 API Key 并调用 REST API；管理员与班管理员默认拥有 API 访问。
+管理员的有效权限固定为 4095。普通用户固定包含值 1，其余权限来自服务端授权。权限设置界面将值 2 显示为“概览”；七日课表查看只要求账号已登录，课表拉取和自动拉取仅允许系统管理员或当前班级班管理员，值 16 保护换课。`TeacherComing` 单独保护“老师来了”，`SendNotifications` 只保护自定义通知与清除提醒，`SendVoiceMessages` 独立保护语音消息，`RunExtensions` 是所有插件扩展的独立权限，`MainMenuControl` 保护主界面显隐，`PowerControl` 保护音量和 Windows 电源操作，`ChangeDisplayName` 仅保留为兼容旧权限数据，实际只有系统管理员可以修改用户可见用户名（DisplayName，登录 ID 不变）；用户名会影响老师获取的日程信息。`ApiAccess` 允许账号创建 API Key 并调用 REST API；管理员、班管理员与老师默认拥有 API 访问。
 
 账号密码只出现在第一次 `POST /api/auth/login` 的请求内。生产环境必须使用 HTTPS；Android 手机端为兼容尚未配置 TLS 的现有部署，允许用户在持续显示风险提示的情况下明确连接 HTTP 云服务器。响应包含 1 小时 `accessToken`、30 天 `deviceSessionId/deviceSecret` 和用户有效权限。`POST /api/auth/refresh` 会同时轮换访问令牌和设备密钥；旧值立即失效。
 
@@ -170,11 +170,12 @@ WebUI 批量控制页把功能参数和目标设备分成两步：先填写参�
 
 老师的显示名（DisplayName）即“姓名”：显示名与班级课表中的科目教师名（ClassIsland 档案 `Subject.TeacherName`，随 `schedule_sync` 下发）一致时，该老师账号绑定到对应课程。匹配规则为去首尾空白后完全相等，或教师字段按 `、 , ， / ; ； |` 分隔符拆分后任一姓名完全相等；因此多教师科目（如 `张三/李四`）可填写其中之一。绑定完全动态计算，不落库：班级插件尚未推送课表（如服务端刚重启）时绑定暂不可见，收到课表后自动生效，且该班匹配教师集合变化时会触发 `account_sync` 重新推送授权镜像。
 
-老师在任教班级的默认权限为其全局老师角色默认权限：`ViewCurrentCourse | SendNotifications | SendVoiceMessages`。用户名由系统管理员维护，因为它是老师获取日程信息时匹配课表科目教师名的依据。非任教班级的访问与普通用户一致（默认班级的自动成员关系沿用既有语义）。绑定按姓名匹配，同名教师会绑定到同名课程，建议使用完整姓名；管理员可在 WebUI 课表页“科目教师”区显式分配（见下）以统一写法。
+老师在任教班级的默认权限为其全局老师角色默认权限：`ViewCurrentCourse | SendNotifications | SendVoiceMessages | ApiAccess`，因此老师默认可以创建 API Key 读取自己的日程。`ClassSummary` 新增可选 `roleKind`（该用户在本班的角色种类），客户端据此判断是否为本班班管理员，旧服务端不下发时退回角色名。用户名由系统管理员维护，因为它是老师获取日程信息时匹配课表科目教师名的依据。非任教班级的访问与普通用户一致（默认班级的自动成员关系沿用既有语义）。绑定按姓名匹配，同名教师会绑定到同名课程，建议使用完整姓名；管理员可在 WebUI 课表页“科目教师”区显式分配（见下）以统一写法。
 
 `schedule_sync` 载荷中的 `CourseEntry` 与 `SubjectEntry` 新增可选 `teacher` 字段（教师名，未设置时省略），旧版服务端与插件不下发、所有端可安全忽略。
 
 - `GET /api/me/schedule`：返回当前老师账号按姓名绑定后跨班级聚合的“我的日程”`MyScheduleResponse { fromDate, generatedAt, days[] }`，每天 `items[]` 按班级分组（`classId`、`className`、`courses[]`，课程按节次排序）。非老师账号或无绑定时 `days` 为空。
+- `GET /api/me/schedule/next`：返回 `MyNextCourseResponse { at, current?, next? }`，分别是指定时刻正在上的课与接下来的第一节课；每项含 `date`、`classId`、`className`、`course`、`startsAt`、`endsAt`。可选查询参数 `at`（ISO 8601）指定计算时刻，省略时取服务端当前时间。课程钟点是教室电脑本地时间，服务端按该班最近状态快照的 `timeZoneOffsetMinutes` 换算为绝对时间，尚无快照时退回服务端本地时区。非老师账号、无绑定或七日内没有后续课程时对应字段省略。两个日程端点都接受 API Key。
 - `POST /api/me/display-name`：系统管理员修改显示名（即老师姓名），载荷 `{displayName}`（1-40 字），成功返回 204 并触发授权镜像同步；普通账号即使保留旧的 `ChangeDisplayName` 权限也会被拒绝。
 - 命令值 21 为 `SetSubjectTeacher`，要求 `ManageSchedule` 权限和能力 `schedule.subject-teacher`。载荷 `subjectTeacher` 包含 `subjectId` 与 `teacherName`（≤100 字，空表示清除）；插件在 UI 线程写入档案 `Subject.TeacherName` 并保存，保存失败回滚并返回 `SAVE_FAILED`，成功后立即重推课表。WebUI 课表页“科目教师”区由此为班级科目分配授课教师。
 
@@ -187,7 +188,7 @@ WebUI 批量控制页把功能参数和目标设备分成两步：先填写参�
 - `POST /api/plugin/pair`
 - `POST /api/auth/login`、`/api/auth/refresh`、`/api/auth/logout`
 - `GET /api/me`、`POST /api/me/password`、`POST /api/me/display-name`
-- `GET /api/me/schedule`
+- `GET /api/me/schedule`、`GET /api/me/schedule/next`
 - `GET/DELETE /api/me/sessions`
 - `GET /api/state`、`GET /api/schedule`
 - `POST /api/commands`

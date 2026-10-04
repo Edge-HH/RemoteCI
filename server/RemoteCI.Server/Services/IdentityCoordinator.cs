@@ -51,10 +51,13 @@ public sealed partial class IdentityCoordinator(
         UserPermissions.SendNotifications | UserPermissions.SendVoiceMessages | UserPermissions.TeacherComing |
         UserPermissions.RunExtensions | UserPermissions.ApiAccess;
 
-    /// <summary>内置“老师”角色的默认权限：查看当前课程、发送通知与语音消息。显示名由系统管理员维护。</summary>
+    /// <summary>
+    /// 内置“老师”角色的默认权限：查看当前课程、发送通知与语音消息，以及用 API Key 读取自己的日程。
+    /// 显示名由系统管理员维护。
+    /// </summary>
     public const UserPermissions TeacherDefaultPermissions =
         UserPermissions.ViewCurrentCourse | UserPermissions.SendNotifications |
-        UserPermissions.SendVoiceMessages;
+        UserPermissions.SendVoiceMessages | UserPermissions.ApiAccess;
 
     /// <summary>确保默认班级存在；迁移或首次启动都依赖它承接升级前的全部数据。</summary>
     private async Task SeedDefaultClassroomAsync(CancellationToken ct)

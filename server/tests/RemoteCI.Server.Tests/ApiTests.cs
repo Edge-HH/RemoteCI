@@ -809,7 +809,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
     }
 
     [Fact]
-    public async Task RazorWebUi_ChangeDisplayNameUpdatesWhenPermissionGranted()
+    public async Task RazorWebUi_ChangeDisplayNameIsAdminOnlyEvenWhenLegacyPermissionRequested()
     {
         var admin = await _factory.LoginAsync();
         var create = await _client.SendAsync(TestWebApplicationFactory.Bearer(
@@ -825,70 +825,74 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             }));
         create.EnsureSuccessStatusCode();
         var created = (await create.Content.ReadFromJsonAsync<UserListItem>())!;
-        Assert.Equal(UserPermissions.ChangeDisplayName, created.GrantedPermissions);
+        // “修改用户名”权限位仅为兼容旧数据保留：新授予会被丢弃，账号也不能自助改名。
+        Assert.Equal(UserPermissions.None, created.GrantedPermissions);
 
         using var browser = CreateBrowserClient();
         await LoginWebUiAsync(browser, "name.granted", "Name-Granted-Password-2026");
         var accountHtml = await browser.GetStringAsync("/Account");
-        Assert.Contains("修改用户名", accountHtml);
-        Assert.Contains("DisplayName.DisplayName", accountHtml);
+        Assert.DoesNotContain("DisplayName.DisplayName", accountHtml);
 
-        var updated = await PostRazorFormAsync(browser, "/Account?handler=DisplayName", accountHtml, new Dictionary<string, string>
+        var denied = await PostRazorFormAsync(browser, "/Account?handler=DisplayName", accountHtml, new Dictionary<string, string>
         {
             ["DisplayName.DisplayName"] = "新用户名",
         });
-        Assert.Equal(HttpStatusCode.Redirect, updated.StatusCode);
+        Assert.Equal(HttpStatusCode.Redirect, denied.StatusCode);
 
         using var scope = _factory.Services.CreateScope();
         var profile = await scope.ServiceProvider.GetRequiredService<IdentityCoordinator>().GetProfileAsync(created.Id);
-        Assert.Equal("新用户名", profile!.DisplayName);
+        Assert.Equal("旧用户名", profile!.DisplayName);
     }
 
     [Fact]
-    public async Task RazorWebUi_ChangeDisplayNameRejectsBlankValue()
+    public async Task RazorWebUi_AdminChangesOwnDisplayNameAndBlankValueIsRejected()
     {
         var admin = await _factory.LoginAsync();
-        var create = await _client.SendAsync(TestWebApplicationFactory.Bearer(
-            HttpMethod.Post,
-            "/api/users",
-            admin.AccessToken,
-            new CreateUserRequest
-            {
-                Username = "name.blank",
-                DisplayName = "原名",
-                Password = "Name-Blank-Password-2026",
-                GrantedPermissions = UserPermissions.ChangeDisplayName,
-            }));
-        create.EnsureSuccessStatusCode();
-        var created = (await create.Content.ReadFromJsonAsync<UserListItem>())!;
-
+        var original = admin.User.DisplayName;
         using var browser = CreateBrowserClient();
-        await LoginWebUiAsync(browser, "name.blank", "Name-Blank-Password-2026");
+        await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
         var accountHtml = await browser.GetStringAsync("/Account");
-        var response = await PostRazorFormAsync(browser, "/Account?handler=DisplayName", accountHtml, new Dictionary<string, string>
+        Assert.Contains("修改用户名", accountHtml);
+        Assert.Contains("DisplayName.DisplayName", accountHtml);
+
+        var blank = await PostRazorFormAsync(browser, "/Account?handler=DisplayName", accountHtml, new Dictionary<string, string>
         {
             ["DisplayName.DisplayName"] = "   ",
         });
+        Assert.Equal(HttpStatusCode.OK, blank.StatusCode);
+        Assert.Contains("用户名需为 1-40 个字符", WebUtility.HtmlDecode(await blank.Content.ReadAsStringAsync()));
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var responseHtml = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
-        Assert.Contains("用户名需为 1-40 个字符", responseHtml);
-
-        using var scope = _factory.Services.CreateScope();
-        var profile = await scope.ServiceProvider.GetRequiredService<IdentityCoordinator>().GetProfileAsync(created.Id);
-        Assert.Equal("原名", profile!.DisplayName);
+        try
+        {
+            var updated = await PostRazorFormAsync(browser, "/Account?handler=DisplayName", accountHtml, new Dictionary<string, string>
+            {
+                ["DisplayName.DisplayName"] = "新管理员名",
+            });
+            Assert.Equal(HttpStatusCode.Redirect, updated.StatusCode);
+            using var scope = _factory.Services.CreateScope();
+            var profile = await scope.ServiceProvider.GetRequiredService<IdentityCoordinator>().GetProfileAsync(admin.User.Id);
+            Assert.Equal("新管理员名", profile!.DisplayName);
+        }
+        finally
+        {
+            // 管理员账号由整个测试类共享，恢复原名避免影响其他用例。
+            var restoreHtml = await browser.GetStringAsync("/Account");
+            await PostRazorFormAsync(browser, "/Account?handler=DisplayName", restoreHtml, new Dictionary<string, string>
+            {
+                ["DisplayName.DisplayName"] = original,
+            });
+        }
     }
 
     [Fact]
-    public async Task ChangeDisplayNamePermissionAppearsInUserAndRoleAssignmentForms()
+    public async Task ChangeDisplayNamePermissionIsNotAssignableToAccounts()
     {
         using var browser = CreateBrowserClient();
         await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
         var html = await browser.GetStringAsync("/Users");
-        Assert.Contains("Create.ChangeDisplayName", html);
-        Assert.Contains("Edit.ChangeDisplayName", html);
-        Assert.Contains("RoleEdit.ChangeDisplayName", html);
-        Assert.Equal(UserPermissions.ChangeDisplayName, new RemoteCI.Server.Pages.UsersModel.UserInput { ChangeDisplayName = true }.Grants);
+        Assert.DoesNotContain("Create.ChangeDisplayName", html);
+        Assert.DoesNotContain("\"Edit.ChangeDisplayName\"", html);
+        Assert.Equal(UserPermissions.None, new RemoteCI.Server.Pages.UsersModel.UserInput { ChangeDisplayName = true }.Grants);
     }
 
     [Fact]

@@ -373,10 +373,14 @@ data class ClassSummary(
     val id: String = "",
     val name: String = "",
     @SerialName("roleName") val roleName: String? = null,
+    @SerialName("roleKind") val roleKind: Int? = null,
     val permissions: Int? = null,
     @SerialName("visitorEnabled") val visitorEnabled: Boolean = false,
     @SerialName("groupName") val groupName: String? = null,
 ) {
+    /** 本班班管理员：优先按角色种类判断；旧版服务端或插件镜像未下发 roleKind 时退回内置角色名。 */
+    val isClassAdministrator: Boolean
+        get() = roleKind?.let { it == Protocol.ROLE_KIND_CLASS_ADMINISTRATOR } ?: (roleName == "班管理员")
     val effectivePermissions: Int
         get() = permissions ?: Protocol.PERMISSION_VIEW_CURRENT
 }
@@ -401,8 +405,9 @@ data class UserProfile(
 
     /** 内置“老师”角色（按显示名绑定课表教师名），roleKind 免受角色改名影响。 */
     val isTeacher: Boolean get() = roleKind == Protocol.ROLE_KIND_TEACHER
-    /** 当前账号至少有一个班级的班管理员身份，可执行课表拉取。 */
-    val isClassAdministrator: Boolean get() = classes?.any { it.roleName == "班管理员" } == true
+    /** 是否可管理指定班级的课表拉取：系统管理员，或该班级的班管理员（与服务端按班级校验一致）。 */
+    fun canPullScheduleFor(classId: String?): Boolean =
+        isAdmin || classes?.firstOrNull { it.id == classId }?.isClassAdministrator == true
     val roleLabel: String
         get() = when {
             isAdmin -> "管理员"
