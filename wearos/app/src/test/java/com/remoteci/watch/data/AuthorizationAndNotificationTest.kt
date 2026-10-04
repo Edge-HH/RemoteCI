@@ -1,10 +1,8 @@
 package com.remoteci.watch.data
 
-import java.io.IOException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlinx.serialization.json.Json
@@ -215,28 +213,8 @@ class AuthorizationAndNotificationTest {
     }
 
     @Test
-    fun `cleartext is permitted only for rfc1918 ipv4 literals`() {
-        assertTrue(isRfc1918Host("192.168.1.100"))
-        assertTrue(isRfc1918Host("10.0.2.2"))
-        assertTrue(isRfc1918Host("172.16.0.1"))
-        assertTrue(isRfc1918Host("172.31.255.254"))
-        assertFalse(isRfc1918Host("172.32.0.1"))
-        assertFalse(isRfc1918Host("8.8.8.8"))
-        assertFalse(isRfc1918Host("ci.example.com"))
-        assertFalse(isRfc1918Host("192.168.1"))
-        assertFalse(isRfc1918Host("192.168.1.256"))
-        assertFalse(isRfc1918Host("192.168.1.+1"))
-    }
-
-    @Test
-    fun `cleartext urls are rejected outside rfc1918`() {
-        // 私网、环回明文与任何 TLS 地址放行。
-        requireCleartextPrivateUrl("http://192.168.1.5:8080/api")
-        requireCleartextPrivateUrl("ws://10.0.2.2:9123/ws")
-        requireCleartextPrivateUrl("ws://localhost:9123/ws")
-        requireCleartextPrivateUrl("https://ci.example.com")
-        // 公网主机的明文连接一律拒绝。
-        assertFailsWith<IOException> { requireCleartextPrivateUrl("http://ci.example.com") }
-        assertFailsWith<IOException> { requireCleartextPrivateUrl("ws://8.8.8.8:9123/ws") }
+    fun `cleartext cloud urls are allowed and warned by the connection flow`() {
+        assertTrue(cloudWebSocketUrl("http://110.42.96.65", "token").startsWith("ws://"))
+        assertTrue(cloudWebSocketUrl("https://ci.example.com", "token").startsWith("wss://"))
     }
 }

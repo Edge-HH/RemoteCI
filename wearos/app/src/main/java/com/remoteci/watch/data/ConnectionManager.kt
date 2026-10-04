@@ -498,8 +498,8 @@ object ConnectionManager {
         session: PersistedDeviceSession,
         attempt: Int,
     ): Boolean {
-        // 明文 ws:// 直连只允许私网/环回主机，公网候选一律跳过。
-        for (host in lanEndpointHosts(settings).filter(::isCleartextSafeHost)) {
+        // 局域网候选统一尝试；如果云端地址使用 HTTP，界面会持续提示不安全。
+        for (host in lanEndpointHosts(settings)) {
             if (!connectWebSocket(
                     url = lanWebSocketUrl(host, settings.lanPort),
                     successState = State.LanConnected,
@@ -520,7 +520,6 @@ object ConnectionManager {
     }
 
     private suspend fun connectCloud(settings: WatchSettings, auth: AuthResponse, attempt: Int) {
-        requireCleartextPrivateUrl(settings.cloudServerUrl)
         accessToken = auth.accessToken
         // 服务端令牌是标准 Base64，含 +/；不编码时 + 会被服务端解码成空格导致 401。
         if (!connectWebSocket(
@@ -556,7 +555,6 @@ object ConnectionManager {
 
     private suspend fun postAuth(settings: WatchSettings, path: String, bodyJson: String): AuthResponse =
         withContext(Dispatchers.IO) {
-            requireCleartextPrivateUrl(settings.cloudServerUrl)
             val request = Request.Builder()
                 .url("${settings.cloudServerUrl.trimEnd('/')}$path")
                 .post(bodyJson.toRequestBody("application/json".toMediaType()))
@@ -927,50 +925,6 @@ internal fun bootstrapUrlChanged(previous: String, current: String): Boolean {
     if (old.startsWith("http://10.0.2.2")) return false
     // 首次引导（无历史记录）同样要求用户显式确认，防止伪造的 UDP 发现诱导登录。
     return old.isBlank() || !old.equals(fresh, ignoreCase = true)
-}
-
-/**
- * 明文连接允许的目标主机：RFC1918 私网 IPv4 字面量，或本机环回
- * （localhost/127.x，无窃听面，模拟器与本地调试必需）；
- * 其余主机与所有域名一律拒绝，避免 DNS 解析把明文流量带出私网。
- */
-internal fun isCleartextSafeHost(hostname: String): Boolean =
-    hostname.equals("localhost", ignoreCase = true) ||
-        isRfc1918Host(hostname) ||
-        isLoopbackHost(hostname)
-
-/** 仅当 hostname 是 RFC1918 私有网段（10/8、172.16/12、192.168/16）的 IPv4 字面量时返回 true。 */
-internal fun isRfc1918Host(hostname: String): Boolean {
-    val octets = hostname.split('.')
-    if (octets.size != 4) return false
-    val values = IntArray(4)
-    for (i in 0..3) {
-        val octet = octets[i]
-        if (octet.isEmpty() || !octet.all(Char::isDigit)) return false
-        val value = octet.toIntOrNull() ?: return false
-        if (value > 255) return false
-        values[i] = value
-    }
-    return values[0] == 10 ||
-        (values[0] == 172 && values[1] in 16..31) ||
-        (values[0] == 192 && values[1] == 168)
-}
-
-/** 环回地址段 127.0.0.0/8 的 IPv4 字面量。 */
-internal fun isLoopbackHost(hostname: String): Boolean {
-    val octets = hostname.split('.')
-    if (octets.size != 4 || octets[0] != "127") return false
-    return octets.drop(1).all { it.isNotEmpty() && it.all(Char::isDigit) && (it.toIntOrNull() ?: -1) in 0..255 }
-}
-
-/**
- * 明文（http/ws）连接只允许指向私网/环回主机，其余立即拒绝；
- * 与 networkSecurityConfig 配合，确保凭据类明文流量永远不出私网。
- */
-internal fun requireCleartextPrivateUrl(url: String) {
-    if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("ws://", ignoreCase = true)) return
-    val host = url.substringAfter("://").substringBefore('/').substringBefore(':').substringBefore('?')
-    if (!isCleartextSafeHost(host)) throw IOException("明文连接拒绝：$host 不是 RFC1918 私网地址")
 }
 
 /** 密码只能由云端验证，因此密码登录始终允许一次云端引导；开发者开关只控制后续连接回退。 */
