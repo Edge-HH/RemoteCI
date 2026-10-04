@@ -57,7 +57,8 @@ object ConnectionManager {
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+    // WebSocket 信封必须写出默认的 protocolVersion，否则服务端会把省略字段识别为协议缺失。
+    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
     private val okHttp = OkHttpClient.Builder()
         .connectTimeout(6, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)

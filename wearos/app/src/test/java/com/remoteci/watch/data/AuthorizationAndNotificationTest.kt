@@ -6,6 +6,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
 import kotlin.test.assertTrue
 
 class AuthorizationAndNotificationTest {
@@ -216,5 +217,12 @@ class AuthorizationAndNotificationTest {
     fun `cleartext cloud urls are allowed and warned by the connection flow`() {
         assertTrue(cloudWebSocketUrl("http://110.42.96.65", "token").startsWith("ws://"))
         assertTrue(cloudWebSocketUrl("https://ci.example.com", "token").startsWith("wss://"))
+    }
+
+    @Test
+    fun `websocket envelopes always include protocol version`() {
+        val json = Json { encodeDefaults = true }
+        val encoded = json.encodeToString(Envelope.serializer(), Envelope(type = Protocol.TYPE_PEER_CAPABILITIES))
+        assertTrue(encoded.contains("\"protocolVersion\":3"))
     }
 }
