@@ -5,6 +5,7 @@
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 
 > 把 ClassIsland 的课表、通知和受控操作，安全地延伸到 Web、手机和 Wear OS。
+
 > [!WARNING]
 > 当前作者将精力主要用于制作WebUI的集控系统上，对于WearOS端和Android端可能出现功能更新不及时的问题。如出现问题欢迎来提Issue👏
 
