@@ -18,6 +18,7 @@ public sealed partial class IdentityCoordinator(
     UserManager<AppUser> users,
     ExtensionPolicyService extensionPolicies,
     ClassAccessService classAccess,
+    TeacherBindingService teacherBinding,
     IOptions<ServerOptions> options,
     ILogger<IdentityCoordinator> logger)
 {
@@ -49,6 +50,14 @@ public sealed partial class IdentityCoordinator(
         UserPermissions.ViewCurrentCourse | UserPermissions.AccessWebUi | UserPermissions.ManageSchedule |
         UserPermissions.SendNotifications | UserPermissions.SendVoiceMessages | UserPermissions.TeacherComing |
         UserPermissions.RunExtensions | UserPermissions.ApiAccess;
+
+    /// <summary>
+    /// 内置“老师”角色的默认权限：查看当前课程、发送通知与语音消息，以及用 API Key 读取自己的日程。
+    /// 显示名由系统管理员维护。
+    /// </summary>
+    public const UserPermissions TeacherDefaultPermissions =
+        UserPermissions.ViewCurrentCourse | UserPermissions.SendNotifications |
+        UserPermissions.SendVoiceMessages | UserPermissions.ApiAccess;
 
     /// <summary>确保默认班级存在；迁移或首次启动都依赖它承接升级前的全部数据。</summary>
     private async Task SeedDefaultClassroomAsync(CancellationToken ct)
@@ -84,13 +93,19 @@ public sealed partial class IdentityCoordinator(
             db.AccountRoles.AddRange(
                 new AccountRole { Id = AccountRole.StudentId, Name = "Student", NormalizedName = "STUDENT", Kind = AccountRoleKind.Student, DefaultPermissions = UserPermissions.None, CreatedAt = now, UpdatedAt = now },
                 new AccountRole { Id = AccountRole.AdministratorId, Name = "Administrator", NormalizedName = "ADMINISTRATOR", Kind = AccountRoleKind.Administrator, DefaultPermissions = UserPermissions.All, CreatedAt = now, UpdatedAt = now },
-                new AccountRole { Id = AccountRole.ClassAdministratorId, Name = "ClassAdministrator", NormalizedName = "CLASSADMINISTRATOR", Kind = AccountRoleKind.ClassAdministrator, DefaultPermissions = ClassAdministratorDefaultPermissions, CreatedAt = now, UpdatedAt = now });
+                new AccountRole { Id = AccountRole.ClassAdministratorId, Name = "ClassAdministrator", NormalizedName = "CLASSADMINISTRATOR", Kind = AccountRoleKind.ClassAdministrator, DefaultPermissions = ClassAdministratorDefaultPermissions, CreatedAt = now, UpdatedAt = now },
+                new AccountRole { Id = AccountRole.TeacherId, Name = "Teacher", NormalizedName = "TEACHER", Kind = AccountRoleKind.Teacher, DefaultPermissions = TeacherDefaultPermissions, CreatedAt = now, UpdatedAt = now });
         }
         // 历史迁移 AddRolesAndBackups 会在建库时直接插入两个内置角色，导致上面的 AddRange 被跳过；
         // 班管理员角色是新增的，必须独立幂等种子才能同时覆盖全新与已升级的数据库。
         await db.Database.ExecuteSqlRawAsync($"""
             INSERT OR IGNORE INTO AccountRoles (Id, Name, NormalizedName, Kind, DefaultPermissions, CreatedAt, UpdatedAt)
             VALUES ('{AccountRole.ClassAdministratorId}', 'ClassAdministrator', 'CLASSADMINISTRATOR', 4, {(int)ClassAdministratorDefaultPermissions}, '{now:O}', '{now:O}');
+            """, ct);
+        // 老师角色与班管理员同理：独立幂等种子，同时覆盖全新与已升级的数据库。
+        await db.Database.ExecuteSqlRawAsync($"""
+            INSERT OR IGNORE INTO AccountRoles (Id, Name, NormalizedName, Kind, DefaultPermissions, CreatedAt, UpdatedAt)
+            VALUES ('{AccountRole.TeacherId}', 'Teacher', 'TEACHER', 5, {(int)TeacherDefaultPermissions}, '{now:O}', '{now:O}');
             """, ct);
         if (!await db.BackupConfigurations.AnyAsync(ct)) db.BackupConfigurations.Add(new BackupConfiguration());
         await db.SaveChangesAsync(ct);
@@ -105,6 +120,10 @@ public sealed partial class IdentityCoordinator(
             .SetProperty(x => x.Name, "班管理员")
             .SetProperty(x => x.NormalizedName, "班管理员")
             .SetProperty(x => x.Kind, AccountRoleKind.ClassAdministrator), ct);
+        await db.AccountRoles.Where(x => x.Id == AccountRole.TeacherId).ExecuteUpdateAsync(setters => setters
+            .SetProperty(x => x.Name, "老师")
+            .SetProperty(x => x.NormalizedName, "老师")
+            .SetProperty(x => x.Kind, AccountRoleKind.Teacher), ct);
         await SeedDefaultClassroomAsync(ct);
 
         // 启动时清理过期超过 30 天的会话行，避免 DeviceSessions 表长期无界增长。
@@ -723,11 +742,13 @@ public sealed partial class IdentityCoordinator(
         await RevokeAllSessionsAsync(id, ct);
     }
 
-    /// <summary>账号自助修改用户可见用户名（DisplayName）；登录 ID 与设备会话保持不变，仅同步账号版本。</summary>
+    /// <summary>系统管理员修改用户可见用户名（DisplayName）；登录 ID 与设备会话保持不变，仅同步账号版本。</summary>
     public async Task ChangeDisplayNameAsync(Guid id, ChangeDisplayNameRequest request, CancellationToken ct = default)
     {
         ValidateDisplayName(request.DisplayName);
         var user = await RequireUserAsync(id);
+        if (user.Role != UserRole.Admin)
+            throw new IdentityOperationException(ApiErrorCodes.Forbidden, "仅系统管理员可以修改用户名。");
         user.DisplayName = request.DisplayName.Trim();
         user.UpdatedAt = DateTimeOffset.UtcNow;
         user.Version = await NextVersionAsync(ct);
@@ -776,8 +797,11 @@ public sealed partial class IdentityCoordinator(
         var memberIds = memberships.Select(x => x.UserId).ToHashSet();
         var memberRoles = memberships.ToDictionary(x => x.UserId, x => (x.RoleDefinitionId, x.DefaultPermissions));
 
+        // 按显示名绑定本班课表的“老师”账号：即使不是班级成员也进入授权镜像，
+        // 否则 LAN 直连时插件端会因其不在镜像中而拒绝老师发送的通知与语音消息。
+        var taughtTeacherIds = (await teacherBinding.GetMatchedTeacherUserIdsAsync(classId, ct)).ToList();
         var accounts = await users.Users.Include(x => x.RoleDefinition)
-            .Where(x => x.Enabled && (x.Role == UserRole.Admin || memberIds.Contains(x.Id)))
+            .Where(x => x.Enabled && (x.Role == UserRole.Admin || memberIds.Contains(x.Id) || taughtTeacherIds.Contains(x.Id)))
             .ToListAsync(ct);
         var roleIds = accounts.Select(x => x.RoleDefinitionId)
             .Concat(memberRoles.Values.Select(x => x.RoleDefinitionId))
@@ -1012,6 +1036,7 @@ public sealed partial class IdentityCoordinator(
             Role = user.Role,
             RoleId = role.Id,
             RoleName = role.Name,
+            RoleKind = (int)role.Kind,
             GrantedPermissions = user.GrantedPermissions,
             Permissions = user.Role == UserRole.Admin ? UserPermissions.All : UserPermissions.ViewCurrentCourse | role.DefaultPermissions | user.GrantedPermissions,
             Classes = [.. await classAccess.GetAccessibleClassesAsync(user.Id, user.Role, user.GrantedPermissions, ct)],
@@ -1048,7 +1073,7 @@ public sealed partial class IdentityCoordinator(
 
     private static UserPermissions NormalizeGrants(UserRole role, UserPermissions grants) => role == UserRole.Admin
         ? UserPermissions.None
-        : grants & RolePermissions.Assignable;
+        : grants & (RolePermissions.Assignable & ~UserPermissions.ChangeDisplayName);
 
     private static string NormalizeDeviceName(string value) => string.IsNullOrWhiteSpace(value)
         ? "Wear OS"

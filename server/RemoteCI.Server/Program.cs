@@ -90,6 +90,7 @@ builder.Services.AddScoped<ConfigurationArchiveService>();
 builder.Services.AddScoped<SchedulePullSettings>();
 builder.Services.AddScoped<VisitorAccessSettings>();
 builder.Services.AddScoped<LoginPageSettings>();
+builder.Services.AddScoped<TeacherBindingService>();
 builder.Services.AddScoped<ClassAccessService>();
 builder.Services.AddScoped<ClassBroadcastService>();
  builder.Services.AddScoped<DeviceInventoryService>();
@@ -172,6 +173,7 @@ app.Map("/ws", async context =>
         context.RequestServices.GetRequiredService<AuthorizationSyncService>(),
         context.RequestServices.GetRequiredService<ScheduleSyncService>(),
         context.RequestServices.GetRequiredService<ClassAccessService>(),
+        context.RequestServices.GetRequiredService<TeacherBindingService>(),
         logger);
 });
 
@@ -253,6 +255,48 @@ app.MapPost("/api/me/password", async (
         return Results.NoContent();
     }
     catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+
+// 系统管理员修改自己的显示名；显示名是老师绑定课表科目教师名的依据，其他账号不能自助修改。
+app.MapPost("/api/me/display-name", async (
+    HttpContext ctx, ChangeDisplayNameRequest request, IdentityCoordinator identities,
+    AuthorizationSyncService authorizationSync, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.IsApiKey) return Forbidden();
+    if (MissingFields(request.DisplayName) is { } bad) return bad;
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try
+    {
+        await identities.ChangeDisplayNameAsync(principal.User.Id, request, ct);
+        await authorizationSync.SyncAsync(ct);
+        return Results.NoContent();
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+
+// “我的日程”：当前老师账号按显示名绑定课表后，跨班级聚合出的个人课表。
+app.MapGet("/api/me/schedule", async (
+    HttpContext ctx, IdentityCoordinator identities, TeacherBindingService teachers, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    // 只有内置“老师”角色按显示名绑定课表；其他账号即使同名也返回空日程，与 WebUI“我的日程”一致。
+    if (!IsTeacher(principal)) return Results.Ok(new MyScheduleResponse());
+    return Results.Ok(await teachers.BuildMyScheduleAsync(principal.User.DisplayName, ct));
+});
+
+// “我的日程”的下一节课：返回老师正在上的课和接下来要上的课（含班级与起止时间），
+// 供脚本或 Agent 直接回答“下节课去哪个班上什么”。at 省略时取服务端当前时间。
+app.MapGet("/api/me/schedule/next", async (
+    HttpContext ctx, DateTimeOffset? at, IdentityCoordinator identities, TeacherBindingService teachers, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    var now = at ?? DateTimeOffset.UtcNow;
+    if (!IsTeacher(principal)) return Results.Ok(new MyNextCourseResponse { At = now });
+    return Results.Ok(await teachers.BuildMyNextCourseAsync(principal.User.DisplayName, now, ct));
 });
 
 app.MapGet("/api/me/sessions", async (HttpContext ctx, IdentityCoordinator identities, CancellationToken ct) =>
@@ -841,7 +885,7 @@ app.MapPut("/api/settings/notifications", async (SettingsSync body, HttpContext 
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (!HasPermission(principal, UserPermissions.SendNotifications) && principal.User.Role != UserRole.Admin)
+    if (principal.User.Role != UserRole.Admin)
         return Forbidden();
     var updated = await identities.SetForceSenderInTitleAsync(body.ForceSenderInTitle, ct);
     await peers.SendSettingsToWatchesAsync(updated, ct);
@@ -853,11 +897,15 @@ app.MapGet("/api/settings/schedule-pull", async (HttpContext ctx, IdentityCoordi
     if (principal?.User is null) return Unauthorized();
     return Results.Ok(new { intervalMinutes = (int)await pull.GetIntervalAsync(ct) });
 });
-app.MapPut("/api/settings/schedule-pull", async (HttpContext ctx, SchedulePullIntervalBody body, IdentityCoordinator identities, SchedulePullSettings pull, CancellationToken ct) =>
+app.MapPut("/api/settings/schedule-pull", async (HttpContext ctx, SchedulePullIntervalBody body, IdentityCoordinator identities, ClassAccessService access, SchedulePullSettings pull, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (!HasPermission(principal, UserPermissions.ManageSchedule)) return Forbidden();
+    var target = await ResolveClassAsync(principal, null, access, ct);
+    if (target is null ||
+        (principal.User.Role != UserRole.Admin &&
+         !await access.IsClassAdminAsync(principal.User.Id, principal.User.Role, target.Value, ct)))
+        return Forbidden();
     var interval = Enum.IsDefined(typeof(SchedulePullInterval), body.IntervalMinutes)
         ? (SchedulePullInterval)body.IntervalMinutes
         : SchedulePullInterval.Disabled;
@@ -986,6 +1034,10 @@ static async Task<AuthPrincipal?> AuthorizeAsync(HttpContext ctx, IdentityCoordi
 
 static bool HasPermission(AuthPrincipal? principal, UserPermissions permission) =>
     principal?.User?.Permissions.HasFlag(permission) == true;
+
+/// <summary>主体的全局角色是否为内置“老师”；按角色种类判断，不受角色改名影响。</summary>
+static bool IsTeacher(AuthPrincipal principal) =>
+    principal.User?.RoleKind == (int)AccountRoleKind.Teacher;
 
 /// <summary>
 /// 解析请求的目标班级：显式 classId 必须可访问（否则 null→403），缺省落到默认班级或第一个成员班级。

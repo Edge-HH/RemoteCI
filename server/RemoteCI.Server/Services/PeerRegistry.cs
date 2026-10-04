@@ -112,12 +112,25 @@ public sealed class PeerRegistry(
     /// <summary>管理员状态页使用的连接级诊断，不包含令牌或凭据。</summary>
     public IReadOnlyList<PeerCapabilityDiagnostic> GetCapabilityDiagnostics()
     {
+        return BuildCapabilityDiagnostics(_pluginPeers.Values.Concat(_watchPeers.Values), PrimaryPlugin());
+    }
+
+    /// <summary>返回指定班级当前连接的插件诊断，不包含其他班级或手表连接。</summary>
+    public IReadOnlyList<PeerCapabilityDiagnostic> GetCapabilityDiagnostics(Guid classId)
+    {
+        var plugins = PluginPeersFor(classId).ToArray();
+        return BuildCapabilityDiagnostics(plugins, plugins.FirstOrDefault());
+    }
+
+    private static IReadOnlyList<PeerCapabilityDiagnostic> BuildCapabilityDiagnostics(
+        IEnumerable<WsPeer> peers,
+        WsPeer? primary)
+    {
         var server = RemoteCiCapabilities.Current.ToHashSet(StringComparer.Ordinal);
-        var primary = PrimaryPlugin();
         var primaryCapabilities = primary is null
             ? new HashSet<string>(StringComparer.Ordinal)
             : EffectiveCapabilities(primary).ToHashSet(StringComparer.Ordinal);
-        return _pluginPeers.Values.Concat(_watchPeers.Values)
+        return peers
             .OrderBy(peer => peer.Principal.PeerRole)
             .ThenBy(peer => peer.RegisteredAt)
             .Select(peer =>

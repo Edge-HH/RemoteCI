@@ -74,6 +74,10 @@ object Protocol {
 
     const val ROLE_USER = 1
     const val ROLE_ADMIN = 2
+    const val ROLE_KIND_CLASS_ADMINISTRATOR = 4
+
+    /** 服务端全局角色种类（AccountRoleKind）：内置“老师”角色按显示名与课表教师名绑定任教班级。 */
+    const val ROLE_KIND_TEACHER = 5
     const val PERMISSION_VIEW_CURRENT = 1
     const val PERMISSION_ACCESS_WEB_UI = 2
     const val PERMISSION_MANAGE_USERS = 4
@@ -85,6 +89,7 @@ object Protocol {
     const val PERMISSION_RUN_EXTENSIONS = 128
     const val PERMISSION_MAIN_MENU_CONTROL = 256
     const val PERMISSION_SEND_VOICE_MESSAGES = 512
+    const val PERMISSION_CHANGE_DISPLAY_NAME = 1024
 
     const val SCHEDULE_SOURCE_PLUGIN = 1
     const val SCHEDULE_SOURCE_WEB_UI = 2
@@ -220,11 +225,31 @@ data class CourseEntry(
     val subject: String,
     @SerialName("startTime") val startTime: String? = null,
     @SerialName("endTime") val endTime: String? = null,
+    /** 授课教师名，来自教室端 ClassIsland 档案；旧版服务端不下发。 */
+    val teacher: String? = null,
     val enabled: Boolean = true,
 )
 
 @Serializable
-data class SubjectEntry(val id: String, val name: String)
+data class SubjectEntry(val id: String, val name: String, val teacher: String? = null)
+
+/** “我的日程”：当前老师账号按显示名绑定课表后跨班级聚合的个人课表。 */
+@Serializable
+data class MyScheduleResponse(
+    @SerialName("fromDate") val fromDate: String = "",
+    @SerialName("generatedAt") val generatedAt: String? = null,
+    val days: List<MyScheduleDay> = emptyList(),
+)
+
+@Serializable
+data class MyScheduleDay(val date: String, val items: List<MyScheduleItem> = emptyList())
+
+@Serializable
+data class MyScheduleItem(
+    @SerialName("classId") val classId: String,
+    @SerialName("className") val className: String,
+    val courses: List<CourseEntry> = emptyList(),
+)
 
 @Serializable
 data class ClassEvent(
@@ -348,10 +373,14 @@ data class ClassSummary(
     val id: String = "",
     val name: String = "",
     @SerialName("roleName") val roleName: String? = null,
+    @SerialName("roleKind") val roleKind: Int? = null,
     val permissions: Int? = null,
     @SerialName("visitorEnabled") val visitorEnabled: Boolean = false,
     @SerialName("groupName") val groupName: String? = null,
 ) {
+    /** 本班班管理员：优先按角色种类判断；旧版服务端或插件镜像未下发 roleKind 时退回内置角色名。 */
+    val isClassAdministrator: Boolean
+        get() = roleKind?.let { it == Protocol.ROLE_KIND_CLASS_ADMINISTRATOR } ?: (roleName == "班管理员")
     val effectivePermissions: Int
         get() = permissions ?: Protocol.PERMISSION_VIEW_CURRENT
 }
@@ -362,6 +391,9 @@ data class UserProfile(
     val username: String = "",
     @SerialName("displayName") val displayName: String = "",
     val role: Int = Protocol.ROLE_USER,
+    @SerialName("roleId") val roleId: String? = null,
+    @SerialName("roleName") val roleName: String? = null,
+    @SerialName("roleKind") val roleKind: Int? = null,
     @SerialName("grantedPermissions") val grantedPermissions: Int = 0,
     val permissions: Int = Protocol.PERMISSION_VIEW_CURRENT,
     @SerialName("allowedExtensionIds") val allowedExtensionIds: List<String>? = null,
@@ -370,6 +402,18 @@ data class UserProfile(
     val version: Long = 0,
 ) {
     val isAdmin: Boolean get() = role == Protocol.ROLE_ADMIN
+
+    /** 内置“老师”角色（按显示名绑定课表教师名），roleKind 免受角色改名影响。 */
+    val isTeacher: Boolean get() = roleKind == Protocol.ROLE_KIND_TEACHER
+    /** 是否可管理指定班级的课表拉取：系统管理员，或该班级的班管理员（与服务端按班级校验一致）。 */
+    fun canPullScheduleFor(classId: String?): Boolean =
+        isAdmin || classes?.firstOrNull { it.id == classId }?.isClassAdministrator == true
+    val roleLabel: String
+        get() = when {
+            isAdmin -> "管理员"
+            isTeacher -> roleName ?: "老师"
+            else -> roleName ?: "用户"
+        }
     fun has(permission: Int): Boolean = permissions and permission == permission
     fun canInvoke(extension: ExtensionDefinition): Boolean =
         has(Protocol.PERMISSION_RUN_EXTENSIONS) &&

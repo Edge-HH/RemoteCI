@@ -21,6 +21,7 @@ public static class WebSocketHub
         AuthorizationSyncService authorizationSync,
         ScheduleSyncService scheduleSync,
         ClassAccessService classAccess,
+        TeacherBindingService teacherBinding,
         ILogger logger)
     {
         if (!context.WebSockets.IsWebSocketRequest)
@@ -44,7 +45,7 @@ public static class WebSocketHub
         var connectionId = registry.Register(socket, token, principal);
         var session = new ConnectionSession(
             context, identities, registry, store, extensionPolicies, authorizationSync, scheduleSync, classAccess,
-            logger, socket, connectionId, principal);
+            teacherBinding, logger, socket, connectionId, principal);
         logger.LogInformation(
             "WebSocket connected: {Role}/{User} ({Id})",
             principal.PeerRole,
@@ -346,7 +347,12 @@ public static class WebSocketHub
     {
         if (ConvertPayload<ScheduleBundle>(envelope.Payload) is not { } schedule) return;
         schedule.ClassId = classId;
+        // 老师按显示名绑定课表：新课表可能改变该班匹配到的任教老师集合，变化时刷新插件端授权镜像。
+        var teachersBefore = await session.TeacherBinding.GetMatchedTeacherUserIdsAsync(classId, session.CancellationToken);
         session.Store.SaveSchedule(classId, schedule);
+        var teachersAfter = await session.TeacherBinding.GetMatchedTeacherUserIdsAsync(classId, session.CancellationToken);
+        if (!teachersBefore.SetEquals(teachersAfter))
+            await session.AuthorizationSync.SyncAsync(session.CancellationToken);
         await session.Registry.SendScheduleToWatchesAsync(classId, schedule, session.CancellationToken);
         await session.ScheduleSync.CompleteFromScheduleAsync(classId, session.CancellationToken);
     }
@@ -428,6 +434,13 @@ public static class WebSocketHub
                     : ScheduleSyncSource.Watch;
                 var classId = await ResolveClassAsync(request?.ClassId, session);
                 if (classId is null) return;
+                if (session.Principal.User!.Role != UserRole.Admin &&
+                    !await session.ClassAccess.IsClassAdminAsync(
+                        session.Principal.User.Id,
+                        session.Principal.User.Role,
+                        classId.Value,
+                        session.CancellationToken))
+                    return;
                 request ??= new ScheduleSyncRequest { Source = source };
                 request.ClassId = classId;
                 await session.ScheduleSync.StartAsync(
@@ -497,11 +510,12 @@ public static class WebSocketHub
             return;
         }
         command.ClassId = classId;
-        // 远程升级、插件管理和集控操作属于宿主级维护，即使普通角色被授予 ManageUsers 也仅允许系统管理员执行。
+        // 远程升级、插件管理、集控、终端与文件分发属于宿主级维护，即使普通角色被授予 ManageUsers 也仅允许系统管理员执行。
         if ((command.Command is CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
             CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
             CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
-            CommandKind.JoinManagement or CommandKind.RestartClassIsland) && session.Principal.User!.Role != UserRole.Admin)
+            CommandKind.JoinManagement or CommandKind.RestartClassIsland or
+            CommandKind.ExecuteTerminalCommand or CommandKind.SendFile) && session.Principal.User!.Role != UserRole.Admin)
         {
             await SendFailureAsync(
                 envelope, session.ConnectionId, session.Registry,
@@ -596,6 +610,27 @@ public static class WebSocketHub
              command.ProfileDistribution.Sections == ProfileDistributionSection.None ||
              string.IsNullOrWhiteSpace(command.ProfileDistribution.ProfileJson)))
             return new CommandError(CommandResultCodes.InvalidRequest, "缺少档案分发参数");
+        if (command.Command == CommandKind.SetSubjectTeacher)
+        {
+            if (command.SubjectTeacher is null || command.SubjectTeacher.SubjectId == Guid.Empty)
+                return new CommandError(CommandResultCodes.InvalidRequest, "缺少科目教师参数");
+            if (command.SubjectTeacher.TeacherName is { Length: > SubjectTeacherRequest.MaxTeacherNameLength })
+                return new CommandError(CommandResultCodes.InvalidRequest, "教师名过长");
+        }
+        if (command.Command == CommandKind.ExecuteTerminalCommand)
+        {
+            var terminal = command.TerminalCommand;
+            if (terminal is null || string.IsNullOrWhiteSpace(terminal.Command))
+                return new CommandError(CommandResultCodes.InvalidRequest, "缺少终端命令");
+            if (terminal.Command.Trim().Length > TerminalCommandRequest.MaxCommandLength)
+                return new CommandError(CommandResultCodes.InvalidRequest, "终端命令过长");
+            if (terminal.WorkingDirectory is { Length: > TerminalCommandRequest.MaxWorkingDirectoryLength })
+                return new CommandError(CommandResultCodes.InvalidRequest, "工作目录路径过长");
+            if (terminal.TimeoutSeconds is < 1 or > TerminalCommandRequest.MaxTimeoutSeconds)
+                return new CommandError(CommandResultCodes.InvalidRequest, "执行超时必须在 1-10 秒之间");
+        }
+        if (command.Command == CommandKind.SendFile && !FileDistributionRequest.TryDecode(command.FileDistribution, out _))
+            return new CommandError(CommandResultCodes.InvalidRequest, "文件分发参数无效，文件不能为空且不能超过 10 MB");
         return command.Command == CommandKind.JoinManagement && command.ManagementJoin is null
             ? new CommandError(CommandResultCodes.InvalidRequest, "缺少加入集控参数")
             : null;
@@ -658,6 +693,7 @@ public static class WebSocketHub
         AuthorizationSyncService authorizationSync,
         ScheduleSyncService scheduleSync,
         ClassAccessService classAccess,
+        TeacherBindingService teacherBinding,
         ILogger logger,
         WebSocket socket,
         Guid connectionId,
@@ -671,6 +707,7 @@ public static class WebSocketHub
         public AuthorizationSyncService AuthorizationSync { get; } = authorizationSync;
         public ScheduleSyncService ScheduleSync { get; } = scheduleSync;
         public ClassAccessService ClassAccess { get; } = classAccess;
+        public TeacherBindingService TeacherBinding { get; } = teacherBinding;
         public ILogger Logger { get; } = logger;
         public WebSocket Socket { get; } = socket;
         public Guid ConnectionId { get; } = connectionId;

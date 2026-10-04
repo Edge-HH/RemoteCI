@@ -154,6 +154,11 @@ object ConnectionManager {
     fun restToken(): String? = accessToken
     fun restBaseUrl(): String? = desiredSettings?.cloudServerUrl?.trim()?.trimEnd('/')
 
+    /** 从服务端拉取最新档案（/api/me）：修改显示名（老师姓名）后刷新本地班级与权限。 */
+    suspend fun refreshProfile() {
+        applyUserProfile(AdminApi.me())
+    }
+
     fun supports(capability: String): Boolean = capability in availableCapabilities.value
 
     /** 统一写入用户档案：同时刷新班级列表；已选班级失效时回退到第一个可访问班级。 */

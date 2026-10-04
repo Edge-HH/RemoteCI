@@ -4,9 +4,7 @@
 
 <header class="dashboard-head">
     <div>
-        <p class="eyebrow">课堂工作台</p>
         <h1>课堂控制总览</h1>
-        <p class="muted">集中查看课程、连接与同步状态，并快速进入常用操作。</p>
     </div>
     <div class="dashboard-actions">
         <form method="post" asp-page-handler="RetryConnection"><button class="primary-action" type="submit"><i class="bi bi-arrow-repeat" aria-hidden="true"></i>重新检测连接</button></form>
@@ -86,12 +84,12 @@
 
     <section class="dashboard-panel activity-panel">
         <header class="panel-heading">
-            <div><h2>运行信号</h2></div><span class="status-pill">自动汇总</span>
+            <div><h2>运行状态</h2></div>
         </header>
         <div class="activity-list">
             <article>
                 <span class="activity-icon @(Model.PluginOnline ? "success" : "alert")"><i class="bi bi-plug" aria-hidden="true"></i></span>
-                <div><strong>ClassIsland 插件@(Model.PluginOnline ? "连接正常" : Model.PluginProtocolMismatch is null ? "当前离线" : "协议不匹配")</strong><small>@(Model.PluginOnline ? "远程任务可以立即执行" : Model.PluginProtocolMismatch is null ? "换课和通知不会离线排队" : "请升级到与 WebUI 协议兼容的插件")</small></div><span>现在</span>
+                <div><strong>ClassIsland 插件@(Model.PluginOnline ? "连接正常" : Model.PluginProtocolMismatch is null ? "当前离线" : "协议不匹配")</strong><small>@(Model.PluginOnline ? "可执行远程操作" : Model.PluginProtocolMismatch is null ? "远程操作暂不可用" : "请升级插件")</small></div><span>现在</span>
             </article>
             <article>
                 <span class="activity-icon"><i class="bi bi-calendar-check" aria-hidden="true"></i></span>
@@ -99,11 +97,7 @@
             </article>
             <article>
                 <span class="activity-icon"><i class="bi bi-smartwatch" aria-hidden="true"></i></span>
-                <div><strong>@Model.WatchConnections 台手表在线</strong><small>设备连接状态由服务端实时统计</small></div><span>设备</span>
-            </article>
-            <article>
-                <span class="activity-icon"><i class="bi bi-shield-check" aria-hidden="true"></i></span>
-                <div><strong>权限检查已启用</strong><small>所有远程操作都需要服务端授权</small></div><span>安全</span>
+                <div><strong>@Model.WatchConnections 台手表在线</strong></div><span>设备</span>
             </article>
         </div>
     </section>
@@ -112,7 +106,7 @@
 @if (Model.Permissions.HasFlag(UserPermissions.ManageSchedule) || Model.Permissions.HasFlag(UserPermissions.SendNotifications))
 {
     <section class="dashboard-panel execution-panel">
-        <header class="panel-heading execution-heading"><div><h2>常用任务</h2></div><span class="muted">根据当前账号权限显示</span></header>
+        <header class="panel-heading execution-heading"><div><h2>常用任务</h2></div></header>
         <div class="task-table">
             @if (Model.Permissions.HasFlag(UserPermissions.ManageSchedule) && Model.Supports(RemoteCiCapabilities.ScheduleChange))
             {
@@ -147,7 +141,7 @@
     <div class="mobile-login-copy">
         <p class="eyebrow">ANDROID</p>
         <h2 id="mobile-login-title">手机扫码填写服务器地址</h2>
-        <p class="muted">在安卓版登录页点击二维码按钮扫描。二维码只包含当前 WebUI 地址，不包含账号、密码或令牌。</p>
+        <p class="muted">在安卓版登录页点击二维码按钮扫描。二维码只包含服务器地址。</p>
         <div class="mobile-login-url">
             <code>@Model.MobileLoginUrl</code>
             <button class="copy-button" type="button" data-copy-value="@Model.MobileLoginUrl" aria-label="复制服务器地址" title="复制服务器地址"><i class="bi bi-copy" aria-hidden="true"></i></button>
@@ -169,10 +163,10 @@
     @if (Model.IsAdmin)
     {
         <section class="dashboard-panel credential-panel">
-            <header class="panel-heading"><div><p class="eyebrow">CAPABILITIES</p><h2>连接能力诊断</h2></div><span class="status-pill">@Model.CapabilityDiagnostics.Count 个连接</span></header>
+            <header class="panel-heading"><div><h2>连接能力诊断</h2></div><span class="status-pill">@Model.CapabilityDiagnostics.Count 个插件</span></header>
             @if (Model.CapabilityDiagnostics.Count == 0)
             {
-                <div class="empty-state"><i class="bi bi-diagram-3" aria-hidden="true"></i><strong>暂无在线端</strong><span>插件或手表连接后将在这里显示版本和能力交集。</span></div>
+                <div class="empty-state"><i class="bi bi-diagram-3" aria-hidden="true"></i><strong>暂无已连接插件</strong><span>插件连接后显示版本与能力。</span></div>
             }
             else
             {

@@ -187,6 +187,11 @@ public enum AccountRoleKind
     Custom = 3,
     /// <summary>内置“班管理员”：仅在所属班级内生效的班级管理角色，不授予系统管理员身份。</summary>
     ClassAdministrator = 4,
+    /// <summary>
+    /// 内置“老师”：按显示名与课表科目教师名绑定任教班级，
+    /// 默认仅授予任教班级的通知与语音消息权限，其余权限可在角色/人员设置中追加。
+    /// </summary>
+    Teacher = 5,
 }
 
 public sealed class AccountRole
@@ -194,6 +199,7 @@ public sealed class AccountRole
     public static readonly Guid StudentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     public static readonly Guid AdministratorId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     public static readonly Guid ClassAdministratorId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+    public static readonly Guid TeacherId = Guid.Parse("55555555-5555-5555-5555-555555555555");
 
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;

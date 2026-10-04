@@ -114,12 +114,17 @@ public sealed class DeviceInventoryService(
             failures);
     }
 
+    /// <summary>
+    /// 逐台投递命令并等待回执。successDetail 用于把回执的附加数据（终端输出、文件保存路径）
+    /// 带入成功结果的展示文本；返回 null 时保持默认的“已下发”提示。
+    /// </summary>
     public async Task<IReadOnlyList<DeviceCommandResult>> DispatchAsync(
         IReadOnlyCollection<DeviceInventory> targets,
         Func<DeviceInventory, CommandMessage> commandFactory,
         string actionName,
         TimeSpan timeout,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Func<CommandResult, string?>? successDetail = null)
     {
         var results = new List<DeviceCommandResult>();
         foreach (var target in targets)
@@ -139,13 +144,14 @@ public sealed class DeviceInventoryService(
                 connectionId,
                 timeout,
                 ct);
+            var successMessage = result.Success ? successDetail?.Invoke(result) ?? $"{actionName}已下发。" : null;
             results.Add(new DeviceCommandResult(
                 target.CredentialId,
                 connectionId,
                 target.ClassId,
                 target.DeviceName,
                 result.Success,
-                result.Success ? $"{actionName}已下发。" : result.Message));
+                successMessage ?? result.Message));
         }
         return results;
     }

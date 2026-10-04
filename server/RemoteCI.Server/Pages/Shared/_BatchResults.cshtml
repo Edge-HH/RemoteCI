@@ -1,0 +1,24 @@
+@model RemoteCI.Server.Pages.BatchControlModel
+
+@if (Model.LastResults.Count > 0)
+{
+    <section class="panel">
+        <div class="panel-heading">
+            <div>
+                <h2>上次执行结果</h2>
+            </div>
+            <span class="status-pill">@Model.LastResults.Count(x => x.Success) / @Model.LastResults.Count 成功</span>
+        </div>
+        <ul class="broadcast-result">
+            @foreach (var item in Model.LastResults)
+            {
+                <li>
+                    <i class="bi @(item.Success ? "bi-check-circle ok" : "bi-x-circle bad")" aria-hidden="true"></i>
+                    <span>
+                        <strong>@Model.ResultClassName(item)</strong>-@(item.Success ? "成功" : item.Message ?? "失败")（@item.TargetName）
+                    </span>
+                </li>
+            }
+        </ul>
+    </section>
+}

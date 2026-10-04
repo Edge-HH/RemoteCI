@@ -49,6 +49,15 @@ object AdminApi {
         post("/api/me/password", ChangePasswordRequest(current, next), ChangePasswordRequest.serializer(), UnitSerializer)
     }
 
+    /** “我的日程”：老师账号按显示名绑定课表后的跨班级个人课表。 */
+    suspend fun mySchedule(): MyScheduleResponse = get("/api/me/schedule", MyScheduleResponse.serializer())
+    suspend fun updateDisplayName(name: String) {
+        post("/api/me/display-name", UpdateDisplayNameRequest(name), UpdateDisplayNameRequest.serializer(), UnitSerializer)
+    }
+
+    /** 当前登录账号的最新档案（/api/me），修改显示名后用于刷新本地班级与权限。 */
+    suspend fun me(): UserProfile = get("/api/me", UserProfile.serializer())
+
     suspend fun pairingCode(): PairingCodeResponse = post("/api/plugin/pairing-code", EmptyBody(), EmptyBody.serializer(), PairingCodeResponse.serializer())
     suspend fun pluginCredentials(): List<PluginCredentialInfo> =
         get("/api/plugins/credentials", ListSerializer(PluginCredentialInfo.serializer()))
@@ -142,6 +151,8 @@ private object UnitSerializer : kotlinx.serialization.DeserializationStrategy<Un
 }
 
 @Serializable data class EmptyBody(val ok: Boolean = true)
+
+@Serializable data class UpdateDisplayNameRequest(val displayName: String)
 
 @Serializable
 data class UserListItem(

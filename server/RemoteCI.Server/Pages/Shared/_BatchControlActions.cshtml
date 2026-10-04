@@ -1,12 +1,11 @@
 @model BatchControlModel
-<div data-single-control="@(Model.IsSingleControl ? "true" : "false")">
+<div data-single-control="@(Model.IsSingleControl ? "true" : "false")" data-single-class-name="@(Model.IsSingleControl ? Model.CurrentClass?.Name : "")">
 @if (Model.HasClassroomOperations)
 {
 <section class="panel batch-section">
     <div class="panel-heading">
         <div>
             <h2>课堂控制</h2>
-            <p class="muted">通知、清除提醒、电源和语音广播。</p>
         </div>
     </div>
     <div class="batch-action-grid">
@@ -14,7 +13,7 @@
         {
             <button type="button" class="batch-action-card" id="send-notification" data-batch-open="Notify" data-batch-title="通知广播" data-batch-risk="false">
                 <span class="batch-action-icon"><i class="bi bi-megaphone" aria-hidden="true"></i></span>
-                <span class="batch-action-copy"><strong>通知广播</strong><small>向选中的班级或设备发送一条通知。</small></span>
+                <span class="batch-action-copy"><strong>通知广播</strong><small>向设备发送一条通知。</small></span>
             </button>
         }
         @if (Model.CanUseOperation(BatchOperationKind.ClearNotifications))
@@ -35,7 +34,7 @@
         {
             <button type="button" class="batch-action-card" data-batch-open="VoiceMessage" data-batch-title="语音消息" data-batch-risk="false">
                 <span class="batch-action-icon"><i class="bi bi-mic" aria-hidden="true"></i></span>
-                <span class="batch-action-copy"><strong>语音消息</strong><small>先录制语音，再选择要广播的设备。</small></span>
+                <span class="batch-action-copy"><strong>语音消息</strong><small>录制一段语音并在设备上播放。</small></span>
             </button>
         }
     </div>
@@ -48,7 +47,6 @@
     <div class="panel-heading">
         <div>
             <h2>档案与集控</h2>
-            <p class="muted">时间表、档案分发和 ClassIsland 内置集控。</p>
         </div>
     </div>
     <div class="batch-action-grid">
@@ -90,7 +88,6 @@
     <div class="panel-heading">
         <div>
             <h2>插件与软件</h2>
-            <p class="muted">安装、卸载、启停插件，以及更新插件和 ClassIsland 主程序。</p>
         </div>
     </div>
     <div class="batch-action-grid">
@@ -147,13 +144,40 @@
 </section>
 }
 
+@if (Model.HasMaintenanceOperations)
+{
+<section class="panel batch-section">
+    <div class="panel-heading">
+        <div>
+            <h2>远程维护</h2>
+        </div>
+    </div>
+    <div class="batch-action-grid">
+        @if (Model.CanUseMaintenanceOperation(BatchOperationKind.ExecuteTerminalCommand))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="ExecuteTerminalCommand" data-batch-title="远程终端" data-batch-risk="true">
+                <span class="batch-action-icon danger"><i class="bi bi-terminal" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>远程终端</strong><small>在设备上执行命令并取回输出。</small></span>
+            </button>
+        }
+        @if (Model.CanUseMaintenanceOperation(BatchOperationKind.SendFile))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="SendFile" data-batch-title="文件分发" data-batch-risk="true">
+                <span class="batch-action-icon"><i class="bi bi-file-earmark-arrow-up" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>文件分发</strong><small>把文件分发到设备的桌面或下载文件夹。</small></span>
+            </button>
+        }
+    </div>
+</section>
+}
+
 @* 第 1 步：各功能的参数弹窗。参数会被 batch-control.js 复制到目标弹窗。 *@
 @if (Model.CanUseOperation(BatchOperationKind.Notify))
 {
 <dialog id="batch-settings-notify" class="batch-dialog" data-batch-settings="Notify" data-batch-title="通知广播" data-batch-risk="false">
     <div class="batch-dialog-shell">
         <header class="batch-dialog-header">
-            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>通知广播</h2><p class="muted">通知会按设备逐台发送，离线设备会单独回报。</p></div>
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>通知广播</h2></div>
             <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
         </header>
         <div class="batch-dialog-body stack">
@@ -196,10 +220,10 @@
 <dialog id="batch-settings-clear" class="batch-dialog" data-batch-settings="ClearNotifications" data-batch-title="清除通知" data-batch-risk="false">
     <div class="batch-dialog-shell">
         <header class="batch-dialog-header">
-            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>清除通知</h2><p class="muted">清除所选设备当前显示的提醒。</p></div>
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>清除通知</h2></div>
             <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
         </header>
-        <div class="batch-dialog-body"><p class="batch-summary">该操作不需要额外参数，下一步选择设备即可。</p></div>
+        <div class="batch-dialog-body"><p class="batch-summary">清除设备当前显示的提醒。</p></div>
         <footer class="batch-dialog-actions">
             <button type="button" class="ghost" data-batch-close>取消</button>
             <button type="button" data-batch-next>下一步：选择设备</button>
@@ -213,7 +237,7 @@
 <dialog id="batch-settings-power" class="batch-dialog" data-batch-settings="Power" data-batch-title="电源控制" data-batch-risk="true">
     <div class="batch-dialog-shell">
         <header class="batch-dialog-header">
-            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>电源控制</h2><p class="muted">电源操作会影响教室端设备，请谨慎选择。</p></div>
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>电源控制</h2></div>
             <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
         </header>
         <div class="batch-dialog-body stack">
@@ -239,7 +263,7 @@
 <dialog id="batch-settings-time-layout" class="batch-dialog batch-dialog-wide" data-batch-settings="UpdateTimeLayout" data-batch-title="修改时间表" data-batch-risk="false">
     <div class="batch-dialog-shell">
         <header class="batch-dialog-header">
-            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>修改时间表</h2><p class="muted">时间点会按开始时间排序后写入 ClassIsland。</p></div>
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>修改时间表</h2><p class="muted">时间点按开始时间自动排序。</p></div>
             <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
         </header>
         <div class="batch-dialog-body stack">
@@ -270,11 +294,12 @@
 <dialog id="batch-settings-distribute" class="batch-dialog batch-dialog-wide" data-batch-settings="DistributeProfile" data-batch-title="分发档案" data-batch-risk="true">
     <div class="batch-dialog-shell">
         <header class="batch-dialog-header">
-            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>分发档案</h2><p class="muted">只接收 ClassIsland 档案 JSON，不会写入任意文件路径。</p></div>
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>分发档案</h2><p class="muted">仅支持 ClassIsland 档案 JSON。</p></div>
             <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
         </header>
         <div class="batch-dialog-body stack">
             <label>选择档案 JSON<input type="file" accept=".json,application/json" data-profile-file /></label>
+            <label>导入档案名<input type="text" name="ProfileImportName" maxlength="100" placeholder="留空使用 JSON 中的档案名称" /></label>
             <label>档案 JSON<textarea name="ProfileJson" rows="8" placeholder="粘贴 ClassIsland 档案 JSON，或选择文件后自动填入"></textarea></label>
             <fieldset class="batch-check-group">
                 <legend>分发内容</legend>
@@ -282,7 +307,9 @@
                 <label class="check"><input type="checkbox" name="ProfileSections" value="ClassPlans" /> 课表</label>
                 <label class="check"><input type="checkbox" name="ProfileSections" value="Subjects" /> 科目</label>
             </fieldset>
-            <label class="check"><input type="checkbox" name="ProfileReplaceExisting" data-batch-bool /> 替换设备上同 Id 的现有数据</label>
+            <label class="check"><input type="checkbox" name="ProfileReplaceCurrent" data-batch-bool /> 覆盖当前档案</label>
+            <label class="check"><input type="checkbox" name="ProfileEnableImported" data-batch-bool checked /> 启用此档案</label>
+            <label class="check"><input type="checkbox" name="ProfileReplaceExisting" data-batch-bool /> 替换档案中同 Id 的现有数据</label>
         </div>
         <footer class="batch-dialog-actions">
             <button type="button" class="ghost" data-batch-close>取消</button>
@@ -297,17 +324,16 @@
 <dialog id="batch-settings-plugins" class="batch-dialog batch-dialog-wide" data-batch-settings="InstallPlugins" data-batch-title="插件管理" data-batch-risk="false">
     <div class="batch-dialog-shell">
         <header class="batch-dialog-header">
-            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>插件管理</h2><p class="muted">安装会从插件市场解析依赖；卸载、启用和禁用会在重启后生效。</p></div>
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>安装插件</h2><p class="muted">从 ClassIsland 插件市场下载，重启 ClassIsland 后生效。</p></div>
             <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
         </header>
         <div class="batch-dialog-body stack">
             <input type="hidden" name="PluginAction" value="Install" />
-            <p class="batch-summary">安装操作会从 ClassIsland 插件市场解析依赖并下载，重启后生效。</p>
             <fieldset class="batch-check-group batch-plugin-list">
                 <legend>已上报插件</legend>
                 @if (Model.KnownPlugins.Count == 0)
                 {
-                    <p class="muted">当前设备还没有上报插件清单，可在下方手动填写插件 Id。</p>
+                    <p class="muted">设备尚未上报插件清单，可在下方手动填写插件 Id。</p>
                 }
                 else
                 {
@@ -325,7 +351,7 @@
                 }
             </fieldset>
             <label>手动输入插件 Id<textarea name="PluginIdsText" rows="3" placeholder="每行一个插件 Id，例如 remoteci.plugin"></textarea></label>
-            <p class="muted">为避免设备失去远程控制，RemoteCI 会拒绝安装、卸载、启用或禁用自身。</p>
+            <p class="muted">不能对 RemoteCI 插件自身执行此操作。</p>
         </div>
         <footer class="batch-dialog-actions">
             <button type="button" class="ghost" data-batch-close>取消</button>
@@ -340,7 +366,7 @@
 <dialog id="batch-settings-uninstall" class="batch-dialog batch-dialog-wide" data-batch-settings="UninstallPlugins" data-batch-title="卸载插件" data-batch-risk="true">
     <div class="batch-dialog-shell">
         <header class="batch-dialog-header">
-            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>卸载插件</h2><p class="muted">卸载会在下次启动 ClassIsland 时删除插件目录。</p></div>
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>卸载插件</h2><p class="muted">重启 ClassIsland 后生效。</p></div>
             <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
         </header>
         <div class="batch-dialog-body stack">
@@ -370,7 +396,7 @@
 <dialog id="batch-settings-enable" class="batch-dialog batch-dialog-wide" data-batch-settings="SetPluginEnabled" data-batch-title="启用或禁用插件" data-batch-risk="false">
     <div class="batch-dialog-shell">
         <header class="batch-dialog-header">
-            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>启用或禁用插件</h2><p class="muted">切换插件目录中的 .disabled 标记，重启后生效。</p></div>
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>启用或禁用插件</h2><p class="muted">重启 ClassIsland 后生效。</p></div>
             <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
         </header>
         <div class="batch-dialog-body stack">
@@ -443,13 +469,13 @@
 <dialog id="batch-settings-join-management" class="batch-dialog batch-dialog-wide" data-batch-settings="JoinManagement" data-batch-title="加入集控" data-batch-risk="true">
     <div class="batch-dialog-shell">
         <header class="batch-dialog-header">
-            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>加入 ClassIsland 内置集控</h2><p class="muted">设备加入后会按集控服务器下发的档案、策略和凭据重启生效。</p></div>
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>加入 ClassIsland 内置集控</h2></div>
             <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
         </header>
         <div class="batch-dialog-body stack">
             <label>选择集控配置文件<input type="file" accept=".json,application/json" data-management-preset-file /></label>
             <label>集控配置文件 JSON<textarea name="ManagementPresetJson" rows="8" placeholder="粘贴 ClassIsland 集控配置文件（ManagementPreset.json），或选择文件后自动填入"></textarea></label>
-            <p class="muted">配置文件为 ClassIsland 的 ManagementPreset.json（加入集控弹窗使用的配置）。设备 ID 会自动使用所选班级名，无需手动填写；加入集控会清空设备上已有的集控档案缓存，并自动重启 ClassIsland。</p>
+            <p class="muted">设备 ID 自动使用班级名。加入后会清空设备上已有的集控档案缓存，并重启 ClassIsland。</p>
         </div>
         <footer class="batch-dialog-actions">
             <button type="button" class="ghost" data-batch-close>取消</button>
@@ -464,13 +490,65 @@
 <dialog id="batch-settings-policy" class="batch-dialog" data-batch-settings="SetPluginManagementPolicy" data-batch-title="插件管理策略" data-batch-risk="true">
     <div class="batch-dialog-shell">
         <header class="batch-dialog-header">
-            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>插件管理策略</h2><p class="muted">限制 RemoteCI 后续发起的远程插件安装和卸载。</p></div>
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>插件管理策略</h2></div>
             <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
         </header>
         <div class="batch-dialog-body stack">
             <label class="check"><input type="checkbox" name="AllowRemotePluginInstall" data-batch-bool checked /> 允许 RemoteCI 远程安装插件</label>
             <label class="check"><input type="checkbox" name="AllowRemotePluginUninstall" data-batch-bool checked /> 允许 RemoteCI 远程卸载插件</label>
-            <p class="batch-warning">ClassIsland 目前没有公开的宿主级“禁止本地安装/卸载插件”策略 API；此设置只约束 RemoteCI 自己发起的远程操作。</p>
+            <p class="batch-warning">只限制 RemoteCI 发起的远程操作，不影响在 ClassIsland 本地安装或卸载插件。</p>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseMaintenanceOperation(BatchOperationKind.ExecuteTerminalCommand))
+{
+<dialog id="batch-settings-terminal" class="batch-dialog" data-batch-settings="ExecuteTerminalCommand" data-batch-title="远程终端" data-batch-risk="true">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>远程终端</h2><p class="muted">以设备当前登录用户执行，并返回输出。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <label>命令<textarea data-terminal-command rows="4" maxlength="4000" placeholder="例如：ipconfig /all" required></textarea></label>
+            <div class="two-column">
+                <label>超时（秒，1-10）<input type="number" data-terminal-timeout min="1" max="10" value="10" /></label>
+                <label>工作目录（可选）<input data-terminal-workdir maxlength="260" placeholder="留空使用设备用户目录" /></label>
+            </div>
+            <p class="muted">每条命令通过 <code>cmd /d /c</code> 独立执行；输出上限 64KB，超时会被强制结束。</p>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseMaintenanceOperation(BatchOperationKind.SendFile))
+{
+<dialog id="batch-settings-sendfile" class="batch-dialog" data-batch-settings="SendFile" data-batch-title="文件分发" data-batch-risk="true">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>文件分发</h2><p class="muted">单个文件最大 10 MB。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <label>选择文件<input type="file" data-batch-file /></label>
+            <p class="control-note" data-batch-file-status>尚未选择文件。</p>
+            <label>保存位置
+                <select data-file-target-folder>
+                    <option value="Desktop">桌面</option>
+                    <option value="Downloads">下载</option>
+                    <option value="Documents">文档</option>
+                </select>
+            </label>
+            <label class="check"><input type="checkbox" data-file-overwrite /> 覆盖同名文件（不勾选时自动追加序号）</label>
         </div>
         <footer class="batch-dialog-actions">
             <button type="button" class="ghost" data-batch-close>取消</button>
@@ -539,7 +617,7 @@
                             </label>
                         }
                     </div>
-                    <p class="muted">班级级选择只会投递到该班最早接入的在线设备，避免同班多设备重复执行。</p>
+                    <p class="muted">按班级或分组选择时，每个班只发送到最早接入的在线设备。</p>
                     }
                 </section>
                 @if (!Model.IsSingleControl)
@@ -577,9 +655,12 @@
                 }
                 <label class="batch-risk-confirm" data-batch-risk-confirm hidden>
                     <input type="checkbox" name="ConfirmHighRisk" value="true" />
-                    我已确认该操作会影响教室端设备，并理解可能造成重启、程序替换或连接中断。
+                    我确认该操作可能造成重启、程序替换或连接中断。
                 </label>
                 <p class="batch-target-feedback" data-batch-target-feedback role="status"></p>
+                <div class="batch-remote-results" data-batch-remote-results hidden>
+                    <ul class="broadcast-result" data-batch-remote-list></ul>
+                </div>
             </div>
             <footer class="batch-dialog-actions">
                 <button type="button" class="ghost" data-batch-close>取消</button>

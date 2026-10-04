@@ -73,6 +73,8 @@ public class Plugin : PluginBase
         services.AddSingleton<ProfileManagementService>();
         services.AddSingleton<ManagementJoinService>();
         services.AddSingleton<VoiceMessagePlayer>();
+        services.AddSingleton<TerminalCommandService>();
+        services.AddSingleton<FileReceiveService>();
         services.AddSingleton<CommandHandler>();
         services.AddSingleton<ClassIslandNotificationBridge>();
         services.AddSingleton<StateCollector>();

@@ -89,7 +89,7 @@ public sealed class IndexModel(UserManager<AppUser> users, PeerRegistry peers, I
         if (CurrentUser.Role == UserRole.Admin)
         {
             PluginCredentials = await identities.ListPluginCredentialsAsync(ct);
-            CapabilityDiagnostics = peers.GetCapabilityDiagnostics();
+            CapabilityDiagnostics = peers.GetCapabilityDiagnostics(CurrentClassId);
         }
     }
 }

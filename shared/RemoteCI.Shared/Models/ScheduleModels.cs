@@ -115,6 +115,11 @@ public sealed class CourseEntry
     [JsonPropertyName("endTime")]
     public string? EndTime { get; set; }
 
+    /// <summary>该科目授课教师名，来自 ClassIsland 档案的 Subject.TeacherName；旧版插件不下发。</summary>
+    [JsonPropertyName("teacher")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Teacher { get; set; }
+
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; }
 }
@@ -126,6 +131,25 @@ public sealed class SubjectEntry
 
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
+
+    /// <summary>授课教师名，来自 ClassIsland 档案的 Subject.TeacherName；旧版插件不下发。</summary>
+    [JsonPropertyName("teacher")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Teacher { get; set; }
+}
+
+/// <summary>SetSubjectTeacher 命令参数：teacherName 为空表示清除该科目的教师。</summary>
+public sealed class SubjectTeacherRequest
+{
+    /// <summary>教师名长度上限；服务端与插件共用同一校验。</summary>
+    public const int MaxTeacherNameLength = 100;
+
+    [JsonPropertyName("subjectId")]
+    public Guid SubjectId { get; set; }
+
+    [JsonPropertyName("teacherName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TeacherName { get; set; }
 }
 
 public sealed class ScheduleChangeRequest
@@ -153,6 +177,79 @@ public sealed class ScheduleChangeRequest
     /// <summary>写入 ClassIsland 源课表，使本周及以后每周持续生效。</summary>
     [JsonPropertyName("permanent")]
     public bool Permanent { get; set; }
+}
+
+/// <summary>“我的日程”响应：把当前用户任教班级的课表按日期聚合。</summary>
+public sealed class MyScheduleResponse
+{
+    [JsonPropertyName("fromDate")]
+    public string FromDate { get; set; } = string.Empty;
+
+    [JsonPropertyName("generatedAt")]
+    public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("days")]
+    public List<MyScheduleDay> Days { get; set; } = [];
+}
+
+public sealed class MyScheduleDay
+{
+    [JsonPropertyName("date")]
+    public string Date { get; set; } = string.Empty;
+
+    [JsonPropertyName("items")]
+    public List<MyScheduleItem> Items { get; set; } = [];
+}
+
+/// <summary>某一天中用户在某个班级的课程集合。</summary>
+public sealed class MyScheduleItem
+{
+    [JsonPropertyName("classId")]
+    public Guid ClassId { get; set; }
+
+    [JsonPropertyName("className")]
+    public string ClassName { get; set; } = string.Empty;
+
+    [JsonPropertyName("courses")]
+    public List<CourseEntry> Courses { get; set; } = [];
+}
+
+/// <summary>“我的日程”中的一节课：所在班级、课程以及换算成绝对时间的起止时刻。</summary>
+public sealed class MyCourseSlot
+{
+    [JsonPropertyName("date")]
+    public string Date { get; set; } = string.Empty;
+
+    [JsonPropertyName("classId")]
+    public Guid ClassId { get; set; }
+
+    [JsonPropertyName("className")]
+    public string ClassName { get; set; } = string.Empty;
+
+    [JsonPropertyName("course")]
+    public CourseEntry Course { get; set; } = new();
+
+    [JsonPropertyName("startsAt")]
+    public DateTimeOffset StartsAt { get; set; }
+
+    [JsonPropertyName("endsAt")]
+    public DateTimeOffset EndsAt { get; set; }
+}
+
+/// <summary>“下一节课”响应：指定时刻正在上的课与接下来的第一节课；没有时对应字段省略。</summary>
+public sealed class MyNextCourseResponse
+{
+    /// <summary>计算所依据的时刻；请求未指定 at 时为服务端当前时间。</summary>
+    [JsonPropertyName("at")]
+    public DateTimeOffset At { get; set; }
+
+    [JsonPropertyName("current")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MyCourseSlot? Current { get; set; }
+
+    [JsonPropertyName("next")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MyCourseSlot? Next { get; set; }
 }
 
 public sealed class NotificationRequest

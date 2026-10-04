@@ -23,7 +23,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | 1024 | `ChangeDisplayName`（修改用户名） |
 | 2048 | `ApiAccess`（REST API Key；插件协议仅透传该位） |
 
-管理员的有效权限固定为 4095。普通用户固定包含值 1，其余权限来自服务端授权。权限设置界面将值 2 显示为“概览”；七日课表查看和手动拉取只要求账号已登录，值 16 保护换课和自动拉取设置。`TeacherComing` 单独保护“老师来了”，`SendNotifications` 只保护自定义通知与清除提醒，`SendVoiceMessages` 独立保护语音消息，`RunExtensions` 是所有插件扩展的独立权限，`MainMenuControl` 保护主界面显隐，`PowerControl` 保护音量和 Windows 电源操作，`ChangeDisplayName` 允许账号在“个人账号”页自行修改自己的用户可见用户名（DisplayName，登录 ID 不变），`ApiAccess` 允许账号创建 API Key 并调用 REST API；`ChangeDisplayName` 和 `ApiAccess` 默认不授予学生角色，管理员与班管理员默认拥有 API 访问。
+管理员的有效权限固定为 4095。普通用户固定包含值 1，其余权限来自服务端授权。权限设置界面将值 2 显示为“概览”；七日课表查看只要求账号已登录，课表拉取和自动拉取仅允许系统管理员或当前班级班管理员，值 16 保护换课。`TeacherComing` 单独保护“老师来了”，`SendNotifications` 只保护自定义通知与清除提醒，`SendVoiceMessages` 独立保护语音消息，`RunExtensions` 是所有插件扩展的独立权限，`MainMenuControl` 保护主界面显隐，`PowerControl` 保护音量和 Windows 电源操作，`ChangeDisplayName` 仅保留为兼容旧权限数据，实际只有系统管理员可以修改用户可见用户名（DisplayName，登录 ID 不变）；用户名会影响老师获取的日程信息。`ApiAccess` 允许账号创建 API Key 并调用 REST API；管理员、班管理员与老师默认拥有 API 访问。
 
 账号密码只出现在第一次 `POST /api/auth/login` 的请求内。生产环境必须使用 HTTPS；Android 手机端为兼容尚未配置 TLS 的现有部署，允许用户在持续显示风险提示的情况下明确连接 HTTP 云服务器。响应包含 1 小时 `accessToken`、30 天 `deviceSessionId/deviceSecret` 和用户有效权限。`POST /api/auth/refresh` 会同时轮换访问令牌和设备密钥；旧值立即失效。
 
@@ -62,7 +62,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | `schedule_sync_status` | 插件 → 服务端/手表 | 全局课表任务状态：Running、Completed、Failed 或 Busy，以及任务来源和占用任务 ID |
 | `extensions_sync` | 插件 → 服务端/手表 | 扩展功能清单（id、displayName、icon、requiredPermission、parameters） |
 | `event_notify` | 插件 → 服务端/手表 | 上课、下课、放学、课表变更、自定义消息、ClassIsland 自动化或第三方插件通知 |
-| `command` | 手表/服务端 → 插件 | 结构化换课、老师来了、通知、主界面、音量、电源、软件升级、插件管理、档案分发、时间表与集控命令 |
+| `command` | 手表/服务端 → 插件 | 结构化换课、老师来了、通知、主界面、音量、电源、软件升级、插件管理、档案分发、时间表、远程终端、文件分发与集控命令 |
 | `command_result` | 插件 → 发起者 | 真实成功、失败码、消息和可选新修订号 |
 | `settings_sync` | 服务端 → 手表 | 全局通知设置快照（目前含 `forceSenderInTitle`） |
 | `plugin_network_info` | 插件 → 服务端 → 手表 | 插件局域网直连地址与端口（每次云端重连时重新发现网卡） |
@@ -86,13 +86,13 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 ## 能力协商
 
-V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`schedule.time-layout` 和 `management.join` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
+V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`schedule.time-layout`、`management.join` 和 `schedule.subject-teacher` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
 
 WebUI 的有效能力是“服务端 ∩ 当前主插件”，手表的有效能力是“手表本地 ∩ 服务端 ∩ 当前主插件”。多插件时，当前主插件仍是最早接入的健康插件；主插件切换、断开或能力更新后，服务端重新广播能力快照。界面应隐藏缺失能力的入口，服务端转发命令前仍需按统一映射复核主插件能力，缺少能力时返回 `CAPABILITY_UNSUPPORTED`。能力声明不能绕过账号权限或扩展策略检查。
 
 `event_notify.payload.event` 的值 6 表示 ClassIsland 自动化“显示提醒”行动产生的通知，值 7 表示第三方 ClassIsland 插件产生的通知。手表分别持久化开关；内置课程、天气等通知不会被值 7 重复转发。
 
-自定义通知的标题与正文均可留空：标题留空时插件统一显示默认标题 `RemoteCI 通知`（仍会按上述规则添加前缀），正文留空时保持为空，由 ClassIsland 只显示标题。通知标题是否添加 `由用户名发送：` 前缀由服务端全局设置 `forceSenderInTitle` 决定（WebUI 通知页开关，默认开启）。开启时插件最终执行会把标题格式化为 `由用户名发送：原标题`；关闭时不添加前缀。发送者名称取自已认证账号的 `displayName`（界面称“用户名”），而 `username` 是唯一登录 ID；服务端转发命令时会按全局设置覆盖客户端请求中的署名标志，客户端不能绕过。设置变更时服务端通过 `settings_sync` 推送在线手表，手表通知页据此决定是否显示“将显示发送人”提示。通知请求还可通过 `isNotificationEffectEnabled`、`isNotificationSoundEnabled` 和 `isSpeechEnabled` 分别控制 ClassIsland 的提醒强调特效、提醒音效和语音朗读；省略时均为关闭。
+自定义通知的标题与正文均可留空：标题留空时插件统一显示默认标题 `RemoteCI 通知`（仍会按上述规则添加前缀），正文留空时保持为空，由 ClassIsland 只显示标题。通知标题是否添加 `由用户名发送：` 前缀由服务端全局设置 `forceSenderInTitle` 决定（系统配置页开关，默认开启，仅系统管理员可修改）。开启时插件最终执行会把标题格式化为 `由用户名发送：原标题`；关闭时不添加前缀。发送者名称取自已认证账号的 `displayName`（界面称“用户名”），而 `username` 是唯一登录 ID；服务端转发命令时会按全局设置覆盖客户端请求中的署名标志，客户端不能绕过。设置变更时服务端通过 `settings_sync` 推送在线手表，手表通知页据此决定是否显示“将显示发送人”提示。通知请求还可通过 `isNotificationEffectEnabled`、`isNotificationSoundEnabled` 和 `isSpeechEnabled` 分别控制 ClassIsland 的提醒强调特效、提醒音效和语音朗读；省略时均为关闭。
 
 控制命令值 3 为清除当前 ClassIsland 提醒，值 4 通过 `mainMenuVisible` 设置主界面显隐，值 5 通过 `powerAction` 选择关机、重启、睡眠或休眠。值 6 通过 `volume.level` 设置 Windows 默认播放设备的 0-100 主音量，或通过 `volume.muted` 设置静音状态；WebUI 在静音状态下向高调节时会在同一命令中同时发送 `level` 与 `muted: false`。休眠入口只在插件状态报告 Windows 已启用休眠时显示。
 
@@ -150,19 +150,45 @@ RemoteCI 插件在云端连接建立后通过 `software_inventory` 上报设备�
 命令值 13 为 `InstallPlugins`、14 为 `UninstallPlugins`、15 为 `SetPluginEnabled`、16 为 `SetPluginManagementPolicy`、17 为 `DistributeProfile`、18 为 `UpdateTimeLayout`、19 为 `JoinManagement`。这些命令都要求 `ManageUsers` 权限，并在服务端和插件端再次确认系统管理员身份；能力标识分别为 `plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`schedule.time-layout` 和 `management.join`。
 
 - 插件安装使用 ClassIsland 官方插件市场解析依赖并下载 `.cipx` 缓存，卸载和启停使用宿主公开的 `PluginInfo` 状态接口；RemoteCI 拒绝操作自身，避免远程控制链路被卸载或禁用。
-- `DistributeProfile` 只接收 ClassIsland 档案 JSON 和分发范围（时间表、课表、科目），不接收任意文件路径；`UpdateTimeLayout` 接收结构化时间点并由插件在 UI 线程写入档案。
+- `DistributeProfile` 只接收 ClassIsland 档案 JSON 和分发范围（时间表、课表、科目），不接收任意文件路径；请求可带 `importProfileName`、`replaceCurrentProfile`（默认 `false`）和 `enableImportedProfile`（默认 `true`）。默认会把选中的内容写入一个新档案并启用该档案；只有明确开启 `replaceCurrentProfile` 才会写入当前档案。`replaceExisting` 仍只控制选中分发范围内的同 Id 数据是否先清空。`UpdateTimeLayout` 接收结构化时间点并由插件在 UI 线程写入档案。
 - 插件对 `Profile` 的字典属性按属性名运行时读取，以兼容 ClassIsland 2.0 的 `ObservableDictionary` 与后续 2.x 的字典实现；因此升级宿主后无需重新生成档案 JSON。
 - `JoinManagement` 由管理员上传 ClassIsland 集控配置文件 `ManagementPreset.json`（即宿主 ManagementSettings 的 JSON）发起。插件解析后按配置文件里的服务器类型（Serverless manifest 模板或 ManagementServer 的 API + gRPC）注册，先校验集控清单核心版本，再写入宿主的 Management 配置并重启；配置文件里的 ID（ClassIdentity）由服务端按目标设备所属班级名自动填充，不需要管理员填写。
 - `SetPluginManagementPolicy` 只约束 RemoteCI 后续发起的远程插件安装或卸载。ClassIsland 当前没有公开的宿主级“禁止本地安装/卸载插件”策略 API，因此该策略不阻止用户在 ClassIsland 本地设置页操作。
 
 WebUI 批量控制页把功能参数和目标设备分成两步：先填写参数，再选择班级、分组或具体设备。班级级选择只投递到该班最早接入的在线设备；具体设备选择按插件连接逐台投递。命令下发成功只表示设备端已接受任务，下载、部署、重启或档案拉取的最终结果由后续 `software_inventory`、连接状态或用户再次查看时体现。
+
+## 远程终端与文件分发
+
+命令值 22 为 `ExecuteTerminalCommand`，23 为 `SendFile`。两者都要求 `ManageUsers` 权限，并在服务端和插件端再次确认系统管理员身份；能力标识分别为 `terminal.execute` 和 `file.distribute`，只进入当前版本能力列表。
+
+- 远程终端在设备上以当前登录用户执行单条命令，等价于 `cmd /d /c`：每次执行相互独立，进程之间不保留 shell 状态。载荷 `terminalCommand` 包含 `command`（≤4000 字符）、可选 `workingDirectory`（≤260 字符，目录不存在时返回 `INVALID_REQUEST`）和可选 `timeoutSeconds`（1-10，默认 10）。插件合并标准输出与标准错误（中间以 `--- 标准错误 ---` 分隔），放入 `command_result.data` 返回，总上限 64K 字符，超出截断并注明；超时的进程会被强制结束并返回 `COMMAND_TIMEOUT`，`data` 携带已捕获的部分输出。命令正常结束时回执 `success=true`，退出代码写入 `message`，非零退出代码不视为失败。
+- 文件分发以内联 Base64 经 WebSocket 传输一个文件，解码后上限 10 MB（复用语音消息的 16 MiB 信封上限），不接受 URL 或服务器本地路径。载荷 `fileDistribution` 包含 `fileName`、`contentBase64`、`targetFolder`（1=桌面、2=下载、3=文档）和 `overwrite`。服务端与插件共用同一校验：文件名剥掉目录部分并过滤非法字符，拦截 Windows 保留设备名，长度上限 200；保存目录只允许 `targetFolder` 枚举列出的用户文件夹（下载目录按系统已知文件夹解析），不接收任意路径。`overwrite` 为 `false`（默认）时同名文件自动追加序号，绝不覆盖；成功回执的 `data` 是设备上的完整保存路径。
+- WebUI 在“批量控制”与班级“控制”页的远程维护区开放这两个功能，均需先勾选高风险确认。终端与文件分发结果通过 AJAX 逐设备展示（输出或保存路径），不走表单跳转；普通班管理员即使被授予 `ManageUsers` 也会被服务端与插件拒绝，只有系统管理员可以使用。
+## 老师角色与我的日程
+
+服务端内置“老师”角色（`AccountRoleKind.Teacher = 5`，固定 ID `55555555-5555-5555-5555-555555555555`，启动时幂等种子并随 `roleId`/`roleName` 下发）。`UserProfile` 新增可选 `roleKind`（整数角色种类），客户端据此识别内置老师角色，不受角色改名影响；旧服务端不下发该字段。
+
+老师的显示名（DisplayName）即“姓名”：显示名与班级课表中的科目教师名（ClassIsland 档案 `Subject.TeacherName`，随 `schedule_sync` 下发）一致时，该老师账号绑定到对应课程。匹配规则为去首尾空白后完全相等，或教师字段按 `、 , ， / ; ； |` 分隔符拆分后任一姓名完全相等；因此多教师科目（如 `张三/李四`）可填写其中之一。绑定完全动态计算，不落库：班级插件尚未推送课表（如服务端刚重启）时绑定暂不可见，收到课表后自动生效，且该班匹配教师集合变化时会触发 `account_sync` 重新推送授权镜像。
+
+老师在任教班级的默认权限为其全局老师角色默认权限：`ViewCurrentCourse | SendNotifications | SendVoiceMessages | ApiAccess`，因此老师默认可以创建 API Key 读取自己的日程。`ClassSummary` 新增可选 `roleKind`（该用户在本班的角色种类），客户端据此判断是否为本班班管理员，旧服务端不下发时退回角色名。用户名由系统管理员维护，因为它是老师获取日程信息时匹配课表科目教师名的依据。非任教班级的访问与普通用户一致（默认班级的自动成员关系沿用既有语义）。绑定按姓名匹配，同名教师会绑定到同名课程，建议使用完整姓名；管理员可在 WebUI 课表页“科目教师”区显式分配（见下）以统一写法。
+
+`schedule_sync` 载荷中的 `CourseEntry` 与 `SubjectEntry` 新增可选 `teacher` 字段（教师名，未设置时省略），旧版服务端与插件不下发、所有端可安全忽略。
+
+- `GET /api/me/schedule`：返回当前老师账号按姓名绑定后跨班级聚合的“我的日程”`MyScheduleResponse { fromDate, generatedAt, days[] }`，每天 `items[]` 按班级分组（`classId`、`className`、`courses[]`，课程按节次排序）。非老师账号或无绑定时 `days` 为空。
+- `GET /api/me/schedule/next`：返回 `MyNextCourseResponse { at, current?, next? }`，分别是指定时刻正在上的课与接下来的第一节课；每项含 `date`、`classId`、`className`、`course`、`startsAt`、`endsAt`。可选查询参数 `at`（ISO 8601）指定计算时刻，省略时取服务端当前时间。课程钟点是教室电脑本地时间，服务端按该班最近状态快照的 `timeZoneOffsetMinutes` 换算为绝对时间，尚无快照时退回服务端本地时区。非老师账号、无绑定或七日内没有后续课程时对应字段省略。两个日程端点都接受 API Key。
+- `POST /api/me/display-name`：系统管理员修改显示名（即老师姓名），载荷 `{displayName}`（1-40 字），成功返回 204 并触发授权镜像同步；普通账号即使保留旧的 `ChangeDisplayName` 权限也会被拒绝。
+- 命令值 21 为 `SetSubjectTeacher`，要求 `ManageSchedule` 权限和能力 `schedule.subject-teacher`。载荷 `subjectTeacher` 包含 `subjectId` 与 `teacherName`（≤100 字，空表示清除）；插件在 UI 线程写入档案 `Subject.TeacherName` 并保存，保存失败回滚并返回 `SAVE_FAILED`，成功后立即重推课表。WebUI 课表页“科目教师”区由此为班级科目分配授课教师。
+
+手机端老师登录后课表页默认展示“我的日程”（可切换“本班课表”），列表按天分组显示班级、科目、教师与节次时间。
+
 ## REST API
 
 主要端点：
 
 - `POST /api/plugin/pair`
 - `POST /api/auth/login`、`/api/auth/refresh`、`/api/auth/logout`
-- `GET /api/me`、`POST /api/me/password`
+- `GET /api/me`、`POST /api/me/password`、`POST /api/me/display-name`
+- `GET /api/me/schedule`、`GET /api/me/schedule/next`
 - `GET/DELETE /api/me/sessions`
 - `GET /api/state`、`GET /api/schedule`
 - `POST /api/commands`
@@ -171,7 +197,7 @@ WebUI 批量控制页把功能参数和目标设备分成两步：先填写参�
 - `POST /api/plugin/pairing-code`
 - `GET /api/admin/status`
 - `GET/POST/PUT/DELETE /api/roles`、`GET/PUT /api/visitor`
-- `GET/PUT /api/settings/notifications`、`GET/PUT /api/settings/schedule-pull`
+- `GET/PUT /api/settings/notifications`（读取需登录，修改仅系统管理员）、`GET/PUT /api/settings/schedule-pull`
 - `GET/PUT /api/extensions`
 - `GET /api/admin/system`、`POST /api/admin/updates/check`、`GET/POST/DELETE /api/admin/backups`
 

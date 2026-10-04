@@ -96,6 +96,11 @@ public sealed class UserProfile : UserProfileLike
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RoleName { get; set; }
 
+    /// <summary>全局角色种类（AccountRoleKind）；null 表示旧版服务端未下发。客户端据此识别内置“老师”角色。</summary>
+    [JsonPropertyName("roleKind")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RoleKind { get; set; }
+
     [JsonPropertyName("grantedPermissions")]
     public UserPermissions GrantedPermissions { get; set; }
 
@@ -135,6 +140,7 @@ public sealed class UserProfile : UserProfileLike
         Role = Role,
         RoleId = RoleId,
         RoleName = RoleName,
+        RoleKind = RoleKind,
         GrantedPermissions = GrantedPermissions,
         Permissions = permissions,
         AllowedExtensionIds = AllowedExtensionIds,

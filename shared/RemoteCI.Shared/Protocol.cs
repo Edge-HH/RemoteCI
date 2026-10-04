@@ -79,7 +79,7 @@ public static class RolePermissions
     public const UserPermissions Assignable = UserPermissions.AccessWebUi | UserPermissions.ManageUsers |
         UserPermissions.SendNotifications | UserPermissions.ManageSchedule | UserPermissions.PowerControl |
         UserPermissions.TeacherComing | UserPermissions.RunExtensions | UserPermissions.MainMenuControl |
-        UserPermissions.SendVoiceMessages | UserPermissions.ChangeDisplayName | UserPermissions.ApiAccess;
+        UserPermissions.SendVoiceMessages | UserPermissions.ApiAccess;
 
     public static UserPermissions Effective(
         UserRole role,
@@ -156,6 +156,12 @@ public enum CommandKind
     JoinManagement = 19,
     /// <summary>仅重启 ClassIsland 宿主，不重启 Windows。</summary>
     RestartClassIsland = 20,
+    /// <summary>设置班级某科目的授课教师名，写入 ClassIsland 档案并随课表推送生效。</summary>
+    SetSubjectTeacher = 21,
+    /// <summary>在设备上执行一条远程终端命令并返回标准输出/错误；无状态，等价于 cmd /d /c。</summary>
+    ExecuteTerminalCommand = 22,
+    /// <summary>把一个文件分发到设备的桌面、下载或文档文件夹；文件名净化，默认不覆盖。</summary>
+    SendFile = 23,
 }
 
 public enum PowerActionKind
@@ -170,18 +176,20 @@ public static class CommandPermissions
 {
     public static UserPermissions Required(CommandKind command) => command switch
     {
-        CommandKind.ChangeSchedule => UserPermissions.ManageSchedule,
+        CommandKind.ChangeSchedule or CommandKind.SetSubjectTeacher => UserPermissions.ManageSchedule,
         CommandKind.SendNotification or CommandKind.ClearNotifications => UserPermissions.SendNotifications,
         CommandKind.SendVoiceMessage => UserPermissions.SendVoiceMessages,
         CommandKind.TeacherComing => UserPermissions.TeacherComing,
         CommandKind.SetMainMenuVisibility => UserPermissions.MainMenuControl,
         CommandKind.Power or CommandKind.Volume => UserPermissions.PowerControl,
-        // 远程升级、插件管理和集控操作都会改变教室端程序或宿主配置，与账号管理同属高风险管理员操作。
+        // 远程升级、插件管理、集控、终端与文件分发都会改变教室端程序、配置或文件系统，
+        // 与账号管理同属高风险管理员操作。
         CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
         CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
         CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
         CommandKind.JoinManagement
         or CommandKind.RestartClassIsland
+        or CommandKind.ExecuteTerminalCommand or CommandKind.SendFile
             => UserPermissions.ManageUsers,
         _ => UserPermissions.None,
     };
@@ -214,6 +222,12 @@ public static class RemoteCiCapabilities
     public const string ManagementJoin = "management.join";
     /// <summary>把换课写入 ClassIsland 源课表（本周及以后每周生效），而不是只写到当天临时课表层。</summary>
     public const string ScheduleChangePermanent = "schedule.change-permanent";
+    /// <summary>设置班级科目的授课教师（写入 ClassIsland 档案）。</summary>
+    public const string ScheduleSubjectTeacher = "schedule.subject-teacher";
+    /// <summary>在设备上执行远程终端命令并取回输出。</summary>
+    public const string TerminalExecute = "terminal.execute";
+    /// <summary>把文件分发到设备的用户文件夹。</summary>
+    public const string FileDistribute = "file.distribute";
 
     /// <summary>没有上报能力列表的旧 V3 端自动获得的基础能力。</summary>
     public static IReadOnlyList<string> Baseline { get; } =
@@ -234,7 +248,8 @@ public static class RemoteCiCapabilities
     /// <summary>当前版本支持的能力；新能力不能加入旧端默认获得的 Baseline。</summary>
     public static IReadOnlyList<string> Current { get; } =
         [.. Baseline, VoiceMessageSend, SoftwareInventory, SoftwareUpgradePlugins, SoftwareUpgradeClassIsland,
-            PluginInstall, PluginUninstall, PluginEnable, PluginManagementPolicy, ProfileDistribute, TimeLayoutUpdate, ManagementJoin];
+            PluginInstall, PluginUninstall, PluginEnable, PluginManagementPolicy, ProfileDistribute, TimeLayoutUpdate, ManagementJoin,
+            ScheduleSubjectTeacher, TerminalExecute, FileDistribute];
 
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
@@ -261,6 +276,9 @@ public static class RemoteCiCapabilities
         ProfileDistribute => "分发档案",
         TimeLayoutUpdate => "修改时间表",
         ManagementJoin => "加入集控",
+        ScheduleSubjectTeacher => "设置科目教师",
+        TerminalExecute => "远程终端",
+        FileDistribute => "文件分发",
         _ => "未知能力",
     };
 
@@ -285,6 +303,9 @@ public static class RemoteCiCapabilities
         CommandKind.DistributeProfile => ProfileDistribute,
         CommandKind.UpdateTimeLayout => TimeLayoutUpdate,
         CommandKind.JoinManagement => ManagementJoin,
+        CommandKind.SetSubjectTeacher => ScheduleSubjectTeacher,
+        CommandKind.ExecuteTerminalCommand => TerminalExecute,
+        CommandKind.SendFile => FileDistribute,
         _ => null,
     };
 }

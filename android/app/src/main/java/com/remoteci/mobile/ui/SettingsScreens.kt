@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -65,6 +66,7 @@ import com.remoteci.mobile.data.ConnectionManager
 import com.remoteci.mobile.data.Protocol
 import com.remoteci.mobile.data.UpdateChannel
 import com.remoteci.mobile.data.UpdateManager
+import com.remoteci.mobile.data.UserProfile
 import com.remoteci.mobile.data.WatchSettings
 import kotlinx.coroutines.launch
 
@@ -118,6 +120,7 @@ fun AccountScreen(
     onLoggedOut: () -> Unit,
 ) {
     val user by ConnectionManager.currentUser.collectAsState()
+    val currentClassId by ConnectionManager.currentClassId.collectAsState()
     val connection by ConnectionManager.state.collectAsState()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         TopAppBar(
@@ -137,8 +140,7 @@ fun AccountScreen(
             onClick = { onOpen(Screen.Connection) },
         ) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                val role = if (user?.isAdmin == true) "管理员" else (user?.username ?: "未登录")
-                Text("${user?.displayName ?: settings.username} - $role", style = MaterialTheme.typography.titleMedium)
+                Text("${user?.displayName ?: settings.username} · ${user?.roleLabel ?: "未登录"}", style = MaterialTheme.typography.titleMedium)
                 Text(
                     when (val currentConnection = connection) {
                         ConnectionManager.State.CloudConnected -> "已连接到 RemoteCI 服务器（云端）"
@@ -151,10 +153,30 @@ fun AccountScreen(
                 )
             }
         }
-        val rows = listOf(
+        // 显示名是老师绑定课表教师名的依据，服务端只允许系统管理员修改，其他账号不显示入口。
+        if (user?.isAdmin == true) {
+            var editingName by remember { mutableStateOf(false) }
+            Card(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                onClick = { editingName = true },
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("姓名", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        user?.displayName ?: "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (editingName) DisplayNameEditorDialog(user, onDismiss = { editingName = false })
+        }
+        val rows = listOfNotNull(
             Triple("连接与服务器", "账号、云端地址、局域网插件发现与重新连接", Screen.Connection to Icons.Rounded.Wifi),
             Triple("通知设置", "课程、自动化和第三方插件提醒的同步开关", Screen.NotificationSettings to Icons.Rounded.Notifications),
-            Triple("自动拉取课表", "设置在线插件自动刷新课表的周期", Screen.ScheduleSettings to Icons.Rounded.Schedule),
+            if (user?.canPullScheduleFor(currentClassId) == true)
+                Triple("自动拉取课表", "设置在线插件自动刷新课表的周期", Screen.ScheduleSettings to Icons.Rounded.Schedule)
+            else null,
             Triple("外观", "主题与显示偏好", Screen.Appearance to Icons.Rounded.Palette),
             Triple("更新", "检查更新与同版本强制覆盖", Screen.Updates to Icons.Rounded.SystemUpdate),
             Triple("开发者设置", "云端中转、局域网连接开关与重新连接", Screen.Developer to Icons.Rounded.Code),
@@ -175,6 +197,43 @@ fun AccountScreen(
             }
         }
     }
+}
+
+/** 系统管理员的姓名（显示名）编辑：保存后从服务端拉取最新档案。 */
+@Composable
+private fun DisplayNameEditorDialog(user: UserProfile?, onDismiss: () -> Unit) {
+    var name by remember(user) { mutableStateOf(user?.displayName ?: "") }
+    var saving by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    AlertDialog(
+        onDismissRequest = { if (!saving) onDismiss() },
+        title = { Text("修改姓名") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(name, { name = it }, label = { Text("姓名（显示名）") }, singleLine = true)
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !saving && name.trim().length in 1..40,
+                onClick = {
+                    scope.launch {
+                        saving = true
+                        error = null
+                        runCatching {
+                            AdminApi.updateDisplayName(name.trim())
+                            ConnectionManager.refreshProfile()
+                        }.onSuccess { onDismiss() }
+                            .onFailure { error = it.message ?: "保存失败" }
+                        saving = false
+                    }
+                },
+            ) { Text("保存") }
+        },
+        dismissButton = { TextButton(enabled = !saving, onClick = onDismiss) { Text("取消") } },
+    )
 }
 
 /** 与 WebUI“自动拉取课表”使用同一个管理 API；旧服务端不支持时保留当前页面并提示原因。 */

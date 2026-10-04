@@ -16,6 +16,14 @@ public sealed class ClassSummary
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RoleName { get; set; }
 
+    /// <summary>
+    /// 该用户在班级中的角色种类（AccountRoleKind）；null 表示旧版服务端未下发。
+    /// 客户端据此识别班管理员等内置角色，不受角色改名影响。
+    /// </summary>
+    [JsonPropertyName("roleKind")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RoleKind { get; set; }
+
     /// <summary>该用户在本班级内的有效权限（按成员角色计算）。</summary>
     [JsonPropertyName("permissions")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

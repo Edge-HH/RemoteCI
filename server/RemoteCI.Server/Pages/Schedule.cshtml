@@ -1,12 +1,12 @@
 @page
 @model ScheduleModel
 @{ ViewData["Title"] = "课表"; }
-<div class="page-head"><div><p class="eyebrow">指定日期课表</p><h1>未来七日课表</h1></div><span class="status @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "已连接" : "插件离线")</span></div>
+<div class="page-head"><div><h1>未来七日课表</h1></div><span class="status @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "已连接" : "插件离线")</span></div>
 @if (Model.CanPullSchedule)
 {
 <section class="panel schedule-pull-panel">
     <form method="post" asp-page-handler="Pull" class="schedule-pull-layout" data-schedule-pull-form>
-        <div class="schedule-pull-copy"><h2>从插件拉取课表</h2><p class="muted">立即连接在线插件重新生成当前课表；拉取成功后会强制覆盖服务端缓存。</p></div>
+        <div class="schedule-pull-copy"><h2>从插件拉取课表</h2><p class="muted">从在线插件获取最新课表，并覆盖服务端缓存。</p></div>
         <button type="submit" class="schedule-pull-button" disabled="@(!Model.PluginOnline || Model.CurrentTask is not null)" data-schedule-pull-button>@(Model.CurrentTask is null ? "立即拉取课表" : "已有课表任务正在执行")</button>
         @if (Model.CurrentTask is { } task)
         {
@@ -14,7 +14,7 @@
         }
         else
         {
-            <div class="schedule-pull-progress" data-schedule-pull-progress hidden aria-live="polite"><progress></progress><span>正在连接插件并拉取课表，请稍候…</span></div>
+            <div class="schedule-pull-progress" data-schedule-pull-progress hidden aria-live="polite"><progress></progress><span>正在拉取课表…</span></div>
         }
     </form>
 </section>
@@ -41,7 +41,33 @@ else
     @if (Model.CanManageSchedule)
     {
     <section class="panel">
-        <h2>提交修改</h2>
+        <h2>科目教师</h2>
+        <p class="muted">教师名与老师账号的用户名一致时，课程会出现在该老师的“我的日程”中。</p>
+        @if (!Model.CanSetSubjectTeacher)
+        {
+            <div class="notice warning">当前班级的插件不支持设置科目教师，请升级教室端插件后重试。</div>
+        }
+        else
+        {
+            <div class="form-grid subject-teacher-grid">
+                @foreach (var subject in Model.Subjects)
+                {
+                    <form method="post" asp-page-handler="SubjectTeacher" class="subject-teacher-row">
+                        <input type="hidden" name="SubjectTeacher.SubjectId" value="@subject.Id" />
+                        <label>@subject.Name
+                            <input type="text" name="SubjectTeacher.TeacherName" value="@subject.Teacher" maxlength="@RemoteCI.Shared.Models.SubjectTeacherRequest.MaxTeacherNameLength" placeholder="授课教师名（留空清除）" />
+                        </label>
+                        <button type="submit">保存</button>
+                    </form>
+                }
+            </div>
+        }
+    </section>
+    }
+    @if (Model.CanManageSchedule)
+    {
+    <section class="panel">
+        <h2>换课</h2>
         <form method="post" class="form-grid schedule-change-form" data-schedule-change-form>
             <label>日期与原节次
                 <select data-schedule-source required>
@@ -81,7 +107,7 @@ else
                 </select>
             </label>
             <label class="schedule-permanent-option"><input asp-for="Input.Permanent" /> 永久换课（写入源课表，之后每周继续生效）</label>
-            <button type="submit" class="schedule-submit-button" disabled="@(!Model.PluginOnline)">执行并等待真实回执</button>
+            <button type="submit" class="schedule-submit-button" disabled="@(!Model.PluginOnline)">提交换课</button>
         </form>
     </section>
     }
@@ -90,7 +116,7 @@ else
 {
 <section class="panel">
     <h2>自动拉取课表</h2>
-    <p class="muted">插件每次连接时都会自动拉取；这里可额外设置在线期间的刷新周期。</p>
+    <p class="muted">插件连接时会自动拉取一次；在线期间按下方间隔再次拉取。</p>
     <form method="post" asp-page-handler="PullInterval" class="form-grid">
         <label>拉取间隔
             <select asp-for="PullInterval">

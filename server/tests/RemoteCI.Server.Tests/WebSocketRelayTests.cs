@@ -316,7 +316,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     }
 
     [Fact]
-    public async Task AuthenticatedWatchSchedulePull_IsForwardedWithoutScheduleManagementPermission()
+    public async Task ClassAdministratorWatchSchedulePull_IsForwarded()
     {
         using var plugin = await ConnectPluginAsync();
         await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
@@ -328,8 +328,9 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
             new CreateUserRequest
             {
                 Username = "schedule.reader",
-                DisplayName = "课表查看者",
+                DisplayName = "班级管理员",
                 Password = "Schedule-Reader-Password-2026",
+                RoleId = AccountRole.ClassAdministratorId,
             }));
         create.EnsureSuccessStatusCode();
         using var watch = await ConnectWatchAsync("schedule.reader", "Schedule-Reader-Password-2026");

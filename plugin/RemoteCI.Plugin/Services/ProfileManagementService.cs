@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Reflection;
 using Avalonia.Threading;
 using ClassIsland.Core;
 using ClassIsland.Core.Abstractions.Services;
@@ -153,13 +154,46 @@ public sealed class ProfileManagementService(ILogger<ProfileManagementService> l
                 var sourceTimeLayouts = HostApiCompat.ReadProperty<IReadOnlyDictionary<Guid, TimeLayout>>(source, "TimeLayouts");
                 var sourceClassPlans = HostApiCompat.ReadProperty<IReadOnlyDictionary<Guid, ClassPlan>>(source, "ClassPlans");
                 var sourceSubjects = HostApiCompat.ReadProperty<IReadOnlyDictionary<Guid, Subject>>(source, "Subjects");
-                if (request.Sections.HasFlag(ProfileDistributionSection.TimeLayouts))
-                    ApplyDictionary(targetTimeLayouts, sourceTimeLayouts, request.ReplaceExisting);
-                if (request.Sections.HasFlag(ProfileDistributionSection.ClassPlans))
-                    ApplyDictionary(targetClassPlans, sourceClassPlans, request.ReplaceExisting);
-                if (request.Sections.HasFlag(ProfileDistributionSection.Subjects))
-                    ApplyDictionary(targetSubjects, sourceSubjects, request.ReplaceExisting);
-                profileService.SaveProfile();
+                if (request.ReplaceCurrentProfile)
+                {
+                    ApplyImportedSections(target, targetTimeLayouts, targetClassPlans, targetSubjects,
+                        sourceTimeLayouts, sourceClassPlans, sourceSubjects, request);
+                    profileService.SaveProfile();
+                }
+                else
+                {
+                    var importName = NormalizeImportName(request.ImportProfileName, source.Name);
+                    var profileType = profileService.GetType();
+                    var profilePath = profileType.GetProperty("ProfilePath", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) as string;
+                    if (string.IsNullOrWhiteSpace(profilePath))
+                        throw new InvalidOperationException("宿主未提供档案目录");
+                    var filename = $"{importName}.json";
+                    var destination = Path.Combine(profilePath, filename);
+                    if (File.Exists(destination))
+                        throw new InvalidOperationException($"档案“{importName}”已存在，请更换导入档案名");
+
+                    var imported = new Profile { Name = importName };
+                    ApplyImportedSections(imported,
+                        HostApiCompat.ReadProperty<IDictionary<Guid, TimeLayout>>(imported, "TimeLayouts"),
+                        HostApiCompat.ReadProperty<IDictionary<Guid, ClassPlan>>(imported, "ClassPlans"),
+                        HostApiCompat.ReadProperty<IDictionary<Guid, Subject>>(imported, "Subjects"),
+                        sourceTimeLayouts, sourceClassPlans, sourceSubjects, request);
+
+                    var save = profileType.GetMethod("SaveProfile", [typeof(string)]);
+                    if (save is null)
+                        throw new InvalidOperationException("宿主未提供档案保存接口");
+                    // SaveProfile(string) serializes the service's current Profile, so temporarily
+                    // swap it even when the imported file should remain disabled.
+                    profileType.GetProperty("Profile")?.SetValue(profileService, imported);
+                    if (request.EnableImportedProfile)
+                    {
+                        profileType.GetProperty("CurrentProfilePath")?.SetValue(profileService, filename);
+                        SetSelectedProfile(profileService, filename);
+                    }
+                    save.Invoke(profileService, [filename]);
+                    if (!request.EnableImportedProfile)
+                        profileType.GetProperty("Profile")?.SetValue(profileService, target);
+                }
             });
         }
         catch (Exception ex)
@@ -171,7 +205,49 @@ public sealed class ProfileManagementService(ILogger<ProfileManagementService> l
         if (request.RestartAfter)
             ScheduleRestart();
         var sections = DescribeSections(request.Sections);
-        return Success($"已分发{sections}{(request.RestartAfter ? "，ClassIsland 将自动重启" : string.Empty)}");
+        var profileHint = request.ReplaceCurrentProfile ? "当前档案" : $"档案“{NormalizeImportName(request.ImportProfileName, source.Name)}”";
+        return Success($"已导入{profileHint}的{sections}{(request.RestartAfter ? "，ClassIsland 将自动重启" : string.Empty)}");
+    }
+
+    private static void ApplyImportedSections(
+        Profile target,
+        IDictionary<Guid, TimeLayout> targetTimeLayouts,
+        IDictionary<Guid, ClassPlan> targetClassPlans,
+        IDictionary<Guid, Subject> targetSubjects,
+        IReadOnlyDictionary<Guid, TimeLayout> sourceTimeLayouts,
+        IReadOnlyDictionary<Guid, ClassPlan> sourceClassPlans,
+        IReadOnlyDictionary<Guid, Subject> sourceSubjects,
+        ProfileDistributionRequest request)
+    {
+        if (request.Sections.HasFlag(ProfileDistributionSection.TimeLayouts))
+            ApplyDictionary(targetTimeLayouts, sourceTimeLayouts, request.ReplaceExisting);
+        if (request.Sections.HasFlag(ProfileDistributionSection.ClassPlans))
+            ApplyDictionary(targetClassPlans, sourceClassPlans, request.ReplaceExisting);
+        if (request.Sections.HasFlag(ProfileDistributionSection.Subjects))
+            ApplyDictionary(targetSubjects, sourceSubjects, request.ReplaceExisting);
+    }
+
+    private static string NormalizeImportName(string? requested, string? sourceName)
+    {
+        var raw = (string.IsNullOrWhiteSpace(requested) ? sourceName : requested)?.Trim();
+        if (!string.IsNullOrWhiteSpace(raw) && (raw.Contains(Path.DirectorySeparatorChar) || raw.Contains(Path.AltDirectorySeparatorChar)))
+            throw new InvalidOperationException("导入档案名不能包含目录路径");
+        var name = Path.GetFileNameWithoutExtension(raw)?.Trim();
+        if (string.IsNullOrWhiteSpace(name)) name = "RemoteCI 导入档案";
+        if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name is "." or "..")
+            throw new InvalidOperationException("导入档案名包含非法字符");
+        return name;
+    }
+
+    private static void SetSelectedProfile(object profileService, string filename)
+    {
+        var settingsService = profileService.GetType().GetProperty("SettingsService",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(profileService);
+        var settings = settingsService?.GetType().GetProperty("Settings")?.GetValue(settingsService);
+        var selected = settings?.GetType().GetProperty("SelectedProfile");
+        selected?.SetValue(settings, filename);
+        settingsService?.GetType().GetMethod("SaveSettings", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            ?.Invoke(settingsService, null);
     }
 
     private static void ApplyDictionary<T>(

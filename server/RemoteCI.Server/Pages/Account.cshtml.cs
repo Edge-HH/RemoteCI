@@ -33,8 +33,8 @@ public sealed class AccountModel(
     /// <summary>创建成功后仅在本次重定向回显一次；明文不写入数据库或日志。</summary>
     public ApiKeyCreationResult? CreatedApiKey { get; private set; }
 
-    /// <summary>是否显示“修改用户名”表单：由“修改用户名”权限决定，默认不给学生角色开放。</summary>
-    public bool CanChangeDisplayName => Permissions.HasFlag(UserPermissions.ChangeDisplayName);
+    /// <summary>是否显示“修改用户名”表单：仅系统管理员可用。</summary>
+    public bool CanChangeDisplayName => CurrentUser.Role == UserRole.Admin;
 
     /// <summary>是否显示 API Key 管理：学生默认没有，管理员和班管理员默认拥有，也可单独授权。</summary>
     public bool CanUseApi => Permissions.HasFlag(UserPermissions.ApiAccess);
@@ -90,9 +90,9 @@ public sealed class AccountModel(
     public async Task<IActionResult> OnPostDisplayNameAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (!Permissions.HasFlag(UserPermissions.ChangeDisplayName))
+        if (!CanChangeDisplayName)
         {
-            TempData["Error"] = "当前账号没有修改用户名的权限。";
+            TempData["Error"] = "仅系统管理员可以修改用户名。";
             return RedirectToPage();
         }
         // 清空“修改密码”表单模型绑定产生的校验项，避免其错误串入用户名表单（反之亦然）。
