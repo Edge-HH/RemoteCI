@@ -6,6 +6,9 @@
 
 > 把 ClassIsland 的课表、通知和受控操作，安全地延伸到 Web、手机和 Wear OS。
 
+> [!WARNING]
+> 当前作者将精力主要用于制作WebUI的集控系统上，对于WearOS端和Android端可能出现功能更新不及时的问题。如出现问题欢迎来提Issue👏
+
 RemoteCI 是面向 ClassIsland 2.x 的跨设备联动系统，由 ClassIsland 插件、ASP.NET Core 服务端、WebUI、Android 手机和 Wear OS 应用组成。它让用户可以在浏览器、手机或手表上查看当前课程与未来七日课表、接收课堂事件，并在权限允许时执行通知、换课和扩展操作。
 
 当前稳定软件版本为 `3.3.0.1`，通信协议为 V3。稳定版使用 ClassIsland 要求的四段纯数字版本；保留的 Beta 使用 `v3.x.x-beta.y`，仅用于测试且不会进入插件市场。
