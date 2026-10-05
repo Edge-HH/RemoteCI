@@ -102,6 +102,34 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
     }
 
     [Fact]
+    public async Task HeadTeacher_HasFixedNameAndPersonalSchedule()
+    {
+        var admin = await _factory.LoginAsync();
+        using var client = _factory.CreateClient();
+        var roles = (await (await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, "/api/roles", admin.AccessToken)))
+            .Content.ReadFromJsonAsync<List<AccountRoleInfo>>())!;
+        var headTeacher = roles.Single(x => x.Id == AccountRole.ClassAdministratorId);
+        Assert.Equal("班主任", headTeacher.Name);
+
+        // 内置班主任角色只能调整默认权限，名称保持不变。
+        var rename = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Put, $"/api/roles/{AccountRole.ClassAdministratorId}", admin.AccessToken,
+            new UpdateAccountRoleRequest { Name = "改过的名字", DefaultPermissions = headTeacher.DefaultPermissions }));
+        rename.EnsureSuccessStatusCode();
+        roles = (await (await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, "/api/roles", admin.AccessToken)))
+            .Content.ReadFromJsonAsync<List<AccountRoleInfo>>())!;
+        Assert.Equal("班主任", roles.Single(x => x.Id == AccountRole.ClassAdministratorId).Name);
+
+        // 班主任与老师一样按显示名获得“我的日程”。
+        var (classId, _) = await SeedTaughtClassAsync("班主任任教班");
+        await CreateUserAsync("head.teacher", "Head-Teacher-Password-2026", AccountRole.ClassAdministratorId, displayName: "王老师");
+        var headTeacherLogin = await _factory.LoginAsync("head.teacher", "Head-Teacher-Password-2026");
+        var scheduleResponse = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, "/api/me/schedule", headTeacherLogin.AccessToken));
+        scheduleResponse.EnsureSuccessStatusCode();
+        var schedule = (await scheduleResponse.Content.ReadFromJsonAsync<MyScheduleResponse>())!;
+        Assert.Contains(schedule.Days.SelectMany(x => x.Items), x => x.ClassId == classId);
+    }
+
+    [Fact]
     public async Task StudentRole_IsNotBoundByDisplayNameEvenWithSameName()
     {
         await SeedTaughtClassAsync("学生同名班");

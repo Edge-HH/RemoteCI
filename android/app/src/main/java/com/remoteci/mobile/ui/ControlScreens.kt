@@ -27,7 +27,9 @@ import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,7 +49,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -55,7 +59,12 @@ import com.remoteci.mobile.data.AdminApi
 import com.remoteci.mobile.data.ClassEvent
 import com.remoteci.mobile.data.ConnectionManager
 import com.remoteci.mobile.data.ExtensionDefinition
+import com.remoteci.mobile.data.ExtensionParameter
+import com.remoteci.mobile.data.initialExtensionArgs
+import com.remoteci.mobile.data.optionLabel
+import com.remoteci.mobile.data.validateExtensionArgs
 import com.remoteci.mobile.data.ExtensionPolicyUpdate
+import com.remoteci.mobile.data.effectiveClassPermissions
 import com.remoteci.mobile.data.Protocol
 import com.remoteci.mobile.data.UserProfile
 import com.remoteci.mobile.data.VoiceRecorder
@@ -66,8 +75,12 @@ import kotlinx.coroutines.launch
 @Composable
 fun ControlListScreen(embedded: Boolean, onOpen: (Screen) -> Unit, onBack: (() -> Unit)?) {
     val user by ConnectionManager.currentUser.collectAsState()
+    val classes by ConnectionManager.classes.collectAsState()
+    val currentClassId by ConnectionManager.currentClassId.collectAsState()
     val snapshot by ConnectionManager.snapshot.collectAsState()
     val caps by ConnectionManager.availableCapabilities.collectAsState()
+    val classPermissions = effectiveClassPermissions(classes, currentClassId, user?.permissions ?: 0)
+    fun can(permission: Int): Boolean = classPermissions and permission == permission
     data class Row(
         val title: String,
         val supporting: String,
@@ -78,24 +91,24 @@ fun ControlListScreen(embedded: Boolean, onOpen: (Screen) -> Unit, onBack: (() -
     )
     val rows = listOf(
         Row("发送通知", "标题、正文、强调特效、音效和语音朗读", Icons.Rounded.NotificationsActive,
-            user?.has(Protocol.PERMISSION_SEND_NOTIFICATIONS) == true && Protocol.CAP_NOTIFICATION_SEND in caps, Screen.Notify),
+            can(Protocol.PERMISSION_SEND_NOTIFICATIONS) && Protocol.CAP_NOTIFICATION_SEND in caps, Screen.Notify),
         Row("发送语音", "最长 60 秒的语音消息", Icons.Rounded.Mic,
-            user?.has(Protocol.PERMISSION_SEND_VOICE_MESSAGES) == true && Protocol.CAP_VOICE_MESSAGE_SEND in caps, Screen.Voice),
+            can(Protocol.PERMISSION_SEND_VOICE_MESSAGES) && Protocol.CAP_VOICE_MESSAGE_SEND in caps, Screen.Voice),
         Row("清除提醒", "清除 ClassIsland 当前提醒与手表提示", Icons.Rounded.NotificationsOff,
-            user?.has(Protocol.PERMISSION_SEND_NOTIFICATIONS) == true && Protocol.CAP_NOTIFICATION_CLEAR in caps, null,
+            can(Protocol.PERMISSION_SEND_NOTIFICATIONS) && Protocol.CAP_NOTIFICATION_CLEAR in caps, null,
             { ConnectionManager.clearNotifications() }),
         Row("老师来了", "显示提醒，等待一秒后自动清除", Icons.Rounded.Campaign,
-            user?.has(Protocol.PERMISSION_TEACHER_COMING) == true && Protocol.CAP_TEACHER_COMING in caps, null,
+            can(Protocol.PERMISSION_TEACHER_COMING) && Protocol.CAP_TEACHER_COMING in caps, null,
             { ConnectionManager.teacherComing() }),
         Row("主界面", if (snapshot?.isMainMenuVisible == true) "当前显示中，点击可隐藏" else "当前已隐藏，点击可显示",
             Icons.Rounded.Visibility,
-            user?.has(Protocol.PERMISSION_MAIN_MENU_CONTROL) == true && Protocol.CAP_MAIN_MENU_VISIBILITY in caps, Screen.MainMenu),
+            can(Protocol.PERMISSION_MAIN_MENU_CONTROL) && Protocol.CAP_MAIN_MENU_VISIBILITY in caps, Screen.MainMenu),
         Row("音量", "音量调节和切换静音", Icons.Rounded.VolumeUp,
-            user?.has(Protocol.PERMISSION_POWER_CONTROL) == true && Protocol.CAP_VOLUME_CONTROL in caps, Screen.Volume),
+            can(Protocol.PERMISSION_POWER_CONTROL) && Protocol.CAP_VOLUME_CONTROL in caps, Screen.Volume),
         Row("电源控制", "关机、睡眠或休眠", Icons.Rounded.PowerSettingsNew,
-            user?.has(Protocol.PERMISSION_POWER_CONTROL) == true && Protocol.CAP_POWER_CONTROL in caps, Screen.Power),
+            can(Protocol.PERMISSION_POWER_CONTROL) && Protocol.CAP_POWER_CONTROL in caps, Screen.Power),
         Row("扩展功能", "运行已注册扩展", Icons.Rounded.Extension,
-            user?.has(Protocol.PERMISSION_RUN_EXTENSIONS) == true && Protocol.CAP_EXTENSIONS_RUN in caps, Screen.Extensions),
+            can(Protocol.PERMISSION_RUN_EXTENSIONS) && Protocol.CAP_EXTENSIONS_RUN in caps, Screen.Extensions),
     ).filter { it.visible }
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
@@ -283,7 +296,18 @@ fun MainMenuScreen(onBack: () -> Unit) {
 @Composable
 fun ExtensionsScreen(onBack: () -> Unit) {
     val user by ConnectionManager.currentUser.collectAsState()
+    val classes by ConnectionManager.classes.collectAsState()
+    val currentClassId by ConnectionManager.currentClassId.collectAsState()
     val extensions by ConnectionManager.extensions.collectAsState()
+    val classPermissions = effectiveClassPermissions(classes, currentClassId, user?.permissions ?: 0)
+    val canRunExtensions = (classPermissions and Protocol.PERMISSION_RUN_EXTENSIONS) == Protocol.PERMISSION_RUN_EXTENSIONS
+    val allowedExtensionIds = user?.allowedExtensionIds
+    val visibleExtensionIds = user?.visibleExtensionIds
+    val visibleExtensions = extensions.filter { extension ->
+        canRunExtensions &&
+            (allowedExtensionIds == null || extension.id in allowedExtensionIds) &&
+            (visibleExtensionIds == null || extension.id in visibleExtensionIds)
+    }
     val scope = rememberCoroutineScope()
     var policies by remember { mutableStateOf<List<com.remoteci.mobile.data.ExtensionPolicyItem>>(emptyList()) }
     var selected by remember { mutableStateOf<ExtensionDefinition?>(null) }
@@ -293,22 +317,21 @@ fun ExtensionsScreen(onBack: () -> Unit) {
     }
     Column(Modifier.fillMaxSize()) {
         TopAppBar(title = { Text("扩展功能") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
-        if (extensions.isEmpty()) {
+        if (visibleExtensions.isEmpty()) {
             EmptyState("没有扩展", "其他 ClassIsland 插件注册后会出现在这里。")
         } else {
             ConnectedListCard(Modifier.padding(16.dp)) {
-                extensions.filter { user?.showsOnWatch(it) == true || user?.isAdmin == true }.forEachIndexed { index, item ->
-                    val visible = extensions.filter { user?.showsOnWatch(it) == true || user?.isAdmin == true }
+                visibleExtensions.forEachIndexed { index, item ->
                     AppListItem(
                         title = item.displayName,
                         supporting = item.id,
                         leading = Icons.Rounded.Extension,
                         trailing = Icons.Rounded.ChevronRight,
                         index = index,
-                        count = visible.size,
+                        count = visibleExtensions.size,
                         onClick = {
                             selected = item
-                            args = item.parameters.associate { it.key to it.defaultValue }
+                            args = initialExtensionArgs(item.parameters)
                         },
                     )
                 }
@@ -330,24 +353,75 @@ fun ExtensionsScreen(onBack: () -> Unit) {
         }
     }
     selected?.let { extension ->
+        val error = validateExtensionArgs(extension.parameters, args)
         AlertDialog(
             onDismissRequest = { selected = null },
             title = { Text(extension.displayName) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     extension.parameters.forEach { parameter ->
-                        OutlinedTextField(
-                            value = args[parameter.key].orEmpty(),
-                            onValueChange = { args = args + (parameter.key to it) },
-                            label = { Text(parameter.label) },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                        ExtensionParameterField(parameter, args[parameter.key]) { value ->
+                            args = args + (parameter.key to value)
+                        }
+                    }
+                    if (extension.parameters.isNotEmpty() && error != null) {
+                        Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             },
-            confirmButton = { TextButton({ ConnectionManager.runExtension(extension, args); selected = null }) { Text("运行") } },
+            confirmButton = {
+                TextButton({ ConnectionManager.runExtension(extension, args); selected = null }, enabled = error == null) { Text("运行") }
+            },
             dismissButton = { TextButton({ selected = null }) { Text("取消") } },
         )
+    }
+}
+
+/** 按参数类型渲染：开关用 Switch，选项用候选项显示名，数字用数字键盘，多行文本用多行输入框。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ExtensionParameterField(parameter: ExtensionParameter, value: String?, onChange: (String?) -> Unit) {
+    val label = parameter.label.ifBlank { parameter.key } + if (parameter.required) " *" else ""
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        when (parameter.type) {
+            Protocol.EXT_PARAM_SWITCH -> Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(label, Modifier.weight(1f))
+                Switch(value.equals("true", ignoreCase = true), { onChange(if (it) "true" else "false") })
+            }
+            Protocol.EXT_PARAM_SELECT -> {
+                Text(label, style = MaterialTheme.typography.labelLarge)
+                parameter.options.forEachIndexed { index, option ->
+                    FilterChip(
+                        selected = value == option,
+                        // 非必填选项再次点击可取消选择。
+                        onClick = { onChange(if (value == option && !parameter.required) null else option) },
+                        label = { Text(parameter.optionLabel(index)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+            else -> OutlinedTextField(
+                value = value.orEmpty(),
+                onValueChange = { onChange(it) },
+                label = { Text(label) },
+                placeholder = parameter.placeholder?.let { hint -> { Text(hint) } },
+                singleLine = parameter.type == Protocol.EXT_PARAM_NUMBER || !parameter.multiline,
+                minLines = if (parameter.multiline && parameter.type == Protocol.EXT_PARAM_TEXT) 3 else 1,
+                keyboardOptions = if (parameter.type == Protocol.EXT_PARAM_NUMBER)
+                    KeyboardOptions(keyboardType = KeyboardType.Decimal) else KeyboardOptions.Default,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        parameter.description?.takeIf { it.isNotBlank() }?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 

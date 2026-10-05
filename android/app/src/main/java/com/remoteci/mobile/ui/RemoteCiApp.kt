@@ -18,6 +18,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -35,9 +36,11 @@ import com.remoteci.mobile.data.SettingsStore
 import com.remoteci.mobile.data.WatchSettings
 import com.remoteci.mobile.notif.NotificationHelper
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
-enum class HomeTab { Today, Schedule, Control, People }
+/** SwapRequests：老师换课申请页，仅在账号拥有“老师主动换课”权限时出现在底栏。 */
+enum class HomeTab { Today, Schedule, SwapRequests, Control, People }
 
 sealed interface Screen {
     data object Login : Screen
@@ -75,22 +78,25 @@ fun RemoteCiApp(appContext: android.content.Context) {
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val connection by ConnectionManager.state.collectAsState()
-    val user by ConnectionManager.currentUser.collectAsState()
     var stack by remember { mutableStateOf(listOf<Screen>(if (ConnectionManager.hasSavedSession()) Screen.Home() else Screen.Login)) }
     val current = stack.last()
     val history = remember { EventHistory(appContext) }
+    var navigationDirection by remember { mutableIntStateOf(1) }
 
     DisposableEffect(Unit) {
         ConnectionManager.initialize(appContext)
-        if (ConnectionManager.hasSavedSession()) ConnectionManager.connect(settings)
         onDispose { }
     }
 
+    // 首次启动与回到前台都交给 onForeground：已连接时不再断开重连（扫码、选文件等短暂离开也不打断连接），
+    // 只有未连接、失败或在后台停留过久时才重建。观察者注册时会立即收到 ON_START，覆盖冷启动。
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_START && ConnectionManager.hasSavedSession()) {
-                ConnectionManager.connect(settings)
+            when (event) {
+                Lifecycle.Event.ON_START -> ConnectionManager.onForeground(settings)
+                Lifecycle.Event.ON_STOP -> ConnectionManager.onBackground()
+                else -> Unit
             }
         }
         lifecycle.addObserver(observer)
@@ -103,10 +109,34 @@ fun RemoteCiApp(appContext: android.content.Context) {
         }
     }
     LaunchedEffect(Unit) {
+        ConnectionManager.userNotifications.collect { notification ->
+            NotificationHelper.handleUser(appContext, notification, history)
+        }
+    }
+    LaunchedEffect(Unit) {
+        com.remoteci.mobile.MainActivity.openRequests.collect { target ->
+            if (target == NotificationHelper.OPEN_SWAP_REQUESTS && stack.last() !is Screen.Login) {
+                navigationDirection = 1
+                stack = listOf(Screen.Home(HomeTab.SwapRequests))
+            }
+            if (target != null) com.remoteci.mobile.MainActivity.openRequests.value = null
+        }
+    }
+    LaunchedEffect(Unit) {
         ConnectionManager.lastCommandResult.collectLatest { result ->
             result ?: return@collectLatest
             snackbar.showSnackbar(if (result.success) "已完成：${result.message.ifBlank { "成功" }}" else "失败：${result.message.ifBlank { result.code }}")
         }
+    }
+    LaunchedEffect(Unit) {
+        combine(
+            ConnectionManager.snapshot,
+            ConnectionManager.personalNextCourse,
+            ConnectionManager.currentUser,
+        ) { snapshot, personal, profile -> Triple(snapshot, personal, profile?.isTeacher == true) }
+            .collectLatest { (snapshot, personal, isTeacher) ->
+                NotificationHelper.updateSchoolStatus(appContext, snapshot, personal, isTeacher)
+            }
     }
     LaunchedEffect(Unit) {
         ConnectionManager.discoveredSettings.collectLatest {
@@ -120,9 +150,20 @@ fun RemoteCiApp(appContext: android.content.Context) {
         store.save(next)
     }
 
-    fun push(screen: Screen) { stack = stack + screen }
-    fun pop() { if (stack.size > 1) stack = stack.dropLast(1) }
-    fun goHome(tab: HomeTab) { stack = listOf(Screen.Home(tab)) }
+    fun push(screen: Screen) {
+        navigationDirection = 1
+        stack = stack + screen
+    }
+    fun pop() {
+        if (stack.size > 1) {
+            navigationDirection = -1
+            stack = stack.dropLast(1)
+        }
+    }
+    fun goHome(tab: HomeTab) {
+        navigationDirection = -1
+        stack = listOf(Screen.Home(tab))
+    }
 
     val appearance = when (settings.appearanceMode) {
         "light" -> AppearanceMode.Light
@@ -138,8 +179,13 @@ fun RemoteCiApp(appContext: android.content.Context) {
                 // 四个首页板块共用同一个 HomeShell；切换底栏只替换正文，不让底栏跟着横向滑动。
                 contentKey = ::screenTransitionKey,
                 transitionSpec = {
-                    (fadeIn(tween(180)) + slideInHorizontally(tween(220)) { it / 12 }) togetherWith
-                        (fadeOut(tween(140)) + slideOutHorizontally(tween(180)) { -it / 16 })
+                    if (navigationDirection >= 0) {
+                        (fadeIn(tween(180)) + slideInHorizontally(tween(220)) { it / 12 }) togetherWith
+                            (fadeOut(tween(140)) + slideOutHorizontally(tween(180)) { -it / 16 })
+                    } else {
+                        (fadeIn(tween(180)) + slideInHorizontally(tween(220)) { -it / 12 }) togetherWith
+                            (fadeOut(tween(140)) + slideOutHorizontally(tween(180)) { it / 16 })
+                    }
                 },
                 label = "screen-transition",
             ) { screen ->
@@ -162,7 +208,12 @@ fun RemoteCiApp(appContext: android.content.Context) {
                         tab = screen.tab,
                         settings = settings,
                         snackbar = snackbar,
-                        onTab = { tab -> stack = listOf(Screen.Home(tab)) },
+                        onTab = { tab ->
+                            val currentTab = (current as? Screen.Home)?.tab
+                            navigationDirection = if (currentTab != null &&
+                                HomeTab.entries.indexOf(tab) < HomeTab.entries.indexOf(currentTab)) -1 else 1
+                            stack = listOf(Screen.Home(tab))
+                        },
                         onOpen = ::push,
                         onPersist = ::persist,
                     )

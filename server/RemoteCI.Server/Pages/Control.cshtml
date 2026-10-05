@@ -42,7 +42,7 @@
         }
         @if (Model.CanManageClassInfo)
         {
-            <button type="button" class="batch-action-card" data-user-edit-open="class-info-dialog" aria-controls="class-info-dialog"><span class="batch-action-icon"><i class="bi bi-collection" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>班级设置</strong><small>修改班级名称与头像。</small></span></button>
+            <button type="button" class="batch-action-card" data-user-edit-open="class-info-dialog" aria-controls="class-info-dialog"><span class="batch-action-icon"><i class="bi bi-collection" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>班级设置</strong><small>@(Model.ClassSelfService.CanRename && Model.ClassSelfService.CanChangeAvatar ? "修改班级名称与头像。" : Model.ClassSelfService.CanRename ? "修改班级名称。" : "修改班级头像。")</small></span></button>
         }
     </div>
 </section>
@@ -57,19 +57,26 @@
                 {
                     <img class="class-avatar" src="/api/classes/@Model.CurrentClassId/avatar" alt="班头像" />
                 }
-                <form method="post" asp-page-handler="ClassInfo" class="stack">
-                    <label>班名<input asp-for="ClassNameInput" maxlength="40" placeholder="@Model.CurrentClass?.Name" /></label>
-                    <button type="submit">保存班名</button>
-                </form>
-                <form method="post" asp-page-handler="Avatar" enctype="multipart/form-data" class="stack">
-                    <label>班头像（PNG/JPEG/WebP，≤256KB）<input type="file" asp-for="AvatarFile" accept="image/png,image/jpeg,image/webp" /></label>
-                    <button type="submit">上传头像</button>
-                </form>
-                @if (Model.HasAvatar)
+                @* 班名与头像分别受班级自治策略控制；系统管理员两项都可用。 *@
+                @if (Model.ClassSelfService.CanRename)
                 {
-                    <form method="post" asp-page-handler="RemoveAvatar">
-                        <button type="submit" class="ghost">清除头像</button>
+                    <form method="post" asp-page-handler="ClassInfo" class="stack">
+                        <label>班名<input asp-for="ClassNameInput" maxlength="40" placeholder="@Model.CurrentClass?.Name" /></label>
+                        <button type="submit">保存班名</button>
                     </form>
+                }
+                @if (Model.ClassSelfService.CanChangeAvatar)
+                {
+                    <form method="post" asp-page-handler="Avatar" enctype="multipart/form-data" class="stack">
+                        <label>班头像（PNG/JPEG/WebP，≤256KB）<input type="file" asp-for="AvatarFile" accept="image/png,image/jpeg,image/webp" /></label>
+                        <button type="submit">上传头像</button>
+                    </form>
+                    @if (Model.HasAvatar)
+                    {
+                        <form method="post" asp-page-handler="RemoveAvatar">
+                            <button type="submit" class="ghost">清除头像</button>
+                        </form>
+                    }
                 }
             </div>
         </div>
@@ -156,21 +163,38 @@
         <section class="panel control-card control-card-full" id="extensions">
             <div class="control-card-head">
                 <span class="feature-icon"><i class="bi bi-puzzle" aria-hidden="true"></i></span>
-                <div><h2>扩展功能</h2><p class="muted">由其他 ClassIsland 插件注册的功能。</p></div>
+                <div><h2>扩展功能</h2><p class="muted">由其他 ClassIsland 插件注册的功能，按插件分组显示。</p></div>
             </div>
+            @if (!Model.ExtensionGroups.Any(Model.ShowExtensionGroup))
+            {
+                <p class="muted">当前没有向此账号开放的扩展功能。</p>
+            }
+            @{ var extensionIndex = 0; }
+            @foreach (var group in Model.ExtensionGroups.Where(Model.ShowExtensionGroup))
+            {
+            <div class="extension-group" data-extension-group="@group.Id">
+                <div class="extension-group-head">
+                    <div class="extension-identity">
+                        <strong>@group.DisplayName</strong>
+                        @if (!string.IsNullOrWhiteSpace(group.Description)) { <small>@group.Description</small> }
+                    </div>
+                    @if (group.HasSettings && Model.CanEditExtensionSettings)
+                    {
+                        <a class="button ghost" asp-page="/ExtensionSettings" asp-route-groupId="@group.Id"><i class="bi bi-sliders" aria-hidden="true"></i> 插件设置</a>
+                    }
+                </div>
             <div class="extension-list">
-                @if (Model.Extensions.Count == 0)
+                @if (group.Extensions.Count == 0)
                 {
-                    <p class="muted">当前没有向此账号开放的扩展功能。</p>
+                    <p class="muted">该插件没有可执行的扩展功能，可在插件设置中统一调整。</p>
                 }
-                @{ var extensionIndex = 0; }
-                @foreach (var item in Model.Extensions)
+                @foreach (var extension in group.Extensions)
                 {
-                    var extension = item.Definition;
+                    var item = Model.ExtensionItem(extension);
                     var runDialogId = $"extension-run-{extensionIndex}";
                     var editDialogId = $"extension-edit-{extensionIndex}";
                     <article class="extension-control-row">
-                        <div class="extension-identity"><strong>@extension.DisplayName</strong><small>ID：@extension.Id</small></div>
+                        <div class="extension-identity"><strong>@extension.DisplayName</strong>@if (!string.IsNullOrWhiteSpace(extension.Description)) { <small>@extension.Description</small> }<small>ID：@extension.Id</small></div>
                         <div class="extension-row-actions">
                             @if ((extension.Parameters?.Count ?? 0) == 0)
                             {
@@ -194,34 +218,7 @@
                                 <header class="user-edit-dialog-header"><div><p class="eyebrow">执行扩展</p><h2 id="@($"{runDialogId}-title")">@extension.DisplayName</h2><small>ID：@extension.Id</small></div><button type="button" class="ghost dialog-close-button" data-user-edit-close aria-label="关闭执行窗口"><i class="bi bi-x-lg" aria-hidden="true"></i></button></header>
                                 <form method="post" asp-page-handler="Extension" class="stack extension-dialog-form">
                                     <input type="hidden" name="extensionId" value="@extension.Id" />
-                                    @for (var parameterIndex = 0; parameterIndex < extension.Parameters!.Count; parameterIndex++)
-                                    {
-                                        var parameter = extension.Parameters[parameterIndex];
-                                        <input type="hidden" name="ExtensionInputs[@parameterIndex].Key" value="@parameter.Key" />
-                                        <label>@parameter.Label
-                                            @if (parameter.Type == ExtensionParameterType.Switch)
-                                            {
-                                                <select name="ExtensionInputs[@parameterIndex].Value">
-                                                    <option value="false" selected="@(!string.Equals(parameter.DefaultValue, "true", StringComparison.OrdinalIgnoreCase))">关闭</option>
-                                                    <option value="true" selected="@(string.Equals(parameter.DefaultValue, "true", StringComparison.OrdinalIgnoreCase))">开启</option>
-                                                </select>
-                                            }
-                                            else if (parameter.Type == ExtensionParameterType.Select)
-                                            {
-                                                <select name="ExtensionInputs[@parameterIndex].Value" required="@parameter.Required">
-                                                    @if (!parameter.Required) { <option value="">未选择</option> }
-                                                    @foreach (var option in parameter.Options ?? [])
-                                                    {
-                                                        <option value="@option" selected="@(option == parameter.DefaultValue)">@option</option>
-                                                    }
-                                                </select>
-                                            }
-                                            else
-                                            {
-                                                <input name="ExtensionInputs[@parameterIndex].Value" type="@(parameter.Type == ExtensionParameterType.Number ? "number" : "text")" value="@parameter.DefaultValue" required="@parameter.Required" />
-                                            }
-                                        </label>
-                                    }
+                                    @await Html.PartialAsync("_ExtensionFields", new ExtensionFieldsModel(extension.Parameters!, "ExtensionInputs", runDialogId))
                                     <div class="dialog-actions"><button type="button" class="ghost" data-user-edit-close>取消</button><button type="submit">执行</button></div>
                                 </form>
                             </div>
@@ -256,6 +253,8 @@
                     extensionIndex++;
                 }
             </div>
+            </div>
+            }
         </section>
     }
 </div>

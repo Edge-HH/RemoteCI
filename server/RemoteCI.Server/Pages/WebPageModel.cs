@@ -25,8 +25,14 @@ public abstract class WebPageModel(UserManager<AppUser> users) : PageModel
 
     public IReadOnlyList<ClassSummary> AccessibleClasses { get; private set; } = [];
 
-    /// <summary>当前用户是否可以管理当前班级的信息（班名/班头像）：系统管理员或本班班管理员。</summary>
-    public bool CanManageClassInfo { get; private set; }
+    /// <summary>
+    /// 当前用户在当前班级可自行完成的班级管理操作：系统管理员全部允许，
+    /// 本班班主任按系统管理员设置的班级自治策略，其他账号全部禁止。
+    /// </summary>
+    public ClassSelfServicePolicy ClassSelfService { get; private set; } = ClassSelfServicePolicy.None;
+
+    /// <summary>当前用户是否可以修改当前班级的班名或班头像（任一项被允许即显示“班级设置”入口）。</summary>
+    public bool CanManageClassInfo => ClassSelfService.CanRename || ClassSelfService.CanChangeAvatar;
 
     public Guid CurrentClassId => CurrentClass?.Id ?? Classroom.DefaultId;
 
@@ -54,7 +60,7 @@ public abstract class WebPageModel(UserManager<AppUser> users) : PageModel
         CurrentClass = AccessibleClasses.FirstOrDefault(x => x.Id == cookieClass) ?? AccessibleClasses.FirstOrDefault();
         // 没有任何可访问班级时退回默认班级占位，权限为 None，页面自然呈现无权限状态。
         ClassPermissions = CurrentClass?.Permissions ?? UserPermissions.None;
-        CanManageClassInfo = await access.IsClassAdminAsync(user.Id, user.Role, CurrentClassId, HttpContext.RequestAborted);
+        ClassSelfService = await access.GetClassSelfServiceAsync(user.Id, user.Role, CurrentClassId, HttpContext.RequestAborted);
         return permission is not null && !Permissions.HasFlag(permission.Value)
             ? RedirectToPage("/Denied")
             : null;

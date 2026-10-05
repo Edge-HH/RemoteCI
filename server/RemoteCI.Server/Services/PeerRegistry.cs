@@ -103,11 +103,25 @@ public sealed class PeerRegistry(
         await PersistSoftwareInventoryAsync(peer, inventory, now, ct);
     }
 
-    public Task SendCurrentCapabilitiesToWatchAsync(Guid connectionId, CancellationToken ct = default) =>
-        SendToWatchAsync(connectionId, Envelope.CapabilitiesSync(CreateCapabilitiesSync()), ct);
+    public async Task SendCurrentCapabilitiesToWatchAsync(Guid connectionId, CancellationToken ct = default)
+    {
+        if (_watchPeers.TryGetValue(connectionId, out var peer))
+            await SendToWatchAsync(connectionId, Envelope.CapabilitiesSync(CreateCapabilitiesSync(peer)), ct);
+    }
 
-    public Task BroadcastCapabilitiesToWatchesAsync(CancellationToken ct = default) =>
-        BroadcastWatchesAsync(Envelope.CapabilitiesSync(CreateCapabilitiesSync()), ct);
+    /// <summary>
+    /// 能力快照按接收方可访问的班级逐个生成：多班级部署中各班插件版本与在线状态不同，
+    /// 不能把全局最早接入的插件当作每个班级的能力来源。
+    /// </summary>
+    public async Task BroadcastCapabilitiesToWatchesAsync(CancellationToken ct = default)
+    {
+        foreach (var peer in _watchPeers.Values)
+        {
+            if (!IsLocallyAuthorized(peer) ||
+                !await TrySendAsync(peer, Envelope.CapabilitiesSync(CreateCapabilitiesSync(peer)), ct))
+                await UnregisterAsync(peer.Id, WebSocketCloseStatus.PolicyViolation);
+        }
+    }
 
     /// <summary>管理员状态页使用的连接级诊断，不包含令牌或凭据。</summary>
     public IReadOnlyList<PeerCapabilityDiagnostic> GetCapabilityDiagnostics()
@@ -341,6 +355,19 @@ public sealed class PeerRegistry(
             if (!principal.CoversClass(value.ClassId ?? Classroom.DefaultId)) continue;
             await SendToWatchAsync(connectionId, Envelope.PluginNetworkInfo(value), ct);
         }
+    }
+
+    /// <summary>发给某个用户全部在线的手表/手机连接（个人通知），不按班级过滤；返回投递成功的连接数。</summary>
+    public async Task<int> SendToUserAsync(Guid userId, Envelope envelope, CancellationToken ct = default)
+    {
+        var delivered = 0;
+        foreach (var peer in _watchPeers.Values)
+        {
+            if (peer.Principal.User?.Id != userId) continue;
+            if (IsLocallyAuthorized(peer) && await TrySendAsync(peer, envelope, ct)) delivered++;
+            else await UnregisterAsync(peer.Id, WebSocketCloseStatus.PolicyViolation);
+        }
+        return delivered;
     }
 
     public async Task BroadcastWatchesAsync(Envelope envelope, CancellationToken ct = default) =>
@@ -591,24 +618,34 @@ public sealed class PeerRegistry(
     private static IReadOnlyList<string> EffectiveCapabilities(WsPeer peer) =>
         peer.HasExplicitCapabilities ? peer.Capabilities : RemoteCiCapabilities.Baseline;
 
-    private CapabilitiesSync CreateCapabilitiesSync()
+    private CapabilitiesSync CreateCapabilitiesSync(WsPeer viewer)
     {
+        var classPlugins = _pluginPeers.Values
+            .Where(peer => IsLocallyAuthorized(peer) &&
+                peer.Principal.ClassId is { } classId &&
+                viewer.Principal.CoversClass(classId))
+            .GroupBy(peer => peer.Principal.ClassId!.Value)
+            .Select(group => group.OrderBy(peer => peer.RegisteredAt).First())
+            .OrderBy(peer => peer.RegisteredAt)
+            .Select(peer => new ClassPluginCapabilities
+            {
+                ClassId = peer.Principal.ClassId!.Value,
+                Plugin = ToPeerCapabilities(peer),
+            })
+            .ToList();
         return new CapabilitiesSync
         {
             Server = AppVersion.Capabilities(),
-            Plugin = BuildPrimaryPluginCapabilities(),
+            Plugin = classPlugins.FirstOrDefault()?.Plugin,
+            ClassPlugins = classPlugins,
         };
     }
 
-    private PeerCapabilities? BuildPrimaryPluginCapabilities()
+    private static PeerCapabilities ToPeerCapabilities(WsPeer plugin) => new()
     {
-        var plugin = PrimaryPlugin();
-        return plugin is null ? null : new PeerCapabilities
-        {
-            SoftwareVersion = plugin.SoftwareVersion ?? string.Empty,
-            Capabilities = EffectiveCapabilities(plugin),
-        };
-    }
+        SoftwareVersion = plugin.SoftwareVersion ?? string.Empty,
+        Capabilities = EffectiveCapabilities(plugin),
+    };
 
     private static string? NormalizeSoftwareVersion(string? value)
     {

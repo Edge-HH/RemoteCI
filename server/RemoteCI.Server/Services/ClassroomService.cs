@@ -89,9 +89,9 @@ public sealed class ClassroomService(AppDbContext db)
         await db.SaveChangesAsync(ct);
     }
 
-    // ---------- 班级信息（班名/头像）：班管理员与系统管理员可用 ----------
+    // ---------- 班级信息（班名/头像）：班主任与系统管理员可用 ----------
 
-    /// <summary>更新班名；调用方负责先做权限校验（系统管理员或本班班管理员）。</summary>
+    /// <summary>更新班名；调用方负责先做权限校验（系统管理员或本班班主任）。</summary>
     public Task RenameClassAsync(Guid classId, string name, CancellationToken ct = default) => RenameAsync(classId, name, ct);
 
     /// <summary>设置或清除班级头像；avatar 为 null 表示清除。</summary>

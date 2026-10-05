@@ -7,6 +7,9 @@ namespace RemoteCI.Server.Services;
 
 public sealed class AccountRoleService(AppDbContext db)
 {
+    /// <summary>内置“班主任”角色曾用名；批量导入等旧清单仍按此名引用。</summary>
+    internal const string LegacyClassAdministratorName = "班管理员";
+
     public async Task<IReadOnlyList<AccountRoleInfo>> ListAsync(CancellationToken ct = default) =>
         await db.AccountRoles.AsNoTracking().OrderBy(x => x.Kind).ThenBy(x => x.Name)
             .Select(x => new AccountRoleInfo
@@ -77,6 +80,9 @@ public sealed class AccountRoleService(AppDbContext db)
     {
         var trimmed = name?.Trim() ?? string.Empty;
         if (trimmed.Length == 0) return null;
+        // 内置“班主任”曾名“班管理员”，旧导入清单仍可按旧名引用。
+        if (trimmed == LegacyClassAdministratorName)
+            return await db.AccountRoles.AsNoTracking().SingleOrDefaultAsync(x => x.Id == AccountRole.ClassAdministratorId, ct);
         var normalized = trimmed.ToUpperInvariant();
         return await db.AccountRoles.AsNoTracking()
             .SingleOrDefaultAsync(x => x.Name == trimmed || x.NormalizedName == normalized, ct);

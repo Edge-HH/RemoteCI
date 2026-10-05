@@ -19,7 +19,8 @@ public sealed class ClassesModel(
     VisitorAccessSettings visitorAccess,
     ClassExcelService classExcel,
     IMemoryCache reportCache,
-    PeerRegistry peers)
+    PeerRegistry peers,
+    ClassSelfServiceSettings selfService)
     : WebPageModel(users)
 {
     /// <summary>虚拟树节点：用于筛选没有任何分组归属的班级。</summary>
@@ -91,6 +92,20 @@ public sealed class ClassesModel(
     public IReadOnlyList<AccountRoleInfo> RoleDefinitions { get; private set; } = [];
     public bool AnyVisitorClass { get; private set; }
     public bool AutoEnter { get; private set; }
+
+    /// <summary>班级自治策略：系统管理员统一决定班主任可在本班自行完成的操作。</summary>
+    public ClassSelfServicePolicy SelfServicePolicy { get; private set; } = ClassSelfServicePolicy.Default;
+
+    [BindProperty]
+    public SelfServiceInput SelfServiceOptions { get; set; } = new();
+
+    public sealed class SelfServiceInput
+    {
+        public bool CanRename { get; set; }
+        public bool CanChangeAvatar { get; set; }
+        public bool CanPullSchedule { get; set; }
+        public bool CanEditExtensionSettings { get; set; }
+    }
 
     /// <summary>是否已设置统一连接码；不展示明文。</summary>
     public bool HasUnifiedCode { get; private set; }
@@ -238,6 +253,20 @@ public sealed class ClassesModel(
             TempData["Message"] = "班级已删除，成员关系与插件凭据一并移除。";
         }
         catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
+        return RedirectToClasses();
+    }
+
+    /// <summary>保存班级自治策略；只影响服务端复核，不需要刷新插件授权镜像。</summary>
+    public async Task<IActionResult> OnPostSaveSelfServiceAsync(CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
+        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        await selfService.SetAsync(new ClassSelfServicePolicy(
+            SelfServiceOptions.CanRename,
+            SelfServiceOptions.CanChangeAvatar,
+            SelfServiceOptions.CanPullSchedule,
+            SelfServiceOptions.CanEditExtensionSettings), ct);
+        TempData["Message"] = "班主任权限已保存，对全部班级生效。";
         return RedirectToClasses();
     }
 
@@ -538,6 +567,7 @@ public sealed class ClassesModel(
         AnyVisitorClass = await visitorAccess.AnyVisitorClassEnabledAsync(ct);
         AutoEnter = await visitorAccess.GetAutoEnterAsync(ct);
         HasUnifiedCode = await identities.HasSharedPluginPairingCodeAsync(ct);
+        SelfServicePolicy = await selfService.GetAsync(ct);
         UnassignedDevices = await LoadUnassignedDevicesAsync(ct);
         if (TempData["ClassExcelReportId"] is string reportId &&
             reportCache.TryGetValue(reportId, out ClassExcelImportResult? report))

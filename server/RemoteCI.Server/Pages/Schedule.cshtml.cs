@@ -20,10 +20,11 @@ public sealed class ScheduleModel(
     public ScheduleInput Input { get; set; } = new();
     public ScheduleBundle? Bundle { get; private set; }
     public bool PluginOnline => peers.HasPluginFor(CurrentClassId);
-    // 拉取课表会覆盖服务端缓存，只允许系统管理员或当前班级班管理员使用；其他账号不显示入口。
-    public bool CanPullSchedule => CanManageClassInfo &&
+    // 拉取课表会覆盖服务端缓存，只允许系统管理员或获准的本班班主任使用；其他账号不显示入口。
+    public bool CanPullSchedule => ClassSelfService.CanPullSchedule &&
         (!PluginOnline || peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.SchedulePull));
-    public bool CanConfigureSchedulePull => CanPullSchedule;
+    // 定时拉取间隔是对全部班级生效的全局设置，只有系统管理员可以修改。
+    public bool CanConfigureSchedulePull => CanPullSchedule && CurrentUser.Role == UserRole.Admin;
     public bool CanManageSchedule => ClassPermissions.HasFlag(UserPermissions.ManageSchedule) &&
         (!PluginOnline || peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.ScheduleChange));
     public ScheduleSyncStatus? CurrentTask => scheduleSync.Current(CurrentClassId);
@@ -50,7 +51,7 @@ public sealed class ScheduleModel(
     public async Task<IActionResult> OnPostPullAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (!CanManageClassInfo) return RedirectToPage("/Denied");
+        if (!ClassSelfService.CanPullSchedule) return RedirectToPage("/Denied");
         if (PluginOnline && !peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.SchedulePull))
         {
             TempData["Error"] = $"{CommandResultCodes.CapabilityUnsupported}：当前班级的插件不支持拉取课表。";
@@ -67,7 +68,7 @@ public sealed class ScheduleModel(
     public async Task<IActionResult> OnPostPullIntervalAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (!CanManageClassInfo) return RedirectToPage("/Denied");
+        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
         if (PluginOnline && !peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.SchedulePull))
         {
             TempData["Error"] = $"{CommandResultCodes.CapabilityUnsupported}：当前班级的插件不支持拉取课表。";
@@ -147,6 +148,9 @@ public sealed class ScheduleModel(
     {
         if (await RequireAsync() is { } denied) return denied;
         if (RequireClass(UserPermissions.ManageSchedule) is { } classDenied) return classDenied;
+        // Razor Page 的 POST 不会执行 OnGetAsync；先读取当前班级课表，
+        // 否则 Subjects 仍是空列表，任何合法的科目 Id 都会被误判为不存在。
+        Bundle = state.GetLatestSchedule(CurrentClassId);
         if (!CanSetSubjectTeacher)
         {
             TempData["Error"] = $"{CommandResultCodes.CapabilityUnsupported}：当前班级的插件不支持设置科目教师。";

@@ -309,6 +309,30 @@
 
 @if (Model.CurrentUser.Role == UserRole.Admin)
 {
+<section class="panel class-self-service-panel" id="class-self-service">
+    <div class="panel-heading">
+        <div>
+            <h2>班主任权限</h2>
+            <p class="muted">统一决定班主任能否在自己的班级里自行完成以下操作，对全部班级生效；系统管理员始终可以执行。</p>
+        </div>
+    </div>
+    <form method="post" asp-page-handler="SaveSelfService" class="stack">
+        <input type="hidden" name="groupId" value="@Model.SelectedGroupId" />
+        <fieldset class="batch-check-group">
+            <legend>允许班主任</legend>
+            <label class="check"><input type="checkbox" name="SelfServiceOptions.CanRename" value="true" checked="@Model.SelfServicePolicy.CanRename" /> 修改本班班名</label>
+            <label class="check"><input type="checkbox" name="SelfServiceOptions.CanChangeAvatar" value="true" checked="@Model.SelfServicePolicy.CanChangeAvatar" /> 上传或清除本班头像</label>
+            <label class="check"><input type="checkbox" name="SelfServiceOptions.CanPullSchedule" value="true" checked="@Model.SelfServicePolicy.CanPullSchedule" /> 手动从插件拉取本班课表</label>
+            <label class="check"><input type="checkbox" name="SelfServiceOptions.CanEditExtensionSettings" value="true" checked="@Model.SelfServicePolicy.CanEditExtensionSettings" /> 修改本班的扩展插件设置</label>
+        </fieldset>
+        <p class="muted">关闭“修改本班的扩展插件设置”后，扩展设置只能由系统管理员在“扩展插件”页统一下发。课表定时拉取间隔属于全局设置，始终只有系统管理员可以修改。</p>
+        <div><button type="submit">保存班主任权限</button></div>
+    </form>
+</section>
+}
+
+@if (Model.CurrentUser.Role == UserRole.Admin)
+{
 <section class="panel member-excel-panel pairing-panel">
     <div class="panel-heading">
         <div>

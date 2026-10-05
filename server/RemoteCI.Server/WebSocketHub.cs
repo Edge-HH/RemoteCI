@@ -323,6 +323,7 @@ public static class WebSocketHub
             case Protocol.MessageTypeEventNotify: await HandleEventNotifyAsync(envelope, session, classId); return true;
             case Protocol.MessageTypeSoftwareInventory: await HandleSoftwareInventoryAsync(envelope, session); return true;
             case Protocol.MessageTypeExtensionsSync: await HandleExtensionsSyncAsync(envelope, session, classId); return true;
+            case Protocol.MessageTypeExtensionGroupsSync: HandleExtensionGroupsSync(envelope, session, classId); return true;
             default:
                 return false;
         }
@@ -353,7 +354,9 @@ public static class WebSocketHub
         var teachersAfter = await session.TeacherBinding.GetMatchedTeacherUserIdsAsync(classId, session.CancellationToken);
         if (!teachersBefore.SetEquals(teachersAfter))
             await session.AuthorizationSync.SyncAsync(session.CancellationToken);
-        await session.Registry.SendScheduleToWatchesAsync(classId, schedule, session.CancellationToken);
+        // 下发叠加了换课临时任课老师的课表，手机/手表与服务端展示保持一致。
+        await session.Registry.SendScheduleToWatchesAsync(
+            classId, session.Store.GetLatestSchedule(classId) ?? schedule, session.CancellationToken);
         await session.ScheduleSync.CompleteFromScheduleAsync(classId, session.CancellationToken);
     }
 
@@ -379,6 +382,29 @@ public static class WebSocketHub
         session.Store.SaveExtensions(classId, extensions);
         if (accessChanged) await session.AuthorizationSync.SyncAsync(session.CancellationToken);
         await session.Registry.SendExtensionsToWatchesAsync(classId, extensions, session.CancellationToken);
+    }
+
+    /// <summary>扩展分组只供 WebUI 使用：缓存最新快照即可，不转发给手表。非法分组 Id 整条忽略，避免脏数据进入设置页。</summary>
+    private static void HandleExtensionGroupsSync(Envelope envelope, ConnectionSession session, Guid classId)
+    {
+        if (ConvertPayload<List<ExtensionGroupDefinition>>(envelope.Payload) is not { } groups) return;
+        try
+        {
+            foreach (var group in groups)
+            {
+                ExtensionId.Parse(group.Id, nameof(groups));
+                group.ClassId = classId;
+            }
+        }
+        catch (ArgumentException ex)
+        {
+            session.Logger.LogWarning(ex, "忽略包含非法分组 Id 的扩展分组同步 ({ConnectionId})", session.ConnectionId);
+            return;
+        }
+        session.Store.SaveExtensionGroups(classId, groups);
+        // 插件上线后补发它离线期间被修改的设置（后台执行，不阻塞本连接的消息循环）。
+        session.Context.RequestServices.GetRequiredService<ExtensionSettingsReplayService>()
+            .Schedule(classId, session.ConnectionId, groups);
     }
 
     private static async Task<bool> TryDispatchPluginControlAsync(
@@ -434,13 +460,25 @@ public static class WebSocketHub
                     : ScheduleSyncSource.Watch;
                 var classId = await ResolveClassAsync(request?.ClassId, session);
                 if (classId is null) return;
-                if (session.Principal.User!.Role != UserRole.Admin &&
-                    !await session.ClassAccess.IsClassAdminAsync(
-                        session.Principal.User.Id,
+                // 拉取课表会覆盖服务端缓存：系统管理员，或班级自治策略允许的本班班主任。
+                // 被拒绝时回一条 Failed 状态，避免手机/手表一直停在“正在拉取”直到超时。
+                if (!(await session.ClassAccess.GetClassSelfServiceAsync(
+                        session.Principal.User!.Id,
                         session.Principal.User.Role,
                         classId.Value,
-                        session.CancellationToken))
+                        session.CancellationToken)).CanPullSchedule)
+                {
+                    await session.Registry.SendToWatchAsync(session.ConnectionId, Envelope.ScheduleSyncStatus(new ScheduleSyncStatus
+                    {
+                        TaskId = request?.TaskId ?? string.Empty,
+                        Source = source,
+                        State = ScheduleSyncTaskState.Failed,
+                        Message = "没有本班课表拉取权限，请联系系统管理员",
+                        FinishedAt = DateTimeOffset.UtcNow,
+                        ClassId = classId,
+                    }), session.CancellationToken);
                     return;
+                }
                 request ??= new ScheduleSyncRequest { Source = source };
                 request.ClassId = classId;
                 await session.ScheduleSync.StartAsync(
@@ -552,7 +590,7 @@ public static class WebSocketHub
             return;
         }
 
-        await ForwardValidatedCommandAsync(envelope, command, session, classId.Value);
+        await ForwardValidatedCommandAsync(envelope, command, session, classId.Value, classPermissions);
     }
 
     private static CommandError? GetCommandValidationError(
@@ -562,6 +600,9 @@ public static class WebSocketHub
         IStateStore store,
         Guid classId)
     {
+        // 扩展设置需要按班级自治策略复核，手表与手机的通用命令通道不提供该操作。
+        if (command.Command == CommandKind.ApplyExtensionSettings)
+            return new CommandError(CommandResultCodes.Forbidden, "扩展设置只能在 WebUI 或扩展设置 API 中修改");
         if (command.Command == CommandKind.RunExtension)
             return GetExtensionValidationError(command, classPermissions, allowedExtensionIds, store, classId);
 
@@ -659,9 +700,11 @@ public static class WebSocketHub
         Envelope envelope,
         CommandMessage command,
         ConnectionSession session,
-        Guid classId)
+        Guid classId,
+        UserPermissions classPermissions)
     {
-        command.RequestedBy = session.Principal.User;
+        // 插件会再次鉴权，因此必须携带刚刚验证的班内权限，且不修改连接的全局身份。
+        command.RequestedBy = session.Principal.User!.WithPermissions(classPermissions);
         envelope.Payload = command;
         session.Registry.RegisterWatchCommand(envelope.MessageId, session.ConnectionId);
         if (await session.Registry.SendToPluginAsync(classId, envelope, session.CancellationToken)) return;

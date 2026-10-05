@@ -1,0 +1,198 @@
+@page
+@model ExtensionSettingsModel
+@{
+    ViewData["Title"] = Model.Group is { } current ? $"{current.DisplayName} 设置" : "扩展插件";
+    var group = Model.Group;
+}
+<div class="page-head">
+    <div>
+        <p class="eyebrow">扩展插件</p>
+        <h1>@(group?.DisplayName ?? "扩展插件设置")</h1>
+        @if (!string.IsNullOrWhiteSpace(group?.Description))
+        {
+            <p class="muted">@group.Description</p>
+        }
+    </div>
+    @if (group is not null)
+    {
+        <a class="button ghost" asp-page="/ExtensionSettings"><i class="bi bi-arrow-left" aria-hidden="true"></i> 全部插件</a>
+    }
+</div>
+
+@if (string.IsNullOrWhiteSpace(Model.GroupId))
+{
+    <section class="panel">
+        <div class="panel-heading">
+            <div>
+                <h2>已上报设置页的插件</h2>
+                <p class="muted">@(Model.IsAdmin ? "汇总全部班级设备上报的插件；安装支持 RemoteCI 扩展分组的插件后会自动出现在这里。" : $"{Model.CurrentClass?.Name} 的设备上报的插件。")</p>
+            </div>
+        </div>
+        @if (Model.Groups.Count == 0)
+        {
+            <div class="empty-state"><i class="bi bi-puzzle" aria-hidden="true"></i><strong>暂无可设置的扩展插件</strong><span>插件需要通过 RemoteCI 注册带设置字段的扩展分组，并保持设备在线同步。</span></div>
+        }
+        else
+        {
+            <div class="extension-list">
+                @foreach (var item in Model.Groups)
+                {
+                    <article class="extension-control-row">
+                        <div class="extension-identity">
+                            <strong>@item.DisplayName</strong>
+                            @if (!string.IsNullOrWhiteSpace(item.Description)) { <small>@item.Description</small> }
+                            <small>ID：@item.Id · @item.Settings.Count 项设置 · @item.Extensions.Count 个扩展功能</small>
+                        </div>
+                        <div class="extension-row-actions">
+                            <a class="button" asp-page="/ExtensionSettings" asp-route-groupId="@item.Id">打开设置</a>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+}
+else if (group is null)
+{
+    <section class="panel">
+        <div class="empty-state"><i class="bi bi-question-circle" aria-hidden="true"></i><strong>没有找到该插件的设置</strong><span>插件可能已卸载、尚未同步，或当前班级没有安装它。</span></div>
+    </section>
+}
+else
+{
+    @if (Model.LastResults.Count > 0)
+    {
+        <section class="panel">
+            <div class="panel-heading">
+                <div><h2>上次下发结果</h2></div>
+                <span class="status-pill">@Model.LastResults.Count(x => x.Success) / @Model.LastResults.Count 成功</span>
+            </div>
+            <ul class="broadcast-result">
+                @foreach (var result in Model.LastResults)
+                {
+                    <li>
+                        <i class="bi @(result.Success ? "bi-check-circle ok" : "bi-x-circle bad")" aria-hidden="true"></i>
+                        <span><strong>@result.ClassName</strong>（@result.DeviceName）— @result.Message</span>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+
+    @if (Model.CanEditCurrentClass)
+    {
+        <section class="panel" id="current-class-settings">
+            <div class="panel-heading">
+                <div>
+                    <h2>当前班级：@Model.CurrentClass?.Name</h2>
+                    <p class="muted">表单已按设备当前值预填，保存后由插件在本班设备上写入并生效。</p>
+                </div>
+            </div>
+            @if (Model.CurrentClassGroup is not { HasSettings: true } currentGroup)
+            {
+                <p class="muted">当前班级的设备没有上报这个插件，或插件尚未连接。</p>
+            }
+            else
+            {
+                <form method="post" asp-page-handler="ApplyCurrent" asp-route-groupId="@group.Id" class="stack extension-settings-form">
+                    @await Html.PartialAsync("_ExtensionFields", new ExtensionFieldsModel(currentGroup.Settings!, "SettingInputs", "current-setting", currentGroup.Values))
+                    <div><button type="submit">保存到当前班级</button></div>
+                </form>
+            }
+        </section>
+    }
+
+    @if (Model.IsAdmin)
+    {
+        <section class="panel" id="batch-settings">
+            <div class="panel-heading">
+                <div>
+                    <h2>批量下发</h2>
+                    <p class="muted">勾选要修改的设置项并填写新值，未勾选的设置项保持各班原值。所选班级中的每一台在线设备都会收到。</p>
+                </div>
+            </div>
+            <form method="post" asp-page-handler="ApplyBatch" asp-route-groupId="@group.Id" class="stack extension-settings-form">
+                @await Html.PartialAsync("_ExtensionFields", new ExtensionFieldsModel(group.Settings, "SettingInputs", "batch-setting", Model.CurrentClassGroup?.Values, Selectable: true))
+                @if (Model.ClassGroups.Count > 0)
+                {
+                    <h3>整组下发</h3>
+                    <div class="broadcast-targets">
+                        @foreach (var classGroup in Model.ClassGroups)
+                        {
+                            <label class="check"><input type="checkbox" name="SelectedGroupIds" value="@classGroup.Id" /> @classGroup.Name（@classGroup.ClassCount 个班级）</label>
+                        }
+                    </div>
+                }
+                <h3>逐班选择 <button type="button" class="ghost" data-check-all="#extension-target-classes">全选</button></h3>
+                <div class="broadcast-targets" id="extension-target-classes">
+                    @foreach (var state in Model.ClassStates)
+                    {
+                        <label class="check">
+                            <input type="checkbox" name="SelectedClassIds" value="@state.ClassId" />
+                            @state.ClassName
+                            <span class="muted">@(state.Online ? "在线" : "离线")</span>
+                        </label>
+                    }
+                </div>
+                <p class="muted">只列出设备上报了该插件或有待补发设置的班级。插件离线的班级会保存为“待补发”，插件上线后自动写入；按分组下发时，未安装该插件的在线班级会在结果中显示失败。</p>
+                <div><button type="submit">下发到所选班级</button></div>
+            </form>
+        </section>
+
+        <section class="panel" id="class-setting-values">
+            <div class="panel-heading">
+                <div>
+                    <h2>各班级当前值</h2>
+                    <p class="muted">来自设备最近一次同步；高亮表示与多数班级不一致，“待补发”表示插件离线期间已下发、尚未写入的新值。</p>
+                </div>
+            </div>
+            @if (Model.ClassStates.Count == 0)
+            {
+                <p class="muted">暂无班级上报该插件。</p>
+            }
+            else
+            {
+                <div class="user-account-table-wrap">
+                    <table class="user-account-table extension-values-table">
+                        <thead>
+                            <tr>
+                                <th>班级</th>
+                                @foreach (var field in group.Settings)
+                                {
+                                    <th>@(string.IsNullOrWhiteSpace(field.Label) ? field.Key : field.Label)</th>
+                                }
+                                <th>待补发</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var state in Model.ClassStates)
+                            {
+                                <tr>
+                                    <td><strong>@state.ClassName</strong> <span class="status-pill @(state.Online ? "online" : "offline")">@(state.Online ? "在线" : "离线")</span></td>
+                                    @foreach (var field in group.Settings)
+                                    {
+                                        var value = state.Values.GetValueOrDefault(field.Key);
+                                        <td class="@(value != Model.MajorityValue(field.Key) ? "extension-value-diff" : null)">@ExtensionSettingsModel.FormatValue(field, value)</td>
+                                    }
+                                    <td>
+                                        @if (state.Pending is { Count: > 0 } queued)
+                                        {
+                                            <span class="status-pill">待补发</span>
+                                            <small class="muted">@string.Join("、", group.Settings.Where(field => queued.ContainsKey(field.Key)).Select(field => $"{(string.IsNullOrWhiteSpace(field.Label) ? field.Key : field.Label)}={ExtensionSettingsModel.FormatValue(field, queued[field.Key])}"))</small>
+                                        }
+                                        else
+                                        {
+                                            <span class="muted">—</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    }
+}
+
+<script src="~/extension-fields.js" asp-append-version="true" defer></script>

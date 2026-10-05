@@ -16,10 +16,18 @@ class TeacherProtocolTest {
             """{"id":"u1","username":"wang","displayName":"王老师","role":1,"roleKind":5,"roleName":"老师","permissions":1025}""",
         )
         assertTrue(teacher.isTeacher)
+        assertTrue(teacher.hasPersonalSchedule)
         assertEquals("老师", teacher.roleLabel)
 
         val legacy = Json.decodeFromString<UserProfile>("""{"id":"u2","username":"a","displayName":"甲","role":1}""")
         assertFalse(legacy.isTeacher)
+        assertFalse(legacy.hasPersonalSchedule)
+
+        val headTeacher = Json.decodeFromString<UserProfile>(
+            """{"id":"u5","username":"zhao","displayName":"赵老师","role":1,"roleKind":4,"roleName":"班主任"}""",
+        )
+        assertFalse(headTeacher.isTeacher)
+        assertTrue(headTeacher.hasPersonalSchedule)
         assertEquals("用户", legacy.roleLabel)
     }
 
@@ -30,7 +38,8 @@ class TeacherProtocolTest {
             {"id":"u3","username":"li","displayName":"李","role":1,"classes":[
               {"id":"class-a","name":"A 班","roleName":"自定义名称","roleKind":4},
               {"id":"class-b","name":"B 班","roleName":"学生","roleKind":1},
-              {"id":"class-c","name":"C 班","roleName":"班管理员"}
+              {"id":"class-c","name":"C 班","roleName":"班管理员"},
+              {"id":"class-d","name":"D 班","roleName":"班主任"}
             ]}
             """.trimIndent(),
         )
@@ -38,6 +47,7 @@ class TeacherProtocolTest {
         assertFalse(user.canPullScheduleFor("class-b"))
         // 旧版服务端不下发 roleKind 时退回内置角色名。
         assertTrue(user.canPullScheduleFor("class-c"))
+        assertTrue(user.canPullScheduleFor("class-d"))
         assertFalse(user.canPullScheduleFor(null))
 
         val admin = Json.decodeFromString<UserProfile>("""{"id":"u4","username":"root","displayName":"管理员","role":2}""")

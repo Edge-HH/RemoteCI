@@ -80,6 +80,7 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AllowAnonymousToPage("/Login");
     options.Conventions.AllowAnonymousToPage("/Visitor");
     options.Conventions.AllowAnonymousToPage("/SetupPassword");
+    options.Conventions.AllowAnonymousToPage("/StatusCode");
 });
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IdentityCoordinator>();
@@ -90,6 +91,7 @@ builder.Services.AddScoped<ConfigurationArchiveService>();
 builder.Services.AddScoped<SchedulePullSettings>();
 builder.Services.AddScoped<VisitorAccessSettings>();
 builder.Services.AddScoped<LoginPageSettings>();
+builder.Services.AddScoped<MobileLoginSettings>();
 builder.Services.AddScoped<TeacherBindingService>();
 builder.Services.AddScoped<ClassAccessService>();
 builder.Services.AddScoped<ClassBroadcastService>();
@@ -97,6 +99,15 @@ builder.Services.AddScoped<ClassBroadcastService>();
 builder.Services.AddScoped<UserImportService>();
 builder.Services.AddScoped<MemberExcelService>();
 builder.Services.AddScoped<ClassExcelService>();
+builder.Services.AddScoped<ClassSelfServiceSettings>();
+builder.Services.AddScoped<ExtensionGroupService>();
+builder.Services.AddScoped<PendingExtensionSettingsService>();
+builder.Services.AddSingleton<ExtensionSettingsReplayService>();
+builder.Services.AddScoped<UserNotificationService>();
+builder.Services.AddScoped<ScheduleSwapService>();
+builder.Services.AddSingleton<IScheduleCommandSender, PeerScheduleCommandSender>();
+builder.Services.AddSingleton<WebPushSender>();
+builder.Services.AddHttpClient(WebPushSender.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddScoped(sp =>
 {
     // 插件在线数来自单例连接注册表；scoped 服务通过回调取数，避免直接依赖单例链。
@@ -105,7 +116,8 @@ builder.Services.AddScoped(sp =>
     service.OnlinePluginCounter = classId => registry.GetOnlinePluginConnections().Count(x => x.ClassId == classId);
     return service;
 });
-builder.Services.AddSingleton<IStateStore, StateStore>();
+builder.Services.AddSingleton<LessonOverrideTable>();
+builder.Services.AddSingleton<IStateStore>(sp => new StateStore(sp.GetRequiredService<LessonOverrideTable>()));
 builder.Services.AddSingleton<PeerRegistry>();
 builder.Services.AddSingleton<ScheduleSyncTaskTracker>();
 builder.Services.AddSingleton<ScheduleSyncService>();
@@ -113,6 +125,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHostedService<SchedulePullWorker>();
 builder.Services.AddHostedService<PeerAuthorizationRefreshWorker>();
 builder.Services.AddHostedService<AutomaticBackupWorker>();
+builder.Services.AddHostedService<ScheduleSwapSweepWorker>();
 builder.Services.AddSingleton(new UpdateService(args));
 
 var app = builder.Build();
@@ -146,6 +159,11 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
     app.UseHttpsRedirection();
 }
+// 非法地址等空响应的错误状态渲染为 WebUI 状态页（带返回主页入口）；
+// API 与 WebSocket 由客户端按状态码/JSON 处理，保持原样不插入 HTML。
+app.UseWhen(
+    context => !context.Request.Path.StartsWithSegments("/api") && !context.Request.Path.StartsWithSegments("/ws"),
+    branch => branch.UseStatusCodePagesWithReExecute("/status/{0}"));
 app.UseStaticFiles();
 app.UseRouting();
 app.UseRateLimiter();
@@ -159,7 +177,11 @@ app.UseWebSockets(new WebSocketOptions
 });
 
 using (var scope = app.Services.CreateScope())
+{
     await scope.ServiceProvider.GetRequiredService<IdentityCoordinator>().BootstrapAsync();
+    // 换课产生的单节临时任课老师覆盖需要在接受连接前载入内存，首个课表推送即可正确叠加。
+    await scope.ServiceProvider.GetRequiredService<ScheduleSwapService>().LoadOverridesAsync();
+}
 
 app.Map("/ws", async context =>
 {
@@ -193,6 +215,20 @@ app.MapPost("/api/auth/login", async (
     try
     {
         var response = await identities.LoginAsync(request, ct);
+        await authorizationSync.SyncAsync(ct);
+        return Results.Ok(response);
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+}).RequireRateLimiting("auth");
+
+// 手机扫码登录：WebUI 二维码携带一次性票据，安卓版凭票据直接登录二维码所属账号。
+app.MapPost("/api/auth/mobile-login", async (
+    MobileLoginRequest request, IdentityCoordinator identities, AuthorizationSyncService authorizationSync, CancellationToken ct) =>
+{
+    if (MissingFields(request.Ticket) is { } bad) return bad;
+    try
+    {
+        var response = await identities.RedeemMobileLoginTicketAsync(request, ct);
         await authorizationSync.SyncAsync(ct);
         return Results.Ok(response);
     }
@@ -276,14 +312,14 @@ app.MapPost("/api/me/display-name", async (
     catch (IdentityOperationException ex) { return OperationError(ex); }
 });
 
-// “我的日程”：当前老师账号按显示名绑定课表后，跨班级聚合出的个人课表。
+// “我的日程”：当前老师或班主任账号按显示名绑定课表后，跨班级聚合出的个人课表。
 app.MapGet("/api/me/schedule", async (
     HttpContext ctx, IdentityCoordinator identities, TeacherBindingService teachers, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    // 只有内置“老师”角色按显示名绑定课表；其他账号即使同名也返回空日程，与 WebUI“我的日程”一致。
-    if (!IsTeacher(principal)) return Results.Ok(new MyScheduleResponse());
+    // 只有内置“老师”与“班主任”角色按显示名绑定课表；其他账号即使同名也返回空日程，与 WebUI“我的日程”一致。
+    if (!HasPersonalSchedule(principal)) return Results.Ok(new MyScheduleResponse());
     return Results.Ok(await teachers.BuildMyScheduleAsync(principal.User.DisplayName, ct));
 });
 
@@ -295,8 +331,70 @@ app.MapGet("/api/me/schedule/next", async (
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
     var now = at ?? DateTimeOffset.UtcNow;
-    if (!IsTeacher(principal)) return Results.Ok(new MyNextCourseResponse { At = now });
+    if (!HasPersonalSchedule(principal)) return Results.Ok(new MyNextCourseResponse { At = now });
     return Results.Ok(await teachers.BuildMyNextCourseAsync(principal.User.DisplayName, now, ct));
+});
+
+// ---------- 换课申请：老师发起、对方老师审批；强制换课立即生效、对方可撤回 ----------
+
+app.MapGet("/api/swap-requests/catalog", async (
+    HttpContext ctx, IdentityCoordinator identities, ScheduleSwapService swaps, CancellationToken ct) =>
+    await SwapCallAsync(ctx, identities, principal => swaps.GetCatalogAsync(principal.User!.Id, ct), ct));
+
+app.MapGet("/api/swap-requests", async (
+    HttpContext ctx, string? box, SwapRequestStatus? status, IdentityCoordinator identities, ScheduleSwapService swaps,
+    CancellationToken ct) =>
+    await SwapCallAsync(ctx, identities, principal => swaps.ListAsync(principal.User!.Id, box ?? "all", status, ct), ct));
+
+app.MapGet("/api/swap-requests/{id}", async (
+    string id, HttpContext ctx, IdentityCoordinator identities, ScheduleSwapService swaps, CancellationToken ct) =>
+    await SwapCallAsync(ctx, identities, async principal =>
+        await swaps.GetAsync(principal.User!.Id, await ResolveSwapIdAsync(swaps, principal, id, ct), ct), ct));
+
+app.MapPost("/api/swap-requests", async (
+    HttpContext ctx, CreateSwapRequest request, IdentityCoordinator identities, ScheduleSwapService swaps, CancellationToken ct) =>
+    await SwapCallAsync(ctx, identities, principal => swaps.CreateAsync(principal.User!.Id, request, ct), ct));
+
+app.MapPost("/api/swap-requests/{id}/approve", async (
+    string id, HttpContext ctx, SwapDecisionRequest? request, IdentityCoordinator identities, ScheduleSwapService swaps,
+    CancellationToken ct) =>
+    await SwapCallAsync(ctx, identities, async principal =>
+        await swaps.ApproveAsync(principal.User!.Id, await ResolveSwapIdAsync(swaps, principal, id, ct), request?.Note, ct), ct));
+
+app.MapPost("/api/swap-requests/{id}/reject", async (
+    string id, HttpContext ctx, SwapDecisionRequest? request, IdentityCoordinator identities, ScheduleSwapService swaps,
+    CancellationToken ct) =>
+    await SwapCallAsync(ctx, identities, async principal =>
+        await swaps.RejectAsync(principal.User!.Id, await ResolveSwapIdAsync(swaps, principal, id, ct), request?.Note, ct), ct));
+
+app.MapPost("/api/swap-requests/{id}/cancel", async (
+    string id, HttpContext ctx, IdentityCoordinator identities, ScheduleSwapService swaps, CancellationToken ct) =>
+    await SwapCallAsync(ctx, identities, async principal =>
+        await swaps.CancelAsync(principal.User!.Id, await ResolveSwapIdAsync(swaps, principal, id, ct), ct), ct));
+
+app.MapPost("/api/swap-requests/{id}/revoke", async (
+    string id, HttpContext ctx, IdentityCoordinator identities, ScheduleSwapService swaps, CancellationToken ct) =>
+    await SwapCallAsync(ctx, identities, async principal =>
+        await swaps.RevokeForcedAsync(principal.User!.Id, await ResolveSwapIdAsync(swaps, principal, id, ct), ct), ct));
+
+// 个人通知：WebUI 铃铛、手机离线补齐与 AstrBot 轮询共用；after 为上次读取到的最新通知时间。
+app.MapGet("/api/me/notifications", async (
+    HttpContext ctx, DateTimeOffset? after, bool? unread, int? limit, IdentityCoordinator identities,
+    UserNotificationService notifications, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    return Results.Ok(await notifications.ListAsync(principal.User.Id, after, unread == true, limit ?? 50, ct));
+});
+
+app.MapPost("/api/me/notifications/read", async (
+    HttpContext ctx, MarkNotificationsReadRequest request, IdentityCoordinator identities,
+    UserNotificationService notifications, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    await notifications.MarkReadAsync(principal.User.Id, request.Ids, request.All, ct);
+    return Results.NoContent();
 });
 
 app.MapGet("/api/me/sessions", async (HttpContext ctx, IdentityCoordinator identities, CancellationToken ct) =>
@@ -354,6 +452,10 @@ app.MapPost("/api/commands", async (
     command.ClassId = target;
     var classPermissions = await access.GetEffectivePermissionsAsync(
         principal.User.Id, principal.User.Role, target, principal.User.GrantedPermissions, ct);
+    // 扩展设置需要按班级自治策略复核，只能走专用的扩展设置接口。
+    if (command.Command == CommandKind.ApplyExtensionSettings)
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest,
+            "请使用 PUT /api/classes/{classId}/extension-groups/{groupId}/settings 修改扩展设置"));
     if (command.Command == CommandKind.RunExtension)
     {
         // 与 WS 路径一致：独立扩展权限和管理员逐扩展策略必须同时通过。
@@ -370,7 +472,7 @@ app.MapPost("/api/commands", async (
         if (required == UserPermissions.None) return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "未知命令"));
         if (!classPermissions.HasFlag(required)) return Forbidden();
     }
-    command.RequestedBy = principal.User;
+    command.RequestedBy = principal.User.WithPermissions(classPermissions);
     var result = await peers.SendCommandAndWaitAsync(command, target, TimeSpan.FromSeconds(15), ct);
     return Results.Json(result, statusCode: CommandStatus(result));
 });
@@ -629,14 +731,14 @@ classesApi.MapDelete("/{id:guid}", async (
     }
     catch (IdentityOperationException ex) { return OperationError(ex); }
 });
-// 班级信息：系统管理员或本班班管理员可改班名；头像小图直存数据库。
+// 班级信息：系统管理员或本班班主任可改班名；头像小图直存数据库。
 classesApi.MapPut("/{id:guid}/info", async (
     Guid id, HttpContext ctx, UpdateClassRequest request, IdentityCoordinator identities, ClassAccessService access,
     ClassroomService classrooms, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (!await access.IsClassAdminAsync(principal.User.Id, principal.User.Role, id, ct)) return Forbidden();
+    if (!(await access.GetClassSelfServiceAsync(principal.User.Id, principal.User.Role, id, ct)).CanRename) return Forbidden();
     if (MissingFields(request.Name) is { } bad) return bad;
     try
     {
@@ -652,7 +754,7 @@ classesApi.MapPut("/{id:guid}/avatar", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (!await access.IsClassAdminAsync(principal.User.Id, principal.User.Role, id, ct)) return Forbidden();
+    if (!(await access.GetClassSelfServiceAsync(principal.User.Id, principal.User.Role, id, ct)).CanChangeAvatar) return Forbidden();
     var contentType = ctx.Request.Headers["X-Avatar-Type"].ToString();
     var allowed = new[] { "image/png", "image/jpeg", "image/webp" };
     if (!allowed.Contains(contentType))
@@ -670,7 +772,7 @@ classesApi.MapDelete("/{id:guid}/avatar", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (!await access.IsClassAdminAsync(principal.User.Id, principal.User.Role, id, ct)) return Forbidden();
+    if (!(await access.GetClassSelfServiceAsync(principal.User.Id, principal.User.Role, id, ct)).CanChangeAvatar) return Forbidden();
     await classrooms.SetAvatarAsync(id, null, null, ct);
     return Results.NoContent();
 });
@@ -891,6 +993,21 @@ app.MapPut("/api/settings/notifications", async (SettingsSync body, HttpContext 
     await peers.SendSettingsToWatchesAsync(updated, ct);
     return Results.Ok(updated);
 });
+// 班级自治策略：系统管理员统一决定班主任能否自行改班名、改头像、拉取课表与修改扩展设置；任何登录账号都可读取。
+app.MapGet("/api/settings/class-self-service", async (HttpContext ctx, IdentityCoordinator identities, ClassSelfServiceSettings selfService, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    return Results.Ok(await selfService.GetAsync(ct));
+});
+app.MapPut("/api/settings/class-self-service", async (HttpContext ctx, ClassSelfServicePolicy body, IdentityCoordinator identities, ClassSelfServiceSettings selfService, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    await selfService.SetAsync(body, ct);
+    return Results.Ok(await selfService.GetAsync(ct));
+});
 app.MapGet("/api/settings/schedule-pull", async (HttpContext ctx, IdentityCoordinator identities, SchedulePullSettings pull, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
@@ -901,11 +1018,8 @@ app.MapPut("/api/settings/schedule-pull", async (HttpContext ctx, SchedulePullIn
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    var target = await ResolveClassAsync(principal, null, access, ct);
-    if (target is null ||
-        (principal.User.Role != UserRole.Admin &&
-         !await access.IsClassAdminAsync(principal.User.Id, principal.User.Role, target.Value, ct)))
-        return Forbidden();
+    // 定时拉取间隔对全部班级生效，属于全局设置，只允许系统管理员修改。
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
     var interval = Enum.IsDefined(typeof(SchedulePullInterval), body.IntervalMinutes)
         ? (SchedulePullInterval)body.IntervalMinutes
         : SchedulePullInterval.Disabled;
@@ -956,6 +1070,44 @@ app.MapPut("/api/extensions/{id}", async (string id, ExtensionPolicyBody body, H
         return Results.NoContent();
     }
     catch (Exception ex) { return Results.Json(Error(ApiErrorCodes.InvalidRequest, ex.Message), statusCode: 400); }
+});
+// 扩展分组与设置：分组定义与当前值来自插件上报；只有可修改设置的账号才能看到当前值。
+app.MapGet("/api/extension-groups", async (
+    HttpContext ctx, Guid? classId, IdentityCoordinator identities, ClassAccessService access,
+    ExtensionGroupService groups, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (await ResolveClassAsync(principal, classId, access, ct) is not { } target) return Forbidden();
+    var classPermissions = await access.GetEffectivePermissionsAsync(
+        principal.User.Id, principal.User.Role, target, principal.User.GrantedPermissions, ct);
+    if (!classPermissions.HasFlag(UserPermissions.RunExtensions)) return Forbidden();
+    var canEdit = await groups.CanEditSettingsAsync(principal.User, target, ct);
+    return Results.Ok(groups.BuildForClass(target)
+        .Where(group => !group.IsUngrouped)
+        .Select(group => new
+        {
+            id = group.Id,
+            displayName = group.DisplayName,
+            description = group.Description,
+            icon = group.Icon,
+            settings = group.Settings,
+            values = canEdit ? group.Values : null,
+            canEditSettings = canEdit && group.HasSettings,
+            classId = target,
+        }));
+});
+app.MapPut("/api/classes/{classId:guid}/extension-groups/{groupId}/settings", async (
+    Guid classId, string groupId, ExtensionSettingsBody body, HttpContext ctx, IdentityCoordinator identities,
+    ClassAccessService access, ExtensionGroupService groups, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (await ResolveClassAsync(principal, classId, access, ct) is not { } target) return Forbidden();
+    if (!await groups.CanEditSettingsAsync(principal.User, target, ct)) return Forbidden();
+    var result = await groups.ApplyToClassAsync(
+        principal.User, target, groupId, body.Values ?? new Dictionary<string, string?>(), ct);
+    return Results.Json(result, statusCode: CommandStatus(result));
 });
 app.MapGet("/api/admin/system", async (HttpContext ctx, IdentityCoordinator identities, UpdateService updates, CancellationToken ct) =>
 {
@@ -1032,12 +1184,27 @@ static async Task<AuthPrincipal?> AuthorizeAsync(HttpContext ctx, IdentityCoordi
         : await identities.ValidateAccessTokenAsync(token, ct);
 }
 
+/// <summary>换课端点统一的鉴权与错误映射：SwapOperationException 转为带错误码的 JSON。</summary>
+static async Task<IResult> SwapCallAsync<T>(
+    HttpContext ctx, IdentityCoordinator identities, Func<AuthPrincipal, Task<T>> action, CancellationToken ct)
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    try { return Results.Ok(await action(principal)); }
+    catch (SwapOperationException ex) { return Results.Json(Error(ex.Code, ex.Message), statusCode: ex.Status); }
+}
+
+/// <summary>换课申请编号既接受完整 Id，也接受聊天机器人里展示的 8 位短编号。</summary>
+static async Task<Guid> ResolveSwapIdAsync(ScheduleSwapService swaps, AuthPrincipal principal, string id, CancellationToken ct) =>
+    await swaps.ResolveShortIdAsync(principal.User!.Id, id, ct)
+    ?? throw new SwapOperationException(ApiErrorCodes.NotFound, "换课申请不存在", StatusCodes.Status404NotFound);
+
 static bool HasPermission(AuthPrincipal? principal, UserPermissions permission) =>
     principal?.User?.Permissions.HasFlag(permission) == true;
 
-/// <summary>主体的全局角色是否为内置“老师”；按角色种类判断，不受角色改名影响。</summary>
-static bool IsTeacher(AuthPrincipal principal) =>
-    principal.User?.RoleKind == (int)AccountRoleKind.Teacher;
+/// <summary>主体的全局角色是否拥有个人“我的日程”（内置老师或班主任）；按角色种类判断，不受角色改名影响。</summary>
+static bool HasPersonalSchedule(AuthPrincipal principal) =>
+    principal.User?.RoleKind is { } kind && AccountRole.HasPersonalSchedule((AccountRoleKind)kind);
 
 /// <summary>
 /// 解析请求的目标班级：显式 classId 必须可访问（否则 null→403），缺省落到默认班级或第一个成员班级。
@@ -1064,6 +1231,7 @@ static int CommandStatus(CommandResult result) => result.Code switch
     CommandResultCodes.Forbidden => StatusCodes.Status403Forbidden,
     CommandResultCodes.InvalidRequest => StatusCodes.Status400BadRequest,
     CommandResultCodes.ScheduleStale => StatusCodes.Status409Conflict,
+    CommandResultCodes.Queued => StatusCodes.Status202Accepted,
     _ => result.Success ? StatusCodes.Status200OK : StatusCodes.Status422UnprocessableEntity,
 };
 
@@ -1085,6 +1253,7 @@ static ApiError Error(string code, string message) => new() { Code = code, Messa
 
 public sealed record SchedulePullIntervalBody(int IntervalMinutes);
 public sealed record ExtensionPolicyBody(bool? Enabled, bool? AllowNonAdmin, bool? ShowOnWatch);
+public sealed record ExtensionSettingsBody(Dictionary<string, string?>? Values);
 public sealed record UpdateCheckBody(string Channel, bool Force = false);
 public sealed record PairingCodeBody(Guid? ClassId, bool Unified = false, bool Persistent = false, string? RequestedCode = null);
 public sealed record VisitorAutoEnterBody(bool AutoEnter);

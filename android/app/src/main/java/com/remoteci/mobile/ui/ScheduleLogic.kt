@@ -10,7 +10,9 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.OffsetDateTime
+import java.time.ZoneId
 import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
 data class LessonChoice(
     val id: String,
@@ -69,6 +71,18 @@ internal fun extractPeriod(value: String?): String? = value?.let(LessonPeriodReg
 internal fun extractTimeRange(value: String?): String {
     val match = value?.let(TimeRangeRegex::find) ?: return ""
     return "${match.groupValues[1]}-${match.groupValues[2]}"
+}
+
+/** 将课表快照的 ISO-8601 生成时间转换为手机当前时区的显示时间。 */
+internal fun formatLocalSyncTime(
+    generatedAt: String?,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): String? = generatedAt?.let { raw ->
+    runCatching {
+        OffsetDateTime.parse(raw)
+            .atZoneSameInstant(zoneId)
+            .format(DateTimeFormatter.ofPattern("HH:mm"))
+    }.getOrNull()
 }
 
 /**

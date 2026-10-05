@@ -502,6 +502,8 @@ textarea { resize: vertical; }
 .mobile-login-copy p { margin: 0; }
 .mobile-login-url { display: flex; align-items: center; gap: .6rem; margin-top: 1rem; }
 .mobile-login-url code { overflow-wrap: anywhere; }
+.mobile-login-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-top: 1rem; }
+.mobile-login-qr[hidden] { display: none; }
 .mobile-login-qr { width: 10rem; height: 10rem; padding: .55rem; border-radius: 1rem; background: #fff; }
 .mobile-login-qr svg { display: block; width: 100%; height: 100%; }
 
@@ -1132,4 +1134,25 @@ input[type="checkbox"][form] { width: 18px; height: 18px; min-height: 0; padding
         width: 100%;
         margin-top: 6px;
     }
+}
+
+/* 扩展插件：控制页按插件分组、共享字段表单、批量控制分组与设置页对比表 */
+.extension-group { display: grid; gap: 12px; padding-top: 16px; margin-top: 16px; border-top: 1px solid var(--line); }
+.extension-group:first-of-type { padding-top: 0; margin-top: 0; border-top: 0; }
+.extension-group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.extension-group-head .button { flex: 0 0 auto; }
+.extension-field { display: grid; gap: 4px; }
+.extension-field-label { display: block; }
+.extension-field-help { font-size: 12px; line-height: 1.5; }
+.extension-field-selectable { padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; }
+.extension-field-selectable:has([data-extension-field-apply]:checked) { border-color: var(--accent); background: var(--accent-faint); }
+.extension-field-apply { font-size: 12px; }
+.extension-settings-form { max-width: 720px; }
+.batch-extension-group + .batch-extension-group { margin-top: 18px; }
+.batch-extension-group h3 { margin: 0 0 4px; }
+.batch-extension-group > .muted { margin: 0 0 10px; }
+a.batch-action-card { color: inherit; text-decoration: none; }
+.extension-values-table td.extension-value-diff { background: var(--accent-faint); font-weight: 700; }
+@media (max-width: 640px) {
+    .extension-group-head { align-items: flex-start; flex-direction: column; }
 }

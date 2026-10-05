@@ -45,19 +45,20 @@ public sealed partial class IdentityCoordinator(
     /// <summary>API Key 的固定前缀，便于与设备访问令牌区分且不改变现有 Bearer 鉴权格式。</summary>
     public const string ApiKeyPrefix = "rci_";
 
-    /// <summary>内置“班管理员”角色的默认权限：班内日常管理，不含用户管理、电源/主菜单控制等系统级权限。</summary>
+    /// <summary>内置“班主任”角色的默认权限：班内日常管理，不含用户管理、电源/主菜单控制等系统级权限。</summary>
     public const UserPermissions ClassAdministratorDefaultPermissions =
         UserPermissions.ViewCurrentCourse | UserPermissions.AccessWebUi | UserPermissions.ManageSchedule |
         UserPermissions.SendNotifications | UserPermissions.SendVoiceMessages | UserPermissions.TeacherComing |
-        UserPermissions.RunExtensions | UserPermissions.ApiAccess;
+        UserPermissions.RunExtensions | UserPermissions.ApiAccess | UserPermissions.RequestScheduleSwap;
 
     /// <summary>
-    /// 内置“老师”角色的默认权限：查看当前课程、发送通知与语音消息，以及用 API Key 读取自己的日程。
+    /// 内置“老师”角色的默认权限：查看当前课程、发送通知与语音消息、发起换课申请，以及用 API Key 读取自己的日程。
+    /// 强制换课默认关闭，由系统管理员在角色配置中开启。
     /// 显示名由系统管理员维护。
     /// </summary>
     public const UserPermissions TeacherDefaultPermissions =
         UserPermissions.ViewCurrentCourse | UserPermissions.SendNotifications |
-        UserPermissions.SendVoiceMessages | UserPermissions.ApiAccess;
+        UserPermissions.SendVoiceMessages | UserPermissions.ApiAccess | UserPermissions.RequestScheduleSwap;
 
     /// <summary>确保默认班级存在；迁移或首次启动都依赖它承接升级前的全部数据。</summary>
     private async Task SeedDefaultClassroomAsync(CancellationToken ct)
@@ -65,8 +66,8 @@ public sealed partial class IdentityCoordinator(
         var now = DateTimeOffset.UtcNow;
         if (await db.Classrooms.AnyAsync(x => x.Id == Classroom.DefaultId, ct))
         {
-            await db.Classrooms.Where(x => x.Id == Classroom.DefaultId).ExecuteUpdateAsync(setters => setters
-                .SetProperty(x => x.Name, "默认班级"), ct);
+            // 默认班级是迁移前数据的承载对象。它已经存在时只需保留现有记录，
+            // 否则管理员自定义的班级名称会在每次服务端启动时被覆盖。
             return;
         }
         db.Classrooms.Add(new Classroom
@@ -97,12 +98,12 @@ public sealed partial class IdentityCoordinator(
                 new AccountRole { Id = AccountRole.TeacherId, Name = "Teacher", NormalizedName = "TEACHER", Kind = AccountRoleKind.Teacher, DefaultPermissions = TeacherDefaultPermissions, CreatedAt = now, UpdatedAt = now });
         }
         // 历史迁移 AddRolesAndBackups 会在建库时直接插入两个内置角色，导致上面的 AddRange 被跳过；
-        // 班管理员角色是新增的，必须独立幂等种子才能同时覆盖全新与已升级的数据库。
+        // 班主任角色是新增的，必须独立幂等种子才能同时覆盖全新与已升级的数据库。
         await db.Database.ExecuteSqlRawAsync($"""
             INSERT OR IGNORE INTO AccountRoles (Id, Name, NormalizedName, Kind, DefaultPermissions, CreatedAt, UpdatedAt)
             VALUES ('{AccountRole.ClassAdministratorId}', 'ClassAdministrator', 'CLASSADMINISTRATOR', 4, {(int)ClassAdministratorDefaultPermissions}, '{now:O}', '{now:O}');
             """, ct);
-        // 老师角色与班管理员同理：独立幂等种子，同时覆盖全新与已升级的数据库。
+        // 老师角色与班主任同理：独立幂等种子，同时覆盖全新与已升级的数据库。
         await db.Database.ExecuteSqlRawAsync($"""
             INSERT OR IGNORE INTO AccountRoles (Id, Name, NormalizedName, Kind, DefaultPermissions, CreatedAt, UpdatedAt)
             VALUES ('{AccountRole.TeacherId}', 'Teacher', 'TEACHER', 5, {(int)TeacherDefaultPermissions}, '{now:O}', '{now:O}');
@@ -117,8 +118,8 @@ public sealed partial class IdentityCoordinator(
             .SetProperty(x => x.NormalizedName, "管理员")
             .SetProperty(x => x.DefaultPermissions, UserPermissions.All), ct);
         await db.AccountRoles.Where(x => x.Id == AccountRole.ClassAdministratorId).ExecuteUpdateAsync(setters => setters
-            .SetProperty(x => x.Name, "班管理员")
-            .SetProperty(x => x.NormalizedName, "班管理员")
+            .SetProperty(x => x.Name, "班主任")
+            .SetProperty(x => x.NormalizedName, "班主任")
             .SetProperty(x => x.Kind, AccountRoleKind.ClassAdministrator), ct);
         await db.AccountRoles.Where(x => x.Id == AccountRole.TeacherId).ExecuteUpdateAsync(setters => setters
             .SetProperty(x => x.Name, "老师")

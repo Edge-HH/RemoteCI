@@ -498,7 +498,14 @@ fun RemoteCiApp(context: Context) {
             stateText = describeConnection(connectionState),
             onSettingsChange = { settings = it; settingsStore.save(it) },
             onReconnect = { settingsStore.save(settings); ConnectionManager.connect(settings) },
-            onLogout = { ConnectionManager.logout(settings); screen = Screen.Login },
+            onLogout = {
+                ConnectionManager.logout(settings)
+                snapshotStore.clear()
+                eventHistory.clear()
+                cachedSnapshot = null
+                cachedSchedule = null
+                screen = Screen.Login
+            },
             onBack = { screen = Screen.Settings },
         )
 

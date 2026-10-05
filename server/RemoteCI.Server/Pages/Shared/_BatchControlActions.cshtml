@@ -171,6 +171,75 @@
 </section>
 }
 
+@* 扩展插件：各班安装同一个支持 RemoteCI 的插件后自动出现；单班控制页在下方“扩展功能”中按插件分组展示。 *@
+@if (!Model.IsSingleControl && Model.BatchExtensionGroups.Count > 0)
+{
+<section class="panel batch-section" id="batch-extension-plugins">
+    <div class="panel-heading">
+        <div>
+            <h2>扩展插件</h2>
+            <p class="muted">由各班设备上的 ClassIsland 插件注册；未安装该插件的设备会在结果中显示失败。</p>
+        </div>
+    </div>
+    @{ var batchExtensionIndex = 0; }
+    @foreach (var group in Model.BatchExtensionGroups)
+    {
+        <div class="batch-extension-group" data-extension-group="@group.Id">
+            <h3>@group.DisplayName</h3>
+            @if (!string.IsNullOrWhiteSpace(group.Description)) { <p class="muted">@group.Description</p> }
+            <div class="batch-action-grid">
+                @foreach (var extension in group.Extensions)
+                {
+                    <button type="button" class="batch-action-card" data-batch-open="RunExtension" data-batch-dialog="batch-settings-extension-@batchExtensionIndex" data-batch-title="@extension.DisplayName" data-batch-risk="false">
+                        <span class="batch-action-icon"><i class="bi bi-puzzle" aria-hidden="true"></i></span>
+                        <span class="batch-action-copy"><strong>@extension.DisplayName</strong><small>@(string.IsNullOrWhiteSpace(extension.Description) ? (extension.Parameters?.Count > 0 ? "填写参数后批量执行。" : "批量执行该扩展功能。") : extension.Description)</small></span>
+                    </button>
+                    batchExtensionIndex++;
+                }
+                @if (group.HasSettings)
+                {
+                    <a class="batch-action-card" asp-page="/ExtensionSettings" asp-route-groupId="@group.Id">
+                        <span class="batch-action-icon"><i class="bi bi-sliders" aria-hidden="true"></i></span>
+                        <span class="batch-action-copy"><strong>插件设置</strong><small>统一修改各班的 @group.Settings.Count 项设置。</small></span>
+                    </a>
+                }
+            </div>
+        </div>
+    }
+</section>
+
+var batchExtensionDialogIndex = 0;
+foreach (var extension in Model.BatchExtensionGroups.SelectMany(group => group.Extensions))
+{
+    var dialogId = $"batch-settings-extension-{batchExtensionDialogIndex}";
+    <dialog id="@dialogId" class="batch-dialog" data-batch-settings="RunExtension" data-batch-title="@extension.DisplayName" data-batch-risk="false">
+        <div class="batch-dialog-shell">
+            <header class="batch-dialog-header">
+                <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>@extension.DisplayName</h2><p class="muted">ID：@extension.Id</p></div>
+                <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+            </header>
+            <div class="batch-dialog-body stack">
+                <input type="hidden" name="BatchExtensionId" value="@extension.Id" />
+                @if (!string.IsNullOrWhiteSpace(extension.Description)) { <p class="batch-summary">@extension.Description</p> }
+                @if (extension.Parameters is { Count: > 0 } parameters)
+                {
+                    @await Html.PartialAsync("_ExtensionFields", new ExtensionFieldsModel(parameters, "BatchExtensionInputs", dialogId))
+                }
+                else
+                {
+                    <p class="muted">该功能无需参数，下一步选择设备后直接执行。</p>
+                }
+            </div>
+            <footer class="batch-dialog-actions">
+                <button type="button" class="ghost" data-batch-close>取消</button>
+                <button type="button" data-batch-next>下一步：选择设备</button>
+            </footer>
+        </div>
+    </dialog>
+    batchExtensionDialogIndex++;
+}
+}
+
 @* 第 1 步：各功能的参数弹窗。参数会被 batch-control.js 复制到目标弹窗。 *@
 @if (Model.CanUseOperation(BatchOperationKind.Notify))
 {

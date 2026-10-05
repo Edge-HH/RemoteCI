@@ -1,0 +1,4 @@
+@page "/status/{code:int}"
+@model StatusCodeModel
+@{ ViewData["Title"] = Model.Title; }
+<section class="panel narrow"><p class="eyebrow">@Model.Code</p><h1>@Model.Title</h1><p class="muted">@Model.Message</p><a class="button" href="@Model.HomeUrl">@Model.HomeLabel</a></section>

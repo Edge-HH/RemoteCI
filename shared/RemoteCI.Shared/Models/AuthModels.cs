@@ -15,6 +15,16 @@ public sealed class LoginRequest
     public string DeviceName { get; set; } = "Wear OS";
 }
 
+/// <summary>手机扫码登录：凭 WebUI 二维码中的一次性票据换取设备会话。</summary>
+public sealed class MobileLoginRequest
+{
+    [JsonPropertyName("ticket")]
+    public string Ticket { get; set; } = string.Empty;
+
+    [JsonPropertyName("deviceName")]
+    public string DeviceName { get; set; } = "Android";
+}
+
 public sealed class RefreshSessionRequest
 {
     [JsonPropertyName("deviceSessionId")]

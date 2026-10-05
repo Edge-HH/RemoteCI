@@ -72,6 +72,15 @@
 </section>
 
 <section class="panel">
+    <h2>手机扫码登录</h2>
+    <p class="muted">仅修改概览页登录二维码中的服务器地址（例如反向代理后的公网地址），不影响服务端监听。留空则使用当前访问地址。</p>
+    <form method="post" asp-page-handler="SaveMobileLoginSettings" class="stack system-config-form">
+        <label>服务器地址<input asp-for="MobileServerUrl" type="url" maxlength="512" placeholder="https://remoteci.example.com" autocomplete="off" /></label>
+        <button type="submit">保存扫码登录设置</button>
+    </form>
+</section>
+
+<section class="panel">
     <h2>自动备份</h2>
     <p class="muted">默认每天 02:00 执行，备份文件保存在数据库目录下的 backups 文件夹。</p>
     <form method="post" asp-page-handler="SaveBackupSettings" class="form-grid" data-backup-settings-form>

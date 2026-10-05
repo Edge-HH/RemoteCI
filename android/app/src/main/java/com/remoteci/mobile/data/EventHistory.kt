@@ -16,6 +16,16 @@ class EventHistory(context: Context) {
         return true
     }
 
+    /** 个人通知（换课申请等）按通知 Id 去重，与课程事件共用同一份持久记录。 */
+    @Synchronized
+    fun markIfNew(key: String): Boolean {
+        val existing = prefs.getStringSet(KEY_IDS, emptySet()).orEmpty().toMutableSet()
+        if (!existing.add(key)) return false
+        val trimmed = existing.toList().takeLast(MAX_IDS).toSet()
+        prefs.edit().putStringSet(KEY_IDS, trimmed).apply()
+        return true
+    }
+
     private companion object {
         const val KEY_IDS = "ids"
         const val MAX_IDS = 100

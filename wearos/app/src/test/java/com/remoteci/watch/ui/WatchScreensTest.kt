@@ -518,4 +518,17 @@ class WatchScreensTest {
         assertEquals("A", nextSelectValue(options, null))
         assertEquals("X", nextSelectValue(emptyList(), "X"))
     }
+
+    @Test
+    fun `select parameter shows display labels but keeps raw values`() {
+        val parameter = ExtensionParameter(
+            key = "voice", label = "音色", type = Protocol.EXT_PARAM_SELECT,
+            options = listOf("standard", "soft"), optionLabels = listOf("标准", "柔和"),
+        )
+
+        assertEquals("柔和", parameter.optionLabel("soft"))
+        assertEquals("soft", nextSelectValue(parameter.options, "standard"))
+        assertEquals("custom", parameter.optionLabel("custom"))
+        assertEquals("soft", parameter.copy(optionLabels = listOf("只有一个")).optionLabel("soft"))
+    }
 }

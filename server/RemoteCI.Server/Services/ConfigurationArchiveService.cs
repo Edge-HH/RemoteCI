@@ -54,7 +54,13 @@ public sealed class ConfigurationArchiveService(
                 AutoEnterVisitorPage: metadata.AutoEnterVisitorPage,
                 LoginTheme: metadata.LoginTheme,
                 LoginBackgroundOpacity: metadata.LoginBackgroundOpacity,
-                LoginCardPosition: metadata.LoginCardPosition),
+                LoginCardPosition: metadata.LoginCardPosition,
+                MobileServerUrl: metadata.MobileServerUrl,
+                ClassSelfService: new ClassSelfServicePolicy(
+                    metadata.ClassAdminCanRename,
+                    metadata.ClassAdminCanChangeAvatar,
+                    metadata.ClassAdminCanPullSchedule,
+                    metadata.ClassAdminCanEditExtensionSettings)),
             new BackupSettingsSnapshot(backup.Enabled, backup.Cadence, backup.TimeOfDay, backup.DayOfWeek, backup.MaxBackups),
             state.GetLatestSchedule(Classroom.DefaultId), extensionPolicies, extensionPreferences,
             classrooms, memberships, groups, apiKeys);
@@ -178,6 +184,14 @@ public sealed class ConfigurationArchiveService(
         metadata.LoginTheme = snapshot.Metadata.LoginTheme;
         metadata.LoginBackgroundOpacity = Math.Clamp(snapshot.Metadata.LoginBackgroundOpacity, 0, 100);
         metadata.LoginCardPosition = Enum.IsDefined(snapshot.Metadata.LoginCardPosition) ? snapshot.Metadata.LoginCardPosition : LoginCardPosition.Center;
+        try { metadata.MobileServerUrl = MobileLoginSettings.Normalize(snapshot.Metadata.MobileServerUrl); }
+        catch (ArgumentException) { metadata.MobileServerUrl = null; }
+        // 旧配置包没有班级自治策略，按升级前行为恢复。
+        var selfService = snapshot.Metadata.ClassSelfService ?? ClassSelfServicePolicy.Default;
+        metadata.ClassAdminCanRename = selfService.CanRename;
+        metadata.ClassAdminCanChangeAvatar = selfService.CanChangeAvatar;
+        metadata.ClassAdminCanPullSchedule = selfService.CanPullSchedule;
+        metadata.ClassAdminCanEditExtensionSettings = selfService.CanEditExtensionSettings;
         var backup = await db.BackupConfigurations.SingleAsync(x => x.Id == 1, ct);
         backup.Enabled=snapshot.Backup.Enabled; backup.Cadence=snapshot.Backup.Cadence; backup.TimeOfDay=snapshot.Backup.TimeOfDay; backup.DayOfWeek=snapshot.Backup.DayOfWeek; backup.MaxBackups=Math.Clamp(snapshot.Backup.MaxBackups,1,100); backup.LastScheduledAt=null; backup.LastSucceededAt=null; backup.LastError=null;
         await db.SaveChangesAsync(ct);
@@ -226,5 +240,9 @@ public sealed record MetadataSnapshot(
     // 登录页外观标量设置；背景图片体积较大，与班级头像一样不进入配置包。
     LoginTheme LoginTheme = LoginTheme.Follow,
     int LoginBackgroundOpacity = 100,
-    LoginCardPosition LoginCardPosition = LoginCardPosition.Center);
+    LoginCardPosition LoginCardPosition = LoginCardPosition.Center,
+    // 手机扫码登录二维码中的服务器地址；null 表示使用访问地址。
+    string? MobileServerUrl = null,
+    // 班级自治策略；旧包缺失时按 ClassSelfServicePolicy.Default 恢复。
+    ClassSelfServicePolicy? ClassSelfService = null);
 public sealed record BackupSettingsSnapshot(bool Enabled,BackupCadence Cadence,TimeSpan TimeOfDay,DayOfWeek DayOfWeek,int MaxBackups);

@@ -119,6 +119,46 @@ function handlePageActionClick(event) {
     return true;
 }
 
+// 手机扫码登录二维码：按需生成，倒计时结束后隐藏，避免一次性票据长期留在页面上。
+let mobileLoginTimer = 0;
+document.addEventListener("submit", async event => {
+    const form = event.target.closest("[data-mobile-login-form]");
+    if (!form) return;
+    event.preventDefault();
+    const card = form.closest(".mobile-login-card");
+    const qr = card?.querySelector("[data-mobile-login-qr]");
+    const status = form.querySelector("[data-mobile-login-status]");
+    const button = form.querySelector("[data-mobile-login-generate]");
+    window.clearInterval(mobileLoginTimer);
+    button.disabled = true;
+    try {
+        const response = await fetch(form.action, { method: "POST", body: new FormData(form), credentials: "same-origin" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const result = await response.json();
+        qr.innerHTML = result.svg;
+        qr.hidden = false;
+        button.lastChild.textContent = " 重新生成";
+        let remaining = result.expiresInSeconds;
+        const tick = () => {
+            if (remaining <= 0) {
+                window.clearInterval(mobileLoginTimer);
+                qr.hidden = true;
+                qr.innerHTML = "";
+                status.textContent = "二维码已过期，请重新生成。";
+                return;
+            }
+            status.textContent = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")} 后失效`;
+            remaining -= 1;
+        };
+        tick();
+        mobileLoginTimer = window.setInterval(tick, 1000);
+    } catch {
+        status.textContent = "生成失败，请刷新页面后重试。";
+    } finally {
+        button.disabled = false;
+    }
+});
+
 document.addEventListener("click", async event => {
     if (await handleCopyClick(event)) return;
     if (handleDialogClick(event)) return;

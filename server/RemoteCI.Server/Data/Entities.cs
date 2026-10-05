@@ -97,6 +97,30 @@ public sealed class SystemMetadata
 
     /// <summary>登录页卡片在页面中的水平位置；默认居中。</summary>
     public LoginCardPosition LoginCardPosition { get; set; } = LoginCardPosition.Center;
+
+    // ---------- 班级自治策略：系统管理员统一决定班主任可以在本班自行完成哪些操作 ----------
+
+    /// <summary>班主任可以修改本班班名；默认允许，保持升级前行为。</summary>
+    public bool ClassAdminCanRename { get; set; } = true;
+
+    /// <summary>班主任可以上传或清除本班头像；默认允许，保持升级前行为。</summary>
+    public bool ClassAdminCanChangeAvatar { get; set; } = true;
+
+    /// <summary>班主任可以手动从插件拉取本班课表；默认允许，保持升级前行为。</summary>
+    public bool ClassAdminCanPullSchedule { get; set; } = true;
+
+    /// <summary>班主任可以修改本班设备上的扩展设置；默认关闭，扩展设置由系统管理员统一下发。</summary>
+    public bool ClassAdminCanEditExtensionSettings { get; set; }
+
+    /// <summary>
+    /// 手机扫码登录二维码中写入的服务器地址；null 表示使用当前 WebUI 访问地址。
+    /// 只影响二维码内容，不改变服务端监听地址或反向代理配置。
+    /// </summary>
+    public string? MobileServerUrl { get; set; }
+
+    /// <summary>浏览器 Web Push 的 VAPID 密钥对（Base64Url），首次启动自动生成；更换后旧订阅失效。</summary>
+    public string? VapidPublicKey { get; set; }
+    public string? VapidPrivateKey { get; set; }
 }
 
 /// <summary>登录页主题策略：跟随访客本地偏好，或由管理员强制浅色/深色。</summary>
@@ -185,7 +209,10 @@ public enum AccountRoleKind
     Student = 1,
     Administrator = 2,
     Custom = 3,
-    /// <summary>内置“班管理员”：仅在所属班级内生效的班级管理角色，不授予系统管理员身份。</summary>
+    /// <summary>
+    /// 内置“班主任”（原“班管理员”）：仅在所属班级内生效的班级管理角色，不授予系统管理员身份；
+    /// 同时与老师一样按显示名拥有个人“我的日程”。
+    /// </summary>
     ClassAdministrator = 4,
     /// <summary>
     /// 内置“老师”：按显示名与课表科目教师名绑定任教班级，
@@ -200,6 +227,13 @@ public sealed class AccountRole
     public static readonly Guid AdministratorId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     public static readonly Guid ClassAdministratorId = Guid.Parse("44444444-4444-4444-4444-444444444444");
     public static readonly Guid TeacherId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+
+    /// <summary>拥有个人“我的日程”（按显示名匹配课表科目教师名）的内置角色种类：老师与班主任。</summary>
+    public static bool HasPersonalSchedule(AccountRoleKind kind) =>
+        kind is AccountRoleKind.Teacher or AccountRoleKind.ClassAdministrator;
+
+    /// <summary>按全局角色 Id 判断是否拥有个人“我的日程”；内置角色 Id 固定。</summary>
+    public static bool HasPersonalSchedule(Guid roleId) => roleId == TeacherId || roleId == ClassAdministratorId;
 
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
@@ -218,6 +252,24 @@ public sealed class ExtensionPolicy
     public bool Enabled { get; set; } = true;
     public bool AllowNonAdmin { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// 下发时班级插件离线、尚未生效的扩展设置：插件重新上线并同步扩展分组后由服务端自动补发。
+/// 同一班级同一分组只保留一条，多次修改按字段合并，后写入的值覆盖先写入的值。
+/// </summary>
+public sealed class PendingExtensionSetting
+{
+    public Guid ClassroomId { get; set; }
+    public Classroom Classroom { get; set; } = null!;
+    public string GroupId { get; set; } = string.Empty;
+
+    /// <summary>待写入字段的 JSON 对象（键为设置字段 Key，值统一为字符串）。</summary>
+    public string ValuesJson { get; set; } = "{}";
+
+    /// <summary>最近一次修改的账号；补发时以该账号在班级内的当前权限作为请求者。</summary>
+    public Guid RequestedByUserId { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
 }
 
 /// <summary>账号是否在自己的手表上展示某个扩展；没有记录时默认展示。</summary>

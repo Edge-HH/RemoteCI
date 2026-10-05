@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -35,6 +34,8 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Today
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Surface
@@ -87,11 +88,15 @@ import com.remoteci.mobile.data.AdminApi
 import com.remoteci.mobile.data.ConnectionManager
 import com.remoteci.mobile.data.CourseEntry
 import com.remoteci.mobile.data.MyScheduleResponse
+import com.remoteci.mobile.data.MyCourseSlot
 import com.remoteci.mobile.data.Protocol
 import com.remoteci.mobile.data.ScheduleChangeRequest
 import com.remoteci.mobile.data.ScheduleDay
 import com.remoteci.mobile.data.WatchSettings
+import com.remoteci.mobile.data.effectiveClassPermissions
+import com.remoteci.mobile.data.parseLoginQrPayload
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.time.format.TextStyle
 import java.util.Locale
 import kotlinx.coroutines.delay
@@ -119,7 +124,21 @@ fun LoginScreen(
     val pending by ConnectionManager.lanBootstrapPending.collectAsState()
     val scope = rememberCoroutineScope()
     val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
-        result.contents?.let { server = it; onSettings(settings.copy(cloudServerUrl = it)) }
+        val contents = result.contents?.trim().orEmpty()
+        val login = parseLoginQrPayload(contents)
+        if (login != null) {
+            // WebUI 扫码登录：二维码携带服务器地址、登录 ID 与一次性票据，直接换取设备会话。
+            val next = settings.copy(cloudServerUrl = login.serverUrl, username = login.username)
+            server = login.serverUrl
+            username = login.username
+            password = ""
+            onSettings(next)
+            ConnectionManager.connect(next, mobileLoginTicket = login.ticket)
+        } else if (contents.isNotEmpty()) {
+            // 旧版二维码/手动输入只包含服务器地址。
+            server = contents
+            onSettings(settings.copy(cloudServerUrl = contents))
+        }
     }
     LaunchedEffect(connection, ConnectionManager.currentUser.collectAsState().value) {
         if (connection is ConnectionManager.State.CloudConnected || connection is ConnectionManager.State.LanConnected) {
@@ -132,9 +151,9 @@ fun LoginScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("登录 RemoteCI", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("输入或扫描服务器地址，然后使用账号登录。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("输入服务器地址并用账号登录，或扫描 WebUI 的登录二维码直接登录。", color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedTextField(server, { server = it }, label = { Text("服务器地址") }, modifier = Modifier.fillMaxWidth(), trailingIcon = {
-                IconButton({ scanner.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setPrompt("扫描服务器地址")) }) {
+                IconButton({ scanner.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setPrompt("扫描登录二维码或服务器地址")) }) {
                     Icon(Icons.Rounded.QrCodeScanner, contentDescription = "扫描")
                 }
             })
@@ -250,7 +269,7 @@ fun LoginScreen(
     }
 }
 
-/** 登录后的班级选择页：多班级账号先选一个进入，进入后仍可在首页顶部随时切换。 */
+/** 登录后的班级选择页：多班级账号先选一个进入，进入后可在左上角“账号与设置”中切换。 */
 @Composable
 fun ClassPickerScreen(onPicked: () -> Unit) {
     val classes by ConnectionManager.classes.collectAsState()
@@ -261,7 +280,7 @@ fun ClassPickerScreen(onPicked: () -> Unit) {
         ) {
             Text("选择进入的班级", style = MaterialTheme.typography.headlineSmall)
             Text(
-                "该账号拥有多个班级的访问权限，进入后可随时在顶部切换。",
+                "该账号拥有多个班级的访问权限，进入后可在左上角菜单中切换。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -288,26 +307,6 @@ fun ClassPickerScreen(onPicked: () -> Unit) {
     }
 }
 
-/** 首页顶部的班级切换行：仅在账号可访问多个班级时显示。 */
-@Composable
-private fun ClassSwitcherRow() {
-    val classes by ConnectionManager.classes.collectAsState()
-    val currentClassId by ConnectionManager.currentClassId.collectAsState()
-    if (classes.size <= 1) return
-    Row(
-        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        classes.forEach { classroom ->
-            FilterChip(
-                selected = classroom.id == currentClassId,
-                onClick = { ConnectionManager.switchClass(classroom.id) },
-                label = { Text(classroom.name) },
-            )
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeShell(
@@ -318,6 +317,11 @@ fun HomeShell(
     onOpen: (Screen) -> Unit,
     onPersist: (WatchSettings) -> Unit,
 ) {
+    val user by ConnectionManager.currentUser.collectAsState()
+    val pendingSwaps by ConnectionManager.pendingSwapCount.collectAsState()
+    val tabs = visibleHomeTabs(user?.has(com.remoteci.mobile.data.Protocol.PERMISSION_REQUEST_SWAP) == true)
+    // 失去换课权限后停留在换课页时退回“今天”。
+    LaunchedEffect(tab, tabs, user) { if (user != null && tab !in tabs) onTab(HomeTab.Today) }
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
@@ -326,13 +330,22 @@ fun HomeShell(
                 listOf(
                     Item(HomeTab.Today, "今天", Icons.Rounded.Today),
                     Item(HomeTab.Schedule, "课表", Icons.Rounded.CalendarMonth),
+                    Item(HomeTab.SwapRequests, "换课", Icons.Rounded.SwapHoriz),
                     Item(HomeTab.Control, "控制", Icons.Rounded.Tune),
                     Item(HomeTab.People, "人员", Icons.Rounded.Group),
-                ).forEach { item ->
+                ).filter { it.tab in tabs }.forEach { item ->
                     NavigationBarItem(
                         selected = tab == item.tab,
                         onClick = { onTab(item.tab) },
-                        icon = { Icon(item.icon, contentDescription = item.label) },
+                        icon = {
+                            if (item.tab == HomeTab.SwapRequests && pendingSwaps > 0) {
+                                BadgedBox(badge = { Badge { Text(pendingSwaps.toString()) } }) {
+                                    Icon(item.icon, contentDescription = item.label)
+                                }
+                            } else {
+                                Icon(item.icon, contentDescription = item.label)
+                            }
+                        },
                         label = { Text(item.label, style = MaterialTheme.typography.labelMedium) },
                     )
                 }
@@ -340,14 +353,12 @@ fun HomeShell(
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            Column {
-                ClassSwitcherRow()
-                when (tab) {
-                    HomeTab.Today -> TodayScreen(snackbar, onOpen, onTab)
-                    HomeTab.Schedule -> ScheduleScreen(embedded = true, snackbar = snackbar, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
-                    HomeTab.Control -> ControlListScreen(embedded = true, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
-                    HomeTab.People -> PeopleScreen(embedded = true, snackbar = snackbar, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
-                }
+            when (tab) {
+                HomeTab.Today -> TodayScreen(snackbar, onOpen, onTab)
+                HomeTab.Schedule -> ScheduleScreen(embedded = true, snackbar = snackbar, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
+                HomeTab.SwapRequests -> SwapRequestsScreen(snackbar = snackbar)
+                HomeTab.Control -> ControlListScreen(embedded = true, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
+                HomeTab.People -> PeopleScreen(embedded = true, snackbar = snackbar, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
             }
         }
     }
@@ -358,6 +369,8 @@ fun HomeShell(
 fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (HomeTab) -> Unit) {
     val snapshot by ConnectionManager.snapshot.collectAsState()
     val schedule by ConnectionManager.schedule.collectAsState()
+    val user by ConnectionManager.currentUser.collectAsState()
+    val personalNext by ConnectionManager.personalNextCourse.collectAsState()
     val connection by ConnectionManager.state.collectAsState()
     val status by ConnectionManager.schedulePullState.collectAsState()
     val admin = remember { mutableStateOf<com.remoteci.mobile.data.AdminStatus?>(null) }
@@ -372,11 +385,24 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
     val now = pluginLocalNow(snapshot?.generatedAt, snapshot?.timeZoneOffsetMinutes, generatedElapsed, nowTick)
     val day = schedule?.days?.firstOrNull { it.date == today.toString() }
     val home = homeCourseContent(snapshot)
-    val progress = if (shouldShowStateProgress(snapshot)) lessonProgress(snapshot?.currentTimeLayoutItem, now) else 0f
-    val period = extractPeriod(home.timeLayoutItem) ?: snapshot?.currentTimeLayoutItem?.substringBefore(' ') ?: "—"
-    val room = home.timeLayoutItem?.substringAfter(' ', missingDelimiterValue = "")?.ifBlank { snapshot?.classPlanName }.orEmpty()
-    val timeRange = extractTimeRange(home.timeLayoutItem).ifBlank { "—" }
-    val stateTitle = when (snapshot?.currentState) {
+    val teacherMode = user?.isTeacher == true
+    val teacherCurrent = personalNext?.current
+    val teacherNext = personalNext?.next
+    val progress = if (teacherMode) teacherCurrent?.let { teacherProgress(it.startsAt, it.endsAt) } ?: 0f
+        else if (shouldShowStateProgress(snapshot)) lessonProgress(snapshot?.currentTimeLayoutItem, now) else 0f
+    val period = if (teacherMode) teacherCurrent?.course?.label ?: teacherNext?.course?.label ?: "—"
+        else extractPeriod(home.timeLayoutItem) ?: snapshot?.currentTimeLayoutItem?.substringBefore(' ') ?: "—"
+    val room = if (teacherMode) listOfNotNull(teacherCurrent?.className, teacherNext?.className).firstOrNull().orEmpty()
+        else home.timeLayoutItem?.substringAfter(' ', missingDelimiterValue = "")?.ifBlank { snapshot?.classPlanName }.orEmpty()
+    val timeRange = if (teacherMode) teacherCurrent?.let(::teacherSlotRange) ?: teacherNext?.let(::teacherSlotRange) ?: "—"
+        else extractTimeRange(home.timeLayoutItem).ifBlank { "—" }
+    val stateTitle = if (teacherMode) {
+        when {
+            teacherCurrent != null -> "上课"
+            teacherNext != null -> "即将上课"
+            else -> "放学"
+        }
+    } else when (snapshot?.currentState) {
         Protocol.STATE_CLASS -> "上课"
         Protocol.STATE_BREAKING -> "课间"
         Protocol.STATE_PREPARE_CLASS -> "即将上课"
@@ -393,8 +419,11 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
         )
         Card(
             onClick = {
-                val index = homeQuickSwapLessonIndex(day, snapshot)
-                onOpen(Screen.Swap(day?.date, index))
+                if (teacherMode) onTab(HomeTab.Schedule)
+                else {
+                    val index = homeQuickSwapLessonIndex(day, snapshot)
+                    onOpen(Screen.Swap(day?.date, index))
+                }
             },
             modifier = Modifier.fillMaxWidth().height(168.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
@@ -411,7 +440,8 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
                     verticalAlignment = Alignment.Bottom,
                 ) {
                     Text(
-                        if (home.isAvailable) home.subject else "暂无课程",
+                        if (teacherMode) teacherCurrent?.course?.subject ?: teacherNext?.course?.subject ?: "暂无课程"
+                        else if (home.isAvailable) home.subject else "暂无课程",
                         fontSize = 32.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -432,18 +462,22 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
                 }
             }
         }
-        val next = snapshot?.nextClassSubject
+        val next = if (teacherMode) teacherNext?.course?.subject else snapshot?.nextClassSubject
         ConnectedListCard {
-            if (shouldShowNextLessonSummary(snapshot?.currentState) && !next.isNullOrBlank()) {
+            if ((teacherMode || shouldShowNextLessonSummary(snapshot?.currentState)) && !next.isNullOrBlank()) {
                 AppListItem(
                     title = "下一节 · $next",
-                    supporting = listOfNotNull(extractPeriod(snapshot?.nextClassTimeLayoutItem), extractTimeRange(snapshot?.nextClassTimeLayoutItem)).joinToString(" ") +
+                    supporting = if (teacherMode) listOfNotNull(teacherNext?.className, teacherNext?.let(::teacherSlotRange)).joinToString(" · ")
+                    else listOfNotNull(extractPeriod(snapshot?.nextClassTimeLayoutItem), extractTimeRange(snapshot?.nextClassTimeLayoutItem)).joinToString(" ") +
                         (snapshot?.nextClassTimeLayoutItem?.substringAfter(' ', "")?.let { " · $it" } ?: ""),
                     leading = Icons.Rounded.DirectionsRun,
                     trailing = Icons.Rounded.SwapHoriz,
                     index = 0,
                     count = 2,
-                    onClick = { onOpen(Screen.Swap(day?.date, nextQuickSwapLessonIndex(day, snapshot))) },
+                    onClick = {
+                        if (teacherMode) onTab(HomeTab.Schedule)
+                        else onOpen(Screen.Swap(day?.date, nextQuickSwapLessonIndex(day, snapshot)))
+                    },
                 )
             } else {
                 AppListItem("下一节", "目前没有下一节课程", Icons.Rounded.DirectionsRun, index = 0, count = 2)
@@ -452,7 +486,7 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
                 is ConnectionManager.SchedulePullState.Pulling -> currentStatus.message
                 is ConnectionManager.SchedulePullState.Success -> currentStatus.message
                 is ConnectionManager.SchedulePullState.Error -> currentStatus.message
-                else -> snapshot?.generatedAt?.let { "课表已于 ${it.substring(11, 16)} 同步" } ?: "尚未同步课表"
+                else -> formatLocalSyncTime(snapshot?.generatedAt)?.let { "课表已于 $it 同步" } ?: "尚未同步课表"
             }
             val watchText = if ((admin.value?.watchConnections ?: 0) > 0) "手表已连接" else "手表未连接"
             AppListItem(
@@ -486,17 +520,24 @@ fun ScheduleScreen(
     val snapshot by ConnectionManager.snapshot.collectAsState()
     val pull by ConnectionManager.schedulePullState.collectAsState()
     val user by ConnectionManager.currentUser.collectAsState()
+    val classes by ConnectionManager.classes.collectAsState()
     val afterSchool = snapshot?.currentState == Protocol.STATE_AFTER_SCHOOL
     val days = availableScheduleDays(bundle, afterSchool)
     var selected by remember { mutableIntStateOf(0) }
     if (selected >= days.size) selected = 0
-    val canChange = user?.has(Protocol.PERMISSION_MANAGE_SCHEDULE) == true && ConnectionManager.supports(Protocol.CAP_SCHEDULE_CHANGE)
-    val scheduleClassId by ConnectionManager.currentClassId.collectAsState()
-    val canPull = user?.canPullScheduleFor(scheduleClassId) == true
+    // 权限按当前班级计算；老师/自定义角色可能只在某个班级拥有换课权限。
+    val currentClassId by ConnectionManager.currentClassId.collectAsState()
+    val classPermissions = effectiveClassPermissions(classes, currentClassId, user?.permissions ?: 0)
+    // 换课是否可执行由服务端按班级权限和插件能力最终复核。
+    // 能力快照可能在连接切换/插件刚上线时短暂缺失，不能因此把 Android 入口直接禁用。
+    val canChange = (classPermissions and Protocol.PERMISSION_MANAGE_SCHEDULE) == Protocol.PERMISSION_MANAGE_SCHEDULE
+    val canPull = user?.canPullScheduleFor(currentClassId) == true
 
-    // 老师：显示名与课表教师名绑定后，可跨班级查看“我的日程”；null 表示尚未手动切换。
+    // 老师与班主任：显示名与课表教师名绑定后，可跨班级查看“我的日程”；null 表示尚未手动切换。
+    // 老师默认进入“我的日程”，班主任默认仍看本班课表。
     var mineChoice by remember { mutableStateOf<Boolean?>(null) }
-    val mineMode = mineChoice ?: (user?.isTeacher == true)
+    // 委派属性无法智能转换，先取局部值再判断，避免 user 为 null 时误读。
+    val mineMode = user?.let { it.hasPersonalSchedule && (mineChoice ?: it.isTeacher) } == true
     var mySchedule by remember { mutableStateOf<MyScheduleResponse?>(null) }
     var myScheduleStatus by remember { mutableStateOf<String?>(null) }
     var myScheduleRefresh by remember { mutableIntStateOf(0) }
@@ -528,7 +569,7 @@ fun ScheduleScreen(
                 }
             },
         )
-        if (user?.isTeacher == true) {
+        if (user?.hasPersonalSchedule == true) {
             Row(
                 Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -580,7 +621,7 @@ fun ScheduleScreen(
             }
         } else {
         if (days.isEmpty()) {
-            EmptyState("还没有课表", if (canPull) "连接成功后会显示未来七日课程。管理员或班管理员可刷新课表。" else "连接成功后会显示未来七日课程。")
+            EmptyState("还没有课表", if (canPull) "连接成功后会显示未来七日课程。管理员或班主任可刷新课表。" else "连接成功后会显示未来七日课程。")
         } else {
             PrimaryScrollableTabRow(selectedTabIndex = selected.coerceAtMost(days.lastIndex)) {
                 days.forEachIndexed { index, day ->
@@ -596,7 +637,7 @@ fun ScheduleScreen(
             val courses = day.courses.filter { it.enabled }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (courses.isEmpty()) {
-                    EmptyState("这一天没有课程", if (canPull) "管理员或班管理员可拉取最新课表，或选择其他日期。" else "请选择其他日期。")
+                    EmptyState("这一天没有课程", if (canPull) "管理员或班主任可拉取最新课表，或选择其他日期。" else "请选择其他日期。")
                 } else {
                     ConnectedListCard {
                         courses.forEachIndexed { index, course ->
@@ -646,6 +687,7 @@ fun SwapScreen(date: String?, index: Int?, onBack: () -> Unit, snackbar: Snackba
     val bundle by ConnectionManager.schedule.collectAsState()
     val snapshot by ConnectionManager.snapshot.collectAsState()
     val user by ConnectionManager.currentUser.collectAsState()
+    val classes by ConnectionManager.classes.collectAsState()
     val afterSchool = snapshot?.currentState == Protocol.STATE_AFTER_SCHOOL
     val days = availableScheduleDays(bundle, afterSchool)
     var selectedDate by remember { mutableStateOf(date ?: days.firstOrNull()?.date) }
@@ -658,7 +700,11 @@ fun SwapScreen(date: String?, index: Int?, onBack: () -> Unit, snackbar: Snackba
     var replacementId by remember { mutableStateOf(bundle?.subjects?.firstOrNull()?.id.orEmpty()) }
     val source = courses.firstOrNull { it.index == sourceIndex }
     val target = courses.firstOrNull { it.index == targetIndex }
-    val canChange = user?.has(Protocol.PERMISSION_MANAGE_SCHEDULE) == true
+    // 与提交命令使用同一套班级权限判断，避免全局权限没有该位时把本班授权的老师挡在入口外。
+    val currentClassId by ConnectionManager.currentClassId.collectAsState()
+    val classPermissions = effectiveClassPermissions(classes, currentClassId, user?.permissions ?: 0)
+    // 能力快照存在短暂不同步窗口时仍允许提交，由服务端返回 CAPABILITY_UNSUPPORTED 等明确结果。
+    val canChange = (classPermissions and Protocol.PERMISSION_MANAGE_SCHEDULE) == Protocol.PERMISSION_MANAGE_SCHEDULE
     val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         TopAppBar(
@@ -773,7 +819,7 @@ fun SwapScreen(date: String?, index: Int?, onBack: () -> Unit, snackbar: Snackba
                         )
                     },
                     modifier = Modifier.fillMaxWidth().height(56.dp),
-                    enabled = canChange && ConnectionManager.supports(Protocol.CAP_SCHEDULE_CHANGE),
+                    enabled = canChange,
                 ) { Text("确认换课") }
             }
         }
@@ -805,6 +851,16 @@ fun subjectIcon(subject: String): ImageVector {
         "数学" in name -> Icons.Rounded.Functions
         else -> Icons.Rounded.CalendarMonth
     }
+}
+
+private fun teacherSlotRange(slot: MyCourseSlot): String = listOfNotNull(slot.course.startTime, slot.course.endTime)
+    .joinToString("–").ifBlank { slot.startsAt.take(16).replace('T', ' ') }
+
+private fun teacherProgress(startsAt: String, endsAt: String): Float {
+    val start = runCatching { OffsetDateTime.parse(startsAt).toInstant().toEpochMilli() }.getOrNull() ?: return 0f
+    val end = runCatching { OffsetDateTime.parse(endsAt).toInstant().toEpochMilli() }.getOrNull() ?: return 0f
+    if (end <= start) return 0f
+    return ((System.currentTimeMillis() - start).toFloat() / (end - start)).coerceIn(0f, 1f)
 }
 
 fun schedulePullActionEnabled(state: ConnectionManager.SchedulePullState): Boolean =

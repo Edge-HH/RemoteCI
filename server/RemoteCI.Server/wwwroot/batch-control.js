@@ -276,7 +276,7 @@
     };
 
 
-    const openOperation = (operation, title, risk) => {
+    const openOperation = (operation, title, risk, dialogId) => {
         if (singleControl && ["ClearNotifications", "RefreshSoftwareInventory"].includes(operation)) {
             operationInput.value = operation;
             targetForm.action = `${location.pathname}?handler=SingleExecute`;
@@ -295,12 +295,14 @@
             openDialog(voiceDialog);
             return;
         }
-        if (!settingsDialogFor(operation)) {
+        // 扩展功能等同一操作对应多个参数弹窗时，由卡片上的 data-batch-dialog 指定具体弹窗。
+        const settingsDialog = (dialogId && document.getElementById(dialogId)) || settingsDialogFor(operation);
+        if (!settingsDialog) {
             openTargetDialog(operation, title, risk, null);
             return;
         }
         currentOperation = operation;
-        currentSettingsDialog = settingsDialogFor(operation);
+        currentSettingsDialog = settingsDialog;
         openDialog(currentSettingsDialog);
         prepareSingleDialog(currentSettingsDialog, risk);
         if (operation === "UpdateTimeLayout" && currentSettingsDialog.querySelectorAll("[data-time-layout-rows] .time-layout-row").length === 0) {
@@ -313,7 +315,7 @@
     const handleOpenClick = event => {
         const button = findTarget(event, "[data-batch-open]");
         if (!button) return false;
-        openOperation(button.dataset.batchOpen, button.dataset.batchTitle, button.dataset.batchRisk === "true");
+        openOperation(button.dataset.batchOpen, button.dataset.batchTitle, button.dataset.batchRisk === "true", button.dataset.batchDialog);
         return true;
     };
     const handleCloseClick = event => {

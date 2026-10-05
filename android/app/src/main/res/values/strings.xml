@@ -149,4 +149,8 @@
     <string name="notification_title_remote_ci">RemoteCI 通知</string>
     <string name="notification_title_classisland">ClassIsland 通知</string>
     <string name="notification_title_fallback">RemoteCI</string>
+    <string name="notification_swap_channel_name">换课申请</string>
+    <string name="notification_swap_channel_description">换课申请、审批结果与强制换课提醒</string>
+    <string name="notification_school_status_channel_name">上课状态</string>
+    <string name="notification_school_status_channel_description">上学期间显示当前课程、下一节课和剩余时间</string>
 </resources>

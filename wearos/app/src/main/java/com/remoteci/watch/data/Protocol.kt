@@ -136,7 +136,16 @@ data class PeerCapabilities(
 @Serializable
 data class CapabilitiesSync(
     val server: PeerCapabilities = PeerCapabilities(capabilities = Protocol.BASELINE_CAPABILITIES.toList()),
+    /** 旧版服务端或局域网直连时唯一的插件能力；新版服务端改用 [classPlugins] 按班级下发。 */
     val plugin: PeerCapabilities? = null,
+    /** 每个可访问班级当前主插件的能力；未出现的班级表示该班插件离线。旧版服务端为 null。 */
+    @SerialName("classPlugins") val classPlugins: List<ClassPluginCapabilities>? = null,
+)
+
+@Serializable
+data class ClassPluginCapabilities(
+    @SerialName("classId") val classId: String = "",
+    val plugin: PeerCapabilities = PeerCapabilities(),
 )
 
 @Serializable
@@ -330,7 +339,20 @@ data class ExtensionParameter(
     @SerialName("defaultValue") val defaultValue: String? = null,
     val required: Boolean = false,
     val options: List<String> = emptyList(),
-)
+    /** 与 options 按下标对应的显示名称；缺失或数量不一致时显示原值。 */
+    @SerialName("optionLabels") val optionLabels: List<String>? = null,
+) {
+    /** 候选值在表盘上的显示名称；提交仍使用原始候选值。 */
+    fun optionLabel(value: String?): String {
+        val index = if (value == null) -1 else options.indexOf(value)
+        val labels = optionLabels
+        return when {
+            index < 0 -> value.orEmpty()
+            labels != null && labels.size == options.size && labels[index].isNotBlank() -> labels[index]
+            else -> options[index]
+        }
+    }
+}
 
 @Serializable
 data class ClassSummary(
@@ -342,9 +364,9 @@ data class ClassSummary(
     @SerialName("visitorEnabled") val visitorEnabled: Boolean = false,
     @SerialName("groupName") val groupName: String? = null,
 ) {
-    /** 本班班管理员：优先按角色种类判断；旧版服务端或插件镜像未下发 roleKind 时退回内置角色名。 */
+    /** 本班班主任：优先按角色种类判断；旧版服务端或插件镜像未下发 roleKind 时退回内置角色名。 */
     val isClassAdministrator: Boolean
-        get() = roleKind?.let { it == Protocol.ROLE_KIND_CLASS_ADMINISTRATOR } ?: (roleName == "班管理员")
+        get() = roleKind?.let { it == Protocol.ROLE_KIND_CLASS_ADMINISTRATOR } ?: (roleName == "班主任" || roleName == "班管理员")
     val effectivePermissions: Int
         get() = permissions ?: Protocol.PERMISSION_VIEW_CURRENT
 }
@@ -364,7 +386,7 @@ data class UserProfile(
     val version: Long = 0,
 ) {
     val isAdmin: Boolean get() = role == Protocol.ROLE_ADMIN
-    /** 是否可管理指定班级的课表拉取：系统管理员，或该班级的班管理员（与服务端按班级校验一致）。 */
+    /** 是否可管理指定班级的课表拉取：系统管理员，或该班级的班主任（与服务端按班级校验一致）。 */
     fun canPullScheduleFor(classId: String?): Boolean =
         isAdmin || classes?.firstOrNull { it.id == classId }?.isClassAdministrator == true
     fun has(permission: Int): Boolean = permissions and permission == permission

@@ -10,7 +10,8 @@ using RemoteCI.Shared.Models;
 namespace RemoteCI.Server.Pages;
 
 [Authorize]
-public sealed class IndexModel(UserManager<AppUser> users, PeerRegistry peers, IStateStore state, IdentityCoordinator identities)
+public sealed class IndexModel(
+    UserManager<AppUser> users, PeerRegistry peers, IStateStore state, IdentityCoordinator identities, MobileLoginSettings mobileLogin)
     : WebPageModel(users)
 {
     public bool PluginOnline => peers.HasPluginFor(CurrentClassId);
@@ -20,7 +21,6 @@ public sealed class IndexModel(UserManager<AppUser> users, PeerRegistry peers, I
     public ScheduleBundle? Schedule { get; private set; }
     public string? PairCode { get; private set; }
     public string MobileLoginUrl { get; private set; } = string.Empty;
-    public string MobileLoginQrSvg { get; private set; } = string.Empty;
     public IReadOnlyList<PluginCredentialInfo> PluginCredentials { get; private set; } = [];
     public IReadOnlyList<PeerCapabilityDiagnostic> CapabilityDiagnostics { get; private set; } = [];
     public PluginProtocolMismatch? PluginProtocolMismatch => peers.LatestPluginProtocolMismatch;
@@ -76,12 +76,33 @@ public sealed class IndexModel(UserManager<AppUser> users, PeerRegistry peers, I
         return Page();
     }
 
+    /// <summary>
+    /// 按需生成手机扫码登录二维码：内含服务器地址、当前登录 ID 与一次性票据，
+    /// 安卓版扫码后直接登录当前 WebUI 账号。票据 5 分钟内有效且只能使用一次。
+    /// </summary>
+    public async Task<IActionResult> OnPostMobileLoginQrAsync(CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
+        var serverUrl = await ResolveMobileServerUrlAsync(ct);
+        var ticket = await identities.CreateMobileLoginTicketAsync(CurrentUser.Id, ct);
+        var payload = MobileLoginSettings.BuildLoginQrPayload(serverUrl, ticket.Username, ticket.Ticket);
+        using var qrData = QRCodeGenerator.GenerateQrCode(payload, QRCodeGenerator.ECCLevel.M);
+        using var renderer = new SvgQRCode(qrData);
+        return new JsonResult(new
+        {
+            svg = renderer.GetGraphic(4),
+            serverUrl,
+            expiresInSeconds = (int)IdentityCoordinator.MobileLoginTicketLifetime.TotalSeconds,
+        });
+    }
+
+    /// <summary>二维码服务器地址：系统配置中指定的地址优先，否则使用当前访问地址。</summary>
+    private async Task<string> ResolveMobileServerUrlAsync(CancellationToken ct) =>
+        await mobileLogin.GetServerUrlAsync(ct) ?? $"{Request.Scheme}://{Request.Host}{Request.PathBase}".TrimEnd('/');
+
     private async Task LoadAsync(CancellationToken ct)
     {
-        MobileLoginUrl = $"{Request.Scheme}://{Request.Host}{Request.PathBase}".TrimEnd('/');
-        using (var qrData = QRCodeGenerator.GenerateQrCode(MobileLoginUrl, QRCodeGenerator.ECCLevel.Q))
-        using (var renderer = new SvgQRCode(qrData))
-            MobileLoginQrSvg = renderer.GetGraphic(4);
+        MobileLoginUrl = await ResolveMobileServerUrlAsync(ct);
         WatchConnections = peers.WatchCount;
         AccountCount = (await identities.ListUsersAsync(ct)).Count;
         Snapshot = state.GetLatestSnapshot(CurrentClassId);

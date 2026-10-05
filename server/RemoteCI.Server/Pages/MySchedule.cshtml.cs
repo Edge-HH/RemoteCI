@@ -19,7 +19,7 @@ public sealed class MyScheduleModel(
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (CurrentUser.RoleDefinitionId != AccountRole.TeacherId)
+        if (!AccountRole.HasPersonalSchedule(CurrentUser.RoleDefinitionId))
             return RedirectToPage("/Denied");
 
         Schedule = await teachers.BuildMyScheduleAsync(CurrentUser.DisplayName, ct);

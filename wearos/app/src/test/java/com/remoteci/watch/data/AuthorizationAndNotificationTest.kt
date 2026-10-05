@@ -2,6 +2,7 @@ package com.remoteci.watch.data
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -38,6 +39,21 @@ class AuthorizationAndNotificationTest {
 
         assertEquals(setOf(Protocol.CAP_SCHEDULE_READ), effective)
         assertTrue(effectiveCapabilities(CapabilitiesSync()).isEmpty())
+    }
+
+    @Test
+    fun `effective capabilities follow the current class plugin`() {
+        val sync = CapabilitiesSync(
+            server = PeerCapabilities(capabilities = Protocol.CURRENT_CAPABILITIES.toList()),
+            plugin = PeerCapabilities(capabilities = listOf(Protocol.CAP_SCHEDULE_READ)),
+            classPlugins = listOf(
+                ClassPluginCapabilities("class-b", PeerCapabilities(capabilities = listOf(Protocol.CAP_VOLUME_CONTROL))),
+            ),
+        )
+
+        assertEquals(setOf(Protocol.CAP_VOLUME_CONTROL), effectiveCapabilities(sync, "CLASS-B"))
+        assertTrue(effectiveCapabilities(sync, "class-a").isEmpty())
+        assertEquals(setOf(Protocol.CAP_SCHEDULE_READ), effectiveCapabilities(sync.copy(classPlugins = null), "class-a"))
     }
 
     @Test

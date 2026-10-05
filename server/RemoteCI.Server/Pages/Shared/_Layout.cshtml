@@ -16,11 +16,19 @@
         ? UserPermissions.None
         : RolePermissions.Effective(current.Role, current.GrantedPermissions, roleDefaults);
     var currentPage = ViewContext.RouteData.Values["page"]?.ToString();
-    var isTeacher = current?.RoleDefinitionId == AccountRole.TeacherId;
+    var hasPersonalSchedule = current is not null && AccountRole.HasPersonalSchedule(current.RoleDefinitionId);
+    var canRequestSwap = current is not null && permissions.HasFlag(UserPermissions.RequestScheduleSwap);
+    // 铃铛未读数与换课页待处理数在服务端渲染首屏，之后由 notifications.js 轮询刷新。
+    var unreadNotifications = current is null ? 0 : await Db.UserNotifications.CountAsync(x => x.UserId == current.Id && x.ReadAt == null);
+    var currentUserKey = current?.Id.ToString() ?? string.Empty;
+    var pendingSwaps = current is null || !canRequestSwap ? 0 : await Db.ScheduleSwapRequests.CountAsync(x =>
+        x.Status == RemoteCI.Shared.Models.SwapRequestStatus.Pending && x.ApproverUserIdsJson.Contains(currentUserKey));
     string NavClass(string page) => currentPage == page ? "nav-link active" : "nav-link";
     string? CurrentPage(string page) => currentPage == page ? "page" : null;
     var userInitial = string.IsNullOrWhiteSpace(current?.DisplayName) ? "R" : current.DisplayName.Trim()[0].ToString().ToUpperInvariant();
-    var controlMenuActive = currentPage is "/Control" or "/Notifications";
+    // 班主任从控制页进入扩展插件设置时，侧栏仍高亮“控制”；系统管理员有独立的“扩展插件”入口。
+    var controlMenuActive = currentPage is "/Control" or "/Notifications" ||
+        (currentPage == "/ExtensionSettings" && current?.Role != UserRole.Admin);
     var showControlMenu = permissions.HasFlag(UserPermissions.TeacherComing) ||
         permissions.HasFlag(UserPermissions.SendNotifications) ||
         permissions.HasFlag(UserPermissions.SendVoiceMessages) ||
@@ -125,10 +133,17 @@
                 {
                     <a class="@(controlMenuActive ? "nav-link active" : "nav-link")" aria-current="@(controlMenuActive ? "page" : null)" asp-page="/Control" data-search-label="控制 老师来了 发送通知 清除通知 主界面 音量 电源 扩展"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 5H3m9 14H3M14 3v4m2 10v4m5-9h-9m9 7h-5m5-14h-7m-6 5v4m0-2H3"/></svg><span>控制</span></a>
                 }
-                @if (isTeacher)
+                @if (hasPersonalSchedule || canRequestSwap)
                 {
                     <div class="nav-section-label" role="presentation">个人</div>
+                }
+                @if (hasPersonalSchedule)
+                {
                     <a class="@NavClass("/MySchedule")" aria-current="@CurrentPage("/MySchedule")" asp-page="/MySchedule" data-search-label="我的日程 教师课表 任教班级"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M8 2v3m8-3v3M3 9h18M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01M16 17h.01"/></g></svg><span>我的日程</span></a>
+                }
+                @if (canRequestSwap)
+                {
+                    <a class="@NavClass("/SwapRequests")" aria-current="@CurrentPage("/SwapRequests")" asp-page="/SwapRequests" data-search-label="换课申请 调课 强制换课 审批换课"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m16 3l4 4l-4 4"/><path d="M20 7H4m4 14l-4-4l4-4"/><path d="M4 17h16"/></g></svg><span>换课</span><span class="nav-badge" data-swap-badge hidden="@(pendingSwaps == 0)">@pendingSwaps</span></a>
                 }
                 @* 管理员专属管理器与“选中班级的操作”用分组标签分区：上面是当前班级的操作，下面是全局管理。 *@
                 @if (permissions.HasFlag(UserPermissions.ManageUsers) || current.Role == UserRole.Admin)
@@ -141,6 +156,7 @@
                     @if (current.Role == UserRole.Admin)
                     {
                         <a class="@NavClass("/BatchControl")" aria-current="@CurrentPage("/BatchControl")" asp-page="/BatchControl" data-search-label="批量控制 广播 通知 开关机 电源 语音"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M4.9 16.1C1 12.2 1 5.8 4.9 1.9m2.9 2.8a6.14 6.14 0 0 0-.8 7.5"/><circle cx="12" cy="9" r="2"/><path d="M16.2 4.8c2 2 2.26 5.11.8 7.47M19.1 1.9a9.96 9.96 0 0 1 0 14.1m-9.6 2h5M8 22l4-11l4 11"/></g></svg><span>批量控制</span></a>
+                        <a class="@NavClass("/ExtensionSettings")" aria-current="@CurrentPage("/ExtensionSettings")" asp-page="/ExtensionSettings" data-search-label="扩展插件 插件设置 扩展设置 批量设置"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.39 4.39a1 1 0 0 0 1.68-.474a2.5 2.5 0 1 1 3.014 3.015a1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474a2.5 2.5 0 1 0-3.014 3.015a1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474a2.5 2.5 0 1 1-3.014-3.015a1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474a2.5 2.5 0 1 0 3.014-3.015a1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/></svg><span>扩展插件</span></a>
                         <a class="@NavClass("/Classes")" aria-current="@CurrentPage("/Classes")" asp-page="/Classes" data-search-label="班级管理 班级 分组 成员 访客"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m6.08 9.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/><path d="m6.08 14.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/></g></svg><span>班级管理</span></a>
                         <a class="@NavClass("/SystemConfig")" aria-current="@CurrentPage("/SystemConfig")" asp-page="/SystemConfig" data-search-label="系统配置 系统更新 服务端维护"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M14 17H5M19 7h-9"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></g></svg><span>系统配置</span></a>
                         <a class="@NavClass("/LoginSettings")" aria-current="@CurrentPage("/LoginSettings")" asp-page="/LoginSettings" data-search-label="登录页设置 登录页 主题 深色 浅色 背景 背景图 透明度 外观 卡片位置 左 右"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15l-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></g></svg><span>登录页设置</span></a>
@@ -197,6 +213,7 @@
                     {
                         <span class="class-switcher current" title="当前班级"><svg class="switcher-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m6.08 9.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/><path d="m6.08 14.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/></g></svg><span>@currentClassName</span></span>
                     }
+                    <a class="topbar-button notification-bell" asp-page="/Inbox" aria-label="通知" title="通知" data-notification-bell data-unread-url="@Url.Page("/Inbox", "Unread")"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M10.268 21a2 2 0 0 0 3.464 0M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></g></svg><span class="bell-badge" data-unread-badge hidden="@(unreadNotifications == 0)">@(unreadNotifications > 99 ? "99+" : unreadNotifications.ToString())</span></a>
                     <button class="topbar-button" type="button" data-theme-toggle aria-label="切换明暗主题" title="切换明暗主题"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2v2m2.837 12.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715M16 12a4 4 0 0 0-4-4m7-3l-1.256 1.256M20 12h2"/></svg></button>
                     <button class="topbar-button" type="button" data-page-refresh aria-label="刷新当前页面" title="刷新当前页面"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></g></svg></button>
                     <a class="topbar-button" asp-page="/Account" aria-label="打开个人账号" title="个人账号"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0a2.34 2.34 0 0 0 3.319 1.915a2.34 2.34 0 0 1 2.33 4.033a2.34 2.34 0 0 0 0 3.831a2.34 2.34 0 0 1-2.33 4.033a2.34 2.34 0 0 0-3.319 1.915a2.34 2.34 0 0 1-4.659 0a2.34 2.34 0 0 0-3.32-1.915a2.34 2.34 0 0 1-2.33-4.033a2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></g></svg></a>
@@ -220,5 +237,10 @@
     }
     <script src="~/app.js" asp-append-version="true" defer></script>
     <script src="~/voice-message.js" asp-append-version="true" defer></script>
+    @if (current is not null && currentPage != "/Visitor")
+    {
+        <div class="toast-stack" data-toast-stack aria-live="polite"></div>
+        <script src="~/notifications.js" asp-append-version="true" defer></script>
+    }
 </body>
 </html>

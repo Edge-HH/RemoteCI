@@ -580,6 +580,190 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     }
 
     [Fact]
+    public async Task ExtensionGroups_SyncedFromPlugin_AdminAppliesPartialSettingsThroughRest()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
+        await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>()
+            .PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.ExtensionsSettings));
+        await SendAsync(plugin, Envelope.ExtensionGroupsSync(new List<ExtensionGroupDefinition>
+        {
+            new()
+            {
+                Id = "demo.settings",
+                DisplayName = "演示插件",
+                Settings =
+                [
+                    new ExtensionParameter { Key = "volume", Label = "音量", Type = ExtensionParameterType.Number, Min = 0, Max = 100 },
+                    new ExtensionParameter
+                    {
+                        Key = "mode", Label = "模式", Type = ExtensionParameterType.Select,
+                        Options = ["a", "b"], OptionLabels = ["模式 A", "模式 B"],
+                    },
+                ],
+                Values = new Dictionary<string, string?> { ["volume"] = "50", ["mode"] = "a" },
+            },
+        }));
+        await WaitUntilAsync(() => _factory.Services.GetRequiredService<IStateStore>()
+            .GetLatestExtensionGroups(Classroom.DefaultId)?.Any(x => x.Id == "demo.settings") == true);
+
+        var admin = await _factory.LoginAsync();
+        using var client = _factory.CreateClient();
+        var listed = await (await client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Get, "/api/extension-groups", admin.AccessToken))).Content.ReadFromJsonAsync<JsonElement>();
+        var group = listed.EnumerateArray().Single(x => x.GetProperty("id").GetString() == "demo.settings");
+        Assert.True(group.GetProperty("canEditSettings").GetBoolean());
+        Assert.Equal("50", group.GetProperty("values").GetProperty("volume").GetString());
+
+        // 服务端按插件声明预校验，非法值不会下发到设备。
+        var invalid = await client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Put, $"/api/classes/{Classroom.DefaultId}/extension-groups/demo.settings/settings", admin.AccessToken,
+            new { values = new Dictionary<string, string?> { ["volume"] = "120" } }));
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, invalid.StatusCode);
+
+        var apply = client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Put, $"/api/classes/{Classroom.DefaultId}/extension-groups/demo.settings/settings", admin.AccessToken,
+            new { values = new Dictionary<string, string?> { ["volume"] = "30" } }));
+        var forwarded = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
+        var command = ConvertPayload<CommandMessage>(forwarded.Payload);
+        Assert.Equal(CommandKind.ApplyExtensionSettings, command.Command);
+        Assert.Equal("demo.settings", command.ExtensionSettings!.GroupId);
+        // 部分更新：只下发本次修改的字段，未提交的 mode 保持设备原值。
+        var change = Assert.Single(command.ExtensionSettings.Values);
+        Assert.Equal(("volume", "30"), (change.Key, change.Value));
+        Assert.Equal(UserRole.Admin, command.RequestedBy?.Role);
+        await SendAsync(plugin, new Envelope
+        {
+            Type = Protocol.MessageTypeCommandResult,
+            ReplyToMessageId = forwarded.MessageId,
+            Payload = new CommandResult { Success = true, Code = CommandResultCodes.Ok, Message = "已保存" },
+        });
+        var response = await apply;
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("已保存", (await response.Content.ReadFromJsonAsync<CommandResult>())!.Message);
+    }
+
+    [Fact]
+    public async Task ExtensionSettings_QueuedWhileOffline_AreReplayedWhenPluginSyncsGroups()
+    {
+        var group = new ExtensionGroupDefinition
+        {
+            Id = "demo.queued",
+            DisplayName = "离线补发插件",
+            Settings = [new ExtensionParameter { Key = "volume", Label = "音量", Type = ExtensionParameterType.Number, Min = 0, Max = 100 }],
+            Values = new Dictionary<string, string?> { ["volume"] = "50" },
+        };
+        // 插件曾经上报过分组，但现在离线：下发应保存为待补发并返回 202。
+        _factory.Services.GetRequiredService<IStateStore>().SaveExtensionGroups(Classroom.DefaultId, [group]);
+        await WaitUntilAsync(() => !_factory.Services.GetRequiredService<PeerRegistry>().HasPluginFor(Classroom.DefaultId));
+        var admin = await _factory.LoginAsync();
+        using var client = _factory.CreateClient();
+        var queued = await client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Put, $"/api/classes/{Classroom.DefaultId}/extension-groups/demo.queued/settings", admin.AccessToken,
+            new { values = new Dictionary<string, string?> { ["volume"] = "20" } }));
+        Assert.Equal(System.Net.HttpStatusCode.Accepted, queued.StatusCode);
+        Assert.Equal(CommandResultCodes.Queued, (await queued.Content.ReadFromJsonAsync<CommandResult>())!.Code);
+        Assert.True(await PendingExistsAsync("demo.queued"));
+
+        using var plugin = await ConnectPluginAsync();
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
+        await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>()
+            .PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.ExtensionsSettings));
+        await SendAsync(plugin, Envelope.ExtensionGroupsSync(new List<ExtensionGroupDefinition> { group }));
+
+        var forwarded = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
+        var command = ConvertPayload<CommandMessage>(forwarded.Payload);
+        Assert.Equal(CommandKind.ApplyExtensionSettings, command.Command);
+        Assert.Equal("20", command.ExtensionSettings!.Values["volume"]);
+        await SendAsync(plugin, new Envelope
+        {
+            Type = Protocol.MessageTypeCommandResult,
+            ReplyToMessageId = forwarded.MessageId,
+            Payload = new CommandResult { Success = true, Code = CommandResultCodes.Ok, Message = "已保存" },
+        });
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (await PendingExistsAsync("demo.queued")) await Task.Delay(20, timeout.Token);
+    }
+
+    [Fact]
+    public async Task CapabilitiesSync_OnlyIncludesPluginsOfClassesTheViewerCanAccess()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
+        await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>()
+            .PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.ExtensionsSettings));
+
+        using (var adminWatch = await ConnectWatchAsync())
+        {
+            var sync = await ReceivePayloadAsync<CapabilitiesSync>(adminWatch, Protocol.MessageTypeCapabilitiesSync);
+            var entry = Assert.Single(sync.ClassPlugins!, x => x.ClassId == Classroom.DefaultId);
+            Assert.Contains(RemoteCiCapabilities.ExtensionsSettings, entry.Plugin.Capabilities);
+        }
+
+        // 只属于另一个班级的账号：默认班级的插件不能被当作它所在班级的能力来源。
+        var admin = await _factory.LoginAsync();
+        using var client = _factory.CreateClient();
+        var created = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post, "/api/classes", admin.AccessToken,
+            new CreateClassRequest { Name = "能力隔离班" }));
+        created.EnsureSuccessStatusCode();
+        var otherClass = (await created.Content.ReadFromJsonAsync<ClassDetail>())!;
+        var user = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post, "/api/users", admin.AccessToken,
+            new CreateUserRequest
+            {
+                Username = "caps.isolated", DisplayName = "能力隔离", Password = "Caps-Isolated-Password-2026",
+                RoleId = AccountRole.StudentId,
+            }));
+        user.EnsureSuccessStatusCode();
+        var userId = (await user.Content.ReadFromJsonAsync<UserListItem>())!.Id;
+        (await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Put, $"/api/classes/{otherClass.Id}/members", admin.AccessToken,
+            new UpdateClassMembersRequest { Members = [new ClassMemberInput { UserId = userId, RoleId = AccountRole.StudentId }] })))
+            .EnsureSuccessStatusCode();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            // 新账号可能被默认放入默认班级；移除后它只属于“能力隔离班”。
+            await scope.ServiceProvider.GetRequiredService<AppDbContext>().ClassMemberships
+                .Where(x => x.UserId == userId && x.ClassroomId == Classroom.DefaultId).ExecuteDeleteAsync();
+        }
+
+        using var isolatedWatch = await ConnectWatchAsync("caps.isolated", "Caps-Isolated-Password-2026");
+        var isolated = await ReceivePayloadAsync<CapabilitiesSync>(isolatedWatch, Protocol.MessageTypeCapabilitiesSync);
+        Assert.Empty(isolated.ClassPlugins!);
+        Assert.Null(isolated.Plugin);
+    }
+
+    private async Task<bool> PendingExistsAsync(string groupId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.PendingExtensionSettings.AnyAsync(x => x.GroupId == groupId);
+    }
+
+    [Fact]
+    public async Task ExtensionSettingsCommand_FromWatchOrGenericApi_IsRejected()
+    {
+        using var plugin = await ConnectPluginAsync();
+        using var watch = await ConnectWatchAsync();
+        var request = Envelope.Command(new CommandMessage
+        {
+            Command = CommandKind.ApplyExtensionSettings,
+            ExtensionSettings = new ExtensionSettingsRequest
+            {
+                GroupId = "demo.settings",
+                Values = new Dictionary<string, string?> { ["volume"] = "1" },
+            },
+        });
+        await SendAsync(watch, request);
+        var reply = await ReceiveEnvelopeAsync(watch, Protocol.MessageTypeCommandResult);
+        Assert.Equal(request.MessageId, reply.ReplyToMessageId);
+        Assert.Equal(CommandResultCodes.Forbidden, ConvertPayload<CommandResult>(reply.Payload).Code);
+
+        var admin = await _factory.LoginAsync();
+        var generic = await _factory.CreateClient().SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Post, "/api/commands", admin.AccessToken, request.Payload));
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, generic.StatusCode);
+    }
+
+    [Fact]
     public async Task WatchReceivesDefaultSettings_AndNotificationCommandGetsServerPolicyInjected()
     {
         using var plugin = await ConnectPluginAsync();

@@ -34,6 +34,8 @@ object Protocol {
     const val TYPE_CONNECTION_BOOTSTRAP = "connection_bootstrap"
     const val TYPE_PEER_CAPABILITIES = "peer_capabilities"
     const val TYPE_CAPABILITIES_SYNC = "capabilities_sync"
+    /** 服务端发给当前用户所有在线连接的个人通知（换课申请等），不按班级过滤。 */
+    const val TYPE_USER_NOTIFY = "user_notify"
     const val LAN_DISCOVERY_PORT = 48765
     const val LAN_DISCOVERY_REQUEST = "REMOTECI_DISCOVER_V3"
 
@@ -90,6 +92,10 @@ object Protocol {
     const val PERMISSION_MAIN_MENU_CONTROL = 256
     const val PERMISSION_SEND_VOICE_MESSAGES = 512
     const val PERMISSION_CHANGE_DISPLAY_NAME = 1024
+    /** 老师主动发起换课申请（由对方老师审批）。 */
+    const val PERMISSION_REQUEST_SWAP = 4096
+    /** 不经审批的强制换课；对方老师可撤回。 */
+    const val PERMISSION_FORCE_SWAP = 8192
 
     const val SCHEDULE_SOURCE_PLUGIN = 1
     const val SCHEDULE_SOURCE_WEB_UI = 2
@@ -152,7 +158,16 @@ data class PeerCapabilities(
 @Serializable
 data class CapabilitiesSync(
     val server: PeerCapabilities = PeerCapabilities(capabilities = Protocol.BASELINE_CAPABILITIES.toList()),
+    /** 旧版服务端或局域网直连时唯一的插件能力；新版服务端改用 [classPlugins] 按班级下发。 */
     val plugin: PeerCapabilities? = null,
+    /** 每个可访问班级当前主插件的能力；未出现的班级表示该班插件离线。旧版服务端为 null。 */
+    @SerialName("classPlugins") val classPlugins: List<ClassPluginCapabilities>? = null,
+)
+
+@Serializable
+data class ClassPluginCapabilities(
+    @SerialName("classId") val classId: String = "",
+    val plugin: PeerCapabilities = PeerCapabilities(),
 )
 
 @Serializable
@@ -197,6 +212,7 @@ data class ScheduleSyncStatus(
     @SerialName("startedAt") val startedAt: String? = null,
     @SerialName("finishedAt") val finishedAt: String? = null,
     @SerialName("activeTaskId") val activeTaskId: String? = null,
+    @SerialName("classId") val classId: String? = null,
 )
 
 @Serializable
@@ -251,6 +267,24 @@ data class MyScheduleItem(
     val courses: List<CourseEntry> = emptyList(),
 )
 
+/** “我的日程”当前/下一节课，时间已经由服务端按班级时区换算为绝对时间。 */
+@Serializable
+data class MyNextCourseResponse(
+    val at: String = "",
+    val current: MyCourseSlot? = null,
+    val next: MyCourseSlot? = null,
+)
+
+@Serializable
+data class MyCourseSlot(
+    val date: String = "",
+    @SerialName("classId") val classId: String = "",
+    @SerialName("className") val className: String = "",
+    val course: CourseEntry = CourseEntry(index = 0, label = "", subjectId = "", subject = ""),
+    @SerialName("startsAt") val startsAt: String = "",
+    @SerialName("endsAt") val endsAt: String = "",
+)
+
 @Serializable
 data class ClassEvent(
     val id: String = "",
@@ -293,6 +327,8 @@ data class PluginNetworkInfo(
     @SerialName("lanServerEnabled") val lanServerEnabled: Boolean = false,
     val addresses: List<String> = emptyList(),
     val port: Int = 8765,
+    /** 插件所属班级；旧服务端不下发，表示单班级部署。 */
+    @SerialName("classId") val classId: String? = null,
 )
 
 @Serializable
@@ -366,6 +402,13 @@ data class ExtensionParameter(
     @SerialName("defaultValue") val defaultValue: String? = null,
     val required: Boolean = false,
     val options: List<String> = emptyList(),
+    /** 与 options 按下标对应的显示名称；缺失或数量不一致时显示原值。 */
+    @SerialName("optionLabels") val optionLabels: List<String>? = null,
+    val description: String? = null,
+    val placeholder: String? = null,
+    val multiline: Boolean = false,
+    val min: Double? = null,
+    val max: Double? = null,
 )
 
 @Serializable
@@ -378,9 +421,9 @@ data class ClassSummary(
     @SerialName("visitorEnabled") val visitorEnabled: Boolean = false,
     @SerialName("groupName") val groupName: String? = null,
 ) {
-    /** 本班班管理员：优先按角色种类判断；旧版服务端或插件镜像未下发 roleKind 时退回内置角色名。 */
+    /** 本班班主任：优先按角色种类判断；旧版服务端或插件镜像未下发 roleKind 时退回内置角色名。 */
     val isClassAdministrator: Boolean
-        get() = roleKind?.let { it == Protocol.ROLE_KIND_CLASS_ADMINISTRATOR } ?: (roleName == "班管理员")
+        get() = roleKind?.let { it == Protocol.ROLE_KIND_CLASS_ADMINISTRATOR } ?: (roleName == "班主任" || roleName == "班管理员")
     val effectivePermissions: Int
         get() = permissions ?: Protocol.PERMISSION_VIEW_CURRENT
 }
@@ -405,7 +448,10 @@ data class UserProfile(
 
     /** 内置“老师”角色（按显示名绑定课表教师名），roleKind 免受角色改名影响。 */
     val isTeacher: Boolean get() = roleKind == Protocol.ROLE_KIND_TEACHER
-    /** 是否可管理指定班级的课表拉取：系统管理员，或该班级的班管理员（与服务端按班级校验一致）。 */
+    /** 拥有个人“我的日程”的内置角色：老师与班主任（均按显示名匹配课表教师名）。 */
+    val hasPersonalSchedule: Boolean
+        get() = roleKind == Protocol.ROLE_KIND_TEACHER || roleKind == Protocol.ROLE_KIND_CLASS_ADMINISTRATOR
+    /** 是否可管理指定班级的课表拉取：系统管理员，或该班级的班主任（与服务端按班级校验一致）。 */
     fun canPullScheduleFor(classId: String?): Boolean =
         isAdmin || classes?.firstOrNull { it.id == classId }?.isClassAdministrator == true
     val roleLabel: String
@@ -426,6 +472,39 @@ data class UserProfile(
 
 @Serializable
 data class LoginRequest(val username: String, val password: String, @SerialName("deviceName") val deviceName: String)
+
+@Serializable
+data class MobileLoginRequest(
+    val ticket: String,
+    @SerialName("deviceName") val deviceName: String,
+)
+
+/** WebUI 扫码登录二维码的解析结果：服务器地址、登录 ID 与一次性票据。 */
+data class LoginQrPayload(val serverUrl: String, val username: String, val ticket: String)
+
+/**
+ * 解析 WebUI 生成的 `remoteci://login?...` 扫码登录二维码。
+ * 旧版只含服务器地址的普通 http(s) 地址返回 null，由调用方回退为地址输入。
+ */
+internal fun parseLoginQrPayload(raw: String): LoginQrPayload? {
+    val uri = runCatching { java.net.URI(raw.trim()) }.getOrNull() ?: return null
+    if (!uri.scheme.equals("remoteci", ignoreCase = true) || !uri.host.equals("login", ignoreCase = true)) return null
+    val params = parseQueryParameters(uri.rawQuery)
+    val serverUrl = params["server"]?.takeIf(String::isNotBlank) ?: return null
+    val ticket = params["ticket"]?.takeIf(String::isNotBlank) ?: return null
+    return LoginQrPayload(serverUrl, params["user"].orEmpty(), ticket)
+}
+
+private fun parseQueryParameters(rawQuery: String?): Map<String, String> {
+    if (rawQuery.isNullOrBlank()) return emptyMap()
+    return rawQuery.split('&').mapNotNull { part ->
+        val separator = part.indexOf('=')
+        if (separator < 0) return@mapNotNull null
+        val key = java.net.URLDecoder.decode(part.substring(0, separator), Charsets.UTF_8.name())
+        val value = java.net.URLDecoder.decode(part.substring(separator + 1), Charsets.UTF_8.name())
+        key to value
+    }.toMap()
+}
 
 @Serializable
 data class SetupPasswordRequest(

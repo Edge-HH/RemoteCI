@@ -116,6 +116,14 @@ public class BatchControlModel(
     [BindProperty]
     public bool Force { get; set; }
 
+    /// <summary>批量执行扩展功能时的目标扩展 Id。</summary>
+    [BindProperty]
+    public string? BatchExtensionId { get; set; }
+
+    /// <summary>批量执行扩展功能时提交的参数。</summary>
+    [BindProperty]
+    public List<ExtensionFieldInput> BatchExtensionInputs { get; set; } = [];
+
     [BindProperty]
     public List<Guid> SelectedClassIds { get; set; } = [];
 
@@ -129,6 +137,12 @@ public class BatchControlModel(
     public IReadOnlyList<ClassGroupInfo> Groups { get; private set; } = [];
     public IReadOnlyList<DeviceInventory> Devices { get; private set; } = [];
     public IReadOnlyList<KnownPlugin> KnownPlugins { get; private set; } = [];
+
+    /// <summary>
+    /// 批量控制页的“扩展插件”区：汇总全部班级设备上报的扩展分组，只保留管理员已启用的扩展功能。
+    /// 各班安装同一个支持 RemoteCI 的插件后，这里会自动出现该插件的功能与设置入口。
+    /// </summary>
+    public IReadOnlyList<ExtensionGroupView> BatchExtensionGroups { get; private set; } = [];
     public IReadOnlyList<BatchDeviceItemResult> LastResults { get; protected set; } = [];
     protected ClassroomService Classrooms { get; } = classrooms;
     protected DeviceInventoryService DevicesService { get; } = devices;
@@ -210,6 +224,7 @@ public class BatchControlModel(
         BatchOperationKind.JoinManagement => CommandKind.JoinManagement,
         BatchOperationKind.ExecuteTerminalCommand => CommandKind.ExecuteTerminalCommand,
         BatchOperationKind.SendFile => CommandKind.SendFile,
+        BatchOperationKind.RunExtension => CommandKind.RunExtension,
         _ => null,
     };
 
@@ -634,10 +649,39 @@ public class BatchControlModel(
                 ManagementJoin = BuildManagementJoinRequest(device),
                 RequestedBy = profile,
             },
+            BatchOperationKind.RunExtension => BuildExtensionCommandFactory(profile),
             // 终端与文件分发走 AJAX 处理器（需要逐设备带回输出或保存路径），不走标准表单投递。
             BatchOperationKind.ExecuteTerminalCommand or BatchOperationKind.SendFile =>
                 throw new InvalidOperationException("该操作请通过远程维护面板执行。"),
             _ => throw new InvalidOperationException("不支持的批量操作。"),
+        };
+    }
+
+    /// <summary>
+    /// 批量执行扩展：参数按全部班级汇总的扩展声明补齐默认值并预校验；
+    /// 每台设备的插件仍会按自身注册的声明复核，未安装该扩展的设备返回“扩展功能不存在”。
+    /// </summary>
+    private Func<DeviceInventory, CommandMessage> BuildExtensionCommandFactory(UserProfile? profile)
+    {
+        var definition = BatchExtensionGroups
+            .SelectMany(group => group.Extensions)
+            .FirstOrDefault(extension => string.Equals(extension.Id, BatchExtensionId, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException("扩展功能不存在、已停用或尚未同步。");
+        var submitted = ExtensionFieldInput.ToValues(BatchExtensionInputs);
+        var args = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var parameter in definition.Parameters ?? [])
+        {
+            submitted.TryGetValue(parameter.Key, out var value);
+            args[parameter.Key] = value ?? parameter.DefaultValue;
+        }
+        args = ExtensionFieldValidator.ValidateArguments(definition.Parameters ?? [], args, out var error);
+        if (error is not null) throw new InvalidOperationException(error);
+        return _ => new CommandMessage
+        {
+            Command = CommandKind.RunExtension,
+            ExtensionId = definition.Id,
+            ExtensionArgs = new Dictionary<string, string?>(args, StringComparer.Ordinal),
+            RequestedBy = profile,
         };
     }
 
@@ -777,6 +821,27 @@ public class BatchControlModel(
             })
             .OrderBy(x => x.Name, StringComparer.CurrentCulture)
             .ToList();
+        if (!IsSingleControl) await LoadBatchExtensionGroupsAsync(ct);
+    }
+
+    private async Task LoadBatchExtensionGroupsAsync(CancellationToken ct)
+    {
+        var services = HttpContext.RequestServices;
+        var groups = await services.GetRequiredService<ExtensionGroupService>().BuildForAllClassesAsync(ct: ct);
+        var definitions = groups.SelectMany(group => group.Extensions).ToList();
+        // 批量页只对系统管理员开放：按管理员身份取策略，只保留已启用的扩展。
+        var enabled = (await services.GetRequiredService<ExtensionPolicyService>().ListForUserAsync(
+                CurrentUser.Id, CurrentUser.Role, UserPermissions.All, definitions, ct))
+            .Where(item => item.Enabled)
+            .Select(item => item.Definition.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        BatchExtensionGroups = groups
+            .Select(group => group with
+            {
+                Extensions = group.Extensions.Where(extension => enabled.Contains(extension.Id)).ToList(),
+            })
+            .Where(group => group.Extensions.Count > 0 || group.HasSettings)
+            .ToList();
     }
 
     private bool TargetsSelected() =>
@@ -819,6 +884,7 @@ public class BatchControlModel(
         BatchOperationKind.JoinManagement => "加入集控",
         BatchOperationKind.ExecuteTerminalCommand => "远程终端",
         BatchOperationKind.SendFile => "文件分发",
+        BatchOperationKind.RunExtension => "扩展功能",
         _ => "批量操作",
     };
 

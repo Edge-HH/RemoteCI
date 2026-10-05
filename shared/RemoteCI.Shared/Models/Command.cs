@@ -41,6 +41,11 @@ public sealed class CommandMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, string?>? ExtensionArgs { get; set; }
 
+    /// <summary>ApplyExtensionSettings 命令的目标分组与待修改设置。</summary>
+    [JsonPropertyName("extensionSettings")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ExtensionSettingsRequest? ExtensionSettings { get; set; }
+
     /// <summary>插件或 ClassIsland 远程升级参数；仅升级命令使用。</summary>
     [JsonPropertyName("softwareUpgrade")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -154,4 +159,6 @@ public static class CommandResultCodes
     public const string TooManyRequests = "TOO_MANY_REQUESTS";
     /// <summary>目标扩展上一次执行尚未结束，拒绝重复触发。</summary>
     public const string Busy = "BUSY";
+    /// <summary>插件离线，请求已由服务端保存，插件重新上线后自动补发（目前用于扩展设置）。</summary>
+    public const string Queued = "QUEUED";
 }

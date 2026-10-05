@@ -20,7 +20,8 @@ public sealed class ControlModel(
     ExtensionPolicyService extensionPolicies,
     AuthorizationSyncService authorizationSync,
     ClassBroadcastService broadcast,
-    ClassroomService classesService) : BatchControlModel(users, classrooms, devices, identities)
+    ClassroomService classesService,
+    ExtensionGroupService extensionGroups) : BatchControlModel(users, classrooms, devices, identities)
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(15);
 
@@ -31,7 +32,7 @@ public sealed class ControlModel(
     public NoticeInput Input { get; set; } = new();
 
     [BindProperty]
-    public List<ExtensionInput> ExtensionInputs { get; set; } = [];
+    public List<ExtensionFieldInput> ExtensionInputs { get; set; } = [];
 
     [BindProperty]
     public NoticeInput BroadcastInput { get; set; } = new();
@@ -50,6 +51,23 @@ public sealed class ControlModel(
     public bool PluginOnline => peers.HasPluginFor(CurrentClassId);
     public ClassStateSnapshot? Snapshot { get; private set; }
     public IReadOnlyList<ExtensionControlItem> Extensions { get; private set; } = [];
+
+    /// <summary>当前班级扩展按插件分组后的视图；分组内的扩展只包含当前账号可见的项。</summary>
+    public IReadOnlyList<ExtensionGroupView> ExtensionGroups { get; private set; } = [];
+
+    /// <summary>
+    /// 当前账号能否修改本班扩展设置：系统管理员；或班级自治策略允许、且在本班拥有扩展功能权限的班主任。
+    /// 与 ExtensionGroupService.CanEditSettingsAsync 的口径一致。
+    /// </summary>
+    public bool CanEditExtensionSettings =>
+        ClassSelfService.CanEditExtensionSettings && ClassPermissions.HasFlag(UserPermissions.RunExtensions);
+
+    /// <summary>分组是否在控制页展示：有可见扩展，或当前账号可以打开它的设置页。</summary>
+    public bool ShowExtensionGroup(ExtensionGroupView group) =>
+        group.Extensions.Count > 0 || (group.HasSettings && CanEditExtensionSettings);
+
+    public ExtensionControlItem ExtensionItem(ExtensionDefinition definition) =>
+        Extensions.First(item => string.Equals(item.Definition.Id, definition.Id, StringComparison.Ordinal));
     public bool CanTeacherComing => ClassPermissions.HasFlag(UserPermissions.TeacherComing) && Supports(RemoteCiCapabilities.TeacherComing);
     public bool CanSendNotifications => ClassPermissions.HasFlag(UserPermissions.SendNotifications) && Supports(RemoteCiCapabilities.NotificationSend);
     public bool CanSendVoiceMessages => ClassPermissions.HasFlag(UserPermissions.SendVoiceMessages) && Supports(RemoteCiCapabilities.VoiceMessageSend);
@@ -227,10 +245,7 @@ public sealed class ControlModel(
             .SingleOrDefault();
         if (item?.CanInvoke != true) return RedirectToPage("/Denied");
 
-        var submitted = ExtensionInputs
-            .Where(input => !string.IsNullOrWhiteSpace(input.Key))
-            .GroupBy(input => input.Key, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.Last().Value, StringComparer.Ordinal);
+        var submitted = ExtensionFieldInput.ToValues(ExtensionInputs);
         var args = new Dictionary<string, string?>(StringComparer.Ordinal);
         foreach (var parameter in definition.Parameters ?? [])
         {
@@ -238,12 +253,14 @@ public sealed class ControlModel(
             value ??= parameter.Type == ExtensionParameterType.Switch
                 ? (string.Equals(parameter.DefaultValue, "true", StringComparison.OrdinalIgnoreCase) ? "true" : "false")
                 : parameter.DefaultValue;
-            if (parameter.Required && string.IsNullOrWhiteSpace(value))
-            {
-                TempData["Error"] = $"请填写“{parameter.Label}”";
-                return RedirectToPage();
-            }
             args[parameter.Key] = value;
+        }
+        // 与插件执行端使用同一套校验，提前把类型、范围与必填错误反馈给用户。
+        args = ExtensionFieldValidator.ValidateArguments(definition.Parameters ?? [], args, out var argumentError);
+        if (argumentError is not null)
+        {
+            TempData["Error"] = argumentError;
+            return RedirectToPage();
         }
 
         return RedirectWithResult(await SendAsync(new CommandMessage
@@ -300,12 +317,12 @@ public sealed class ControlModel(
         return RedirectToPage();
     }
 
-    // ---------- 班级设置（班名/头像）：系统管理员或本班班管理员 ----------
+    // ---------- 班级设置（班名/头像）：系统管理员或本班班主任 ----------
 
     public async Task<IActionResult> OnPostClassInfoAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (!CanManageClassInfo) return RedirectToPage("/Denied");
+        if (!ClassSelfService.CanRename) return RedirectToPage("/Denied");
         if (string.IsNullOrWhiteSpace(ClassNameInput))
         {
             TempData["Error"] = "班名不能为空。";
@@ -323,7 +340,7 @@ public sealed class ControlModel(
     public async Task<IActionResult> OnPostAvatarAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (!CanManageClassInfo) return RedirectToPage("/Denied");
+        if (!ClassSelfService.CanChangeAvatar) return RedirectToPage("/Denied");
         var allowed = new[] { "image/png", "image/jpeg", "image/webp" };
         if (AvatarFile is null || AvatarFile.Length is 0 or > 256 * 1024)
         {
@@ -345,7 +362,7 @@ public sealed class ControlModel(
     public async Task<IActionResult> OnPostRemoveAvatarAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (!CanManageClassInfo) return RedirectToPage("/Denied");
+        if (!ClassSelfService.CanChangeAvatar) return RedirectToPage("/Denied");
         await classesService.SetAvatarAsync(CurrentClassId, null, null, ct);
         TempData["Message"] = "班头像已清除。";
         return RedirectToPage();
@@ -406,6 +423,8 @@ public sealed class ControlModel(
             ClassPermissions,
             store.GetLatestExtensions(CurrentClassId) ?? [],
             ct);
+        ExtensionGroups = extensionGroups.BuildForClass(
+            CurrentClassId, Extensions.Select(item => item.Definition).ToList());
         return !CanTeacherComing && !CanSendNotifications && !CanSendVoiceMessages && !CanClearNotifications && !CanControlMainMenu &&
             !CanControlPower && !CanControlVolume && !CanUseExtensions && !HasMaintenanceOperations
             ? RedirectToPage("/Denied")
@@ -420,7 +439,7 @@ public sealed class ControlModel(
 
     private async Task<CommandResult> SendAsync(CommandMessage command, CancellationToken ct)
     {
-        command.RequestedBy = await identities.GetProfileAsync(CurrentUser.Id, ct);
+        command.RequestedBy = (await identities.GetProfileAsync(CurrentUser.Id, ct))?.WithPermissions(ClassPermissions);
         command.ClassId = CurrentClassId;
         return await peers.SendCommandAndWaitAsync(command, CurrentClassId, CommandTimeout, ct);
     }
@@ -469,11 +488,5 @@ public sealed class ControlModel(
 
         /// <summary>提醒时置顶 ClassIsland 主界面。</summary>
         public bool IsNotificationTopmostEnabled { get; set; }
-    }
-
-    public sealed class ExtensionInput
-    {
-        public string Key { get; set; } = string.Empty;
-        public string? Value { get; set; }
     }
 }

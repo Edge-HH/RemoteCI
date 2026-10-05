@@ -138,7 +138,7 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
             .SingleOrDefaultAsync(ct);
         var binding = await GetTeacherBindingAsync(userId, ct);
         // 任教班级的老师：任教权限来自其全局老师角色的默认权限（角色设置中可追加），
-        // 与班内成员角色权限取并集，保证班管理员等成员身份不被覆盖。
+        // 与班内成员角色权限取并集，保证班主任等成员身份不被覆盖。
         var taughtPermissions = binding is not null && teachers.IsTaughtClass(binding.BoundName, classId)
             ? EffectiveForMembership(role, binding.RoleDefaults, granted)
             : UserPermissions.None;
@@ -157,7 +157,7 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
     }
 
     /// <summary>
-    /// 是否可以管理班级信息（班名/班头像）：系统管理员，或该班级中班内角色为“班管理员”的成员。
+    /// 是否可以管理班级信息（班名/班头像）：系统管理员，或该班级中班内角色为“班主任”的成员。
     /// </summary>
     public Task<bool> IsClassAdminAsync(Guid userId, UserRole role, Guid classId, CancellationToken ct = default) =>
         role == UserRole.Admin
@@ -166,6 +166,18 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
                 .Where(x => x.UserId == userId && x.ClassroomId == classId)
                 .Join(db.AccountRoles, x => x.RoleDefinitionId, y => y.Id, (x, y) => y.Kind)
                 .AnyAsync(kind => kind == AccountRoleKind.ClassAdministrator, ct);
+
+    /// <summary>
+    /// 用户在指定班级可以自行完成的班级管理操作：系统管理员全部允许；
+    /// 本班班主任按系统管理员统一设置的班级自治策略；其他账号全部禁止。
+    /// </summary>
+    public async Task<ClassSelfServicePolicy> GetClassSelfServiceAsync(
+        Guid userId, UserRole role, Guid classId, CancellationToken ct = default)
+    {
+        if (role == UserRole.Admin) return ClassSelfServicePolicy.All;
+        if (!await IsClassAdminAsync(userId, role, classId, ct)) return ClassSelfServicePolicy.None;
+        return await ClassSelfServiceSettings.ReadAsync(db, ct);
+    }
 
     /// <summary>解析用户未显式选择班级时的默认班级：第一个可访问班级；没有可访问班级返回 null。</summary>
     public async Task<Guid?> ResolveDefaultClassIdAsync(Guid userId, UserRole role, CancellationToken ct = default)

@@ -24,6 +24,8 @@ public enum BatchOperationKind
     RestartClassIsland = 41,
     ExecuteTerminalCommand = 50,
     SendFile = 51,
+    /// <summary>批量执行某个已注册的扩展功能。</summary>
+    RunExtension = 60,
 }
 
 public enum PluginActionKind

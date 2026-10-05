@@ -13,8 +13,14 @@ import com.remoteci.mobile.data.ConnectionManager
 import com.remoteci.mobile.data.hasLocalNetworkPermission
 import com.remoteci.mobile.notif.NotificationHelper
 import com.remoteci.mobile.ui.RemoteCiApp
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        /** 通知点击请求打开的页面（如换课页），界面层消费后置空。 */
+        val openRequests = MutableStateFlow<String?>(null)
+    }
+
     // 先完成本地网络授权再创建应用界面，防止自动续登在系统授权框出现前就发出请求。
     private val localNetworkPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         showApp()
@@ -26,11 +32,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         NotificationHelper.ensureChannel(this)
         ConnectionManager.initialize(applicationContext)
+        intent?.getStringExtra(NotificationHelper.EXTRA_OPEN)?.let { openRequests.value = it }
         if (!hasLocalNetworkPermission(this)) {
             localNetworkPermission.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
         } else {
             showApp()
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra(NotificationHelper.EXTRA_OPEN)?.let { openRequests.value = it }
     }
 
     private fun showApp() {

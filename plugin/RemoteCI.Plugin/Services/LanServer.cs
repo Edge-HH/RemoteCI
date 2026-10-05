@@ -221,7 +221,11 @@ public sealed class LanServer : IDisposable
         // 因此需要单独检查镜像状态，避免绕过“仅允许查看课程”的限制。
         var mirrorExpired = !_accounts.AllowsPrivilegedOperations;
         CommandResult result;
-        if (LanSessionLogic.CommandDenied(mirrorExpired, client.User.Permissions, required))
+        if (LanSessionLogic.IsServerOnly(command.Command))
+        {
+            result = CommandResult.Failure(CommandResultCodes.Forbidden, LanSessionLogic.ServerOnlyMessage);
+        }
+        else if (LanSessionLogic.CommandDenied(mirrorExpired, client.User.Permissions, required))
         {
             result = new CommandResult
             {

@@ -90,4 +90,14 @@ public static class ApiErrorCodes
     public const string ProtocolVersionUnsupported = "PROTOCOL_VERSION_UNSUPPORTED";
     /// <summary>参与端未共同声明该功能能力。</summary>
     public const string CapabilityUnsupported = "CAPABILITY_UNSUPPORTED";
+    /// <summary>换课申请涉及的课位已被修改（409），需要重新申请。</summary>
+    public const string SwapSlotChanged = "SWAP_SLOT_CHANGED";
+    /// <summary>该老师当天对这节课的强制换课已被撤回，不能再次强制（409）。</summary>
+    public const string SwapForceLocked = "SWAP_FORCE_LOCKED";
+    /// <summary>目标班级没有同名学科，无法跨班换入（400）。</summary>
+    public const string SwapSubjectMissing = "SWAP_SUBJECT_MISSING";
+    /// <summary>换课的两节课中至少要有一节是申请人自己的课（400）。</summary>
+    public const string SwapNotOwn = "SWAP_NOT_OWN";
+    /// <summary>申请当前状态不允许该操作（409），例如已被处理。</summary>
+    public const string SwapStateConflict = "SWAP_STATE_CONFLICT";
 }

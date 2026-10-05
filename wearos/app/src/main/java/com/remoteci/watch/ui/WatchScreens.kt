@@ -710,7 +710,7 @@ internal fun ExtensionFormScreen(
                 }
 
                 Protocol.EXT_PARAM_SELECT -> ActionButton(
-                    "${param.label}：${values[param.key] ?: ""}",
+                    "${param.label}：${param.optionLabel(values[param.key])}",
                     null,
                     param.options.isNotEmpty(),
                     onClick = { values = values + (param.key to nextSelectValue(param.options, values[param.key])) },

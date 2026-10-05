@@ -51,8 +51,38 @@ object AdminApi {
 
     /** “我的日程”：老师账号按显示名绑定课表后的跨班级个人课表。 */
     suspend fun mySchedule(): MyScheduleResponse = get("/api/me/schedule", MyScheduleResponse.serializer())
+    /** 老师状态栏/超级岛使用的当前课与下一节课。 */
+    suspend fun myNextCourse(): MyNextCourseResponse = get("/api/me/schedule/next", MyNextCourseResponse.serializer())
     suspend fun updateDisplayName(name: String) {
         post("/api/me/display-name", UpdateDisplayNameRequest(name), UpdateDisplayNameRequest.serializer(), UnitSerializer)
+    }
+
+    /** 换课申请：选择器数据（所有班级七日课表与本人任教学科）。 */
+    suspend fun swapCatalog(): SwapCatalog = get("/api/swap-requests/catalog", SwapCatalog.serializer())
+    /** box：incoming 待我处理 / outgoing 我发起的。 */
+    suspend fun swapRequests(box: String): List<SwapRequestView> =
+        get("/api/swap-requests?box=${enc(box)}", ListSerializer(SwapRequestView.serializer()))
+    suspend fun createSwap(body: CreateSwapRequest): SwapRequestView =
+        post("/api/swap-requests", body, CreateSwapRequest.serializer(), SwapRequestView.serializer())
+    suspend fun approveSwap(id: String, note: String?): SwapRequestView =
+        post("/api/swap-requests/${enc(id)}/approve", SwapDecisionRequest(note), SwapDecisionRequest.serializer(), SwapRequestView.serializer())
+    suspend fun rejectSwap(id: String, note: String?): SwapRequestView =
+        post("/api/swap-requests/${enc(id)}/reject", SwapDecisionRequest(note), SwapDecisionRequest.serializer(), SwapRequestView.serializer())
+    suspend fun cancelSwap(id: String): SwapRequestView =
+        post("/api/swap-requests/${enc(id)}/cancel", EmptyBody(), EmptyBody.serializer(), SwapRequestView.serializer())
+    suspend fun revokeSwap(id: String): SwapRequestView =
+        post("/api/swap-requests/${enc(id)}/revoke", EmptyBody(), EmptyBody.serializer(), SwapRequestView.serializer())
+
+    /** 个人通知；after 为上次收到的最新通知时间，用于重连后补齐离线期间的通知。 */
+    suspend fun notifications(after: String? = null, unreadOnly: Boolean = false): List<UserNotification> {
+        val query = buildList {
+            if (after != null) add("after=${enc(after)}")
+            if (unreadOnly) add("unread=true")
+        }.joinToString("&")
+        return get("/api/me/notifications" + if (query.isEmpty()) "" else "?$query", ListSerializer(UserNotification.serializer()))
+    }
+    suspend fun markNotificationsRead(ids: List<String>? = null, all: Boolean = false) {
+        post("/api/me/notifications/read", MarkNotificationsReadRequest(ids, all), MarkNotificationsReadRequest.serializer(), UnitSerializer)
     }
 
     /** 当前登录账号的最新档案（/api/me），修改显示名后用于刷新本地班级与权限。 */

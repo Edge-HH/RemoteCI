@@ -354,6 +354,68 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
     }
 
     [Fact]
+    public async Task DatabaseRestart_PreservesClassRename()
+    {
+        // 同一个数据库文件模拟服务端重启：班主任改过的班名必须落库，重启后仍在。
+        var databasePath = Path.Combine(Path.GetTempPath(), "RemoteCI.Tests", Guid.NewGuid().ToString("N"), "class-rename.db");
+        var renamed = "重启保留班名（改）";
+        Guid classId;
+        await using (var first = TestWebApplicationFactory.ForDatabase(databasePath))
+        {
+            var admin = await first.LoginAsync();
+            var created = await first.CreateClient().SendAsync(TestWebApplicationFactory.Bearer(
+                HttpMethod.Post,
+                "/api/classes",
+                admin.AccessToken,
+                new CreateClassRequest { Name = "重启保留班名" }));
+            created.EnsureSuccessStatusCode();
+            classId = (await created.Content.ReadFromJsonAsync<ClassDetail>())!.Id;
+
+            var renamedResponse = await first.CreateClient().SendAsync(TestWebApplicationFactory.Bearer(
+                HttpMethod.Put,
+                $"/api/classes/{classId}/info",
+                admin.AccessToken,
+                new UpdateClassRequest { Name = renamed }));
+            Assert.Equal(HttpStatusCode.NoContent, renamedResponse.StatusCode);
+        }
+
+        await using var second = TestWebApplicationFactory.ForDatabase(databasePath);
+        var secondAdmin = await second.LoginAsync();
+        var classes = (await (await second.CreateClient().SendAsync(TestWebApplicationFactory.Bearer(
+                HttpMethod.Get,
+                "/api/classes",
+                secondAdmin.AccessToken)))
+            .Content.ReadFromJsonAsync<List<ClassDetail>>())!;
+        Assert.Equal(renamed, classes.Single(x => x.Id == classId).Name);
+    }
+
+    [Fact]
+    public async Task MobileLoginTicket_RedeemsOnceAndCreatesDeviceSession()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        var admin = await factory.LoginAsync();
+        var client = factory.CreateClient();
+
+        using var scope = factory.Services.CreateScope();
+        var identities = scope.ServiceProvider.GetRequiredService<IdentityCoordinator>();
+        var issued = await identities.CreateMobileLoginTicketAsync(admin.User.Id);
+
+        var redeem = await client.PostAsJsonAsync(
+            "/api/auth/mobile-login",
+            new MobileLoginRequest { Ticket = issued.Ticket, DeviceName = "Android Test" });
+        redeem.EnsureSuccessStatusCode();
+        var auth = (await redeem.Content.ReadFromJsonAsync<AuthResponse>())!;
+        Assert.Equal(admin.User.Id, auth.User.Id);
+        Assert.NotEmpty(auth.DeviceSecret);
+
+        // 票据一次性使用：再次兑换同一张票据会被拒绝。
+        var second = await client.PostAsJsonAsync(
+            "/api/auth/mobile-login",
+            new MobileLoginRequest { Ticket = issued.Ticket, DeviceName = "Android Test" });
+        Assert.Equal(HttpStatusCode.Unauthorized, second.StatusCode);
+    }
+
+    [Fact]
     public async Task RazorLogin_PostWithoutCsrfToken_IsRejected()
     {
         var response = await _client.PostAsync("/Login", new FormUrlEncodedContent(new Dictionary<string, string>
@@ -1128,7 +1190,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             new Dictionary<string, string>
             {
                 ["Create.Username"] = "class.assigned.user",
-                ["Create.DisplayName"] = "已分配班级的班管理员",
+                ["Create.DisplayName"] = "已分配班级的班主任",
                 ["Create.Password"] = "Class-Assigned-Password-2026",
                 ["Create.RoleId"] = AccountRole.ClassAdministratorId.ToString(),
                 ["Create.ClassId"] = classId.ToString(),
@@ -1298,7 +1360,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Contains("生成配对码", overviewHtml);
         Assert.Contains("重新检测连接", overviewHtml);
         Assert.Contains("data-mobile-login-qr", overviewHtml);
-        Assert.Contains("手机扫码填写服务器地址", WebUtility.HtmlDecode(overviewHtml));
+        Assert.Contains("手机扫码登录", WebUtility.HtmlDecode(overviewHtml));
         Assert.Contains(WebUtility.HtmlEncode(_factory.Server.BaseAddress.ToString().TrimEnd('/')), overviewHtml);
         Assert.DoesNotContain("去重试连接</a>", overviewHtml);
 
@@ -1809,6 +1871,47 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             new Uri(factory.Server.BaseAddress, $"/ws?{Protocol.QueryToken}={Uri.EscapeDataString(pluginToken)}"),
             CancellationToken.None));
         Assert.Contains("401", connectError.Message);
+    }
+
+    [Fact]
+    public async Task DeviceInventory_ExcludesRevokedCredentialsButKeepsAuditList()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), "RemoteCI.Tests", Guid.NewGuid().ToString("N"), "device-inventory.db");
+        await using var factory = TestWebApplicationFactory.ForDatabase(databasePath);
+        var client = factory.CreateClient();
+        await factory.GetPluginTokenAsync();
+        var admin = await factory.LoginAsync();
+
+        var list = await client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Get, "/api/plugins/credentials", admin.AccessToken));
+        list.EnsureSuccessStatusCode();
+        var credential = Assert.Single((await list.Content.ReadFromJsonAsync<List<PluginCredentialInfo>>())!);
+
+        // 已分配且启用的凭据出现在批量控制的设备目录里（离线也保留，用于解释为什么不能选择）。
+        using (var scope = factory.Services.CreateScope())
+        {
+            var inventory = scope.ServiceProvider.GetRequiredService<DeviceInventoryService>();
+            var devices = await inventory.ListAsync();
+            Assert.Contains(devices, x => x.CredentialId == credential.Id);
+        }
+
+        // 吊销后：设备目录不再包含它，但管理页仍保留禁用记录用于审计。
+        var revoke = await client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Delete, $"/api/plugins/credentials/{credential.Id}", admin.AccessToken));
+        Assert.Equal(HttpStatusCode.NoContent, revoke.StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var inventory = scope.ServiceProvider.GetRequiredService<DeviceInventoryService>();
+            var devices = await inventory.ListAsync();
+            Assert.DoesNotContain(devices, x => x.CredentialId == credential.Id);
+        }
+
+        var after = await client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Get, "/api/plugins/credentials", admin.AccessToken));
+        after.EnsureSuccessStatusCode();
+        var audited = (await after.Content.ReadFromJsonAsync<List<PluginCredentialInfo>>())!;
+        Assert.False(audited.Single(x => x.Id == credential.Id).Enabled);
     }
 
     [Fact]

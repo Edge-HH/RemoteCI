@@ -2,6 +2,7 @@ package com.remoteci.watch.data
 
 import android.content.Context
 import android.os.Build
+import androidx.core.content.ContextCompat
 import com.remoteci.watch.BuildConfig
 import java.io.IOException
 import java.security.MessageDigest
@@ -68,8 +69,11 @@ object ConnectionManager {
         .build()
     private val lanDiscoveryClient = LanDiscoveryClient(okHttp, json)
     private lateinit var sessions: SessionStorage
+    private var appContext: Context? = null
     // 以下字段会被 OkHttp 回调线程、IO 协程与主线程并发读写，必须保证跨线程可见性。
     @Volatile private var webSocket: WebSocket? = null
+    /** 最近一次能力快照：切换班级时按新班级重新计算可用控制项。 */
+    @Volatile private var lastCapabilitiesSync: CapabilitiesSync? = null
     private var activeJob: Job? = null
     private var refreshJob: Job? = null
     private var volumeJob: Job? = null
@@ -135,6 +139,7 @@ object ConnectionManager {
 
     fun initialize(context: Context) {
         if (!::sessions.isInitialized) sessions = SecureSessionStore(context.applicationContext)
+        appContext = context.applicationContext
     }
 
     /** 仅供 JVM 单元测试注入内存会话存储，绕开 Android Keystore。 */
@@ -172,12 +177,18 @@ object ConnectionManager {
         snapshot.value = null
         schedule.value = null
         extensions.value = emptyList()
+        lastCapabilitiesSync?.let { availableCapabilities.value = effectiveCapabilities(it, classId) }
         if (state.value == State.LanConnected || state.value == State.CloudConnected) requestSchedulePull()
     }
 
     fun scanLanPlugins() {
         discoveryJob?.cancel()
         lanPlugins.value = emptyList()
+        if (!hasLocalNetworkPermission()) {
+            lanDiscoveryStatus.value = "系统未授予局域网权限，请在设置中允许后重试"
+            lanDiscoveryScanning.value = false
+            return
+        }
         lanDiscoveryStatus.value = "正在扫描同一局域网中的 RemoteCI 插件…"
         lanDiscoveryScanning.value = true
         discoveryJob = scope.launch {
@@ -332,7 +343,11 @@ object ConnectionManager {
         webSocket = null
         serverVersion.value = null
         accessToken = null
-        if (clearUser) applyUserProfile(null)
+        if (clearUser) {
+            applyUserProfile(null)
+            snapshot.value = null
+            schedule.value = null
+        }
         extensions.value = emptyList()
         this@ConnectionManager.settings.value = null
         state.value = State.Idle
@@ -476,7 +491,7 @@ object ConnectionManager {
     }
 
     private fun sendCommand(command: CommandMessage, requiredPermission: Int) {
-        // 权限按当前班级计算（班管理员只在所属班级有管理权限），命令随班级路由。
+        // 权限按当前班级计算（班主任只在所属班级有管理权限），命令随班级路由。
         if (!hasClassPermission(requiredPermission)) {
             lastCommandResult.value = CommandResult(false, "FORBIDDEN", "权限不足")
             return
@@ -499,6 +514,7 @@ object ConnectionManager {
         session: PersistedDeviceSession,
         attempt: Int,
     ): Boolean {
+        if (!hasLocalNetworkPermission()) return false
         // 局域网候选统一尝试；如果云端地址使用 HTTP，界面会持续提示不安全。
         for (host in lanEndpointHosts(settings)) {
             if (!connectWebSocket(
@@ -519,6 +535,13 @@ object ConnectionManager {
         }
         return false
     }
+
+    private fun hasLocalNetworkPermission(): Boolean =
+        Build.VERSION.SDK_INT < 37 ||
+            ContextCompat.checkSelfPermission(
+                appContext ?: return true,
+                "android.permission.ACCESS_LOCAL_NETWORK",
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
     private suspend fun connectCloud(settings: WatchSettings, auth: AuthResponse, attempt: Int) {
         accessToken = auth.accessToken
@@ -686,6 +709,7 @@ object ConnectionManager {
         if (webSocket !== socket) return
         webSocket = null
         serverVersion.value = null
+        lastCapabilitiesSync = null
         availableCapabilities.value = Protocol.BASELINE_CAPABILITIES
     }
 
@@ -735,7 +759,8 @@ object ConnectionManager {
         }
         Protocol.TYPE_CAPABILITIES_SYNC -> {
             decodePayload(envelope.payload, CapabilitiesSync.serializer())?.let { sync ->
-                availableCapabilities.value = effectiveCapabilities(sync)
+                lastCapabilitiesSync = sync
+                availableCapabilities.value = effectiveCapabilities(sync, currentClassId.value)
             }
             null
         }
@@ -862,10 +887,18 @@ object ConnectionManager {
     private class AuthenticationException : Exception()
 }
 
-internal fun effectiveCapabilities(sync: CapabilitiesSync): Set<String> =
-    Protocol.CURRENT_CAPABILITIES
+/** 当前班级可用能力 = 手表本地 ∩ 服务端 ∩ 该班主插件；不能借用其他班级插件的能力。 */
+internal fun effectiveCapabilities(sync: CapabilitiesSync, classId: String? = null): Set<String> {
+    val perClass = sync.classPlugins
+    val plugin = when {
+        // 旧版服务端或局域网直连（插件只代表自己的班级）。
+        perClass == null || classId == null -> sync.plugin
+        else -> perClass.firstOrNull { it.classId.equals(classId, ignoreCase = true) }?.plugin
+    }
+    return Protocol.CURRENT_CAPABILITIES
         .intersect(sync.server.capabilities.toSet())
-        .intersect(sync.plugin?.capabilities?.toSet() ?: emptySet())
+        .intersect(plugin?.capabilities?.toSet() ?: emptySet())
+}
 
 internal data class ConnectionPlan(
     val bootstrapCloudAuthentication: Boolean,

@@ -203,7 +203,7 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
         var classB = (await CreateClassAsync(admin.AccessToken, "班管一班"))!;
         var userId = await CreateUserAsync("cls.admin", "Cls-Admin-Password-2026", AccountRole.ClassAdministratorId);
 
-        // 班管理员默认就是默认班级的成员；同时成为 B 班班管理员。
+        // 班主任默认就是默认班级的成员；同时成为 B 班班主任。
         var put = await client.SendAsync(Bearer(HttpMethod.Put, $"/api/classes/{classB.Id}/members", admin.AccessToken,
             new UpdateClassMembersRequest { Members = [new ClassMemberInput { UserId = userId, RoleId = AccountRole.ClassAdministratorId }] }));
         Assert.Equal(HttpStatusCode.NoContent, put.StatusCode);
@@ -388,7 +388,7 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
         Assert.False(result.Results.Single().Success);
         Assert.Contains("没有该班级的操作权限", result.Results.Single().Message);
 
-        // 班管理员（班内含通知权限）可以广播自己管理的班级；权限通过后失败原因是插件离线。
+        // 班主任（班内含通知权限）可以广播自己管理的班级；权限通过后失败原因是插件离线。
         var classB = (await CreateClassAsync(admin.AccessToken, "广播三班"))!;
         var adminUser = await CreateUserAsync("bcast.admin", "Bcast-Admin-Password-2026", AccountRole.ClassAdministratorId);
         await client.SendAsync(Bearer(HttpMethod.Put, $"/api/classes/{classB.Id}/members", admin.AccessToken,
@@ -648,7 +648,7 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
         // v2 行格式：ID,用户名,班级,角色,密码（密码可空=待激活；班级不存在自动创建）。
         var importText = string.Join("\n",
             "imp.a,导入甲,导入一班,学生,",
-            "imp.b,导入乙,导入一班,班管理员,Imp-B-Password-2026",
+            "imp.b,导入乙,导入一班,班主任,Imp-B-Password-2026",
             "# 注释行",
             "imp.c,导入丙,不存在的角色,");
         var imported = await client.SendAsync(Bearer(HttpMethod.Post, "/api/users/batch-import", admin.AccessToken,

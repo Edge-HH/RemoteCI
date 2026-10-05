@@ -36,7 +36,7 @@ public sealed class AccountModel(
     /// <summary>是否显示“修改用户名”表单：仅系统管理员可用。</summary>
     public bool CanChangeDisplayName => CurrentUser.Role == UserRole.Admin;
 
-    /// <summary>是否显示 API Key 管理：学生默认没有，管理员和班管理员默认拥有，也可单独授权。</summary>
+    /// <summary>是否显示 API Key 管理：学生默认没有，管理员和班主任默认拥有，也可单独授权。</summary>
     public bool CanUseApi => Permissions.HasFlag(UserPermissions.ApiAccess);
 
     /// <summary>没有权限但已有历史密钥时仍展示吊销入口，避免遗留凭据无法清理。</summary>

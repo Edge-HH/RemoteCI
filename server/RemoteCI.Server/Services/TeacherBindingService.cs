@@ -51,7 +51,7 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state)
         foreach (var classroom in classrooms.OrderBy(x => x.CreatedAt))
         {
             var bundle = state.GetLatestSchedule(classroom.Id);
-            if (bundle is null || !HasMatchedCourse(name, bundle)) continue;
+            if (bundle is null || !IsTaught(name, classroom.Id, bundle)) continue;
             result.Add(new TaughtClass(classroom.Id, classroom.Name, classroom.VisitorAccessEnabled, classroom.Avatar != null, bundle));
         }
         return result;
@@ -62,19 +62,28 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state)
     {
         var name = boundName?.Trim();
         if (string.IsNullOrEmpty(name)) return false;
-        return HasMatchedCourse(name, state.GetLatestSchedule(classId));
+        return state.GetLatestSchedule(classId) is { } bundle && IsTaught(name, classId, bundle);
     }
+
+    /// <summary>
+    /// 原课表或叠加换课临时任课老师后的课表任一匹配即视为任教：临时代上某班的老师在覆盖有效期间
+    /// 也能看到并操作该班，被换走一节课的老师也不会因此暂时失去本班访问。
+    /// </summary>
+    private bool IsTaught(string name, Guid classId, ScheduleBundle overlaid) =>
+        HasMatchedCourse(name, overlaid) || HasMatchedCourse(name, state.GetSourceSchedule(classId));
 
     /// <summary>某班级当前课表匹配到的“老师”角色用户 Id 集合；供授权镜像检测绑定变化。</summary>
     public async Task<IReadOnlySet<Guid>> GetMatchedTeacherUserIdsAsync(Guid classId, CancellationToken ct = default)
     {
-        var teacherFields = state.GetLatestSchedule(classId)?.Days
+        var teacherFields = new[] { state.GetLatestSchedule(classId), state.GetSourceSchedule(classId) }
+            .Where(x => x is not null)
+            .SelectMany(x => x!.Days)
             .SelectMany(x => x.Courses)
             .Where(x => x.Enabled && !string.IsNullOrWhiteSpace(x.Teacher))
             .Select(x => x.Teacher!.Trim())
             .Distinct(StringComparer.Ordinal)
             .ToList();
-        if (teacherFields is not { Count: > 0 }) return new HashSet<Guid>();
+        if (teacherFields.Count == 0) return new HashSet<Guid>();
         var teachers = await db.Users.AsNoTracking()
             .Where(x => x.Enabled && x.RoleDefinitionId == AccountRole.TeacherId)
             .Select(x => new { x.Id, x.DisplayName })

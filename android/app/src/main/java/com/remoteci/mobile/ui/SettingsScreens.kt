@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,10 +58,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import com.remoteci.mobile.data.AdminApi
+import com.remoteci.mobile.data.ClassSummary
 import com.remoteci.mobile.data.CompatibleUpdate
 import com.remoteci.mobile.data.ConnectionManager
 import com.remoteci.mobile.data.Protocol
@@ -68,6 +72,8 @@ import com.remoteci.mobile.data.UpdateChannel
 import com.remoteci.mobile.data.UpdateManager
 import com.remoteci.mobile.data.UserProfile
 import com.remoteci.mobile.data.WatchSettings
+import com.remoteci.mobile.data.normalizeServerUrl
+import com.remoteci.mobile.data.parseLoginQrPayload
 import kotlinx.coroutines.launch
 
 @Composable
@@ -98,7 +104,7 @@ fun SecondaryHost(
         Screen.Users -> UsersScreen(onBack, snackbar)
         Screen.Sessions -> SessionsScreen(onBack, snackbar)
         Screen.Pairing -> PairingScreen(onBack, snackbar)
-        Screen.Connection -> ConnectionScreen(settings, onBack, onPersist)
+        Screen.Connection -> ConnectionScreen(settings, onBack, onPersist, snackbar)
         Screen.NotificationSettings -> NotificationSettingsScreen(settings, onBack, onPersist)
         Screen.ScheduleSettings -> ScheduleSettingsScreen(onBack)
         Screen.Appearance -> AppearanceScreen(settings, onBack, onPersist)
@@ -153,6 +159,26 @@ fun AccountScreen(
                 )
             }
         }
+        // 多班级账号在这里换班；首页不再放班级切换行，避免顶栏被挤到状态栏下方。
+        val classes by ConnectionManager.classes.collectAsState()
+        if (classes.size > 1) {
+            var pickingClass by remember { mutableStateOf(false) }
+            val currentClass = classes.firstOrNull { it.id == currentClassId }
+            Card(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                onClick = { pickingClass = true },
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("当前班级", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        currentClass?.name ?: "未选择 · 点击切换班级",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (pickingClass) ClassSwitchDialog(classes, currentClassId, onDismiss = { pickingClass = false })
+        }
         // 显示名是老师绑定课表教师名的依据，服务端只允许系统管理员修改，其他账号不显示入口。
         if (user?.isAdmin == true) {
             var editingName by remember { mutableStateOf(false) }
@@ -174,8 +200,9 @@ fun AccountScreen(
         val rows = listOfNotNull(
             Triple("连接与服务器", "账号、云端地址、局域网插件发现与重新连接", Screen.Connection to Icons.Rounded.Wifi),
             Triple("通知设置", "课程、自动化和第三方插件提醒的同步开关", Screen.NotificationSettings to Icons.Rounded.Notifications),
-            if (user?.canPullScheduleFor(currentClassId) == true)
-                Triple("自动拉取课表", "设置在线插件自动刷新课表的周期", Screen.ScheduleSettings to Icons.Rounded.Schedule)
+            // 自动拉取周期对全部班级生效，服务端只允许系统管理员修改。
+            if (user?.isAdmin == true)
+                Triple("自动拉取课表", "设置在线插件自动刷新课表的周期（对全部班级生效）", Screen.ScheduleSettings to Icons.Rounded.Schedule)
             else null,
             Triple("外观", "主题与显示偏好", Screen.Appearance to Icons.Rounded.Palette),
             Triple("更新", "检查更新与同版本强制覆盖", Screen.Updates to Icons.Rounded.SystemUpdate),
@@ -197,6 +224,35 @@ fun AccountScreen(
             }
         }
     }
+}
+
+/** 多班级账号的换班对话框：选中即切换，并关闭对话框。 */
+@Composable
+private fun ClassSwitchDialog(classes: List<ClassSummary>, currentClassId: String?, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("切换班级") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                classes.forEach { classroom ->
+                    ListItem(
+                        headlineContent = { Text(classroom.name) },
+                        supportingContent = listOfNotNull(classroom.groupName, classroom.roleName)
+                            .joinToString(" · ")
+                            .takeIf { it.isNotBlank() }
+                            ?.let { { Text(it) } },
+                        trailingContent = { RadioButton(selected = classroom.id == currentClassId, onClick = null) },
+                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            ConnectionManager.switchClass(classroom.id)
+                            onDismiss()
+                        },
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
 }
 
 /** 系统管理员的姓名（显示名）编辑：保存后从服务端拉取最新档案。 */
@@ -273,7 +329,7 @@ fun ScheduleSettingsScreen(onBack: () -> Unit) {
                             .onFailure { status = it.message ?: "保存失败" }
                     }
                 },
-                enabled = user?.has(Protocol.PERMISSION_MANAGE_SCHEDULE) == true,
+                enabled = user?.isAdmin == true,
                 modifier = Modifier.fillMaxWidth().height(56.dp),
             ) { Text("保存设置") }
         }
@@ -282,14 +338,33 @@ fun ScheduleSettingsScreen(onBack: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ConnectionScreen(settings: WatchSettings, onBack: () -> Unit, onPersist: (WatchSettings) -> Unit) {
+fun ConnectionScreen(
+    settings: WatchSettings,
+    onBack: () -> Unit,
+    onPersist: (WatchSettings) -> Unit,
+    snackbar: SnackbarHostState,
+) {
     val scope = rememberCoroutineScope()
     var server by remember { mutableStateOf(settings.cloudServerUrl) }
     var username by remember { mutableStateOf(settings.username) }
+    var password by remember { mutableStateOf("") }
     val scanStatus by ConnectionManager.lanDiscoveryStatus.collectAsState()
     val plugins by ConnectionManager.lanPlugins.collectAsState()
     val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
-        result.contents?.let { server = it }
+        val contents = result.contents?.trim().orEmpty()
+        val login = parseLoginQrPayload(contents)
+        if (login != null) {
+            // WebUI 扫码登录：直接切换到二维码所属的服务器与账号，无需输入密码。
+            val next = settings.copy(cloudServerUrl = login.serverUrl, username = login.username)
+            server = login.serverUrl
+            username = login.username
+            password = ""
+            onPersist(next)
+            ConnectionManager.connect(next, mobileLoginTicket = login.ticket)
+        } else if (contents.isNotEmpty()) {
+            // 旧版二维码只包含服务器地址。
+            server = contents
+        }
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         TopAppBar(title = { Text("连接与服务器") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
@@ -300,11 +375,36 @@ fun ConnectionScreen(settings: WatchSettings, onBack: () -> Unit, onPersist: (Wa
                 }
             })
             OutlinedTextField(username, { username = it }, label = { Text("ID") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { Text("密码") },
+                supportingText = { Text("切换账号或服务器时必填；密码只用于本次登录，不会保存") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            )
+            val identityChanged = username.trim() != settings.username.trim() ||
+                normalizeServerUrl(server.trim()) != normalizeServerUrl(settings.cloudServerUrl)
             Button(onClick = {
-                val next = settings.copy(cloudServerUrl = server.trim(), username = username.trim())
+                val nextServer = server.trim()
+                val nextUsername = username.trim()
+                if (nextServer.isBlank() || nextUsername.isBlank()) {
+                    scope.launch { snackbar.showSnackbar("请填写服务器地址和 ID") }
+                    return@Button
+                }
+                if (identityChanged && password.isBlank()) {
+                    scope.launch { snackbar.showSnackbar("切换账号或服务器需要输入密码") }
+                    return@Button
+                }
+                val next = settings.copy(cloudServerUrl = nextServer, username = nextUsername)
                 onPersist(next)
-                ConnectionManager.connect(next)
-            }, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("保存并重新连接") }
+                ConnectionManager.connect(next, password.takeIf(String::isNotEmpty))
+                password = ""
+            }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+                Text(if (identityChanged) "登录并切换" else "保存并重新连接")
+            }
             Button(onClick = { ConnectionManager.scanLanPlugins() }, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("扫描局域网插件") }
             scanStatus?.let { Text(it) }
             plugins.forEach { plugin ->

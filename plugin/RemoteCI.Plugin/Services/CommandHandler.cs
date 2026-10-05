@@ -71,6 +71,8 @@ public sealed class CommandHandler
         // 扩展命令同时使用独立扩展权限、服务端策略和注册项动态权限，不走静态命令表。
         if (command.Command == CommandKind.RunExtension)
             return await _extensionRouter.RunAsync(command);
+        if (command.Command == CommandKind.ApplyExtensionSettings)
+            return await _extensionRouter.ApplySettingsAsync(command);
 
         // 远程升级、插件管理、集控、终端与文件分发属于宿主级维护，即使账号被授予 ManageUsers 也只允许系统管理员执行。
         if (command.Command is (CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or

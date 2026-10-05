@@ -2,6 +2,7 @@ package com.remoteci.mobile.data
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
@@ -88,5 +89,57 @@ class ConnectionManagerLogicTest {
         }
         assertEquals(listOf(10_000L, 20_000L, 40_000L, 60_000L, 60_000L, 60_000L), sequence)
         assertEquals(60_000L, MaxReconnectDelayMs)
+    }
+
+    @Test
+    fun `access expiry follows server clock instead of a skewed phone clock`() {
+        val serverNow = java.time.Instant.parse("2026-10-04T08:00:00Z").toEpochMilli()
+        // 手机时间比服务器慢 10 分钟：仍应在服务器判定的 1 小时后到期，而不是多出 10 分钟。
+        val phoneNow = serverNow - 10 * 60_000L
+
+        val expiry = localAccessExpiryMillis("2026-10-04T09:00:00+00:00", serverNow, phoneNow)
+
+        assertEquals(phoneNow + 60 * 60_000L, expiry)
+    }
+
+    @Test
+    fun `access expiry falls back to local clock and default ttl`() {
+        val now = 1_000_000L
+
+        assertEquals(now + 30_000L, localAccessExpiryMillis(java.time.Instant.ofEpochMilli(now + 30_000L).toString(), null, now))
+        assertEquals(now + DefaultAccessTtlMs, localAccessExpiryMillis("not-a-date", null, now))
+    }
+
+    @Test
+    fun `lan candidates are only used for the class they were advertised for`() {
+        val unknown = WatchSettings(lanHost = "192.168.1.5")
+        val classA = unknown.copy(lanClassId = "a")
+
+        assertTrue(lanCandidatesBelongTo(unknown, "b"))
+        assertTrue(lanCandidatesBelongTo(classA, "a"))
+        assertTrue(lanCandidatesBelongTo(classA, null))
+        assertFalse(lanCandidatesBelongTo(classA, "b"))
+    }
+
+    @Test
+    fun `foreground reconnect keeps user settings but takes discovered network state`() {
+        val ui = WatchSettings(cloudServerUrl = "https://new.example.com", lanHost = "10.0.0.1", selectedClassId = "a")
+        val network = WatchSettings(
+            cloudServerUrl = "https://old.example.com",
+            lanHost = "192.168.1.9",
+            lanHostCandidates = listOf("192.168.1.9", "10.8.0.2"),
+            lanPort = 9000,
+            lanClassId = "b",
+            selectedClassId = "b",
+        )
+
+        val merged = ui.withNetworkStateFrom(network)
+
+        assertEquals("https://new.example.com", merged.cloudServerUrl)
+        assertEquals("192.168.1.9", merged.lanHost)
+        assertEquals(listOf("192.168.1.9", "10.8.0.2"), merged.lanHostCandidates)
+        assertEquals(9000, merged.lanPort)
+        assertEquals("b", merged.lanClassId)
+        assertEquals("b", merged.selectedClassId)
     }
 }

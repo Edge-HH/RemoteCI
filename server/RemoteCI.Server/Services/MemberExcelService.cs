@@ -221,6 +221,9 @@ public sealed partial class MemberExcelService(
             roleByKey[role.Name] = role;
             roleByKey[role.NormalizedName] = role;
         }
+        // 覆盖导入与新建导入一致：内置“班主任”曾名“班管理员”，旧清单仍按旧名引用。
+        if (allRoles.FirstOrDefault(x => x.Id == AccountRole.ClassAdministratorId) is { } legacyClassAdmin)
+            roleByKey[AccountRoleService.LegacyClassAdministratorName] = legacyClassAdmin;
 
         var allUsers = await db.Users.AsNoTracking().ToListAsync(ct);
         var userById = allUsers.ToDictionary(x => x.Id);

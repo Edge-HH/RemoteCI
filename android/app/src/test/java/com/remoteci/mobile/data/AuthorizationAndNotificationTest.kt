@@ -42,6 +42,29 @@ class AuthorizationAndNotificationTest {
     }
 
     @Test
+    fun `effective capabilities follow the current class plugin`() {
+        val sync = CapabilitiesSync(
+            server = PeerCapabilities(capabilities = Protocol.CURRENT_CAPABILITIES.toList()),
+            // 兼容字段指向另一个班级的插件，不能用来判断当前班级。
+            plugin = PeerCapabilities(capabilities = listOf(Protocol.CAP_SCHEDULE_READ)),
+            classPlugins = listOf(
+                ClassPluginCapabilities("class-a", PeerCapabilities(capabilities = listOf(Protocol.CAP_SCHEDULE_READ))),
+                ClassPluginCapabilities("CLASS-B", PeerCapabilities(capabilities = listOf(Protocol.CAP_NOTIFICATION_SEND))),
+            ),
+        )
+
+        assertEquals(setOf(Protocol.CAP_NOTIFICATION_SEND), effectiveCapabilities(sync, "class-b"))
+        assertEquals(setOf(Protocol.CAP_SCHEDULE_READ), effectiveCapabilities(sync, "class-a"))
+        // 当前班插件离线：不能借用其他班级的能力而显示控制项。
+        assertTrue(effectiveCapabilities(sync, "class-c").isEmpty())
+        // 局域网直连与旧版服务端没有按班级字段，仍使用唯一的插件能力。
+        assertEquals(
+            setOf(Protocol.CAP_SCHEDULE_READ),
+            effectiveCapabilities(sync.copy(classPlugins = null), "class-c"),
+        )
+    }
+
+    @Test
     fun `breaking permission model uses protocol version three`() {
         assertEquals(3, Protocol.VERSION)
         assertEquals("REMOTECI_DISCOVER_V3", Protocol.LAN_DISCOVERY_REQUEST)
@@ -101,6 +124,29 @@ class AuthorizationAndNotificationTest {
         assertEquals("10.0.0.8", updated.lanHost)
         assertEquals(9876, updated.lanPort)
         assertEquals(listOf("10.0.0.8", "192.168.50.8"), lanEndpointHosts(updated))
+    }
+
+    @Test
+    fun `plugin network info records the class that owns the lan candidates`() {
+        val current = WatchSettings(lanHost = "192.168.50.8", lanClassId = "old")
+
+        val updated = mergePluginNetworkInfo(current, PluginNetworkInfo(true, listOf("10.0.0.8"), 8765, classId = "a"))
+        val legacy = mergePluginNetworkInfo(current, PluginNetworkInfo(true, listOf("10.0.0.8"), 8765))
+
+        assertEquals("a", updated.lanClassId)
+        assertEquals("old", legacy.lanClassId)
+    }
+
+    @Test
+    fun `selected lan plugin clears the previous candidate class`() {
+        val settings = WatchSettings(lanClassId = "a")
+        val updated = mergeLanBootstrapInfo(
+            settings,
+            LanPluginCandidate("PC", "192.168.1.20", 8765),
+            ConnectionBootstrapInfo("PC", "https://ci.example.com"),
+        )
+
+        assertEquals("", updated.lanClassId)
     }
 
     @Test
@@ -180,6 +226,27 @@ class AuthorizationAndNotificationTest {
     }
 
     @Test
+    fun `class permission overrides global permission for mobile actions`() {
+        val classes = listOf(
+            ClassSummary("class-a", "一班", permissions = Protocol.PERMISSION_VIEW_CURRENT),
+            ClassSummary("class-b", "二班", permissions = Protocol.PERMISSION_VIEW_CURRENT or Protocol.PERMISSION_MANAGE_SCHEDULE),
+        )
+
+        assertFalse(
+            effectiveClassPermissions(classes, "class-a", Protocol.PERMISSION_MANAGE_SCHEDULE)
+                .and(Protocol.PERMISSION_MANAGE_SCHEDULE) == Protocol.PERMISSION_MANAGE_SCHEDULE,
+        )
+        assertTrue(
+            effectiveClassPermissions(classes, "class-b", Protocol.PERMISSION_VIEW_CURRENT)
+                .and(Protocol.PERMISSION_MANAGE_SCHEDULE) == Protocol.PERMISSION_MANAGE_SCHEDULE,
+        )
+        assertEquals(
+            Protocol.PERMISSION_MANAGE_SCHEDULE,
+            effectiveClassPermissions(emptyList(), "class-a", Protocol.PERMISSION_MANAGE_SCHEDULE),
+        )
+    }
+
+    @Test
     fun `cloud websocket url url-encodes base64 access token`() {
         // 服务端令牌是标准 Base64，+ 在查询串里会被解码成空格导致 401。
         assertEquals(
@@ -255,5 +322,19 @@ class AuthorizationAndNotificationTest {
     fun `explicit cloud server allows warned public http endpoint`() {
         requireCloudServerUrl("http://203.0.113.10:42089")
         requireCloudServerUrl("https://ci.example.com")
+    }
+
+    @Test
+    fun `web ui login qr payload parses server user and ticket`() {
+        val payload = parseLoginQrPayload(
+            "remoteci://login?server=https%3A%2F%2Fci.example.com%2Fbase&user=teacher%2B1&ticket=abc123",
+        )
+        assertNotNull(payload)
+        assertEquals("https://ci.example.com/base", payload.serverUrl)
+        assertEquals("teacher+1", payload.username)
+        assertEquals("abc123", payload.ticket)
+        // 旧版只含服务器地址的二维码，或缺少票据的二维码，回退为地址输入。
+        assertNull(parseLoginQrPayload("https://ci.example.com"))
+        assertNull(parseLoginQrPayload("remoteci://login?server=https%3A%2F%2Fci.example.com"))
     }
 }

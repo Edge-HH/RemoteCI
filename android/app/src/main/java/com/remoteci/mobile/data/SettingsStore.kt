@@ -11,6 +11,10 @@ data class WatchSettings(
     val lanHost: String = "",
     val lanHostCandidates: List<String> = emptyList(),
     val lanPort: Int = 8765,
+    /** 直连候选所属班级（服务端下发插件地址时带出）；为空表示未知，如旧服务端或手动扫描。 */
+    val lanClassId: String = "",
+    /** 多班级账号最近选择的班级，冷启动后恢复，避免每次都回到第一个班级。 */
+    val selectedClassId: String = "",
     val themeId: String = "lavender",
     val updateChannel: UpdateChannel = UpdateChannel.STABLE,
     val forceUpdateEnabled: Boolean = false,
@@ -36,6 +40,8 @@ class SettingsStore(context: Context) {
         lanHostCandidates = prefs.getString(KEY_LAN_HOST_CANDIDATES, "")
             ?.lineSequence()?.filter(String::isNotBlank)?.distinct()?.toList().orEmpty(),
         lanPort = prefs.getInt(KEY_LAN_PORT, 8765),
+        lanClassId = prefs.getString(KEY_LAN_CLASS_ID, "") ?: "",
+        selectedClassId = prefs.getString(KEY_SELECTED_CLASS_ID, "") ?: "",
         themeId = prefs.getString(KEY_THEME_ID, "lavender") ?: "lavender",
         updateChannel = runCatching {
             UpdateChannel.valueOf(prefs.getString(KEY_UPDATE_CHANNEL, UpdateChannel.STABLE.name)!!)
@@ -60,6 +66,8 @@ class SettingsStore(context: Context) {
             .putString(KEY_LAN_HOST, settings.lanHost)
             .putString(KEY_LAN_HOST_CANDIDATES, settings.lanHostCandidates.joinToString("\n"))
             .putInt(KEY_LAN_PORT, settings.lanPort)
+            .putString(KEY_LAN_CLASS_ID, settings.lanClassId)
+            .putString(KEY_SELECTED_CLASS_ID, settings.selectedClassId)
             .putString(KEY_THEME_ID, settings.themeId)
             .putString(KEY_UPDATE_CHANNEL, settings.updateChannel.name)
             .putBoolean(KEY_FORCE_UPDATE, settings.forceUpdateEnabled)
@@ -82,6 +90,8 @@ class SettingsStore(context: Context) {
         const val KEY_LAN_HOST = "lanHost"
         const val KEY_LAN_HOST_CANDIDATES = "lanHostCandidates"
         const val KEY_LAN_PORT = "lanPort"
+        const val KEY_LAN_CLASS_ID = "lanClassId"
+        const val KEY_SELECTED_CLASS_ID = "selectedClassId"
         const val KEY_THEME_ID = "themeId"
         const val KEY_UPDATE_CHANNEL = "updateChannel"
         const val KEY_FORCE_UPDATE = "forceUpdateEnabled"
@@ -96,7 +106,10 @@ class SettingsStore(context: Context) {
     }
 }
 
-/** 合并服务端下发的候选地址；仍可用的当前首选地址保持优先，避免每次重连重复试错。 */
+/**
+ * 合并服务端下发的候选地址；仍可用的当前首选地址保持优先，避免每次重连重复试错。
+ * 同时记录候选所属班级，换班后不会再直连到上一个班级的插件。
+ */
 internal fun mergePluginNetworkInfo(settings: WatchSettings, info: PluginNetworkInfo): WatchSettings {
     if (info.port !in 1..65535) return settings
     val advertised = info.addresses.map(String::trim).filter(String::isNotEmpty).distinct()
@@ -106,6 +119,7 @@ internal fun mergePluginNetworkInfo(settings: WatchSettings, info: PluginNetwork
         lanHost = preferred,
         lanHostCandidates = listOf(preferred) + advertised.filterNot { it == preferred },
         lanPort = info.port,
+        lanClassId = info.classId ?: settings.lanClassId,
     )
 }
 
@@ -133,6 +147,8 @@ internal fun mergeLanBootstrapInfo(
         lanHost = candidate.host,
         lanHostCandidates = listOf(candidate.host),
         lanPort = candidate.port,
+        // 扫描选中的插件属于哪个班级未知，等服务端下发插件地址后再补齐。
+        lanClassId = "",
     )
 }
 

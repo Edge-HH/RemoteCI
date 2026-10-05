@@ -20,7 +20,8 @@ public sealed class DeviceInventoryService(
         var credentials = await db.PluginCredentials
             .Include(x => x.Classroom)
             .AsNoTracking()
-            .Where(x => x.Assigned)
+            // 撤销凭据仍保留在管理页用于审计，但不能再作为离线设备参与批量控制。
+            .Where(x => x.Assigned && x.Enabled)
             .OrderBy(x => x.ClassroomId)
             .ThenBy(x => x.Name)
             .ToListAsync(ct);
