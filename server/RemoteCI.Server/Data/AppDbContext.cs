@@ -9,6 +9,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>(options)
 {
     public DbSet<DeviceSession> DeviceSessions => Set<DeviceSession>();
+    public DbSet<WebLoginTicket> WebLoginTickets => Set<WebLoginTicket>();
     public DbSet<UserApiKey> UserApiKeys => Set<UserApiKey>();
     public DbSet<PluginCredential> PluginCredentials => Set<PluginCredential>();
     public DbSet<PluginPairingCode> PluginPairingCodes => Set<PluginPairingCode>();
@@ -78,6 +79,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.Property(x => x.DeviceName).HasMaxLength(80);
             entity.Property(x => x.VerifierHash).HasMaxLength(64);
             entity.Property(x => x.AccessTokenHash).HasMaxLength(64);
+            entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<WebLoginTicket>(entity =>
+        {
+            entity.HasKey(x => x.TokenHash);
+            entity.Property(x => x.TokenHash).HasMaxLength(64);
+            entity.HasIndex(x => x.UserId);
+            entity.HasIndex(x => x.ExpiresAtUnixMs);
             entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<UserApiKey>(entity =>

@@ -16,6 +16,21 @@ public sealed class DeviceSession
 }
 
 /// <summary>
+/// 客户端一键打开 WebUI 的一次性网页登录票据。数据库只保存票据的 SHA-256 摘要，明文只出现在跳转链接中；
+/// 持久化而非进程内缓存，服务重启或多实例共享数据库时仍可兑换，兑换时按行原子删除保证只能成功一次。
+/// </summary>
+public sealed class WebLoginTicket
+{
+    public string TokenHash { get; set; } = string.Empty;
+    public Guid UserId { get; set; }
+    public AppUser User { get; set; } = null!;
+    /// <summary>签发时的安全戳：改密、停用等会刷新安全戳，使未兑换的票据失效。</summary>
+    public string? SecurityStamp { get; set; }
+    /// <summary>以 Unix 毫秒保存，SQLite 才能在 SQL 中直接比较并清理过期票据。</summary>
+    public long ExpiresAtUnixMs { get; set; }
+}
+
+/// <summary>
 /// 用户 API Key。密钥明文只在创建时展示一次，数据库只保存 SHA-256 摘要；
 /// 权限不复制到密钥上，每次调用都重新按用户当前角色与授权计算。
 /// </summary>

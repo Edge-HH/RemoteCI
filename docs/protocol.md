@@ -223,6 +223,7 @@ WebUI 批量控制页把功能参数和目标设备分成两步：先填写参�
 
 - `POST /api/plugin/pair`
 - `POST /api/auth/login`、`/api/auth/refresh`、`/api/auth/logout`
+- `POST /api/auth/web-ticket`：客户端一键打开 WebUI。需设备会话 Bearer 令牌（API Key 返回 403），返回 `{ticket, path, expiresAt}`；用浏览器打开 `服务器地址 + path` 即以该账号登录 WebUI，可追加 `&returnUrl=`（仅接受本站相对路径，外部地址被忽略）与 `&classId=`（仅接受该账号可访问的班级）。票据有效期 1 分钟、只能成功兑换一次；同一账号签发新票据会作废旧票据。服务端只保存票据的 SHA-256 摘要，持久化在数据库中，服务重启或多实例共享数据库时仍可兑换，兑换按行原子删除，并发或跨实例重复兑换都会失败。签发后账号被停用、锁定、改密或安全戳变化，票据即失效。落地页返回 `Cache-Control: no-store` 与 `Referrer-Policy: no-referrer`。票据会出现在浏览器地址栏，生产环境必须使用 HTTPS；与手机端连接策略一致，服务端不拒绝 HTTP 部署，但 HTTP 下票据可能被同一网络中的攻击者截获并抢先兑换。
 - `GET /api/me`、`POST /api/me/password`、`POST /api/me/display-name`
 - `GET /api/me/schedule`、`GET /api/me/schedule/next`
 - `GET /api/swap-requests/catalog`、`GET /api/swap-requests?box=incoming|outgoing|all&status=`、`GET /api/swap-requests/{id}`
