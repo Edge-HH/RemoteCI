@@ -33,8 +33,10 @@ public sealed class WebLoginTests
 
         using var browser = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = true });
         var redeem = await browser.GetAsync(path + "&returnUrl=%2FControl");
-        Assert.Equal(HttpStatusCode.Redirect, redeem.StatusCode);
-        Assert.Equal("/Control", redeem.Headers.Location?.OriginalString);
+        // 跨站打开的链接不能直接 302（SameSite=Strict 的登录 Cookie 不会随重定向发送），落地页改为同站跳转。
+        Assert.Equal(HttpStatusCode.OK, redeem.StatusCode);
+        Assert.Equal("/Control", await LandingTargetAsync(redeem));
+        Assert.True(redeem.Headers.CacheControl?.NoStore, "落地页含票据，必须禁止缓存");
         Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/Users")).StatusCode);
 
         // 票据一次性使用：新的浏览器再次打开同一链接会回到登录页。
@@ -56,8 +58,18 @@ public sealed class WebLoginTests
 
         using var browser = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = true });
         var redeem = await browser.GetAsync(path + "&returnUrl=https%3A%2F%2Fevil.example%2F");
-        Assert.Equal(HttpStatusCode.Redirect, redeem.StatusCode);
-        Assert.DoesNotContain("evil.example", redeem.Headers.Location?.OriginalString);
+        Assert.Equal(HttpStatusCode.OK, redeem.StatusCode);
+        var html = await redeem.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("evil.example", html);
+        Assert.StartsWith("/", await LandingTargetAsync(redeem));
+    }
+
+    private static async Task<string> LandingTargetAsync(HttpResponseMessage response)
+    {
+        var html = await response.Content.ReadAsStringAsync();
+        var match = System.Text.RegularExpressions.Regex.Match(html, "http-equiv=\"refresh\" content=\"0;url=([^\"]*)\"");
+        Assert.True(match.Success, html);
+        return WebUtility.HtmlDecode(match.Groups[1].Value);
     }
 
     [Fact]

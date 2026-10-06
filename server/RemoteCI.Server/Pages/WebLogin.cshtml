@@ -1,2 +1,19 @@
 @page
 @model WebLoginModel
+@{
+    Layout = null;
+}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    @* 由本站页面发起跳转属于同站导航，SameSite=Strict 的登录 Cookie 才会随请求发送。 *@
+    <meta http-equiv="refresh" content="0;url=@Model.Target" />
+    <title>正在进入 RemoteCI</title>
+</head>
+<body>
+    <p>已登录，正在进入 RemoteCI……如果没有自动跳转，请<a href="@Model.Target">点击这里</a>。</p>
+</body>
+</html>
