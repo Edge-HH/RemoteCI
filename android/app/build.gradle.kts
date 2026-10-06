@@ -74,6 +74,13 @@ android {
         versionName = releaseVersion
         testInstrumentationRunner =
             "com.remoteci.mobile.NetworkSecurityPolicyInstrumentation"
+        // 小米小部件标识开关：HyperOS 会把带 miuiWidget 标识的组件从“安卓小部件”池中移除，
+        // 而小部件中心只展示通过小米审核的组件，所以审核通过前必须关闭，否则两处都看不到。
+        // 审核通过后用 -Premoteci.miuiWidget=true 构建；此后不得再关闭（小米规范禁止移除标识）。
+        val miuiWidget = providers.gradleProperty("remoteci.miuiWidget").orNull == "true"
+        manifestPlaceholders["miuiWidgetKey"] = if (miuiWidget) "miuiWidget" else "com.remoteci.mobile.widget.miuiWidgetPending"
+        manifestPlaceholders["miuiWidgetVersionKey"] =
+            if (miuiWidget) "miuiWidgetVersion" else "com.remoteci.mobile.widget.miuiWidgetVersionPending"
     }
 
     signingConfigs {
