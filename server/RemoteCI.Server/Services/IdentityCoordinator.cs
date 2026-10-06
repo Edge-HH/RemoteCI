@@ -827,9 +827,12 @@ public sealed partial class IdentityCoordinator(
             var (memberRoleId, memberDefaults) = memberRoles.TryGetValue(user.Id, out var membership)
                 ? membership
                 : (user.RoleDefinitionId, user.RoleDefinition?.DefaultPermissions ?? UserPermissions.None);
-            var effective = isAdmin
-                ? UserPermissions.All
-                : UserPermissions.ViewCurrentCourse | memberDefaults | user.GrantedPermissions;
+            // 与云端 ClassAccessService.GetEffectivePermissionsAsync 保持同一公式：班内角色权限，
+            // 再并上任教老师的全局老师角色默认权限，避免“老师且为班级成员”的账号在 LAN 上权限更少。
+            var effective = ClassAccessService.EffectiveForMembership(user.Role, memberDefaults, user.GrantedPermissions);
+            if (!isAdmin && memberRoles.ContainsKey(user.Id) && taughtTeacherIds.Contains(user.Id))
+                effective |= ClassAccessService.EffectiveForMembership(
+                    user.Role, user.RoleDefinition?.DefaultPermissions ?? UserPermissions.None, user.GrantedPermissions);
             var account = new SyncedAccount
             {
                 Id = user.Id,

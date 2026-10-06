@@ -284,6 +284,37 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
         Assert.False(account.EffectivePermissions.HasFlag(UserPermissions.ManageUsers));
     }
 
+    [Fact]
+    public async Task CreateSyncAsync_TeacherAlsoClassMember_MatchesCloudEffectivePermissions()
+    {
+        // 老师同时以“学生”成员身份加入任教班级：云端取“成员角色 ∪ 老师角色默认权限”，
+        // LAN 授权镜像必须得到相同结果，否则局域网直连时通知、语音和扩展会被插件拒绝。
+        var (classId, _) = await SeedTaughtClassAsync("成员老师班", teacherName: "赵老师");
+        var teacherId = await CreateUserAsync("member.teacher", "Teacher-Password-2026", AccountRole.TeacherId, displayName: "赵老师");
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.ClassMemberships.Add(new ClassMembership
+        {
+            UserId = teacherId,
+            ClassroomId = classId,
+            RoleDefinitionId = AccountRole.StudentId,
+        });
+        await db.SaveChangesAsync();
+
+        var access = scope.ServiceProvider.GetRequiredService<ClassAccessService>();
+        var cloud = await access.GetEffectivePermissionsAsync(teacherId, UserRole.User, classId);
+        var identities = scope.ServiceProvider.GetRequiredService<IdentityCoordinator>();
+        var lan = (await identities.CreateSyncAsync(classId)).Accounts.Single(x => x.Id == teacherId).EffectivePermissions;
+
+        Assert.Equal(cloud, lan);
+        Assert.True(lan.HasFlag(UserPermissions.SendNotifications));
+        Assert.True(lan.HasFlag(UserPermissions.SendVoiceMessages));
+        Assert.Equal(
+            IdentityCoordinator.TeacherDefaultPermissions.HasFlag(UserPermissions.RunExtensions),
+            lan.HasFlag(UserPermissions.RunExtensions));
+    }
+
     // ---------- 辅助 ----------
 
     /// <summary>创建一个新班级并向其 StateStore 缓存一份含指定教师（默认“王老师”）课程的课表。</summary>
