@@ -320,10 +320,12 @@ data class NotificationRequest(
     // 与服务端 NotificationRequest 一致：null 由插件按 5 秒 / 1 次处理。
     @SerialName("durationSeconds") val durationSeconds: Int? = null,
     @SerialName("repeatCounts") val repeatCounts: Int? = null,
-    // 默认关闭：短正文静态显示即可读完，开启后正文横向滚动 repeatCounts 遍。
-    @SerialName("isRollingEnabled") val isRollingEnabled: Boolean = false,
+    // 三态：null（旧客户端省略）由插件保持升级前的滚动正文；本客户端总是显式发送 true/false。
+    @SerialName("isRollingEnabled") val isRollingEnabled: Boolean? = null,
 ) {
     companion object {
+        const val MAX_TITLE_LENGTH = 60
+        const val MAX_MESSAGE_LENGTH = 500
         const val DEFAULT_DURATION_SECONDS = 5
         const val MAX_DURATION_SECONDS = 3600
         const val MAX_REPEAT_COUNTS = 10

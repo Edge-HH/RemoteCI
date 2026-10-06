@@ -278,30 +278,54 @@ public sealed class NotificationRequest
     [JsonPropertyName("isNotificationTopmostEnabled")]
     public bool IsNotificationTopmostEnabled { get; set; }
 
-    /// <summary>单条提醒的显示秒数；null 或 &lt;= 0 时插件按 ClassIsland 集控默认 5 秒处理。</summary>
+    /// <summary>单条提醒的显示秒数；null 或 0 时按 ClassIsland 集控默认 5 秒处理，上限 <see cref="MaxDurationSeconds"/>。</summary>
     [JsonPropertyName("durationSeconds")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? DurationSeconds { get; set; }
 
-    /// <summary>重复次数；null 或 &lt; 1 时按 1 次处理（对齐 ClassIsland 集控的 RepeatCounts）。
-    /// 开启滚动时正文滚动 N 遍；关闭滚动时整条提醒依次显示 N 次。</summary>
+    /// <summary>重复次数；null 或 0 时按 1 次处理（对齐 ClassIsland 集控的 RepeatCounts），上限 <see cref="MaxRepeatCounts"/>。
+    /// 滚动时正文滚动 N 遍；静态时整条提醒依次显示 N 次。</summary>
     [JsonPropertyName("repeatCounts")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? RepeatCounts { get; set; }
 
-    /// <summary>正文是否以横向滚动文本显示；默认关闭，短正文静态显示即可读完。</summary>
+    /// <summary>正文是否以横向滚动文本显示。三态：省略（旧 V3 客户端）保持升级前的滚动行为，
+    /// 显式 <c>false</c> 才静态显示正文，显式 <c>true</c> 滚动显示。</summary>
     [JsonPropertyName("isRollingEnabled")]
-    public bool IsRollingEnabled { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsRollingEnabled { get; set; }
 
-    /// <summary>把“持续时间（秒）”和“重复次数”归一化为插件可直接使用的取值。</summary>
+    /// <summary>把“持续时间（秒）”和“重复次数”归一化为插件可直接使用的取值，并限幅到协议上限。</summary>
     public int EffectiveDurationSeconds => DurationSeconds is null or <= 0
         ? DefaultDurationSeconds
-        : DurationSeconds.Value;
+        : Math.Min(DurationSeconds.Value, MaxDurationSeconds);
 
-    public int EffectiveRepeatCounts => RepeatCounts is null or < 1 ? 1 : RepeatCounts.Value;
+    public int EffectiveRepeatCounts => RepeatCounts is null or < 1 ? 1 : Math.Min(RepeatCounts.Value, MaxRepeatCounts);
+
+    /// <summary>省略字段的旧客户端沿用升级前的滚动正文。</summary>
+    public bool EffectiveRollingEnabled => IsRollingEnabled ?? true;
+
+    /// <summary>
+    /// 所有入口（WebSocket 命令、REST、集控广播、WebUI）共用的通知参数校验；通过返回 null，否则返回面向用户的错误说明。
+    /// 0 与 null 一样表示默认值，以兼容旧客户端；负数或超过上限一律拒绝，防止大量通知排队。
+    /// 标题沿用旧行为在执行端截断到 <see cref="MaxTitleLength"/> 字，不作为拒绝条件。
+    /// </summary>
+    public static string? Validate(NotificationRequest? request)
+    {
+        if (request is null) return "缺少通知内容";
+        if ((request.Message?.Trim().Length ?? 0) > MaxMessageLength) return $"通知正文不能超过 {MaxMessageLength} 个字符";
+        if (request.DurationSeconds is < 0 or > MaxDurationSeconds) return $"持续时间必须在 1-{MaxDurationSeconds} 秒之间";
+        if (request.RepeatCounts is < 0 or > MaxRepeatCounts) return $"重复次数必须在 1-{MaxRepeatCounts} 次之间";
+        return null;
+    }
 
     /// <summary>与 ClassIsland 集控 SendNotification 一致的默认显示秒数。</summary>
     public const int DefaultDurationSeconds = 5;
+
+    public const int MaxTitleLength = 60;
+    public const int MaxMessageLength = 500;
+    public const int MaxDurationSeconds = 3600;
+    public const int MaxRepeatCounts = 10;
 
     /// <summary>正文超过该字数且未开启滚动时，各端发送界面提示建议开启滚动。</summary>
     public const int RollingSuggestionThreshold = 30;

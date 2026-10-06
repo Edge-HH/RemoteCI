@@ -170,21 +170,13 @@ public sealed class CommandHandler
     {
         if (request is null)
             return CommandResult.Failure(CommandResultCodes.InvalidRequest, "缺少通知内容");
+        // 局域网客户端直连插件、不经过服务端，因此执行端必须再次按同一协议上限校验。
+        if (NotificationRequest.Validate(request) is { } error)
+            return CommandResult.Failure(CommandResultCodes.InvalidRequest, error);
         var message = NormalizeNotificationMessage(request.Message);
-        if (message.Length > 500)
-            return CommandResult.Failure(CommandResultCodes.InvalidRequest, "通知正文不能超过 500 个字符");
         // 服务端会按全局设置注入 ForceSenderInTitle；null 按旧行为视为开启。
         var title = BuildNotificationTitle(senderName, request.Title, request.ForceSenderInTitle != false);
-        await _notifications.ShowRemoteNotificationAsync(
-            title,
-            message,
-            request.IsNotificationEffectEnabled,
-            request.IsNotificationSoundEnabled,
-            request.IsSpeechEnabled,
-            request.IsNotificationTopmostEnabled,
-            request.EffectiveDurationSeconds,
-            request.EffectiveRepeatCounts,
-            request.IsRollingEnabled);
+        await _notifications.ShowRemoteNotificationAsync(title, message, RemoteNotificationOptions.From(request));
         NotificationSent?.Invoke(new ClassEvent
         {
             Event = ClassEventKind.Custom,
@@ -306,7 +298,7 @@ public sealed class CommandHandler
     internal static string NormalizeNotificationTitle(string? requestedTitle)
     {
         var title = requestedTitle?.Trim();
-        return string.IsNullOrWhiteSpace(title) ? "RemoteCI 通知" : title[..Math.Min(title.Length, 60)];
+        return string.IsNullOrWhiteSpace(title) ? "RemoteCI 通知" : title[..Math.Min(title.Length, NotificationRequest.MaxTitleLength)];
     }
 
     /// <summary>ClassIsland 支持只有标题的通知，因此空正文保持为空，仅清理首尾空白。</summary>

@@ -154,10 +154,11 @@ fun NotifyScreen(onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         TopAppBar(title = { Text("发送通知") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedTextField(title, { title = it }, label = { Text("标题") }, modifier = Modifier.fillMaxWidth())
+            // 与服务端协议上限一致：标题 60 字、正文 500 字。
+            OutlinedTextField(title, { title = it.take(NotificationRequest.MAX_TITLE_LENGTH) }, label = { Text("标题") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(
                 message,
-                { message = it },
+                { message = it.take(NotificationRequest.MAX_MESSAGE_LENGTH) },
                 label = { Text("正文") },
                 supportingText = if (suggestRolling) {
                     { Text("正文超过 ${NotificationRequest.ROLLING_SUGGESTION_THRESHOLD} 字，建议开启“正文滚动显示”，否则可能显示不全。") }

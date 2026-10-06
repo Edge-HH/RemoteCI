@@ -492,6 +492,9 @@ app.MapPost("/api/commands", async (
         if (required == UserPermissions.None) return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "未知命令"));
         if (!classPermissions.HasFlag(required)) return Forbidden();
     }
+    // 与 WS 路径一致：署名标志由服务端全局设置决定，REST 客户端不能绕过。
+    if (command.Notification is not null)
+        command.Notification.ForceSenderInTitle = await identities.GetForceSenderInTitleAsync(ct);
     command.RequestedBy = principal.User.WithPermissions(classPermissions);
     var result = await peers.SendCommandAndWaitAsync(command, target, TimeSpan.FromSeconds(15), ct);
     return Results.Json(result, statusCode: CommandStatus(result));
@@ -677,8 +680,8 @@ app.MapPost("/api/commands/broadcast", async (
     if (principal?.User is null) return Unauthorized();
     if (request.ClassIds.Count == 0 && (request.GroupIds?.Count ?? 0) == 0)
         return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "请选择要操作的班级或分组"));
-    if (request.Command is CommandKind.SendNotification && request.Notification is null)
-        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "缺少通知内容"));
+    if (request.Command is CommandKind.SendNotification && NotificationRequest.Validate(request.Notification) is { } notificationError)
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, notificationError));
     if (request.Command is CommandKind.SendVoiceMessage &&
         !VoiceMessageRequest.TryDecode(request.VoiceMessage, out _))
         return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "语音格式无效或超过 60 秒"));

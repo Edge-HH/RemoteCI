@@ -460,11 +460,17 @@ public sealed class PeerRegistry(
         });
     }
 
+    /// <summary>服务端代发命令（REST、集控广播、WebUI）与 WebSocket 命令共用的通知参数校验。</summary>
+    internal static string? GetNotificationError(CommandMessage command) =>
+        command.Command == CommandKind.SendNotification ? NotificationRequest.Validate(command.Notification) : null;
+
     public async Task<CommandResult> SendCommandAndWaitAsync(
         CommandMessage command, Guid classId, TimeSpan timeout, CancellationToken ct = default)
     {
         if (command.Command == CommandKind.SendVoiceMessage && !VoiceMessageRequest.TryDecode(command.VoiceMessage, out _))
             return CommandResult.Failure(CommandResultCodes.InvalidRequest, "语音格式无效或超过 60 秒");
+        if (GetNotificationError(command) is { } notificationError)
+            return CommandResult.Failure(CommandResultCodes.InvalidRequest, notificationError);
         if (!HasPluginFor(classId)) return CommandResult.Failure(CommandResultCodes.PluginOffline, "插件未在线，操作未执行");
         if (RemoteCiCapabilities.Required(command.Command) is { } capability &&
             !PrimaryPluginSupports(classId, capability))
@@ -501,6 +507,8 @@ public sealed class PeerRegistry(
         TimeSpan timeout,
         CancellationToken ct = default)
     {
+        if (GetNotificationError(command) is { } notificationError)
+            return CommandResult.Failure(CommandResultCodes.InvalidRequest, notificationError);
         if (!_pluginPeers.TryGetValue(connectionId, out var peer) || !IsLocallyAuthorized(peer))
             return CommandResult.Failure(CommandResultCodes.PluginOffline, "插件未在线，操作未执行");
         if (RemoteCiCapabilities.Required(command.Command) is { } capability &&

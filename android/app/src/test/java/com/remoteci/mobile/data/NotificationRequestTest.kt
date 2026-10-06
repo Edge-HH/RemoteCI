@@ -39,4 +39,15 @@ class NotificationRequestTest {
         assertEquals(3, encoded.getValue("repeatCounts").jsonPrimitive.int)
         assertTrue(encoded.getValue("isRollingEnabled").jsonPrimitive.boolean)
     }
+
+    @Test
+    fun `explicit static body is sent as false instead of being omitted`() {
+        // 插件把省略 isRollingEnabled 视为旧客户端并保持滚动，因此关闭滚动必须显式写出 false。
+        val encoded = protocolJson.encodeToJsonElement(
+            NotificationRequest.serializer(),
+            NotificationRequest(title = "标题", message = "正文", isRollingEnabled = false),
+        ).jsonObject
+
+        assertFalse(encoded.getValue("isRollingEnabled").jsonPrimitive.boolean)
+    }
 }

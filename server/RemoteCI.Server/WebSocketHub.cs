@@ -619,6 +619,8 @@ public static class WebSocketHub
         if (command.Command == CommandKind.SendVoiceMessage &&
             !VoiceMessageRequest.TryDecode(command.VoiceMessage, out _))
             return new CommandError(CommandResultCodes.InvalidRequest, "语音格式无效或超过 60 秒");
+        if (PeerRegistry.GetNotificationError(command) is { } notificationError)
+            return new CommandError(CommandResultCodes.InvalidRequest, notificationError);
         if (command.Command is CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled)
             return ValidatePluginManagement(command);
         return ValidateOptionalCommandPayload(command);
