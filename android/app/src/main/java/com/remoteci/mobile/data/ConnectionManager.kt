@@ -208,6 +208,7 @@ object ConnectionManager {
         val app = context.applicationContext
         if (appContext == null) {
             appContext = app
+            SnapshotStore.deleteLegacy(app)
             snapshotStore = SnapshotStore(app)
             registerNetworkCallback(app)
         }
@@ -241,44 +242,77 @@ object ConnectionManager {
         if (user == null) {
             classes.value = emptyList()
             currentClassId.value = null
+            bindWidgetOwner(null, null)
             return
         }
         // 插件局域网镜像中的账号不带班级列表：沿用云端最近一次下发的班级与当前选择，
         // 否则直连后班级列表被清空、已选班级被重置，换班入口与按班级的权限都会失效。
-        val accessible = user.classes ?: return
+        val accessible = user.classes ?: run {
+            bindWidgetOwner(user, previous)
+            return
+        }
         classes.value = accessible
         val selected = previous ?: desiredSettings?.selectedClassId?.takeIf(String::isNotBlank)
         val next = if (selected != null && accessible.any { it.id == selected }) selected
         else accessible.firstOrNull()?.id
         currentClassId.value = next
+        bindWidgetOwner(user, next)
         // 冷启动走局域网时，插件推送早于班级确定、未能按班级缓存：先归入刚确定的班级，
         // 否则下面的重新发布会把已展示的课表清空，直到插件下次推送课表才恢复。
         if (previous == null && next != null) adoptUnattributedData(next)
         if (previous != next) publishClassData(next)
     }
 
-    /** 老师的个人日程不随某个当前班级推送，单独按短周期刷新以支持多班级授课。 */
+    /**
+     * 老师与班主任的个人日程不随某个当前班级推送，单独按短周期刷新以支持多班级授课。
+     * 只有老师的小组件与常驻通知以个人日程为主；班主任默认仍展示本班状态，个人日程仅供首页“我的”视图。
+     */
     private fun syncPersonalSchedule(user: UserProfile?) {
-        val userId = user?.takeIf { it.isTeacher && it.id.isNotBlank() }?.id
+        val userId = personalScheduleUserId(user)
         if (userId == personalScheduleUserId && personalScheduleJob?.isActive == true) return
         personalScheduleJob?.cancel()
         personalScheduleUserId = userId
         personalNextCourse.value = null
-        if (userId == null) {
-            snapshotStore?.clearPersonalNext()
-            appContext?.let { WidgetUpdater.updateAll(it, force = true) }
-            return
-        }
+        snapshotStore?.clearPersonalNext()
+        appContext?.let { WidgetUpdater.updateAll(it, force = true) }
+        if (userId == null) return
+        val persistForWidget = widgetUsesPersonalSchedule(user)
         personalScheduleJob = scope.launch {
+            var lastSuccessAt = 0L
             while (kotlin.coroutines.coroutineContext.isActive) {
                 runCatching { AdminApi.myNextCourse() }
                     .onSuccess {
+                        lastSuccessAt = SystemClock.elapsedRealtime()
                         personalNextCourse.value = it
-                        snapshotStore?.savePersonalNext(it)
-                        appContext?.let { context -> WidgetUpdater.updateAll(context) }
+                        if (persistForWidget) {
+                            snapshotStore?.savePersonalNext(it)
+                            appContext?.let { context -> WidgetUpdater.updateAll(context) }
+                        }
+                    }
+                    .onFailure { error ->
+                        if (error is CancellationException) throw error
+                        // REST 暂时不可用：短时间内沿用上次结果；过期后清空，让通知与小组件回退到当前班级状态，
+                        // 而不是继续展示早已结束的课程或直接清空课堂通知。
+                        if (isPersonalScheduleStale(lastSuccessAt, SystemClock.elapsedRealtime()) &&
+                            personalNextCourse.value != null
+                        ) {
+                            personalNextCourse.value = null
+                            if (persistForWidget) {
+                                snapshotStore?.clearPersonalNext()
+                                appContext?.let { context -> WidgetUpdater.updateAll(context, force = true) }
+                            }
+                        }
                     }
                 delay(PersonalScheduleRefreshMs)
             }
+        }
+    }
+
+    /** 缓存归属随登录身份与当前班级变化；变化时旧账号、旧服务器或旧班级的小组件内容立即清除。 */
+    private fun bindWidgetOwner(user: UserProfile?, classId: String?) {
+        val store = snapshotStore ?: return
+        if (store.bindOwner(widgetCacheOwner(restBaseUrl(), user, classId))) {
+            appContext?.let { WidgetUpdater.updateAll(it, force = true) }
         }
     }
 
@@ -328,6 +362,7 @@ object ConnectionManager {
         schedulePullJob?.cancel()
         schedulePullState.value = SchedulePullState.Idle
         currentClassId.value = classId
+        bindWidgetOwner(currentUser.value, classId)
         publishClassData(classId)
         lastCapabilitiesSync?.let { availableCapabilities.value = effectiveCapabilities(it, classId) }
 
@@ -973,7 +1008,12 @@ object ConnectionManager {
                         json.encodeToString(RefreshSessionRequest(saved.deviceSessionId, saved.deviceSecret)),
                     )
                 } catch (_: AuthenticationException) {
-                    if (sessionEpoch.get() == epoch) sessions.clear()
+                    if (sessionEpoch.get() == epoch) {
+                        sessions.clear()
+                        // 设备会话被吊销或过期：本机缓存的课堂与日程不再属于可证明的登录身份。
+                        snapshotStore?.clear()
+                        appContext?.let { WidgetUpdater.updateAll(it, force = true) }
+                    }
                     issuedAuth = null
                     throw MissingSessionException()
                 }
@@ -1521,6 +1561,23 @@ internal data class ConnectionPlan(
 
 internal const val InitialReconnectDelayMs = 5_000L
 internal const val PersonalScheduleRefreshMs = 60_000L
+
+/** 个人日程连续刷新失败超过该时长后视为过期，通知与小组件回退到班级状态。 */
+internal const val PersonalScheduleStaleMs = PersonalScheduleRefreshMs * 3
+
+/** 需要轮询个人日程的账号：协议规定老师与班主任都拥有“我的日程”。 */
+internal fun personalScheduleUserId(user: UserProfile?): String? =
+    user?.takeIf { it.hasPersonalSchedule && it.id.isNotBlank() }?.id
+
+/** 小组件与常驻通知是否以个人日程为主：只有老师；班主任默认展示本班状态。 */
+internal fun widgetUsesPersonalSchedule(user: UserProfile?): Boolean = user?.isTeacher == true
+
+internal fun isPersonalScheduleStale(lastSuccessAtMs: Long, nowMs: Long): Boolean =
+    lastSuccessAtMs == 0L || nowMs - lastSuccessAtMs >= PersonalScheduleStaleMs
+
+/** 小组件缓存的归属；未登录或没有账号 Id（不可证明的身份）时为 null，缓存随之清空。 */
+internal fun widgetCacheOwner(serverUrl: String?, user: UserProfile?, classId: String?): SnapshotOwner? =
+    user?.id?.takeIf(String::isNotBlank)?.let { SnapshotOwner(serverUrl.orEmpty(), it, classId) }
 internal const val MaxReconnectDelayMs = 60_000L
 
 /** 认证握手限时：对端只完成 WebSocket 握手但从不回 auth_state 时不得永久挂起。 */

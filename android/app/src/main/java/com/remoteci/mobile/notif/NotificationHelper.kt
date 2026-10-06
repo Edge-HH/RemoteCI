@@ -133,7 +133,8 @@ object NotificationHelper {
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
 
-        val content = if (isTeacher) teacherStatus(personal) else classStatus(snapshot)
+        // 个人日程暂时不可用（REST 失败或尚未拉到）时回退到当前班级状态，不因此清空课堂通知。
+        val content = if (isTeacher && personal != null) teacherStatus(personal) else classStatus(snapshot)
         val manager = NotificationManagerCompat.from(context)
         if (content == null) {
             if (lastSchoolStatusTitle != null) {

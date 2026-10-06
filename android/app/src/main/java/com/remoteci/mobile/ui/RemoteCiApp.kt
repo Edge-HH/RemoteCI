@@ -33,6 +33,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.remoteci.mobile.data.ConnectionManager
 import com.remoteci.mobile.data.EventHistory
 import com.remoteci.mobile.data.SettingsStore
+import com.remoteci.mobile.data.widgetUsesPersonalSchedule
 import com.remoteci.mobile.data.WatchSettings
 import com.remoteci.mobile.notif.NotificationHelper
 import kotlinx.coroutines.flow.collectLatest
@@ -137,7 +138,7 @@ fun RemoteCiApp(appContext: android.content.Context) {
             ConnectionManager.snapshot,
             ConnectionManager.personalNextCourse,
             ConnectionManager.currentUser,
-        ) { snapshot, personal, profile -> Triple(snapshot, personal, profile?.isTeacher == true) }
+        ) { snapshot, personal, profile -> Triple(snapshot, personal, widgetUsesPersonalSchedule(profile)) }
             .collectLatest { (snapshot, personal, isTeacher) ->
                 NotificationHelper.updateSchoolStatus(appContext, snapshot, personal, isTeacher)
             }
