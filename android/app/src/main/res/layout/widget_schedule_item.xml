@@ -8,30 +8,33 @@
 
     <TextView
         android:id="@+id/widget_schedule_item_period"
-        android:layout_width="54dp"
+        android:layout_width="56dp"
         android:layout_height="wrap_content"
-        android:textColor="@color/widget_text_secondary"
-        android:textSize="11sp"
+        android:fontFamily="sans-serif-medium"
         android:maxLines="1"
-        android:ellipsize="end" />
+        android:ellipsize="end"
+        android:textColor="@color/widget_text_secondary"
+        android:textSize="12sp" />
 
     <TextView
         android:id="@+id/widget_schedule_item_subject"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:textColor="@color/widget_text_primary"
-        android:textSize="14sp"
+        android:fontFamily="sans-serif-medium"
         android:textStyle="bold"
         android:maxLines="1"
-        android:ellipsize="end" />
+        android:ellipsize="end"
+        android:textColor="@color/widget_text_primary"
+        android:textSize="14sp" />
 
     <TextView
         android:id="@+id/widget_schedule_item_time"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="6dp"
+        android:fontFamily="sans-serif-medium"
+        android:maxLines="1"
         android:textColor="@color/widget_text_secondary"
-        android:textSize="11sp"
-        android:maxLines="1" />
+        android:textSize="12sp" />
 </LinearLayout>

@@ -1,14 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 小米规范 2x2：建议 minWidth/minHeight 110dp。系统定时刷新关闭，由曝光刷新与主应用主动刷新代替。 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="110dp"
     android:minHeight="110dp"
-    android:targetCellWidth="1"
+    android:targetCellWidth="2"
     android:targetCellHeight="2"
     android:resizeMode="horizontal|vertical"
-    android:maxResizeWidth="600dp"
-    android:maxResizeHeight="180dp"
     android:widgetCategory="home_screen"
     android:updatePeriodMillis="0"
     android:initialLayout="@layout/widget_current_status"
+    android:previewLayout="@layout/widget_current_status"
     android:description="@string/widget_current_status_description" />
-

@@ -35,10 +35,7 @@ object WidgetUpdater {
         } else {
             lastUpdateAt.set(now)
         }
-        AppWidgetManager.getInstance(appContext).let { manager ->
-            CurrentStatusWidgetProvider.update(manager, appContext)
-            ScheduleWidgetProvider.update(manager, appContext)
-            SwapWidgetProvider.update(manager, appContext)
-        }
+        val manager = AppWidgetManager.getInstance(appContext)
+        WidgetUpdateScheduler.providers().forEach { it.updateWidgets(appContext, manager) }
     }
 }

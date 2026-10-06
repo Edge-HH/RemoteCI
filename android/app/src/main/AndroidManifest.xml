@@ -35,6 +35,10 @@
         <meta-data
             android:name="miui.supportAppContinuity"
             android:value="true" />
+        <!-- 小米小部件版本号：任一小部件功能变动或新增时必须递增，否则应用的小部件可能被下线。 -->
+        <meta-data
+            android:name="miuiWidgetVersion"
+            android:value="1" />
 
         <activity
             android:name=".MainActivity"
@@ -50,45 +54,124 @@
         <receiver
             android:name=".notif.UpdateReceiver"
             android:exported="false" />
+        <!--
+            小米 HyperOS 小部件（miuiWidget）：receiver 运行在独立的 :widgetProvider 进程，只读取缓存并渲染，
+            不拉起主进程；曝光刷新代替系统定时刷新（最短间隔 30 秒）。同功能不同尺寸使用相同 label，
+            小部件中心会聚合展示。receiver 类名与 miuiWidget 标识在通过小米审核后不得修改或移除。
+        -->
         <receiver
             android:name=".widget.CurrentStatusWidgetProvider"
             android:exported="true"
-            android:label="@string/widget_current_status_name">
+            android:label="@string/widget_current_status_name"
+            android:process=":widgetProvider">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="miui.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_current_status_info" />
+            <meta-data
+                android:name="miuiWidget"
+                android:value="true" />
+            <meta-data
+                android:name="miuiWidgetRefresh"
+                android:value="exposure" />
+            <meta-data
+                android:name="miuiWidgetRefreshMinInterval"
+                android:value="30000" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.CurrentStatusWideWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_current_status_name"
+            android:process=":widgetProvider">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="miui.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_current_status_wide_info" />
+            <meta-data
+                android:name="miuiWidget"
+                android:value="true" />
+            <meta-data
+                android:name="miuiWidgetRefresh"
+                android:value="exposure" />
+            <meta-data
+                android:name="miuiWidgetRefreshMinInterval"
+                android:value="30000" />
         </receiver>
 
         <receiver
             android:name=".widget.ScheduleWidgetProvider"
             android:exported="true"
-            android:label="@string/widget_schedule_name">
+            android:label="@string/widget_schedule_name"
+            android:process=":widgetProvider">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="miui.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_schedule_info" />
+            <meta-data
+                android:name="miuiWidget"
+                android:value="true" />
+            <meta-data
+                android:name="miuiWidgetRefresh"
+                android:value="exposure" />
+            <meta-data
+                android:name="miuiWidgetRefreshMinInterval"
+                android:value="30000" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.ScheduleLargeWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_schedule_name"
+            android:process=":widgetProvider">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="miui.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_schedule_large_info" />
+            <meta-data
+                android:name="miuiWidget"
+                android:value="true" />
+            <meta-data
+                android:name="miuiWidgetRefresh"
+                android:value="exposure" />
+            <meta-data
+                android:name="miuiWidgetRefreshMinInterval"
+                android:value="30000" />
         </receiver>
 
         <receiver
             android:name=".widget.SwapWidgetProvider"
             android:exported="true"
-            android:label="@string/widget_swap_name">
+            android:label="@string/widget_swap_name"
+            android:process=":widgetProvider">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="miui.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_swap_info" />
+            <meta-data
+                android:name="miuiWidget"
+                android:value="true" />
         </receiver>
 
         <receiver
             android:name=".widget.WidgetUpdateReceiver"
-            android:exported="false">
+            android:exported="false"
+            android:process=":widgetProvider">
             <intent-filter>
                 <action android:name="com.remoteci.mobile.widget.UPDATE" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

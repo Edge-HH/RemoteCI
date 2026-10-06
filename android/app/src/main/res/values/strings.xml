@@ -158,4 +158,10 @@
     <string name="widget_schedule_description">显示下一节课及随后课程，尺寸越大显示越多</string>
     <string name="widget_swap_name">换课</string>
     <string name="widget_swap_description">打开 RemoteCI 换课入口</string>
+    <string name="widget_swap_hint">发起与审批</string>
+    <string name="widget_brand">RemoteCI</string>
+    <string name="widget_status_next">下一节：%1$s</string>
+    <string name="widget_status_empty">登录 RemoteCI 后显示课堂状态</string>
+    <string name="widget_schedule_empty">今天之后暂无课程</string>
+    <string name="widget_schedule_logged_out">登录 RemoteCI 后显示课表</string>
 </resources>

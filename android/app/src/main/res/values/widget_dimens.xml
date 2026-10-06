@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 小米小部件规范：1080p 手机圆角 55px、内容安全区 ≥42px（xxhdpi 下约 20dp / 16dp）。 -->
+    <dimen name="widget_radius">20dp</dimen>
+    <dimen name="widget_padding">16dp</dimen>
+</resources>

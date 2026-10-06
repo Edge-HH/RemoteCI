@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="widget_surface">#FFF8FF</color>
-    <color name="widget_outline">#FFD9E8F0</color>
-    <color name="widget_accent">#6750A4</color>
-    <color name="widget_text_primary">#241A2E</color>
-    <color name="widget_text_secondary">#675A70</color>
-    <color name="widget_on_accent">#FFFFFF</color>
+    <!-- 根布局背景必须不透明：小米 Widget 与 Activity 的切换动画使用该背景色。 -->
+    <color name="widget_surface">#FFFFFFFF</color>
+    <color name="widget_outline">#14000000</color>
+    <color name="widget_accent">#FF6750A4</color>
+    <!-- 主要信息 90%、次要信息与标题 40% 透明度，对齐小米小部件字色层级。 -->
+    <color name="widget_text_primary">#E6000000</color>
+    <color name="widget_text_secondary">#66000000</color>
+    <color name="widget_on_accent">#FFFFFFFF</color>
+    <color name="widget_on_accent_secondary">#B3FFFFFF</color>
 </resources>

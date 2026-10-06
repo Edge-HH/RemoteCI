@@ -1,67 +1,94 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/widget_status_root"
+<!-- 课堂状态 2x2。根布局 id 必须为 @android:id/background、宽高 match_parent，小米系统据此统一裁切圆角。 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/widget_surface"
-    android:orientation="vertical"
-    android:padding="14dp">
+    android:padding="@dimen/widget_padding">
+
+    <LinearLayout
+        android:id="@+id/widget_status_content"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/widget_status_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/widget_accent"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/widget_status_subject"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:fontFamily="sans-serif-medium"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/widget_text_primary"
+            android:textSize="22sp" />
+
+        <TextView
+            android:id="@+id/widget_status_period"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/widget_text_secondary"
+            android:textSize="12sp" />
+
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/widget_status_time"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:textColor="@color/widget_text_primary"
+            android:textSize="15sp" />
+
+        <ProgressBar
+            android:id="@+id/widget_status_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_marginTop="6dp"
+            android:max="100"
+            android:progressTint="@color/widget_accent"
+            android:progressBackgroundTint="@color/widget_outline" />
+
+        <TextView
+            android:id="@+id/widget_status_next"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="@color/widget_text_secondary"
+            android:textSize="12sp" />
+    </LinearLayout>
 
     <TextView
-        android:id="@+id/widget_status_title"
+        android:id="@+id/widget_status_empty"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:fontFamily="sans-serif-medium"
+        android:text="@string/widget_status_empty"
         android:textColor="@color/widget_text_secondary"
-        android:textSize="12sp"
-        android:maxLines="1" />
-
-    <TextView
-        android:id="@+id/widget_status_subject"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:textColor="@color/widget_text_primary"
-        android:textSize="24sp"
-        android:textStyle="bold"
-        android:maxLines="1"
-        android:ellipsize="end" />
-
-    <TextView
-        android:id="@+id/widget_status_period"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:textColor="@color/widget_text_secondary"
-        android:textSize="12sp"
-        android:maxLines="1"
-        android:ellipsize="end" />
-
-    <TextView
-        android:id="@+id/widget_status_time"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:textColor="@color/widget_text_primary"
-        android:textSize="14sp"
-        android:textStyle="bold" />
-
-    <ProgressBar
-        android:id="@+id/widget_status_progress"
-        style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="match_parent"
-        android:layout_height="4dp"
-        android:layout_marginTop="6dp"
-        android:max="100"
-        android:progressTint="@color/widget_accent"
-        android:progressBackgroundTint="@color/widget_outline" />
-
-    <TextView
-        android:id="@+id/widget_status_next"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:textColor="@color/widget_text_secondary"
-        android:textSize="11sp"
-        android:maxLines="1"
-        android:ellipsize="end" />
-</LinearLayout>
+        android:textSize="13sp"
+        android:visibility="gone" />
+</FrameLayout>

@@ -8,6 +8,6 @@
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
     android:updatePeriodMillis="0"
-    android:initialLayout="@layout/widget_schedule"
-    android:previewLayout="@layout/widget_schedule"
-    android:description="@string/widget_schedule_description" />
+    android:initialLayout="@layout/widget_current_status_wide"
+    android:previewLayout="@layout/widget_current_status_wide"
+    android:description="@string/widget_current_status_description" />

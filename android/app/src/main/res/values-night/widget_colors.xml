@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="widget_surface">#211F24</color>
-    <color name="widget_outline">#4E4654</color>
-    <color name="widget_accent">#D0BCFF</color>
-    <color name="widget_text_primary">#F4EFF7</color>
-    <color name="widget_text_secondary">#CEC4D4</color>
-    <color name="widget_on_accent">#37265F</color>
+    <!-- 小米 Widget 只能通过 values-night 静态适配深色模式，不能在 RemoteViews 中动态切换。 -->
+    <color name="widget_surface">#FF242424</color>
+    <color name="widget_outline">#1FFFFFFF</color>
+    <color name="widget_accent">#FFD0BCFF</color>
+    <color name="widget_text_primary">#E6FFFFFF</color>
+    <color name="widget_text_secondary">#66FFFFFF</color>
+    <color name="widget_on_accent">#FF37265F</color>
+    <color name="widget_on_accent_secondary">#B337265F</color>
 </resources>

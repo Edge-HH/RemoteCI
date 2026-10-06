@@ -35,12 +35,17 @@ object WidgetUpdateScheduler {
     fun hasWidgets(context: Context): Boolean {
         val appContext = context.applicationContext
         val manager = AppWidgetManager.getInstance(appContext)
-        return listOf(
-            CurrentStatusWidgetProvider::class.java,
-            ScheduleWidgetProvider::class.java,
-            SwapWidgetProvider::class.java,
-        ).any { manager.getAppWidgetIds(ComponentName(appContext, it)).isNotEmpty() }
+        return providers().any { manager.getAppWidgetIds(ComponentName(appContext, it.javaClass)).isNotEmpty() }
     }
+
+    /** 全部小组件类型；新增尺寸或类型时只需在此登记。 */
+    fun providers(): List<RemoteCiWidgetProvider> = listOf(
+        CurrentStatusWidgetProvider(),
+        CurrentStatusWideWidgetProvider(),
+        ScheduleWidgetProvider(),
+        ScheduleLargeWidgetProvider(),
+        SwapWidgetProvider(),
+    )
 
     fun pendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
         context,
