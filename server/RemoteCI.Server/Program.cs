@@ -80,6 +80,7 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AllowAnonymousToPage("/Login");
     options.Conventions.AllowAnonymousToPage("/Visitor");
     options.Conventions.AllowAnonymousToPage("/SetupPassword");
+    options.Conventions.AllowAnonymousToPage("/WebLogin");
     options.Conventions.AllowAnonymousToPage("/StatusCode");
 });
 builder.Services.AddMemoryCache();
@@ -231,6 +232,25 @@ app.MapPost("/api/auth/mobile-login", async (
         var response = await identities.RedeemMobileLoginTicketAsync(request, ct);
         await authorizationSync.SyncAsync(ct);
         return Results.Ok(response);
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+}).RequireRateLimiting("auth");
+
+// 客户端一键打开 WebUI：为当前设备会话的账号签发 1 分钟一次性票据，客户端用浏览器打开 /WebLogin?t=… 即自动登录。
+app.MapPost("/api/auth/web-ticket", async (HttpContext ctx, IdentityCoordinator identities, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.IsApiKey) return Forbidden();
+    try
+    {
+        var ticket = await identities.CreateWebLoginTicketAsync(principal.User.Id, ct);
+        return Results.Ok(new
+        {
+            ticket = ticket.Ticket,
+            path = $"/WebLogin?t={Uri.EscapeDataString(ticket.Ticket)}",
+            expiresAt = ticket.ExpiresAt,
+        });
     }
     catch (IdentityOperationException ex) { return OperationError(ex); }
 }).RequireRateLimiting("auth");

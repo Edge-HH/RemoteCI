@@ -283,10 +283,15 @@ public sealed class NotificationRequest
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? DurationSeconds { get; set; }
 
-    /// <summary>正文滚动重复次数；null 或 &lt; 1 时按 1 次处理（对齐 ClassIsland 集控的 RepeatCounts）。</summary>
+    /// <summary>重复次数；null 或 &lt; 1 时按 1 次处理（对齐 ClassIsland 集控的 RepeatCounts）。
+    /// 开启滚动时正文滚动 N 遍；关闭滚动时整条提醒依次显示 N 次。</summary>
     [JsonPropertyName("repeatCounts")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? RepeatCounts { get; set; }
+
+    /// <summary>正文是否以横向滚动文本显示；默认关闭，短正文静态显示即可读完。</summary>
+    [JsonPropertyName("isRollingEnabled")]
+    public bool IsRollingEnabled { get; set; }
 
     /// <summary>把“持续时间（秒）”和“重复次数”归一化为插件可直接使用的取值。</summary>
     public int EffectiveDurationSeconds => DurationSeconds is null or <= 0
@@ -297,4 +302,7 @@ public sealed class NotificationRequest
 
     /// <summary>与 ClassIsland 集控 SendNotification 一致的默认显示秒数。</summary>
     public const int DefaultDurationSeconds = 5;
+
+    /// <summary>正文超过该字数且未开启滚动时，各端发送界面提示建议开启滚动。</summary>
+    public const int RollingSuggestionThreshold = 30;
 }

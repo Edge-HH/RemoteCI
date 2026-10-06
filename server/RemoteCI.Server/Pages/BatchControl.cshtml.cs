@@ -38,9 +38,13 @@ public class BatchControlModel(
     [BindProperty]
     public int? BroadcastDurationSeconds { get; set; }
 
-    /// <summary>正文滚动重复次数；null 或 &lt; 1 时按 1 次处理。</summary>
+    /// <summary>重复次数；null 或 &lt; 1 时按 1 次处理。</summary>
     [BindProperty]
     public int? BroadcastRepeatCounts { get; set; }
+
+    /// <summary>正文横向滚动显示；默认关闭。</summary>
+    [BindProperty]
+    public bool BroadcastIsRollingEnabled { get; set; }
 
     [BindProperty]
     public bool BroadcastIsSpeechEnabled { get; set; }
@@ -567,6 +571,7 @@ public class BatchControlModel(
                     IsNotificationTopmostEnabled = BroadcastIsTopmostEnabled,
                     DurationSeconds = BroadcastDurationSeconds,
                     RepeatCounts = BroadcastRepeatCounts,
+                    IsRollingEnabled = BroadcastIsRollingEnabled,
                 },
                 RequestedBy = profile,
             },

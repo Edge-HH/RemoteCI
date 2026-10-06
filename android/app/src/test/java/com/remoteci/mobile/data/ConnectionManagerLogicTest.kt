@@ -1,5 +1,8 @@
 package com.remoteci.mobile.data
 
+import java.time.Instant
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -18,6 +21,15 @@ class ConnectionManagerLogicTest {
         val encoded = encodeEnvelope(Envelope(type = Protocol.TYPE_PEER_CAPABILITIES))
 
         assertTrue(encoded.contains("\"protocolVersion\":3"), encoded)
+    }
+
+    @Test
+    fun `outgoing envelope timestamp is an iso instant the server can parse`() {
+        // 服务端与插件把 timestamp 解析为 DateTimeOffset：空字符串会让整条消息被丢弃，命令永远收不到回执。
+        val encoded = encodeEnvelope(Envelope(type = Protocol.TYPE_COMMAND))
+        val timestamp = protocolJson.parseToJsonElement(encoded).jsonObject.getValue("timestamp").jsonPrimitive.content
+
+        assertTrue(runCatching { Instant.parse(timestamp) }.isSuccess, encoded)
     }
 
     @Test

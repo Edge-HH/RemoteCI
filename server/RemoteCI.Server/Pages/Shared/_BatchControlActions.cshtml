@@ -249,9 +249,9 @@ foreach (var extension in Model.BatchExtensionGroups.SelectMany(group => group.E
             <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>通知广播</h2></div>
             <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
         </header>
-        <div class="batch-dialog-body stack">
+        <div class="batch-dialog-body stack" data-rolling-scope>
             <label>标题<input name="BroadcastTitle" maxlength="60" placeholder="RemoteCI 通知" /></label>
-            <label>正文<textarea name="BroadcastMessage" maxlength="500" rows="4" placeholder="输入通知内容"></textarea></label>
+            <label>正文<textarea name="BroadcastMessage" maxlength="500" rows="4" placeholder="输入通知内容" data-rolling-message></textarea></label>
             <div class="two-column">
                 <label>持续时间（秒）<input type="number" name="BroadcastDurationSeconds" min="1" max="3600" value="5" /></label>
                 <label>重复次数<input type="number" name="BroadcastRepeatCounts" min="1" max="10" value="1" /></label>
@@ -262,8 +262,10 @@ foreach (var extension in Model.BatchExtensionGroups.SelectMany(group => group.E
                 <label class="check"><input type="checkbox" name="BroadcastIsSoundEnabled" data-batch-bool /> 启用提醒音效</label>
                 <label class="check"><input type="checkbox" name="BroadcastIsEffectEnabled" data-batch-bool checked /> 启用提醒特效</label>
                 <label class="check"><input type="checkbox" name="BroadcastIsTopmostEnabled" data-batch-bool /> 提醒时置顶主界面</label>
+                <label class="check"><input type="checkbox" name="BroadcastIsRollingEnabled" data-batch-bool data-rolling-toggle /> 正文滚动显示</label>
             </fieldset>
-            <p class="muted">重复次数让正文横向滚动指定遍数，总显示时长为“持续时间 × 重复次数”。</p>
+            <p class="muted" data-rolling-hint="@NotificationRequest.RollingSuggestionThreshold" hidden>正文超过 @NotificationRequest.RollingSuggestionThreshold 字，建议开启“正文滚动显示”，否则可能显示不全。</p>
+            <p class="muted">开启滚动时正文横向滚动指定遍数，总显示时长为“持续时间 × 重复次数”；关闭滚动时整条提醒依次显示指定次数。</p>
         </div>
         <footer class="batch-dialog-actions">
             <button type="button" class="ghost" data-batch-close>取消</button>

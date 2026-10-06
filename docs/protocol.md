@@ -16,7 +16,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | 8 | `SendNotifications` |
 | 16 | `ManageSchedule` |
 | 32 | `PowerControl`（旧名称 `SystemControl` 保留为别名） |
-| 64 | `TeacherComing` |
+| 64 | `TeacherComing`（旧协议保留，当前 UI 暂时隐藏） |
 | 128 | `RunExtensions` |
 | 256 | `MainMenuControl` |
 | 512 | `SendVoiceMessages`（发送语音） |
@@ -25,7 +25,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | 4096 | `RequestScheduleSwap`（老师主动换课：发起与审批换课申请） |
 | 8192 | `ForceScheduleSwap`（强制换课：不经审批立即生效，对方可撤回） |
 
-管理员的有效权限固定为 16383（全部位）。`RequestScheduleSwap` 与 `ForceScheduleSwap` 是全局权限，由系统管理员在“角色配置”中开关：内置老师和班主任默认开启前者（升级迁移会为已有的两个内置角色补上一次），后者默认关闭。普通用户固定包含值 1，其余权限来自服务端授权。权限设置界面将值 2 显示为“概览”；七日课表查看只要求账号已登录，手动拉取课表允许系统管理员，以及班级自治策略允许时的本班班主任；定时自动拉取间隔是全局设置，只有系统管理员可以修改，值 16 保护换课。`TeacherComing` 单独保护“老师来了”，`SendNotifications` 只保护自定义通知与清除提醒，`SendVoiceMessages` 独立保护语音消息，`RunExtensions` 是所有插件扩展的独立权限，`MainMenuControl` 保护主界面显隐，`PowerControl` 保护音量和 Windows 电源操作，`ChangeDisplayName` 仅保留为兼容旧权限数据，实际只有系统管理员可以修改用户可见用户名（DisplayName，登录 ID 不变）；用户名会影响老师获取的日程信息。`ApiAccess` 允许账号创建 API Key 并调用 REST API；管理员、班主任与老师默认拥有 API 访问。
+管理员的有效权限固定为 16383（全部位）。`RequestScheduleSwap` 与 `ForceScheduleSwap` 是全局权限，由系统管理员在“角色配置”中开关：内置老师和班主任默认开启前者（升级迁移会为已有的两个内置角色补上一次），后者默认关闭。普通用户固定包含值 1，其余权限来自服务端授权。权限设置界面将值 2 显示为“概览”；七日课表查看只要求账号已登录，手动拉取课表允许系统管理员，以及班级自治策略允许时的本班班主任；定时自动拉取间隔是全局设置，只有系统管理员可以修改，值 16 保护换课。`TeacherComing` 权限位和命令仅为旧客户端兼容保留，当前不在 WebUI、各端 App 或权限设置中显示；`SendNotifications` 只保护自定义通知与清除提醒，`SendVoiceMessages` 独立保护语音消息，`RunExtensions` 是所有插件扩展的独立权限，`MainMenuControl` 保护主界面显隐，`PowerControl` 保护音量和 Windows 电源操作，`ChangeDisplayName` 仅保留为兼容旧权限数据，实际只有系统管理员可以修改用户可见用户名（DisplayName，登录 ID 不变）；用户名会影响老师获取的日程信息。`ApiAccess` 允许账号创建 API Key 并调用 REST API；管理员、班主任与老师默认拥有 API 访问。
 
 账号密码只出现在第一次 `POST /api/auth/login` 的请求内。生产环境必须使用 HTTPS；Android 手机端为兼容尚未配置 TLS 的现有部署，允许用户在持续显示风险提示的情况下明确连接 HTTP 云服务器。响应包含 1 小时 `accessToken`、30 天 `deviceSessionId/deviceSecret` 和用户有效权限。`POST /api/auth/refresh` 会同时轮换访问令牌和设备密钥；旧值立即失效。
 
@@ -65,7 +65,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | `extensions_sync` | 插件 → 服务端/手表 | 扩展功能清单（id、displayName、icon、requiredPermission、parameters，可选 description、groupId） |
 | `extension_groups_sync` | 插件 → 服务端 | 扩展分组（通常对应一个 ClassIsland 插件）：id、displayName、description、icon、设置字段 `settings` 与设备当前值 `values`；仅供 WebUI，手表与局域网不使用 |
 | `event_notify` | 插件 → 服务端/手表 | 上课、下课、放学、课表变更、自定义消息、ClassIsland 自动化或第三方插件通知 |
-| `command` | 手表/服务端 → 插件 | 结构化换课、老师来了、通知、主界面、音量、电源、软件升级、插件管理、档案分发、时间表、远程终端、文件分发与集控命令 |
+| `command` | 手表/服务端 → 插件 | 结构化换课、通知、主界面、音量、电源、软件升级、插件管理、档案分发、时间表、远程终端、文件分发与集控命令 |
 | `command_result` | 插件 → 发起者 | 真实成功、失败码、消息和可选新修订号 |
 | `settings_sync` | 服务端 → 手表 | 全局通知设置快照（目前含 `forceSenderInTitle`） |
 | `plugin_network_info` | 插件 → 服务端 → 手表 | 插件局域网直连地址与端口（每次云端重连时重新发现网卡） |
@@ -90,17 +90,17 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 ## 能力协商
 
-V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute` 和 `extensions.settings` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
+V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute` 和 `extensions.settings` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
 
 WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手机的有效能力是“本地 ∩ 服务端 ∩ 当前班级主插件”。服务端在 `capabilities_sync.classPlugins` 中按接收方可访问的班级逐个下发主插件能力，客户端切换班级时按新班级重算；没有对应条目表示该班插件离线。旧服务端没有该字段时客户端退回 `plugin`。多插件时，当前主插件仍是最早接入的健康插件；主插件切换、断开或能力更新后，服务端重新广播能力快照。界面应隐藏缺失能力的入口，服务端转发命令前仍需按统一映射复核主插件能力，缺少能力时返回 `CAPABILITY_UNSUPPORTED`。能力声明不能绕过账号权限或扩展策略检查。
 
 `event_notify.payload.event` 的值 6 表示 ClassIsland 自动化“显示提醒”行动产生的通知，值 7 表示第三方 ClassIsland 插件产生的通知。手表分别持久化开关；内置课程、天气等通知不会被值 7 重复转发。
 
-自定义通知的标题与正文均可留空：标题留空时插件统一显示默认标题 `RemoteCI 通知`（仍会按上述规则添加前缀），正文留空时保持为空，由 ClassIsland 只显示标题。通知标题是否添加 `由用户名发送：` 前缀由服务端全局设置 `forceSenderInTitle` 决定（系统配置页开关，默认开启，仅系统管理员可修改）。开启时插件最终执行会把标题格式化为 `由用户名发送：原标题`；关闭时不添加前缀。发送者名称取自已认证账号的 `displayName`（界面称“用户名”），而 `username` 是唯一登录 ID；服务端转发命令时会按全局设置覆盖客户端请求中的署名标志，客户端不能绕过。设置变更时服务端通过 `settings_sync` 推送在线手表，手表通知页据此决定是否显示“将显示发送人”提示。通知请求还可通过 `isNotificationEffectEnabled`、`isNotificationSoundEnabled` 和 `isSpeechEnabled` 分别控制 ClassIsland 的提醒强调特效、提醒音效和语音朗读；省略时均为关闭。
+自定义通知的标题与正文均可留空：标题留空时插件统一显示默认标题 `RemoteCI 通知`（仍会按上述规则添加前缀），正文留空时保持为空，由 ClassIsland 只显示标题。通知标题是否添加 `由用户名发送：` 前缀由服务端全局设置 `forceSenderInTitle` 决定（系统配置页开关，默认开启，仅系统管理员可修改）。开启时插件最终执行会把标题格式化为 `由用户名发送：原标题`；关闭时不添加前缀。发送者名称取自已认证账号的 `displayName`（界面称“用户名”），而 `username` 是唯一登录 ID；服务端转发命令时会按全局设置覆盖客户端请求中的署名标志，客户端不能绕过。设置变更时服务端通过 `settings_sync` 推送在线手表，手表通知页据此决定是否显示“将显示发送人”提示。通知请求还可通过 `isNotificationEffectEnabled`、`isNotificationSoundEnabled` 和 `isSpeechEnabled` 分别控制 ClassIsland 的提醒强调特效、提醒音效和语音朗读；省略时均为关闭。`isNotificationTopmostEnabled` 控制提醒时置顶主界面；`durationSeconds`（默认 5）与 `repeatCounts`（默认 1）对齐 ClassIsland 集控。`isRollingEnabled`（默认 `false`）控制正文是否横向滚动：开启时正文滚动 `repeatCounts` 遍，总时长为 `durationSeconds × repeatCounts`；关闭时正文静态显示 `durationSeconds` 秒，整条提醒依次显示 `repeatCounts` 次。旧插件忽略该字段并始终滚动。
 
 控制命令值 3 为清除当前 ClassIsland 提醒，值 4 通过 `mainMenuVisible` 设置主界面显隐，值 5 通过 `powerAction` 选择关机、重启、睡眠或休眠。值 6 通过 `volume.level` 设置 Windows 默认播放设备的 0-100 主音量，或通过 `volume.muted` 设置静音状态；WebUI 在静音状态下向高调节时会在同一命令中同时发送 `level` 与 `muted: false`。休眠入口只在插件状态报告 Windows 已启用休眠时显示。
 
-`extensions_sync` 的载荷是其他 ClassIsland 插件通过 RemoteCI 注册的扩展功能列表；云端服务端和插件局域网服务都会缓存最近一次清单，并在手表完成认证后主动补发。命令值 7 为 `RunExtension`，命令值 8 为 `TeacherComing`；后者由插件完成显示“老师来了”、等待 1 秒和清除提醒的完整流程。通过 `extensionId` 指定目标扩展，`extensionArgs` 携带参数字典（值统一为字符串）。扩展调用必须同时通过独立的 `RunExtensions` 权限和管理员为该扩展设置的启用/普通账号开放策略；`RequiredPermission` 只作为旧扩展兼容字段传输，不再关联通知、电源等权限。账号的 `allowedExtensionIds` 与 `visibleExtensionIds` 随认证状态和 `account_sync` 下发，后者只控制自己的手表入口。未注册、缺少必填参数或权限不足时分别返回 `INVALID_REQUEST` / `FORBIDDEN`，执行异常统一返回 `INTERNAL_ERROR`。
+`extensions_sync` 的载荷是其他 ClassIsland 插件通过 RemoteCI 注册的扩展功能列表；云端服务端和插件局域网服务都会缓存最近一次清单，并在手表完成认证后主动补发。命令值 7 为 `RunExtension`；命令值 8 的旧提醒指令仍由协议层兼容处理，但当前各端不提供入口。通过 `extensionId` 指定目标扩展，`extensionArgs` 携带参数字典（值统一为字符串）。扩展调用必须同时通过独立的 `RunExtensions` 权限和管理员为该扩展设置的启用/普通账号开放策略；`RequiredPermission` 只作为旧扩展兼容字段传输，不再关联通知、电源等权限。账号的 `allowedExtensionIds` 与 `visibleExtensionIds` 随认证状态和 `account_sync` 下发，后者只控制自己的手表入口。未注册、缺少必填参数或权限不足时分别返回 `INVALID_REQUEST` / `FORBIDDEN`，执行异常统一返回 `INTERNAL_ERROR`。
 
 扩展参数与扩展设置字段共用 `ExtensionParameter` 结构：`key`、`label`（显示名称）、`type`（1=文本、2=数字、3=开关、4=选项）、`defaultValue`、`required`、`options`，以及可选的 `optionLabels`（与 `options` 按下标对应的选项显示名称）、`description`（字段说明）、`placeholder`、`multiline`（WebUI 多行文本）和 `min` / `max`（数字范围）。服务端预检与插件执行端使用同一套校验：数字必须可解析且在范围内，开关只能是 `true` / `false`（规范化为小写），选项必须是 `options` 之一；未声明的执行参数键原样透传以兼容旧扩展。旧手表忽略新增字段，选项按原值显示。
 

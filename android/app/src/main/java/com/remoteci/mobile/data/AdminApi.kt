@@ -93,6 +93,20 @@ object AdminApi {
         get("/api/plugins/credentials", ListSerializer(PluginCredentialInfo.serializer()))
     suspend fun revokePluginCredential(id: String) { request("DELETE", "/api/plugins/credentials/$id") }
 
+    /**
+     * 一键打开 WebUI：为当前账号换取 1 分钟一次性网页登录票据，返回可直接交给浏览器的完整地址
+     * （服务端兑换后写入 WebUI 登录 Cookie 并跳到 returnUrl）。
+     */
+    suspend fun webLoginUrl(returnUrl: String? = null, classId: String? = null): String {
+        val base = ConnectionManager.restBaseUrl() ?: throw AdminApiException("尚未连接服务器")
+        val ticket = post("/api/auth/web-ticket", EmptyBody(), EmptyBody.serializer(), WebLoginTicket.serializer())
+        val query = buildString {
+            if (returnUrl != null) append("&returnUrl=").append(enc(returnUrl))
+            if (classId != null) append("&classId=").append(enc(classId))
+        }
+        return base + ticket.path + query
+    }
+
     suspend fun adminStatus(): AdminStatus = get("/api/admin/status", AdminStatus.serializer())
     suspend fun notificationSettings(): SettingsSync = get("/api/settings/notifications", SettingsSync.serializer())
     suspend fun setNotificationSettings(forceSenderInTitle: Boolean): SettingsSync =
@@ -181,6 +195,9 @@ private object UnitSerializer : kotlinx.serialization.DeserializationStrategy<Un
 }
 
 @Serializable data class EmptyBody(val ok: Boolean = true)
+
+/** /api/auth/web-ticket 的响应：path 是相对服务器根的一次性登录地址。 */
+@Serializable data class WebLoginTicket(val ticket: String = "", val path: String = "")
 
 @Serializable data class UpdateDisplayNameRequest(val displayName: String)
 

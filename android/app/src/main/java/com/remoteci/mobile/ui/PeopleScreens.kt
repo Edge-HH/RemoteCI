@@ -21,7 +21,6 @@ import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Group
-import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.PersonOutline
@@ -66,48 +65,52 @@ import kotlinx.coroutines.launch
 @Composable
 fun PeopleScreen(embedded: Boolean, snackbar: androidx.compose.material3.SnackbarHostState, onOpen: (Screen) -> Unit, onBack: (() -> Unit)?) {
     val user by ConnectionManagerUser()
+    // 只列出当前账号有权限的管理项；一项都没有时底栏不会显示本页。
+    val items = visibleManagementItems(user)
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text("人员与凭证", style = MaterialTheme.typography.titleLarge) },
+            title = { Text("管理", style = MaterialTheme.typography.titleLarge) },
             navigationIcon = { IconButton(onClick = { onBack?.invoke() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } },
             actions = {
-                if (user?.has(Protocol.PERMISSION_MANAGE_USERS) == true) {
+                if (ManagementItem.Users in items) {
                     IconButton({ onOpen(Screen.Users) }) { Icon(Icons.Rounded.PersonAdd, contentDescription = "添加账号") }
                 }
             },
         )
-        if (user?.has(Protocol.PERMISSION_MANAGE_USERS) != true) {
-            EmptyState("无权管理人员", "人员、角色和凭证由管理员或拥有人员管理权限的账号处理。")
-        } else {
-            val items = listOf(
-                Triple("访客访问", "访客课表与自动进入设置", Icons.Rounded.PersonOutline),
-                Triple("角色配置", "创建自定义角色，设置课表、通知、语音、控制与扩展权限", Icons.Rounded.AdminPanelSettings),
-                Triple("账号管理", "新建、编辑、启停账号，分配角色与个人附加权限", Icons.Rounded.Group),
-                Triple("密码与设备会话", "重置密码时可撤销所有手表登录", Icons.Rounded.Key),
-                Triple("插件配对码", "添加、查看和撤销 ClassIsland 插件长期凭证", Icons.Rounded.Link),
-            )
-            ConnectedListCard(Modifier.padding(16.dp)) {
-                items.forEachIndexed { index, (title, supporting, icon) ->
-                    AppListItem(
-                        title = title,
-                        supporting = supporting,
-                        leading = icon,
-                        trailing = Icons.Rounded.ChevronRight,
-                        index = index,
-                        count = items.size,
-                        onClick = {
-                            when (index) {
-                                0 -> onOpen(Screen.VisitorAccess)
-                                1 -> onOpen(Screen.Roles)
-                                2 -> onOpen(Screen.Users)
-                                3 -> onOpen(Screen.Sessions)
-                                4 -> onOpen(Screen.Pairing)
-                            }
-                        },
-                    )
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+            if (items.isEmpty()) {
+                EmptyState("没有可用的管理项", "管理项取决于账号权限，可联系管理员开通。")
+            } else {
+                ConnectedListCard(Modifier.padding(16.dp)) {
+                    items.forEachIndexed { index, item ->
+                        AppListItem(
+                            title = item.title,
+                            supporting = item.supporting,
+                            leading = when (item) {
+                                ManagementItem.VisitorAccess -> Icons.Rounded.PersonOutline
+                                ManagementItem.Roles -> Icons.Rounded.AdminPanelSettings
+                                ManagementItem.Users -> Icons.Rounded.Group
+                                ManagementItem.Pairing -> Icons.Rounded.Link
+                            },
+                            trailing = Icons.Rounded.ChevronRight,
+                            index = index,
+                            count = items.size,
+                            onClick = {
+                                onOpen(
+                                    when (item) {
+                                        ManagementItem.VisitorAccess -> Screen.VisitorAccess
+                                        ManagementItem.Roles -> Screen.Roles
+                                        ManagementItem.Users -> Screen.Users
+                                        ManagementItem.Pairing -> Screen.Pairing
+                                    },
+                                )
+                            },
+                        )
+                    }
                 }
             }
         }
+        WebUiHint("更多管理操作请使用", "/Users", snackbar)
     }
 }
 
@@ -458,7 +461,6 @@ fun PermissionEditor(value: Int, onChange: (Int) -> Unit) {
         Protocol.PERMISSION_MANAGE_USERS to "人员管理",
         Protocol.PERMISSION_SEND_NOTIFICATIONS to "通知",
         Protocol.PERMISSION_SEND_VOICE_MESSAGES to "语音",
-        Protocol.PERMISSION_TEACHER_COMING to "老师来了",
         Protocol.PERMISSION_MANAGE_SCHEDULE to "换课",
         Protocol.PERMISSION_RUN_EXTENSIONS to "扩展",
         Protocol.PERMISSION_MAIN_MENU_CONTROL to "主界面",

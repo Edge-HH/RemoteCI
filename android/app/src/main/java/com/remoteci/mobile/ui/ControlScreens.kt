@@ -16,7 +16,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Mic
@@ -58,6 +57,7 @@ import androidx.core.content.ContextCompat
 import com.remoteci.mobile.data.AdminApi
 import com.remoteci.mobile.data.ClassEvent
 import com.remoteci.mobile.data.ConnectionManager
+import com.remoteci.mobile.data.NotificationRequest
 import com.remoteci.mobile.data.ExtensionDefinition
 import com.remoteci.mobile.data.ExtensionParameter
 import com.remoteci.mobile.data.initialExtensionArgs
@@ -73,7 +73,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ControlListScreen(embedded: Boolean, onOpen: (Screen) -> Unit, onBack: (() -> Unit)?) {
+fun ControlListScreen(embedded: Boolean, snackbar: androidx.compose.material3.SnackbarHostState, onOpen: (Screen) -> Unit, onBack: (() -> Unit)?) {
     val user by ConnectionManager.currentUser.collectAsState()
     val classes by ConnectionManager.classes.collectAsState()
     val currentClassId by ConnectionManager.currentClassId.collectAsState()
@@ -97,9 +97,6 @@ fun ControlListScreen(embedded: Boolean, onOpen: (Screen) -> Unit, onBack: (() -
         Row("清除提醒", "清除 ClassIsland 当前提醒与手表提示", Icons.Rounded.NotificationsOff,
             can(Protocol.PERMISSION_SEND_NOTIFICATIONS) && Protocol.CAP_NOTIFICATION_CLEAR in caps, null,
             { ConnectionManager.clearNotifications() }),
-        Row("老师来了", "显示提醒，等待一秒后自动清除", Icons.Rounded.Campaign,
-            can(Protocol.PERMISSION_TEACHER_COMING) && Protocol.CAP_TEACHER_COMING in caps, null,
-            { ConnectionManager.teacherComing() }),
         Row("主界面", if (snapshot?.isMainMenuVisible == true) "当前显示中，点击可隐藏" else "当前已隐藏，点击可显示",
             Icons.Rounded.Visibility,
             can(Protocol.PERMISSION_MAIN_MENU_CONTROL) && Protocol.CAP_MAIN_MENU_VISIBILITY in caps, Screen.MainMenu),
@@ -118,7 +115,8 @@ fun ControlListScreen(embedded: Boolean, onOpen: (Screen) -> Unit, onBack: (() -
         if (rows.isEmpty()) {
             EmptyState("没有可用的控制项", "这取决于账号权限，以及当前插件是否在线。")
         } else {
-            ConnectedListCard(Modifier.padding(16.dp)) {
+            // 控制项多于一屏（小屏或长说明换行）时必须可滚动，否则底部的“扩展功能”等入口无法触达。
+            ConnectedListCard(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
                 rows.forEachIndexed { index, row ->
                     AppListItem(
                         title = row.title,
@@ -132,6 +130,8 @@ fun ControlListScreen(embedded: Boolean, onOpen: (Screen) -> Unit, onBack: (() -
                 }
             }
         }
+        if (rows.isEmpty()) Spacer(Modifier.weight(1f))
+        WebUiHint("更多控制操作请使用", "/Control", snackbar)
     }
 }
 
@@ -143,18 +143,71 @@ fun NotifyScreen(onBack: () -> Unit) {
     var effect by remember { mutableStateOf(true) }
     var sound by remember { mutableStateOf(false) }
     var speech by remember { mutableStateOf(false) }
+    var topmost by remember { mutableStateOf(false) }
+    var rolling by remember { mutableStateOf(false) }
+    var durationText by remember { mutableStateOf(NotificationRequest.DEFAULT_DURATION_SECONDS.toString()) }
+    var repeatText by remember { mutableStateOf("1") }
+    // 与 WebUI 表单的 min/max 一致：持续时间 1–3600 秒，重复 1–10 次。
+    val duration = durationText.toIntOrNull()?.takeIf { it in 1..NotificationRequest.MAX_DURATION_SECONDS }
+    val repeats = repeatText.toIntOrNull()?.takeIf { it in 1..NotificationRequest.MAX_REPEAT_COUNTS }
+    val suggestRolling = NotificationRequest.shouldSuggestRolling(message, rolling)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         TopAppBar(title = { Text("发送通知") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(title, { title = it }, label = { Text("标题") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(message, { message = it }, label = { Text("正文") }, modifier = Modifier.fillMaxWidth().height(140.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("强调特效"); Switch(effect, { effect = it }) }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("通知音效"); Switch(sound, { sound = it }) }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("语音朗读"); Switch(speech, { speech = it }) }
+            OutlinedTextField(
+                message,
+                { message = it },
+                label = { Text("正文") },
+                supportingText = if (suggestRolling) {
+                    { Text("正文超过 ${NotificationRequest.ROLLING_SUGGESTION_THRESHOLD} 字，建议开启“正文滚动显示”，否则可能显示不全。") }
+                } else null,
+                minLines = 5,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    durationText,
+                    { durationText = it.filter(Char::isDigit).take(4) },
+                    label = { Text("持续时间（秒）") },
+                    isError = duration == null,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedTextField(
+                    repeatText,
+                    { repeatText = it.filter(Char::isDigit).take(2) },
+                    label = { Text("重复次数") },
+                    isError = repeats == null,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Text(
+                if (rolling) "正文横向滚动指定遍数，总显示时长为“持续时间 × 重复次数”。"
+                else "整条提醒依次显示指定次数，每次显示“持续时间”秒。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("正文滚动显示"); Switch(rolling, { rolling = it }) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("强调特效"); Switch(effect, { effect = it }) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("通知音效"); Switch(sound, { sound = it }) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("语音朗读"); Switch(speech, { speech = it }) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("提醒时置顶主界面"); Switch(topmost, { topmost = it }) }
             Button(
-                onClick = { ConnectionManager.sendNotification(title, message, effect, sound, speech) },
+                onClick = {
+                    ConnectionManager.sendNotification(
+                        title, message, effect, sound, speech,
+                        isNotificationTopmostEnabled = topmost,
+                        durationSeconds = duration,
+                        repeatCounts = repeats,
+                        isRollingEnabled = rolling,
+                    )
+                },
                 modifier = Modifier.fillMaxWidth().height(56.dp),
-                enabled = title.isNotBlank() || message.isNotBlank(),
+                enabled = (title.isNotBlank() || message.isNotBlank()) && duration != null && repeats != null,
             ) { Text("发送") }
         }
     }

@@ -183,7 +183,8 @@ public sealed class CommandHandler
             request.IsSpeechEnabled,
             request.IsNotificationTopmostEnabled,
             request.EffectiveDurationSeconds,
-            request.EffectiveRepeatCounts);
+            request.EffectiveRepeatCounts,
+            request.IsRollingEnabled);
         NotificationSent?.Invoke(new ClassEvent
         {
             Event = ClassEventKind.Custom,

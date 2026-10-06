@@ -5,7 +5,9 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Build
+import android.os.SystemClock
 import com.remoteci.mobile.BuildConfig
+import com.remoteci.mobile.widget.WidgetUpdater
 import java.io.IOException
 import java.security.MessageDigest
 import java.time.OffsetDateTime
@@ -100,6 +102,9 @@ object ConnectionManager {
     private val lanDiscoveryClient = LanDiscoveryClient(lanOkHttp, json)
     private lateinit var sessions: SessionStorage
     private var appContext: Context? = null
+    /** 最近一次有效推送同时供桌面小组件离线展示。 */
+    private var snapshotStore: SnapshotStore? = null
+    @Volatile private var lastWidgetSnapshotPersistAt = 0L
     // 以下字段会被 OkHttp 回调线程、IO 协程与主线程并发读写，必须保证跨线程可见性。
     @Volatile private var webSocket: WebSocket? = null
     /** 活跃连接的切换（并发探测、令牌轮换、断线清理）必须原子完成。 */
@@ -203,6 +208,7 @@ object ConnectionManager {
         val app = context.applicationContext
         if (appContext == null) {
             appContext = app
+            snapshotStore = SnapshotStore(app)
             registerNetworkCallback(app)
         }
         if (!::sessions.isInitialized) sessions = SecureSessionStore(app)
@@ -258,11 +264,19 @@ object ConnectionManager {
         personalScheduleJob?.cancel()
         personalScheduleUserId = userId
         personalNextCourse.value = null
-        if (userId == null) return
+        if (userId == null) {
+            snapshotStore?.clearPersonalNext()
+            appContext?.let { WidgetUpdater.updateAll(it, force = true) }
+            return
+        }
         personalScheduleJob = scope.launch {
             while (kotlin.coroutines.coroutineContext.isActive) {
                 runCatching { AdminApi.myNextCourse() }
-                    .onSuccess { personalNextCourse.value = it }
+                    .onSuccess {
+                        personalNextCourse.value = it
+                        snapshotStore?.savePersonalNext(it)
+                        appContext?.let { context -> WidgetUpdater.updateAll(context) }
+                    }
                 delay(PersonalScheduleRefreshMs)
             }
         }
@@ -352,6 +366,16 @@ object ConnectionManager {
         snapshot.value = classId?.let(classSnapshots::get)
         schedule.value = classId?.let(classSchedules::get)
         extensions.value = classId?.let(classExtensions::get).orEmpty()
+        snapshot.value?.let { persistWidgetSnapshot(it, force = true) }
+        schedule.value?.let { snapshotStore?.saveSchedule(it) }
+        appContext?.let { WidgetUpdater.updateAll(it, force = true) }
+    }
+
+    private fun persistWidgetSnapshot(value: ClassStateSnapshot, force: Boolean = false) {
+        val now = SystemClock.elapsedRealtime()
+        if (!force && now - lastWidgetSnapshotPersistAt < 15_000L) return
+        lastWidgetSnapshotPersistAt = now
+        snapshotStore?.save(value)
     }
 
     fun scanLanPlugins() {
@@ -597,6 +621,8 @@ object ConnectionManager {
             classExtensions.clear()
             snapshot.value = null
             schedule.value = null
+            snapshotStore?.clear()
+            appContext?.let { WidgetUpdater.updateAll(it, force = true) }
         }
         extensions.value = emptyList()
         this@ConnectionManager.settings.value = null
@@ -671,6 +697,10 @@ object ConnectionManager {
         isNotificationEffectEnabled: Boolean,
         isNotificationSoundEnabled: Boolean,
         isSpeechEnabled: Boolean,
+        isNotificationTopmostEnabled: Boolean = false,
+        durationSeconds: Int? = null,
+        repeatCounts: Int? = null,
+        isRollingEnabled: Boolean = false,
     ) {
         sendCommand(
             CommandMessage(
@@ -681,6 +711,10 @@ object ConnectionManager {
                     isNotificationEffectEnabled = isNotificationEffectEnabled,
                     isNotificationSoundEnabled = isNotificationSoundEnabled,
                     isSpeechEnabled = isSpeechEnabled,
+                    isNotificationTopmostEnabled = isNotificationTopmostEnabled,
+                    durationSeconds = durationSeconds,
+                    repeatCounts = repeatCounts,
+                    isRollingEnabled = isRollingEnabled,
                 ),
             ),
             Protocol.PERMISSION_SEND_NOTIFICATIONS,
@@ -1245,7 +1279,11 @@ object ConnectionManager {
                     // 多班级：按班级缓存，只展示当前班级（或不带班级标识的局域网/旧服务端推送）。
                     val current = currentClassId.value
                     (incoming.classId ?: current)?.let { classSnapshots[it] = incoming }
-                    if (incoming.classId == null || incoming.classId == current) snapshot.value = incoming
+                    if (incoming.classId == null || incoming.classId == current) {
+                        snapshot.value = incoming
+                        persistWidgetSnapshot(incoming)
+                        appContext?.let { WidgetUpdater.updateAll(it) }
+                    }
                 }
             }
             Protocol.TYPE_SCHEDULE_SYNC -> {
@@ -1254,6 +1292,8 @@ object ConnectionManager {
                     (incoming.classId ?: current)?.let { classSchedules[it] = incoming }
                     if (incoming.classId == null || incoming.classId == current) {
                         schedule.value = incoming
+                        snapshotStore?.saveSchedule(incoming)
+                        appContext?.let { WidgetUpdater.updateAll(it, force = true) }
                         // 兼容未实现状态消息的旧插件：收到新课表本身也可作为成功终态。
                         if (schedulePullState.value is SchedulePullState.Pulling)
                             finishSchedulePull(SchedulePullState.Success("课表拉取完成，已使用插件最新课表"))

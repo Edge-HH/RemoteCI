@@ -45,7 +45,6 @@
 
     <!-- 控制 -->
     <string name="control_title">控制</string>
-    <string name="teacher_coming">老师来了</string>
     <string name="send_notification">发送通知</string>
     <string name="clear_notifications">清除通知</string>
     <string name="run_extension">执行</string>
@@ -153,4 +152,10 @@
     <string name="notification_swap_channel_description">换课申请、审批结果与强制换课提醒</string>
     <string name="notification_school_status_channel_name">上课状态</string>
     <string name="notification_school_status_channel_description">上学期间显示当前课程、下一节课和剩余时间</string>
+    <string name="widget_current_status_name">当前时间状态</string>
+    <string name="widget_current_status_description">显示当前课堂、时间段和下一节课</string>
+    <string name="widget_schedule_name">今日课表</string>
+    <string name="widget_schedule_description">显示下一节课及随后课程，尺寸越大显示越多</string>
+    <string name="widget_swap_name">换课</string>
+    <string name="widget_swap_description">打开 RemoteCI 换课入口</string>
 </resources>

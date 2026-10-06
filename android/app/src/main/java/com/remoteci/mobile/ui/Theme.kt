@@ -3,19 +3,25 @@ package com.remoteci.mobile.ui
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+
+const val DynamicThemeId = "dynamic"
 
 private val LightBase = lightColorScheme(
     background = Color(0xFFFAF9FD),
@@ -108,10 +114,17 @@ fun AppearanceMode.resolve(systemDark: Boolean): Boolean = when (this) {
 fun RemoteCiTheme(
     appearanceMode: AppearanceMode = AppearanceMode.System,
     palette: MobilePalette = MobilePalette.fromId("lavender"),
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val dark = appearanceMode.resolve(isSystemInDarkTheme())
-    val scheme = palette.colorScheme(dark)
+    val context = LocalContext.current
+    val scheme = if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        // Material 3 在 Android 12+ 通过系统 Monet 接口读取壁纸生成的动态配色。
+        if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    } else {
+        palette.colorScheme(dark)
+    }
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {

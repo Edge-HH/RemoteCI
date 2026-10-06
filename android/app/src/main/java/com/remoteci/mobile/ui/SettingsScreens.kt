@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.QrCodeScanner
@@ -199,6 +200,7 @@ fun AccountScreen(
         }
         val rows = listOfNotNull(
             Triple("连接与服务器", "账号、云端地址、局域网插件发现与重新连接", Screen.Connection to Icons.Rounded.Wifi),
+            Triple("密码与设备会话", "修改密码，查看并吊销已登录的手机和手表", Screen.Sessions to Icons.Rounded.Key),
             Triple("通知设置", "课程、自动化和第三方插件提醒的同步开关", Screen.NotificationSettings to Icons.Rounded.Notifications),
             // 自动拉取周期对全部班级生效，服务端只允许系统管理员修改。
             if (user?.isAdmin == true)
@@ -493,10 +495,16 @@ fun AppearanceScreen(settings: WatchSettings, onBack: () -> Unit, onPersist: (Wa
             }
             Text("配色方案", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))) {
+                AppearanceChoice(
+                    title = "动态取色",
+                    supporting = "从系统壁纸提取颜色（Android 12+）",
+                    selected = settings.themeId == DynamicThemeId,
+                    onClick = { onPersist(settings.copy(themeId = DynamicThemeId)) },
+                )
                 MobilePalette.All.forEach { palette ->
                     AppearanceChoice(
                         title = palette.label,
-                        supporting = "与 Wear OS ${palette.label}方案一致",
+                        supporting = null,
                         swatch = palette.lightPrimary,
                         selected = settings.themeId == palette.id,
                         onClick = { onPersist(settings.copy(themeId = palette.id)) },
@@ -510,14 +518,14 @@ fun AppearanceScreen(settings: WatchSettings, onBack: () -> Unit, onPersist: (Wa
 @Composable
 private fun AppearanceChoice(
     title: String,
-    supporting: String,
+    supporting: String? = null,
     selected: Boolean,
     swatch: androidx.compose.ui.graphics.Color? = null,
     onClick: () -> Unit,
 ) {
     ListItem(
         headlineContent = { Text(title) },
-        supportingContent = { Text(supporting) },
+        supportingContent = supporting?.let { value -> { Text(value) } },
         leadingContent = swatch?.let { color ->
             { Box(Modifier.size(24.dp).clip(CircleShape).background(color)) }
         },

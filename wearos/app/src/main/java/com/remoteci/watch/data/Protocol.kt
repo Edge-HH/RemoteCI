@@ -1,5 +1,6 @@
 package com.remoteci.watch.data
 
+import java.time.Instant
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -122,7 +123,8 @@ data class Envelope(
     val type: String,
     @SerialName("messageId") val messageId: String = "",
     @SerialName("replyToMessageId") val replyToMessageId: String? = null,
-    val timestamp: String = "",
+    // 服务端与插件按 DateTimeOffset 解析：空字符串会让整条消息被丢弃，必须写出有效的 ISO-8601 时间。
+    val timestamp: String = Instant.now().toString(),
     val sender: Int? = null,
     val payload: JsonElement? = null,
 )

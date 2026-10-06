@@ -488,3 +488,18 @@ document.addEventListener("keydown", event => {
     openMenu.removeAttribute("open");
     openMenu.querySelector("summary")?.focus();
 });
+
+// 通知正文较长而未开启滚动时，静态正文可能显示不全；只提示，不替用户改选项。
+function syncRollingHint(scope) {
+    const hint = scope.querySelector("[data-rolling-hint]");
+    const message = scope.querySelector("[data-rolling-message]");
+    const toggle = scope.querySelector("[data-rolling-toggle]");
+    if (!hint || !message || !toggle) return;
+    const threshold = Number(hint.dataset.rollingHint) || 30;
+    hint.hidden = toggle.checked || [...message.value.trim()].length <= threshold;
+}
+
+["input", "change"].forEach(type => document.addEventListener(type, event => {
+    const scope = event.target.closest?.("[data-rolling-scope]");
+    if (scope) syncRollingHint(scope);
+}));

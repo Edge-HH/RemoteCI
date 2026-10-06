@@ -68,6 +68,7 @@ public sealed class ControlModel(
 
     public ExtensionControlItem ExtensionItem(ExtensionDefinition definition) =>
         Extensions.First(item => string.Equals(item.Definition.Id, definition.Id, StringComparison.Ordinal));
+    // “老师来了”暂时只保留协议处理以兼容旧客户端，不在 WebUI 暴露入口。
     public bool CanTeacherComing => ClassPermissions.HasFlag(UserPermissions.TeacherComing) && Supports(RemoteCiCapabilities.TeacherComing);
     public bool CanSendNotifications => ClassPermissions.HasFlag(UserPermissions.SendNotifications) && Supports(RemoteCiCapabilities.NotificationSend);
     public bool CanSendVoiceMessages => ClassPermissions.HasFlag(UserPermissions.SendVoiceMessages) && Supports(RemoteCiCapabilities.VoiceMessageSend);
@@ -148,6 +149,7 @@ public sealed class ControlModel(
                 IsNotificationTopmostEnabled = Input.IsNotificationTopmostEnabled,
                 DurationSeconds = Input.DurationSeconds,
                 RepeatCounts = Input.RepeatCounts,
+                IsRollingEnabled = Input.IsRollingEnabled,
             },
         }, ct);
         return RedirectWithResult(result);
@@ -395,6 +397,7 @@ public sealed class ControlModel(
                     IsNotificationTopmostEnabled = BroadcastInput.IsNotificationTopmostEnabled,
                     DurationSeconds = BroadcastInput.DurationSeconds,
                     RepeatCounts = BroadcastInput.RepeatCounts,
+                    IsRollingEnabled = BroadcastInput.IsRollingEnabled,
                 },
                 ClassIds = BroadcastClassIds,
             }, ct);
@@ -479,8 +482,11 @@ public sealed class ControlModel(
         /// <summary>单条显示秒数；null 或 &lt;= 0 时插件按 ClassIsland 集控默认 5 秒处理。</summary>
         [Range(0, 3600)] public int? DurationSeconds { get; set; }
 
-        /// <summary>正文滚动重复次数；null 或 &lt; 1 时按 1 次处理。</summary>
+        /// <summary>重复次数；null 或 &lt; 1 时按 1 次处理。</summary>
         [Range(0, 10)] public int? RepeatCounts { get; set; }
+
+        /// <summary>正文横向滚动显示；默认关闭。</summary>
+        public bool IsRollingEnabled { get; set; }
 
         public bool IsSpeechEnabled { get; set; }
         public bool IsNotificationSoundEnabled { get; set; }

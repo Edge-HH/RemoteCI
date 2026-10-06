@@ -1,5 +1,6 @@
 package com.remoteci.mobile.data
 
+import java.time.Instant
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -144,7 +145,8 @@ data class Envelope(
     val type: String,
     @SerialName("messageId") val messageId: String = "",
     @SerialName("replyToMessageId") val replyToMessageId: String? = null,
-    val timestamp: String = "",
+    // 服务端与插件按 DateTimeOffset 解析：空字符串会让整条消息被丢弃，必须写出有效的 ISO-8601 时间。
+    val timestamp: String = Instant.now().toString(),
     val sender: Int? = null,
     val payload: JsonElement? = null,
 )
@@ -314,7 +316,24 @@ data class NotificationRequest(
     @SerialName("isNotificationEffectEnabled") val isNotificationEffectEnabled: Boolean = false,
     @SerialName("isNotificationSoundEnabled") val isNotificationSoundEnabled: Boolean = false,
     @SerialName("isSpeechEnabled") val isSpeechEnabled: Boolean = false,
-)
+    @SerialName("isNotificationTopmostEnabled") val isNotificationTopmostEnabled: Boolean = false,
+    // 与服务端 NotificationRequest 一致：null 由插件按 5 秒 / 1 次处理。
+    @SerialName("durationSeconds") val durationSeconds: Int? = null,
+    @SerialName("repeatCounts") val repeatCounts: Int? = null,
+    // 默认关闭：短正文静态显示即可读完，开启后正文横向滚动 repeatCounts 遍。
+    @SerialName("isRollingEnabled") val isRollingEnabled: Boolean = false,
+) {
+    companion object {
+        const val DEFAULT_DURATION_SECONDS = 5
+        const val MAX_DURATION_SECONDS = 3600
+        const val MAX_REPEAT_COUNTS = 10
+        const val ROLLING_SUGGESTION_THRESHOLD = 30
+
+        /** 正文超过阈值且未开启滚动时，静态正文可能显示不全，发送界面应提示开启滚动。 */
+        fun shouldSuggestRolling(message: String, isRollingEnabled: Boolean): Boolean =
+            !isRollingEnabled && message.trim().let { it.codePointCount(0, it.length) } > ROLLING_SUGGESTION_THRESHOLD
+    }
+}
 
 @Serializable
 data class SettingsSync(

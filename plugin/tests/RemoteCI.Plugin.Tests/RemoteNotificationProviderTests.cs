@@ -46,7 +46,8 @@ public sealed class RemoteNotificationProviderTests
             isNotificationEffectEnabled: false,
             isNotificationSoundEnabled: false,
             isSpeechEnabled: false,
-            durationSeconds: requested);
+            durationSeconds: requested,
+            isRollingEnabled: true);
 
         // 正文滚动 1 次时，总时长等于单条时长。
         Assert.Equal(TimeSpan.FromSeconds(expected), request.OverlayContent!.Duration);
@@ -64,7 +65,8 @@ public sealed class RemoteNotificationProviderTests
             isNotificationSoundEnabled: false,
             isSpeechEnabled: false,
             durationSeconds: 5,
-            repeatCounts: repeatCounts);
+            repeatCounts: repeatCounts,
+            isRollingEnabled: true);
 
         // 总显示时长 = 持续时间 × 重复次数，与 ClassIsland 集控 SendNotification 一致。
         Assert.Equal(TimeSpan.FromSeconds(5 * expectedRepeats), request.OverlayContent!.Duration);
@@ -74,6 +76,41 @@ public sealed class RemoteNotificationProviderTests
         var data = Assert.IsType<ClassIsland.Core.Models.Notification.Templates.RollingTextTemplateData>(
             template.DataContext);
         Assert.Equal(expectedRepeats, data.RepeatCount);
+    }
+
+    [Fact]
+    public void RollingDisabledByDefault_ShowsStaticBodyForOneDuration()
+    {
+        var request = RemoteNotificationProvider.BuildNotificationRequest(
+            new NotificationSettings(), "标题", "短通知",
+            isNotificationEffectEnabled: false,
+            isNotificationSoundEnabled: false,
+            isSpeechEnabled: true,
+            durationSeconds: 8,
+            repeatCounts: 3);
+
+        Assert.IsNotType<ClassIsland.Core.Controls.NotificationTemplates.RollingTextTemplate>(request.OverlayContent!.Content);
+        Assert.Equal(TimeSpan.FromSeconds(8), request.OverlayContent.Duration);
+        Assert.True(request.OverlayContent.IsSpeechEnabled);
+    }
+
+    [Theory]
+    [InlineData(false, 3, 3)]
+    [InlineData(false, 0, 1)]
+    [InlineData(true, 3, 1)]
+    public void RepeatCounts_QueueSeparateRequestsOnlyWhenNotRolling(bool rolling, int repeatCounts, int expectedCount)
+    {
+        var requests = RemoteNotificationProvider.BuildNotificationRequests(
+            new NotificationSettings(), "标题", "正文",
+            isNotificationEffectEnabled: false,
+            isNotificationSoundEnabled: false,
+            isSpeechEnabled: false,
+            repeatCounts: repeatCounts,
+            isRollingEnabled: rolling);
+
+        Assert.Equal(expectedCount, requests.Count);
+        // ClassIsland 会改写请求状态，排队的每一条都必须是独立实例。
+        Assert.Equal(expectedCount, requests.Distinct().Count());
     }
 
     [Fact]

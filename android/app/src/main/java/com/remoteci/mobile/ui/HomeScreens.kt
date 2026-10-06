@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CloudDone
@@ -25,7 +26,6 @@ import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.DirectionsRun
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Functions
-import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.Help
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Notifications
@@ -319,8 +319,11 @@ fun HomeShell(
 ) {
     val user by ConnectionManager.currentUser.collectAsState()
     val pendingSwaps by ConnectionManager.pendingSwapCount.collectAsState()
-    val tabs = visibleHomeTabs(user?.has(com.remoteci.mobile.data.Protocol.PERMISSION_REQUEST_SWAP) == true)
-    // 失去换课权限后停留在换课页时退回“今天”。
+    val tabs = visibleHomeTabs(
+        canRequestSwap = user?.has(com.remoteci.mobile.data.Protocol.PERMISSION_REQUEST_SWAP) == true,
+        canManage = visibleManagementItems(user).isNotEmpty(),
+    )
+    // 失去换课或管理权限后停留在对应页时退回“今天”。
     LaunchedEffect(tab, tabs, user) { if (user != null && tab !in tabs) onTab(HomeTab.Today) }
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -332,7 +335,7 @@ fun HomeShell(
                     Item(HomeTab.Schedule, "课表", Icons.Rounded.CalendarMonth),
                     Item(HomeTab.SwapRequests, "换课", Icons.Rounded.SwapHoriz),
                     Item(HomeTab.Control, "控制", Icons.Rounded.Tune),
-                    Item(HomeTab.People, "人员", Icons.Rounded.Group),
+                    Item(HomeTab.People, "管理", Icons.Rounded.AdminPanelSettings),
                 ).filter { it.tab in tabs }.forEach { item ->
                     NavigationBarItem(
                         selected = tab == item.tab,
@@ -357,7 +360,7 @@ fun HomeShell(
                 HomeTab.Today -> TodayScreen(snackbar, onOpen, onTab)
                 HomeTab.Schedule -> ScheduleScreen(embedded = true, snackbar = snackbar, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
                 HomeTab.SwapRequests -> SwapRequestsScreen(snackbar = snackbar)
-                HomeTab.Control -> ControlListScreen(embedded = true, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
+                HomeTab.Control -> ControlListScreen(embedded = true, snackbar = snackbar, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
                 HomeTab.People -> PeopleScreen(embedded = true, snackbar = snackbar, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
             }
         }
@@ -462,7 +465,7 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
                 }
             }
         }
-        val next = if (teacherMode) teacherNext?.course?.subject else snapshot?.nextClassSubject
+        val next = if (teacherMode) teacherNext?.course?.subject else nextClassSubjectAfterCurrent(snapshot)
         ConnectedListCard {
             if ((teacherMode || shouldShowNextLessonSummary(snapshot?.currentState)) && !next.isNullOrBlank()) {
                 AppListItem(

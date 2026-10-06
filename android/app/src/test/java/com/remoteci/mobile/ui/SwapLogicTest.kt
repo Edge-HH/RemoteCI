@@ -26,9 +26,15 @@ class SwapLogicTest {
 
     @Test
     fun `swap tab is only visible with request permission`() {
-        assertTrue(HomeTab.SwapRequests in visibleHomeTabs(true))
-        assertFalse(HomeTab.SwapRequests in visibleHomeTabs(false))
-        assertEquals(HomeTab.entries.size - 1, visibleHomeTabs(false).size)
+        assertTrue(HomeTab.SwapRequests in visibleHomeTabs(true, canManage = true))
+        assertFalse(HomeTab.SwapRequests in visibleHomeTabs(false, canManage = true))
+        assertEquals(HomeTab.entries.size - 1, visibleHomeTabs(false, canManage = true).size)
+    }
+
+    @Test
+    fun `management tab is hidden without any management item`() {
+        assertTrue(HomeTab.People in visibleHomeTabs(true, canManage = true))
+        assertFalse(HomeTab.People in visibleHomeTabs(true, canManage = false))
     }
 
     @Test

@@ -174,7 +174,6 @@ fun RemoteCiApp(context: Context) {
             !user.has(Protocol.PERMISSION_SEND_VOICE_MESSAGES) &&
             !user.has(Protocol.PERMISSION_POWER_CONTROL) &&
             !user.has(Protocol.PERMISSION_MAIN_MENU_CONTROL) &&
-            !user.has(Protocol.PERMISSION_TEACHER_COMING) &&
             !user.has(Protocol.PERMISSION_RUN_EXTENSIONS) && screen == Screen.Control)
             screen = Screen.Home
         val active = activeExtension
@@ -388,7 +387,6 @@ fun RemoteCiApp(context: Context) {
                 resultText = commandResult?.let {
                     context.getString(if (it.success) R.string.result_success else R.string.result_failure, it.message)
                 },
-                onTeacherComing = ConnectionManager::teacherComing,
                 onOpenNotification = { screen = Screen.Notification },
                 onOpenVoiceMessage = { screen = Screen.VoiceMessage },
                 onClearNotifications = ConnectionManager::clearNotifications,

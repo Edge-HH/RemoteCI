@@ -169,6 +169,40 @@ internal fun lessonProgress(value: String?, now: LocalTime): Float {
 }
 
 /**
+ * 真正的下一节课名。旧版插件在最后一节课上课时会把当堂课报成“下一节”，
+ * 因此开始时间早于当前时段结束的“下一节”一律视为不存在。
+ */
+internal fun nextClassSubjectAfterCurrent(snapshot: ClassStateSnapshot?): String? {
+    val subject = snapshot?.nextClassSubject?.trim()?.takeIf(String::isNotEmpty) ?: return null
+    val current = snapshot.currentTimeLayoutItem?.let(TimeRangeRegex::find) ?: return subject
+    val next = snapshot.nextClassTimeLayoutItem?.let(TimeRangeRegex::find) ?: return subject
+    val pattern = DateTimeFormatter.ofPattern("H:mm")
+    val currentEnd = runCatching { LocalTime.parse(current.groupValues[2], pattern) }.getOrNull() ?: return subject
+    val nextStart = runCatching { LocalTime.parse(next.groupValues[1], pattern) }.getOrNull() ?: return subject
+    return subject.takeUnless { nextStart.isBefore(currentEnd) }
+}
+
+/**
+ * 当前阶段（上课/课间/预备）的绝对结束时刻，供通知倒计时使用。
+ * 以时间段“HH:mm-HH:mm”的结束时间落在插件课表日期与插件时区上；
+ * 不依赖 `*LeftTime`，因为快照只在状态变化时推送，剩余时长会冻结。
+ */
+internal fun snapshotStageEnd(snapshot: ClassStateSnapshot?): OffsetDateTime? {
+    snapshot ?: return null
+    // 第一节课前的“即将上课”没有当前时段，倒计时改指向下一节的开始时间。
+    val end = snapshot.currentTimeLayoutItem?.let(TimeRangeRegex::find)?.groupValues?.get(2)
+        ?: snapshot.nextClassTimeLayoutItem?.takeIf { snapshot.currentState == Protocol.STATE_PREPARE_CLASS }
+            ?.let(TimeRangeRegex::find)?.groupValues?.get(1)
+        ?: return null
+    val date = snapshot.scheduleDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return null
+    val endTime = runCatching { LocalTime.parse(end, DateTimeFormatter.ofPattern("H:mm")) }.getOrNull()
+        ?: return null
+    val offset = snapshot.timeZoneOffsetMinutes?.let { runCatching { ZoneOffset.ofTotalSeconds(it * 60) }.getOrNull() }
+        ?: ZoneId.systemDefault().rules.getOffset(date.atTime(endTime))
+    return date.atTime(endTime).atOffset(offset)
+}
+
+/**
  * 根据插件快照推算“插件本地当前时间”：
  * 以快照的 UTC 生成时间为基准，加上插件时区偏移和本机经过的真实时间，
  * 即使手表时区与插件不一致，课程进度也能按插件时间轴正确计算。

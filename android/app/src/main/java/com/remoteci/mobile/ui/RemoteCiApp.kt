@@ -119,6 +119,10 @@ fun RemoteCiApp(appContext: android.content.Context) {
                 navigationDirection = 1
                 stack = listOf(Screen.Home(HomeTab.SwapRequests))
             }
+            if (target == NotificationHelper.OPEN_SCHEDULE && stack.last() !is Screen.Login) {
+                navigationDirection = 1
+                stack = listOf(Screen.Home(HomeTab.Schedule))
+            }
             if (target != null) com.remoteci.mobile.MainActivity.openRequests.value = null
         }
     }
@@ -171,7 +175,11 @@ fun RemoteCiApp(appContext: android.content.Context) {
         else -> AppearanceMode.System
     }
 
-    RemoteCiTheme(appearance, MobilePalette.fromId(settings.themeId)) {
+    RemoteCiTheme(
+        appearanceMode = appearance,
+        palette = MobilePalette.fromId(settings.themeId),
+        dynamicColor = settings.themeId == DynamicThemeId,
+    ) {
         Box(Modifier.fillMaxSize().imePadding()) {
             AnimatedContent(
                 targetState = current,

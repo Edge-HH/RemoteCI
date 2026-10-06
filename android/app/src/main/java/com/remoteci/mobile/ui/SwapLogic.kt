@@ -7,9 +7,15 @@ import com.remoteci.mobile.data.SwapRequestView
 import com.remoteci.mobile.data.SwapSlot
 import java.time.LocalDate
 
-/** 底栏可见的板块：换课页只在账号拥有“老师主动换课”权限时出现。 */
-internal fun visibleHomeTabs(canRequestSwap: Boolean): List<HomeTab> =
-    HomeTab.entries.filter { it != HomeTab.SwapRequests || canRequestSwap }
+/** 底栏可见的板块：换课页只在账号拥有“老师主动换课”权限时出现；管理页只在至少有一项管理权限时出现。 */
+internal fun visibleHomeTabs(canRequestSwap: Boolean, canManage: Boolean): List<HomeTab> =
+    HomeTab.entries.filter {
+        when (it) {
+            HomeTab.SwapRequests -> canRequestSwap
+            HomeTab.People -> canManage
+            else -> true
+        }
+    }
 
 /** 换课页里选中的一节课。 */
 internal data class SwapPick(val classId: String, val date: String, val index: Int)

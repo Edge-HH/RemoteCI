@@ -29,8 +29,7 @@
     // 班主任从控制页进入扩展插件设置时，侧栏仍高亮“控制”；系统管理员有独立的“扩展插件”入口。
     var controlMenuActive = currentPage is "/Control" or "/Notifications" ||
         (currentPage == "/ExtensionSettings" && current?.Role != UserRole.Admin);
-    var showControlMenu = permissions.HasFlag(UserPermissions.TeacherComing) ||
-        permissions.HasFlag(UserPermissions.SendNotifications) ||
+    var showControlMenu = permissions.HasFlag(UserPermissions.SendNotifications) ||
         permissions.HasFlag(UserPermissions.SendVoiceMessages) ||
         permissions.HasFlag(UserPermissions.PowerControl) ||
         permissions.HasFlag(UserPermissions.MainMenuControl) ||
@@ -131,7 +130,7 @@
                 <a class="@NavClass("/Schedule")" aria-current="@CurrentPage("/Schedule")" asp-page="/Schedule" data-search-label="课表 换课 课程安排"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M8 2v3m8-3v3"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01M16 17h.01"/></g></svg><span>课表</span></a>
                 @if (showControlMenu)
                 {
-                    <a class="@(controlMenuActive ? "nav-link active" : "nav-link")" aria-current="@(controlMenuActive ? "page" : null)" asp-page="/Control" data-search-label="控制 老师来了 发送通知 清除通知 主界面 音量 电源 扩展"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 5H3m9 14H3M14 3v4m2 10v4m5-9h-9m9 7h-5m5-14h-7m-6 5v4m0-2H3"/></svg><span>控制</span></a>
+                    <a class="@(controlMenuActive ? "nav-link active" : "nav-link")" aria-current="@(controlMenuActive ? "page" : null)" asp-page="/Control" data-search-label="控制 发送通知 清除通知 主界面 音量 电源 扩展"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 5H3m9 14H3M14 3v4m2 10v4m5-9h-9m9 7h-5m5-14h-7m-6 5v4m0-2H3"/></svg><span>控制</span></a>
                 }
                 @if (hasPersonalSchedule || canRequestSwap)
                 {

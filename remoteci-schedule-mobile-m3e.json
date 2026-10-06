@@ -488,15 +488,6 @@
           "variant": "filled"
         },
         {
-          "id": "control-teacher",
-          "kind": "listItem",
-          "label": "老师来了",
-          "supporting": "显示提醒，等待一秒后自动清除",
-          "icon": "campaign",
-          "icon2": "chevron_right",
-          "variant": "filled"
-        },
-        {
           "id": "control-main-menu",
           "kind": "listItem",
           "label": "主界面",

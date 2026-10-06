@@ -76,6 +76,7 @@ public sealed class ClassBroadcastService(
                         IsNotificationTopmostEnabled = notification.IsNotificationTopmostEnabled,
                         DurationSeconds = notification.DurationSeconds,
                         RepeatCounts = notification.RepeatCounts,
+                        IsRollingEnabled = notification.IsRollingEnabled,
                     }
                     : null,
                 PowerAction = request.PowerAction,

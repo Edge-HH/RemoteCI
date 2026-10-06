@@ -133,13 +133,15 @@ public sealed class UsersModel(
         }
         try
         {
+            // 隐藏功能的旧权限位不随可见权限表单被意外清除，恢复入口时仍可兼容原有账号。
+            var existing = (await identities.ListUsersAsync(ct)).FirstOrDefault(item => item.Id == Edit.Id);
             await identities.UpdateUserAsync(Edit.Id, new UpdateUserRequest
             {
                 DisplayName = Edit.DisplayName,
                 Role = Edit.Role,
                 RoleId = Edit.RoleId,
                 Enabled = Edit.Enabled,
-                GrantedPermissions = Edit.Grants,
+                GrantedPermissions = Edit.Grants | ((existing?.GrantedPermissions ?? UserPermissions.None) & UserPermissions.TeacherComing),
             }, ct);
             await authorizationSync.SyncAsync(ct);
             TempData["Message"] = "账号与权限已更新。";
@@ -337,7 +339,15 @@ public sealed class UsersModel(
     {
         if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
         if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
-        try { await roleService.UpdateAsync(RoleEdit.Id, RoleEdit.Name, RoleEdit.Grants, ct); await authorizationSync.SyncAsync(ct); TempData["Message"] = "Role updated."; }
+        try
+        {
+            // 同上：角色编辑页不再渲染该权限，但保留已有角色的协议兼容位。
+            var existing = (await roleService.ListAsync(ct)).FirstOrDefault(role => role.Id == RoleEdit.Id);
+            var grants = RoleEdit.Grants | ((existing?.DefaultPermissions ?? UserPermissions.None) & UserPermissions.TeacherComing);
+            await roleService.UpdateAsync(RoleEdit.Id, RoleEdit.Name, grants, ct);
+            await authorizationSync.SyncAsync(ct);
+            TempData["Message"] = "Role updated.";
+        }
         catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
         return RedirectToPage();
     }

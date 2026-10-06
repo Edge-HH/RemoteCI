@@ -40,7 +40,6 @@ import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Visibility
@@ -610,7 +609,6 @@ internal fun ControlScreen(
     capabilities: Set<String> = Protocol.BASELINE_CAPABILITIES,
     extensions: List<ExtensionDefinition>,
     resultText: String?,
-    onTeacherComing: () -> Unit,
     onOpenNotification: () -> Unit,
     onOpenVoiceMessage: () -> Unit,
     onClearNotifications: () -> Unit,
@@ -620,13 +618,11 @@ internal fun ControlScreen(
     onRunExtension: (ExtensionDefinition) -> Unit,
     onBack: () -> Unit,
 ) = WatchList(title = stringResource(R.string.control_title)) {
-    val canTeacherComing = user?.has(Protocol.PERMISSION_TEACHER_COMING) == true && Protocol.CAP_TEACHER_COMING in capabilities
     val canNotify = user?.has(Protocol.PERMISSION_SEND_NOTIFICATIONS) == true && Protocol.CAP_NOTIFICATION_SEND in capabilities
     val canClearNotifications = user?.has(Protocol.PERMISSION_SEND_NOTIFICATIONS) == true && Protocol.CAP_NOTIFICATION_CLEAR in capabilities
     val canControlMainMenu = user?.has(Protocol.PERMISSION_MAIN_MENU_CONTROL) == true && Protocol.CAP_MAIN_MENU_VISIBILITY in capabilities
     val canControlPower = user?.has(Protocol.PERMISSION_POWER_CONTROL) == true && Protocol.CAP_POWER_CONTROL in capabilities
     val canControlVolume = user?.has(Protocol.PERMISSION_POWER_CONTROL) == true && Protocol.CAP_VOLUME_CONTROL in capabilities
-    if (canTeacherComing) item { ActionButton(stringResource(R.string.teacher_coming), Icons.Rounded.School, true, onTeacherComing) }
     if (canNotify) item { ActionButton(stringResource(R.string.send_notification), Icons.Rounded.EditNotifications, true, onOpenNotification) }
     if (user?.has(Protocol.PERMISSION_SEND_VOICE_MESSAGES) == true && Protocol.CAP_VOICE_MESSAGE_SEND in capabilities)
         item { ActionButton("发送语音", Icons.Rounded.EditNotifications, true, onOpenVoiceMessage) }
@@ -1195,8 +1191,7 @@ internal fun homeActionLabels(
 ): List<String> = buildList {
     if (user != null && Protocol.CAP_SCHEDULE_READ in capabilities) add("课表")
     if (user?.has(Protocol.PERMISSION_MANAGE_SCHEDULE) == true && Protocol.CAP_SCHEDULE_CHANGE in capabilities) add("换课")
-    if (user?.has(Protocol.PERMISSION_TEACHER_COMING) == true && Protocol.CAP_TEACHER_COMING in capabilities ||
-        user?.has(Protocol.PERMISSION_SEND_NOTIFICATIONS) == true &&
+    if (user?.has(Protocol.PERMISSION_SEND_NOTIFICATIONS) == true &&
             (Protocol.CAP_NOTIFICATION_SEND in capabilities || Protocol.CAP_NOTIFICATION_CLEAR in capabilities) ||
         user?.has(Protocol.PERMISSION_POWER_CONTROL) == true &&
             (Protocol.CAP_POWER_CONTROL in capabilities || Protocol.CAP_VOLUME_CONTROL in capabilities) ||

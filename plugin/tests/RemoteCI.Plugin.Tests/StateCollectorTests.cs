@@ -23,6 +23,7 @@ public sealed class StateCollectorTests
         public TimeSpan OnClassLeftTime { get; set; }
         public TimeSpan OnBreakingTimeLeftTime { get; set; }
         public bool IsLessonConfirmed { get; set; }
+        public TimeSpan? ClassPreparingDuration { get; set; }
 
         public event EventHandler? OnClass;
         public event EventHandler? OnBreakingTime;
@@ -55,6 +56,61 @@ public sealed class StateCollectorTests
             null, null, NullLogger<ClassIslandHostControlService>.Instance);
         return new StateCollector(
             source, new ScheduleCatalog(new EmptyBackend()), hostControl, NullLogger<StateCollector>.Instance);
+    }
+
+    [Fact]
+    public void BuildSnapshot_DropsNextClassThatIsTheCurrentLesson()
+    {
+        // ClassIsland 在最后一节课上课期间仍把当堂课报成“下一节”。
+        var lesson = new TimeLayoutItem
+        {
+            StartTime = new TimeSpan(10, 5, 0), EndTime = new TimeSpan(10, 45, 0), TimeType = 0,
+        };
+        var source = new FakeStateSource
+        {
+            CurrentSubject = new Subject { Name = "体育" },
+            NextClassSubject = new Subject { Name = "体育" },
+            CurrentState = TimeState.OnClass,
+            CurrentTimeLayoutItem = lesson,
+            NextClassTimeLayoutItem = lesson,
+        };
+
+        var snapshot = CreateCollector(source).BuildSnapshot();
+
+        Assert.Null(snapshot.NextClassSubject);
+        Assert.Equal(string.Empty, snapshot.NextClassTimeLayoutItem);
+    }
+
+    [Theory]
+    [InlineData(TimeState.Breaking)]
+    [InlineData(TimeState.None)]
+    public void BuildSnapshot_ReportsPrepareClassInsideClassIslandPreparingWindow(TimeState state)
+    {
+        var source = new FakeStateSource
+        {
+            CurrentState = state,
+            NextClassSubject = new Subject { Name = "数学" },
+            OnClassLeftTime = TimeSpan.FromMinutes(2),
+            ClassPreparingDuration = TimeSpan.FromMinutes(3),
+        };
+
+        Assert.Equal(ClassStateKind.PrepareClass, CreateCollector(source).BuildSnapshot().CurrentState);
+    }
+
+    [Fact]
+    public void BuildSnapshot_StaysBreakingBeforePreparingWindowOrWithoutHostSettings()
+    {
+        var source = new FakeStateSource
+        {
+            CurrentState = TimeState.Breaking,
+            OnClassLeftTime = TimeSpan.FromMinutes(5),
+            ClassPreparingDuration = TimeSpan.FromMinutes(3),
+        };
+        Assert.Equal(ClassStateKind.Breaking, CreateCollector(source).BuildSnapshot().CurrentState);
+
+        source.OnClassLeftTime = TimeSpan.FromMinutes(1);
+        source.ClassPreparingDuration = null;
+        Assert.Equal(ClassStateKind.Breaking, CreateCollector(source).BuildSnapshot().CurrentState);
     }
 
     [Fact]
@@ -130,12 +186,12 @@ public sealed class StateCollectorTests
         var evt = Assert.Single(events);
         Assert.Equal(ClassEventKind.OnClass, evt.Event);
         Assert.Equal("英语", evt.Subject);
-        Assert.Contains("上课了", evt.Message);
+        Assert.Equal("英语课", evt.Message);
         Assert.Equal(2, snapshots.Count); // 事件后随推一次快照。
     }
 
     [Theory]
-    [InlineData(ClassEventKind.OnBreaking, "下课休息")]
+    [InlineData(ClassEventKind.OnBreaking, "今天没有后续课程了")]
     [InlineData(ClassEventKind.OnAfterSchool, "放学啦！")]
     public void Start_ForwardsBreakingAndAfterSchoolEvents(ClassEventKind kind, string message)
     {
@@ -223,6 +279,83 @@ public sealed class StateCollectorTests
         Assert.Single(schedules);
         Assert.Single(snapshots);
     }
+
+    [Theory]
+    [InlineData("高一（1）班", "数学", "08:00-08:45", "高一（1）班 数学课（08:00-08:45）")]
+    [InlineData(null, "数学", null, "数学课")]
+    [InlineData("高一（1）班", null, null, "高一（1）班 上课了")]
+    public void DescribeOnClass_NamesClassAndSubject(string? className, string? subject, string? time, string expected) =>
+        Assert.Equal(expected, StateCollector.DescribeOnClass(className, subject, time));
+
+    [Theory]
+    [InlineData("高一（1）班", "物理", "09:00-09:45", "高一（1）班 下节课：物理（09:00-09:45）")]
+    [InlineData(null, "物理", null, "下节课：物理")]
+    [InlineData("高一（1）班", null, null, "高一（1）班 今天没有后续课程了")]
+    public void DescribeOnBreaking_NamesNextCourse(string? className, string? next, string? time, string expected) =>
+        Assert.Equal(expected, StateCollector.DescribeOnBreaking(className, next, time));
+
+    [Fact]
+    public void OnBreaking_UsesNextSubjectAndTime()
+    {
+        var source = new FakeStateSource
+        {
+            NextClassSubject = new Subject { Name = "物理" },
+            NextClassTimeLayoutItem = new TimeLayoutItem
+            {
+                StartTime = TimeSpan.FromHours(9), EndTime = TimeSpan.FromHours(9).Add(TimeSpan.FromMinutes(45)), TimeType = 0,
+            },
+        };
+        var collector = CreateCollector(source);
+        var events = new List<ClassEvent>();
+        collector.EventOccurred += events.Add;
+        collector.Start();
+
+        source.RaiseOnBreakingTime();
+
+        Assert.Equal("下节课：物理（09:00-09:45）", Assert.Single(events).Message);
+    }
+
+    [Fact]
+    public void DescribeScheduleChange_ListsSwappedPeriodsPerDay()
+    {
+        var today = new DateOnly(2026, 10, 5);
+        var before = Bundle(("2026-10-05", ["语文", "数学", "英语"]), ("2026-10-08", ["物理", "化学"]));
+        var after = Bundle(("2026-10-05", ["语文", "英语", "数学"]), ("2026-10-08", ["化学", "化学"]));
+
+        var message = StateCollector.DescribeScheduleChange(before, after, today);
+
+        Assert.Equal(
+            "今天第 2 节 数学 换为 英语；第 3 节 英语 换为 数学；10 月 8 日（周四）第 1 节 物理 换为 化学",
+            message);
+    }
+
+    [Fact]
+    public void DescribeScheduleChange_ReturnsNullWhenNoSubjectChanged()
+    {
+        var bundle = Bundle(("2026-10-05", ["语文"]));
+        Assert.Null(StateCollector.DescribeScheduleChange(bundle, Bundle(("2026-10-05", ["语文"])), new DateOnly(2026, 10, 5)));
+    }
+
+    [Fact]
+    public void DescribeScheduleChange_SummarizesBeyondLimit()
+    {
+        var before = Bundle(("2026-10-06", ["A", "A", "A", "A", "A", "A", "A", "A"]));
+        var after = Bundle(("2026-10-06", ["B", "B", "B", "B", "B", "B", "B", "B"]));
+
+        var message = StateCollector.DescribeScheduleChange(before, after, new DateOnly(2026, 10, 5))!;
+
+        Assert.StartsWith("明天第 1 节 A 换为 B；", message);
+        Assert.EndsWith("等 8 处", message);
+    }
+
+    private static ScheduleBundle Bundle(params (string Date, string[] Subjects)[] days) => new()
+    {
+        Days = days.Select(d => new ScheduleDay
+        {
+            Date = d.Date,
+            Courses = d.Subjects.Select((subject, i) => new CourseEntry { Index = i, Subject = subject }).ToList(),
+        }).ToList(),
+    };
 
     [Theory]
     [InlineData(null, null)]

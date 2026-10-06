@@ -513,7 +513,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.DoesNotContain(@"href=""/Notifications""", html);
         Assert.Contains(@"data-batch-open=""Notify""", html);
         Assert.Contains("通知广播", html);
-        Assert.Contains("老师来了", html);
+        Assert.DoesNotContain("老师来了", html);
         Assert.DoesNotContain("向插件发送单一指令，由插件显示强调提醒并在 1 秒后自动清除。", html);
         Assert.DoesNotContain("正文留空时显示原标题", html);
         Assert.Contains(@"data-batch-open=""ClearNotifications""", html);
@@ -952,6 +952,8 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         using var browser = CreateBrowserClient();
         await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
         var html = await browser.GetStringAsync("/Users");
+        Assert.DoesNotContain("TeacherComing", html);
+        Assert.DoesNotContain("老师来了", html);
         Assert.DoesNotContain("Create.ChangeDisplayName", html);
         Assert.DoesNotContain("\"Edit.ChangeDisplayName\"", html);
         Assert.Equal(UserPermissions.None, new RemoteCI.Server.Pages.UsersModel.UserInput { ChangeDisplayName = true }.Grants);
@@ -1443,7 +1445,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             new CreateUserRequest
             {
                 Username = "teacher.alert",
-                DisplayName = "老师来了权限测试",
+                DisplayName = "快捷提醒权限测试",
                 Password = "Teacher-Alert-Password-2026",
                 GrantedPermissions = UserPermissions.AccessWebUi | UserPermissions.TeacherComing,
             }));
@@ -1471,7 +1473,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         using var browser = CreateBrowserClient();
         await LoginWebUiAsync(browser, "teacher.alert", "Teacher-Alert-Password-2026");
         var html = WebUtility.HtmlDecode(await browser.GetStringAsync("/Control"));
-        Assert.Contains("老师来了", html);
+        Assert.DoesNotContain("老师来了", html);
         Assert.DoesNotContain(@"data-batch-open=""Notify""", html);
         Assert.DoesNotContain(@"data-batch-open=""Power""", html);
         Assert.DoesNotContain(@"id=""batch-target-dialog""", html);
@@ -1551,7 +1553,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Contains("<span>控制</span>", accountHtml);
         var control = await browser.GetAsync("/Control");
         Assert.Equal(HttpStatusCode.OK, control.StatusCode);
-        Assert.Contains("老师来了", WebUtility.HtmlDecode(await control.Content.ReadAsStringAsync()));
+        Assert.DoesNotContain("老师来了", WebUtility.HtmlDecode(await control.Content.ReadAsStringAsync()));
     }
 
     [Fact]

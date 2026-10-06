@@ -45,7 +45,6 @@
 
     <!-- 控制 -->
     <string name="control_title">控制</string>
-    <string name="teacher_coming">老师来了</string>
     <string name="send_notification">发送通知</string>
     <string name="clear_notifications">清除通知</string>
     <string name="run_extension">执行</string>
