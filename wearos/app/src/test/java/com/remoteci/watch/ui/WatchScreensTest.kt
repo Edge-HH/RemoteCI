@@ -357,8 +357,9 @@ class WatchScreensTest {
                 ),
             ),
         )
+        // TeacherComing 仅为旧客户端兼容保留，单独持有它不再露出“控制”入口。
         assertEquals(
-            listOf("课表", "控制", "设置"),
+            listOf("课表", "设置"),
             homeActionLabels(
                 UserProfile(
                     permissions = Protocol.PERMISSION_VIEW_CURRENT or Protocol.PERMISSION_TEACHER_COMING,

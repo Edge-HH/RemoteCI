@@ -63,7 +63,7 @@ public sealed class ClassBroadcastService(
             {
                 Command = request.Command,
                 ClassId = classId,
-                RequestedBy = sender.User.WithPermissions(classPermissions),
+                RequestedBy = user.WithPermissions(classPermissions),
                 Notification = request.Notification is { } notification
                     ? new NotificationRequest
                     {

@@ -13,9 +13,7 @@ namespace RemoteCI.Server.Pages;
 /// 首次登录的密码设置页：批量导入且未设密码的账号，凭空密码登录时下发的一次性令牌在此补设密码。
 /// </summary>
 [AllowAnonymous]
-public sealed class SetupPasswordModel(
-    UserManager<AppUser> users,
-    IdentityCoordinator identities) : PageModel
+public sealed class SetupPasswordModel(IdentityCoordinator identities) : PageModel
 {
     [BindProperty]
     public string SetupToken { get; set; } = string.Empty;

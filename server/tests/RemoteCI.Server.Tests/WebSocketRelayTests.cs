@@ -12,11 +12,43 @@ using Xunit;
 
 namespace RemoteCI.Server.Tests;
 
-public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactory>
+/// <remarks>
+/// 本类所有测试共享同一个服务实例。上一个测试释放的插件连接由服务端异步注销，注销前它仍可能被选为
+/// “主插件”而截走下一个测试的命令，导致全量运行与单独运行结果不一致。因此每个测试结束时主动关闭
+/// 自己打开的连接，并等待注册表清空后才进入下一个测试。
+/// </remarks>
+public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactory>, IAsyncLifetime
 {
     private readonly TestWebApplicationFactory _factory;
+    private readonly List<WebSocket> _sockets = [];
 
     public WebSocketRelayTests(TestWebApplicationFactory factory) => _factory = factory;
+
+    public Task InitializeAsync() => WaitForNoPluginAsync();
+
+    public async Task DisposeAsync()
+    {
+        foreach (var socket in _sockets)
+        {
+            try
+            {
+                if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+                {
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "test finished", timeout.Token);
+                }
+            }
+            catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or ObjectDisposedException)
+            {
+                // 测试本身已经关闭或中止的连接无需再处理。
+            }
+            socket.Dispose();
+        }
+        await WaitForNoPluginAsync();
+    }
+
+    private Task WaitForNoPluginAsync() => WaitUntilAsync(() =>
+        !_factory.Services.GetRequiredService<PeerRegistry>().HasPluginFor(Classroom.DefaultId));
 
     [Fact]
     public async Task VoiceMessage_RelaysFullMinuteWithAuthenticatedSenderAndCorrelatedReply()
@@ -961,9 +993,11 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     {
         var socketClient = _factory.Server.CreateWebSocketClient();
         var clientQuery = string.IsNullOrWhiteSpace(clientKind) ? string.Empty : $"&client={Uri.EscapeDataString(clientKind)}";
-        return await socketClient.ConnectAsync(
+        var socket = await socketClient.ConnectAsync(
             new Uri(_factory.Server.BaseAddress, $"/ws?{Protocol.QueryToken}={Uri.EscapeDataString(token)}{clientQuery}"),
             CancellationToken.None);
+        _sockets.Add(socket);
+        return socket;
     }
 
     private static async Task SendAsync(WebSocket socket, Envelope envelope)

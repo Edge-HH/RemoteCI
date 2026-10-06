@@ -142,7 +142,7 @@ public sealed class ControlModel(
             {
                 Title = string.IsNullOrWhiteSpace(Input.Title) ? "RemoteCI 通知" : Input.Title.Trim(),
                 Message = Input.Message?.Trim() ?? string.Empty,
-                ForceSenderInTitle = await identities.GetForceSenderInTitleAsync(ct),
+                ForceSenderInTitle = await Identities.GetForceSenderInTitleAsync(ct),
                 IsSpeechEnabled = Input.IsSpeechEnabled,
                 IsNotificationSoundEnabled = Input.IsNotificationSoundEnabled,
                 IsNotificationEffectEnabled = Input.IsNotificationEffectEnabled,
@@ -382,15 +382,15 @@ public sealed class ControlModel(
 
         var result = await broadcast.BroadcastAsync(
             new AuthPrincipal(PeerRole.Watch,
-                await identities.GetProfileAsync(CurrentUser.Id, ct),
+                await Identities.GetProfileAsync(CurrentUser.Id, ct),
                 null, null, null),
             new BroadcastCommandRequest
             {
                 Command = CommandKind.SendNotification,
                 Notification = new NotificationRequest
                 {
-                    Title = BroadcastInput.Title,
-                    Message = BroadcastInput.Message,
+                    Title = BroadcastInput.Title ?? string.Empty,
+                    Message = BroadcastInput.Message ?? string.Empty,
                     IsSpeechEnabled = BroadcastInput.IsSpeechEnabled,
                     IsNotificationSoundEnabled = BroadcastInput.IsNotificationSoundEnabled,
                     IsNotificationEffectEnabled = BroadcastInput.IsNotificationEffectEnabled,
@@ -442,7 +442,7 @@ public sealed class ControlModel(
 
     private async Task<CommandResult> SendAsync(CommandMessage command, CancellationToken ct)
     {
-        command.RequestedBy = (await identities.GetProfileAsync(CurrentUser.Id, ct))?.WithPermissions(ClassPermissions);
+        command.RequestedBy = (await Identities.GetProfileAsync(CurrentUser.Id, ct))?.WithPermissions(ClassPermissions);
         command.ClassId = CurrentClassId;
         return await peers.SendCommandAndWaitAsync(command, CurrentClassId, CommandTimeout, ct);
     }

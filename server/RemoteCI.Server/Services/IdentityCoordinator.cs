@@ -99,14 +99,16 @@ public sealed partial class IdentityCoordinator(
         }
         // 历史迁移 AddRolesAndBackups 会在建库时直接插入两个内置角色，导致上面的 AddRange 被跳过；
         // 班主任角色是新增的，必须独立幂等种子才能同时覆盖全新与已升级的数据库。
-        await db.Database.ExecuteSqlRawAsync($"""
+        // 参数化写入：取值与历史种子完全一致（小写 Guid 文本、往返格式时间），不再拼接 SQL 字符串。
+        var seededAt = now.ToString("O");
+        await db.Database.ExecuteSqlAsync($"""
             INSERT OR IGNORE INTO AccountRoles (Id, Name, NormalizedName, Kind, DefaultPermissions, CreatedAt, UpdatedAt)
-            VALUES ('{AccountRole.ClassAdministratorId}', 'ClassAdministrator', 'CLASSADMINISTRATOR', 4, {(int)ClassAdministratorDefaultPermissions}, '{now:O}', '{now:O}');
+            VALUES ({AccountRole.ClassAdministratorId.ToString()}, 'ClassAdministrator', 'CLASSADMINISTRATOR', 4, {(int)ClassAdministratorDefaultPermissions}, {seededAt}, {seededAt});
             """, ct);
         // 老师角色与班主任同理：独立幂等种子，同时覆盖全新与已升级的数据库。
-        await db.Database.ExecuteSqlRawAsync($"""
+        await db.Database.ExecuteSqlAsync($"""
             INSERT OR IGNORE INTO AccountRoles (Id, Name, NormalizedName, Kind, DefaultPermissions, CreatedAt, UpdatedAt)
-            VALUES ('{AccountRole.TeacherId}', 'Teacher', 'TEACHER', 5, {(int)TeacherDefaultPermissions}, '{now:O}', '{now:O}');
+            VALUES ({AccountRole.TeacherId.ToString()}, 'Teacher', 'TEACHER', 5, {(int)TeacherDefaultPermissions}, {seededAt}, {seededAt});
             """, ct);
         if (!await db.BackupConfigurations.AnyAsync(ct)) db.BackupConfigurations.Add(new BackupConfiguration());
         await db.SaveChangesAsync(ct);
