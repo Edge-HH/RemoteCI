@@ -22,7 +22,7 @@ jobs:
         rid: [linux-x64, win-x64]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
       - name: Publish 服务端压缩包
@@ -39,7 +39,7 @@ jobs:
           cd ..
           # 同名校验和文件随包发布；服务端更新前按此校验完整性。
           sha256sum "RemoteCI.Server-${version}-${{ matrix.rid }}.zip" > "RemoteCI.Server-${version}-${{ matrix.rid }}.zip.sha256"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: server-${{ matrix.rid }}
           path: |
@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
       - name: 打包 CIPX
@@ -75,7 +75,7 @@ jobs:
               -ChecksumPath checksums.md \
               -ExpectedVersion "$version"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: plugin-cipx
           path: |
@@ -159,7 +159,7 @@ jobs:
             echo "::error::当前 APK 与上一正式版签名证书不一致，拒绝发布"
             exit 1
           }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: watch-apk
           path: RemoteCI.Watch-*.apk
@@ -233,7 +233,7 @@ jobs:
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - name: 登录 GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -344,7 +344,7 @@ jobs:
             "artifacts/release/RemoteCI-${version}-fnos-x86_64-offline.fpk" \
             "artifacts/release/RemoteCI-${version}-fnos-arm64-offline.fpk" \
             "$version"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: fnos-fpk
           path: artifacts/release/RemoteCI-*.fpk
@@ -355,23 +355,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: server-linux-x64
           path: artifacts/server-linux-x64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: server-win-x64
           path: artifacts/server-win-x64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: plugin-cipx
           path: artifacts/plugin-cipx
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: watch-apk
           path: artifacts/watch-apk
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: mobile-apk
           path: artifacts/mobile-apk
