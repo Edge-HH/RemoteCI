@@ -13,5 +13,112 @@
             <button type="submit">修改并撤销设备登录</button>
         </form>
     </section>
+    @if (Model.CanChangeDisplayName)
+    {
+        <section class="panel">
+            <h2>修改用户名</h2>
+            <form method="post" asp-page-handler="DisplayName" class="stack">
+                @if (Model.DisplayNameError is { } displayNameError)
+                {
+                    <div class="validation" role="alert"><ul><li>@displayNameError</li></ul></div>
+                }
+                <label>用户名<input asp-for="DisplayName.DisplayName" minlength="1" maxlength="40" autocomplete="nickname" required /><small class="muted">用户名会影响老师获取的日程信息。</small></label>
+                <button type="submit">保存用户名</button>
+            </form>
+        </section>
+    }
     <section class="panel"><h2>已登录设备</h2>@if (Model.Sessions.Count == 0) { <p class="muted">暂无手表设备会话。</p> } else { <div class="list">@foreach (var session in Model.Sessions) { <article><div><strong>@session.DeviceName</strong><small>最近使用 @session.LastSeenAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</small></div><form method="post" asp-page-handler="Revoke"><input type="hidden" name="id" value="@session.Id" /><button class="danger ghost" type="submit">撤销</button></form></article> }</div> }</section>
 </div>
+@if (Model.ShowApiPanel)
+{
+    <section class="panel api-key-panel">
+        <div class="panel-heading">
+            <div>
+                <h2>API Key</h2>
+                <p class="muted">使用 <code>Authorization: Bearer &lt;API Key&gt;</code> 调用 RemoteCI REST API。密钥只在创建时显示一次，权限始终跟随当前账号。</p>
+            </div>
+        </div>
+
+        @if (Model.CreatedApiKey is { } created)
+        {
+            <div class="api-key-reveal" role="status">
+                <div>
+                    <strong>@created.ApiKey.Name 已创建</strong>
+                    <p>请立即复制并妥善保存；离开页面后无法再次查看完整密钥。</p>
+                </div>
+                <div class="api-key-secret">
+                    <code>@created.Key</code>
+                    <button type="button" class="ghost" data-copy-value="@created.Key" aria-label="复制 API Key" title="复制 API Key"><i class="bi bi-copy" aria-hidden="true"></i></button>
+                </div>
+            </div>
+        }
+
+        @if (!Model.CanUseApi)
+        {
+            <p class="muted">当前账号没有 API 访问权限，已有密钥已失效；仍可吊销不再使用的密钥。</p>
+        }
+        else
+        {
+            <form method="post" asp-page-handler="CreateApiKey" class="api-key-create">
+                <label>密钥名称<input asp-for="NewApiKey.Name" maxlength="40" placeholder="例如：自动化脚本" /></label>
+                <button type="submit">生成 API Key</button>
+            </form>
+        }
+
+        @if (Model.ApiKeys.Count == 0)
+        {
+            <p class="muted">暂无 API Key。</p>
+        }
+        else
+        {
+            <div class="user-account-table-wrap">
+                <table class="user-account-table api-key-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">名称</th>
+                            <th scope="col">前缀</th>
+                            <th scope="col">创建时间</th>
+                            <th scope="col">最近使用</th>
+                            <th scope="col">状态</th>
+                            <th scope="col"><span class="visually-hidden">操作</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var key in Model.ApiKeys)
+                    {
+                        <tr>
+                            <td data-label="名称"><strong>@key.Name</strong></td>
+                            <td data-label="前缀"><code>@key.Prefix…</code></td>
+                            <td data-label="创建时间">@key.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                            <td data-label="最近使用">@(key.LastUsedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "从未使用")</td>
+                            <td data-label="状态">
+                                @if (key.RevokedAt is not null)
+                                {
+                                    <span class="role-badge muted">已吊销</span>
+                                }
+                                else if (key.ExpiresAt is { } expiresAt && expiresAt <= DateTimeOffset.UtcNow)
+                                {
+                                    <span class="role-badge muted">已过期</span>
+                                }
+                                else
+                                {
+                                    <span class="role-badge">有效</span>
+                                }
+                            </td>
+                            <td class="user-account-action">
+                                @if (key.RevokedAt is null)
+                                {
+                                    <form method="post" asp-page-handler="RevokeApiKey" onsubmit="return confirm('吊销后使用该密钥的脚本会立即失效，确定继续吗？')">
+                                        <input type="hidden" name="id" value="@key.Id" />
+                                        <button type="submit" class="danger ghost">吊销</button>
+                                    </form>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+}

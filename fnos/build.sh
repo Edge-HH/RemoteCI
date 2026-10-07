@@ -4,7 +4,7 @@
 # 用法：
 #   ./fnos/build.sh [版本] [fnpack 路径]
 #   REMOTECI_FPK_MODE=offline REMOTECI_FPK_ARCH=amd64 \
-#     REMOTECI_IMAGE_ARCHIVE=/path/to/remoteci-amd64.tar.gz ./fnos/build.sh 3.2.1.2
+#     REMOTECI_IMAGE_ARCHIVE=/path/to/remoteci-amd64.tar.gz ./fnos/build.sh 3.2.1.4
 #
 # 版本缺省从 REMOTECI_VERSION 或最近的 git tag 读取，均无时回退到
 # server/RemoteCI.Server/RemoteCI.Server.csproj 的 <Version>（本地默认版本唯一来源）。
@@ -22,7 +22,7 @@ FNPACK="${2:-${FNPACK:-$ROOT/.tools/fnpack}}"
 FPK_MODE="${REMOTECI_FPK_MODE:-online}"
 FPK_ARCH="${REMOTECI_FPK_ARCH:-}"
 IMAGE_ARCHIVE="${REMOTECI_IMAGE_ARCHIVE:-}"
-IMAGE_TAG="ghcr.io/memz-edge01/remoteci:$VERSION"
+IMAGE_TAG="ghcr.io/edge-hh/remoteci:$VERSION"
 
 case "$FPK_MODE" in
   online)

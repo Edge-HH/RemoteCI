@@ -61,11 +61,15 @@ object NotificationHelper {
             else -> context.getString(R.string.notification_title_fallback)
         }
 
+        val text = event.message ?: event.subject ?: ""
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle(title)
-            .setContentText(event.message ?: event.subject ?: "")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)
             .build()
 

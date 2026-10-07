@@ -18,7 +18,7 @@ public sealed class ScheduleCatalog(IScheduleBackend backend)
             Days = Enumerable.Range(0, 7).Select(offset => BuildDay(from.AddDays(offset))).ToList(),
             Subjects = backend.Subjects
                 .Where(x => !string.IsNullOrWhiteSpace(x.Value.Name) && x.Value.Name != StateCollector.UnsetSubjectPlaceholder)
-                .Select(x => new SubjectEntry { Id = x.Key, Name = x.Value.Name })
+                .Select(x => new SubjectEntry { Id = x.Key, Name = x.Value.Name, Teacher = NormalizeTeacher(x.Value.TeacherName) })
                 // Ordinal 排序不受运行环境区域设置影响，保证同一课表各端看到的顺序一致。
                 .OrderBy(x => x.Name, StringComparer.Ordinal)
                 .ToList(),
@@ -52,8 +52,16 @@ public sealed class ScheduleCatalog(IScheduleBackend backend)
             Subject = subject?.Name is not null and not StateCollector.UnsetSubjectPlaceholder ? subject.Name : "未设置",
             StartTime = item == TimeLayoutItem.Empty ? null : item.StartTime.ToString("hh\\:mm"),
             EndTime = item == TimeLayoutItem.Empty ? null : item.EndTime.ToString("hh\\:mm"),
+            Teacher = subject is null ? null : NormalizeTeacher(subject.TeacherName),
             Enabled = course.IsEnabled,
         };
+    }
+
+    /// <summary>教师名统一去首尾空白，空白视为未设置。</summary>
+    internal static string? NormalizeTeacher(string? teacherName)
+    {
+        var name = teacherName?.Trim();
+        return string.IsNullOrEmpty(name) ? null : name;
     }
 
     private static string ComputeRevision(ScheduleDay day, Guid? planId)

@@ -13,4 +13,9 @@ public sealed class PluginNetworkInfo
 
     [JsonPropertyName("port")]
     public int Port { get; set; }
+
+    /// <summary>归属班级；缺省表示单班级部署的默认班级。</summary>
+    [JsonPropertyName("classId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? ClassId { get; set; }
 }

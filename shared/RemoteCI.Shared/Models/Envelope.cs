@@ -52,8 +52,14 @@ public sealed class Envelope
     public static Envelope EventNotify(object payload) =>
         New(Protocol.MessageTypeEventNotify, payload);
 
+    public static Envelope UserNotify(UserNotificationView payload) =>
+        New(Protocol.MessageTypeUserNotify, payload);
+
     public static Envelope ExtensionsSync(object payload) =>
         New(Protocol.MessageTypeExtensionsSync, payload);
+
+    public static Envelope ExtensionGroupsSync(object payload) =>
+        New(Protocol.MessageTypeExtensionGroupsSync, payload);
 
     public static Envelope Command(object payload) =>
         New(Protocol.MessageTypeCommand, payload);
@@ -84,6 +90,9 @@ public sealed class Envelope
 
     public static Envelope PeerCapabilities(object payload) =>
         New(Protocol.MessageTypePeerCapabilities, payload);
+
+    public static Envelope SoftwareInventory(object payload) =>
+        New(Protocol.MessageTypeSoftwareInventory, payload);
 
     public static Envelope CapabilitiesSync(object payload) =>
         New(Protocol.MessageTypeCapabilitiesSync, payload);

@@ -1,8 +1,13 @@
 package com.remoteci.watch.data
 
+import java.time.Instant
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
 
 /**
  * 覆盖 ConnectionManager 中与网络无关的纯逻辑：
@@ -11,6 +16,17 @@ import kotlin.test.assertNotEquals
  * 提取为顶层函数后用普通 JVM 单测锁定协议兼容性。
  */
 class ConnectionManagerLogicTest {
+    @Test
+    fun `outgoing envelope timestamp is an iso instant the server can parse`() {
+        // 与 ConnectionManager 的 json 配置一致：encodeDefaults 会把 timestamp 默认值写出。
+        // 服务端与插件把 timestamp 解析为 DateTimeOffset：空字符串会让整条消息被丢弃，命令永远收不到回执。
+        val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
+        val encoded = json.encodeToString(Envelope.serializer(), Envelope(type = Protocol.TYPE_COMMAND))
+        val timestamp = json.parseToJsonElement(encoded).jsonObject.getValue("timestamp").jsonPrimitive.content
+
+        assertTrue(runCatching { Instant.parse(timestamp) }.isSuccess, encoded)
+    }
+
     @Test
     fun `lan proof matches server canonical hmac vector`() {
         val challenge = AuthChallenge(challengeId = "c1", nonce = "n1", expiresAt = "2030-01-01T00:00:00Z")

@@ -13,6 +13,11 @@ public sealed class ScheduleSyncRequest
     [JsonPropertyName("requestedAt")]
     public DateTimeOffset RequestedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    /// <summary>任务目标班级；缺省表示单班级部署的默认班级。</summary>
+    [JsonPropertyName("classId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? ClassId { get; set; }
+
     public static ScheduleSyncRequest Create(ScheduleSyncSource source, string? taskId = null) => new()
     {
         TaskId = string.IsNullOrWhiteSpace(taskId) ? Guid.NewGuid().ToString("N") : taskId,
@@ -45,6 +50,11 @@ public sealed class ScheduleSyncStatus
     [JsonPropertyName("activeTaskId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ActiveTaskId { get; set; }
+
+    /// <summary>任务归属班级；旧版服务端不下发该字段。</summary>
+    [JsonPropertyName("classId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? ClassId { get; set; }
 }
 
 public sealed class ScheduleBundle
@@ -54,6 +64,11 @@ public sealed class ScheduleBundle
 
     [JsonPropertyName("generatedAt")]
     public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>课表归属班级；旧版服务端不下发该字段。</summary>
+    [JsonPropertyName("classId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? ClassId { get; set; }
 
     [JsonPropertyName("days")]
     public List<ScheduleDay> Days { get; set; } = [];
@@ -100,6 +115,11 @@ public sealed class CourseEntry
     [JsonPropertyName("endTime")]
     public string? EndTime { get; set; }
 
+    /// <summary>该科目授课教师名，来自 ClassIsland 档案的 Subject.TeacherName；旧版插件不下发。</summary>
+    [JsonPropertyName("teacher")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Teacher { get; set; }
+
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; }
 }
@@ -111,6 +131,25 @@ public sealed class SubjectEntry
 
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
+
+    /// <summary>授课教师名，来自 ClassIsland 档案的 Subject.TeacherName；旧版插件不下发。</summary>
+    [JsonPropertyName("teacher")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Teacher { get; set; }
+}
+
+/// <summary>SetSubjectTeacher 命令参数：teacherName 为空表示清除该科目的教师。</summary>
+public sealed class SubjectTeacherRequest
+{
+    /// <summary>教师名长度上限；服务端与插件共用同一校验。</summary>
+    public const int MaxTeacherNameLength = 100;
+
+    [JsonPropertyName("subjectId")]
+    public Guid SubjectId { get; set; }
+
+    [JsonPropertyName("teacherName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TeacherName { get; set; }
 }
 
 public sealed class ScheduleChangeRequest
@@ -134,6 +173,83 @@ public sealed class ScheduleChangeRequest
 
     [JsonPropertyName("expectedRevision")]
     public string ExpectedRevision { get; set; } = string.Empty;
+
+    /// <summary>写入 ClassIsland 源课表，使本周及以后每周持续生效。</summary>
+    [JsonPropertyName("permanent")]
+    public bool Permanent { get; set; }
+}
+
+/// <summary>“我的日程”响应：把当前用户任教班级的课表按日期聚合。</summary>
+public sealed class MyScheduleResponse
+{
+    [JsonPropertyName("fromDate")]
+    public string FromDate { get; set; } = string.Empty;
+
+    [JsonPropertyName("generatedAt")]
+    public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("days")]
+    public List<MyScheduleDay> Days { get; set; } = [];
+}
+
+public sealed class MyScheduleDay
+{
+    [JsonPropertyName("date")]
+    public string Date { get; set; } = string.Empty;
+
+    [JsonPropertyName("items")]
+    public List<MyScheduleItem> Items { get; set; } = [];
+}
+
+/// <summary>某一天中用户在某个班级的课程集合。</summary>
+public sealed class MyScheduleItem
+{
+    [JsonPropertyName("classId")]
+    public Guid ClassId { get; set; }
+
+    [JsonPropertyName("className")]
+    public string ClassName { get; set; } = string.Empty;
+
+    [JsonPropertyName("courses")]
+    public List<CourseEntry> Courses { get; set; } = [];
+}
+
+/// <summary>“我的日程”中的一节课：所在班级、课程以及换算成绝对时间的起止时刻。</summary>
+public sealed class MyCourseSlot
+{
+    [JsonPropertyName("date")]
+    public string Date { get; set; } = string.Empty;
+
+    [JsonPropertyName("classId")]
+    public Guid ClassId { get; set; }
+
+    [JsonPropertyName("className")]
+    public string ClassName { get; set; } = string.Empty;
+
+    [JsonPropertyName("course")]
+    public CourseEntry Course { get; set; } = new();
+
+    [JsonPropertyName("startsAt")]
+    public DateTimeOffset StartsAt { get; set; }
+
+    [JsonPropertyName("endsAt")]
+    public DateTimeOffset EndsAt { get; set; }
+}
+
+/// <summary>“下一节课”响应：指定时刻正在上的课与接下来的第一节课；没有时对应字段省略。</summary>
+public sealed class MyNextCourseResponse
+{
+    /// <summary>计算所依据的时刻；请求未指定 at 时为服务端当前时间。</summary>
+    [JsonPropertyName("at")]
+    public DateTimeOffset At { get; set; }
+
+    [JsonPropertyName("current")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MyCourseSlot? Current { get; set; }
+
+    [JsonPropertyName("next")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MyCourseSlot? Next { get; set; }
 }
 
 public sealed class NotificationRequest
@@ -157,4 +273,36 @@ public sealed class NotificationRequest
 
     [JsonPropertyName("isSpeechEnabled")]
     public bool IsSpeechEnabled { get; set; }
+
+    /// <summary>是否在提醒时置顶 ClassIsland 主界面（对齐 ClassIsland 集控的 IsTopmost）。</summary>
+    [JsonPropertyName("isNotificationTopmostEnabled")]
+    public bool IsNotificationTopmostEnabled { get; set; }
+
+    /// <summary>单条提醒的显示秒数；null 或 &lt;= 0 时插件按 ClassIsland 集控默认 5 秒处理。</summary>
+    [JsonPropertyName("durationSeconds")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? DurationSeconds { get; set; }
+
+    /// <summary>重复次数；null 或 &lt; 1 时按 1 次处理（对齐 ClassIsland 集控的 RepeatCounts）。
+    /// 开启滚动时正文滚动 N 遍；关闭滚动时整条提醒依次显示 N 次。</summary>
+    [JsonPropertyName("repeatCounts")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RepeatCounts { get; set; }
+
+    /// <summary>正文是否以横向滚动文本显示；默认关闭，短正文静态显示即可读完。</summary>
+    [JsonPropertyName("isRollingEnabled")]
+    public bool IsRollingEnabled { get; set; }
+
+    /// <summary>把“持续时间（秒）”和“重复次数”归一化为插件可直接使用的取值。</summary>
+    public int EffectiveDurationSeconds => DurationSeconds is null or <= 0
+        ? DefaultDurationSeconds
+        : DurationSeconds.Value;
+
+    public int EffectiveRepeatCounts => RepeatCounts is null or < 1 ? 1 : RepeatCounts.Value;
+
+    /// <summary>与 ClassIsland 集控 SendNotification 一致的默认显示秒数。</summary>
+    public const int DefaultDurationSeconds = 5;
+
+    /// <summary>正文超过该字数且未开启滚动时，各端发送界面提示建议开启滚动。</summary>
+    public const int RollingSuggestionThreshold = 30;
 }

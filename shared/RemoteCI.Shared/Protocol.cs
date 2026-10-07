@@ -17,11 +17,16 @@ public static class Protocol
     public const string MessageTypeAuthState = "auth_state";
     public const string MessageTypeAccountSync = "account_sync";
     public const string MessageTypeExtensionsSync = "extensions_sync";
+    /// <summary>插件向服务端同步扩展分组、设置字段与设备当前设置值；手表与局域网不使用。</summary>
+    public const string MessageTypeExtensionGroupsSync = "extension_groups_sync";
     public const string MessageTypeSettingsSync = "settings_sync";
     public const string MessageTypePluginNetworkInfo = "plugin_network_info";
     public const string MessageTypeConnectionBootstrap = "connection_bootstrap";
     public const string MessageTypePeerCapabilities = "peer_capabilities";
     public const string MessageTypeCapabilitiesSync = "capabilities_sync";
+    public const string MessageTypeSoftwareInventory = "software_inventory";
+    /// <summary>服务端发给某个用户全部在线手机/手表连接的个人通知（例如换课申请），不按班级过滤。</summary>
+    public const string MessageTypeUserNotify = "user_notify";
 
     public const int LanDiscoveryPort = 48765;
     public const string LanDiscoveryRequest = "REMOTECI_DISCOVER_V3";
@@ -35,6 +40,7 @@ public enum PeerRole
 {
     Plugin = 1,
     Watch = 2,
+    Mobile = 3,
 }
 
 public enum UserRole
@@ -61,8 +67,18 @@ public enum UserPermissions
     TeacherComing = 1 << 6,
     RunExtensions = 1 << 7,
     MainMenuControl = 1 << 8,
+    SendVoiceMessages = 1 << 9,
+    // 修改自己的用户可见用户名（DisplayName）；不改变唯一登录 ID。
+    ChangeDisplayName = 1 << 10,
+    // 允许使用 API Key 调用服务端 REST API；API Key 仍会按账号当前权限逐次鉴权。
+    ApiAccess = 1 << 11,
+    // 老师主动发起换课申请（临时换课），由对方老师审批。
+    RequestScheduleSwap = 1 << 12,
+    // 不经审批直接强制换课；对方老师可撤回。
+    ForceScheduleSwap = 1 << 13,
     All = ViewCurrentCourse | AccessWebUi | ManageUsers | SendNotifications | ManageSchedule |
-          PowerControl | TeacherComing | RunExtensions | MainMenuControl,
+          PowerControl | TeacherComing | RunExtensions | MainMenuControl | SendVoiceMessages |
+          ChangeDisplayName | ApiAccess | RequestScheduleSwap | ForceScheduleSwap,
 }
 
 public static class RolePermissions
@@ -70,7 +86,9 @@ public static class RolePermissions
     /// <summary>可授予普通账号或自定义角色的权限集合。</summary>
     public const UserPermissions Assignable = UserPermissions.AccessWebUi | UserPermissions.ManageUsers |
         UserPermissions.SendNotifications | UserPermissions.ManageSchedule | UserPermissions.PowerControl |
-        UserPermissions.TeacherComing | UserPermissions.RunExtensions | UserPermissions.MainMenuControl;
+        UserPermissions.TeacherComing | UserPermissions.RunExtensions | UserPermissions.MainMenuControl |
+        UserPermissions.SendVoiceMessages | UserPermissions.ApiAccess | UserPermissions.RequestScheduleSwap |
+        UserPermissions.ForceScheduleSwap;
 
     public static UserPermissions Effective(
         UserRole role,
@@ -124,6 +142,37 @@ public enum CommandKind
     RunExtension = 7,
     /// <summary>显示“老师来了”强调提醒，等待 1 秒后由插件自动清除。</summary>
     TeacherComing = 8,
+    SendVoiceMessage = 9,
+    /// <summary>升级 ClassIsland 插件；升级包由宿主插件市场处理，重启后生效。</summary>
+    UpgradePlugins = 10,
+    /// <summary>升级 ClassIsland 主程序；由宿主官方更新服务下载并部署。</summary>
+    UpgradeClassIsland = 11,
+    /// <summary>请求插件重新采集并上报应用与插件版本清单。</summary>
+    RefreshSoftwareInventory = 12,
+    /// <summary>通过 ClassIsland 插件市场下载并安装一组插件，重启后生效。</summary>
+    InstallPlugins = 13,
+    /// <summary>卸载一组本地插件，重启后生效。</summary>
+    UninstallPlugins = 14,
+    /// <summary>启用或禁用一组本地插件，重启后生效。</summary>
+    SetPluginEnabled = 15,
+    /// <summary>设置 RemoteCI 远程插件管理策略。</summary>
+    SetPluginManagementPolicy = 16,
+    /// <summary>把档案 JSON 中的时间表、课表或科目分发到设备。</summary>
+    DistributeProfile = 17,
+    /// <summary>新增或整体替换一张 ClassIsland 时间表。</summary>
+    UpdateTimeLayout = 18,
+    /// <summary>让设备加入 ClassIsland 内置集控。</summary>
+    JoinManagement = 19,
+    /// <summary>仅重启 ClassIsland 宿主，不重启 Windows。</summary>
+    RestartClassIsland = 20,
+    /// <summary>设置班级某科目的授课教师名，写入 ClassIsland 档案并随课表推送生效。</summary>
+    SetSubjectTeacher = 21,
+    /// <summary>在设备上执行一条远程终端命令并返回标准输出/错误；无状态，等价于 cmd /d /c。</summary>
+    ExecuteTerminalCommand = 22,
+    /// <summary>把一个文件分发到设备的桌面、下载或文档文件夹；文件名净化，默认不覆盖。</summary>
+    SendFile = 23,
+    /// <summary>修改某个扩展分组在设备上的设置（部分更新），由注册方插件实际写入并生效。</summary>
+    ApplyExtensionSettings = 24,
 }
 
 public enum PowerActionKind
@@ -138,11 +187,23 @@ public static class CommandPermissions
 {
     public static UserPermissions Required(CommandKind command) => command switch
     {
-        CommandKind.ChangeSchedule => UserPermissions.ManageSchedule,
+        CommandKind.ChangeSchedule or CommandKind.SetSubjectTeacher => UserPermissions.ManageSchedule,
         CommandKind.SendNotification or CommandKind.ClearNotifications => UserPermissions.SendNotifications,
+        CommandKind.SendVoiceMessage => UserPermissions.SendVoiceMessages,
         CommandKind.TeacherComing => UserPermissions.TeacherComing,
         CommandKind.SetMainMenuVisibility => UserPermissions.MainMenuControl,
         CommandKind.Power or CommandKind.Volume => UserPermissions.PowerControl,
+        // 服务端另按“系统管理员或获准的班管理员”复核，插件端只校验扩展权限位作为纵深防御。
+        CommandKind.ApplyExtensionSettings => UserPermissions.RunExtensions,
+        // 远程升级、插件管理、集控、终端与文件分发都会改变教室端程序、配置或文件系统，
+        // 与账号管理同属高风险管理员操作。
+        CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
+        CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
+        CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
+        CommandKind.JoinManagement
+        or CommandKind.RestartClassIsland
+        or CommandKind.ExecuteTerminalCommand or CommandKind.SendFile
+            => UserPermissions.ManageUsers,
         _ => UserPermissions.None,
     };
 }
@@ -155,12 +216,33 @@ public static class RemoteCiCapabilities
     public const string SchedulePull = "schedule.pull";
     public const string ScheduleChange = "schedule.change";
     public const string NotificationSend = "notification.send";
+    public const string VoiceMessageSend = "voice-message.send";
     public const string NotificationClear = "notification.clear";
     public const string TeacherComing = "teacher-coming";
     public const string MainMenuVisibility = "main-menu.visibility";
     public const string PowerControl = "power.control";
     public const string VolumeControl = "volume.control";
     public const string ExtensionsRun = "extensions.run";
+    public const string SoftwareInventory = "software.inventory";
+    public const string SoftwareUpgradePlugins = "software.upgrade-plugins";
+    public const string SoftwareUpgradeClassIsland = "software.upgrade-classisland";
+    public const string PluginInstall = "plugin.install";
+    public const string PluginUninstall = "plugin.uninstall";
+    public const string PluginEnable = "plugin.enable";
+    public const string PluginManagementPolicy = "plugin.management-policy";
+    public const string ProfileDistribute = "profile.distribute";
+    public const string TimeLayoutUpdate = "schedule.time-layout";
+    public const string ManagementJoin = "management.join";
+    /// <summary>把换课写入 ClassIsland 源课表（本周及以后每周生效），而不是只写到当天临时课表层。</summary>
+    public const string ScheduleChangePermanent = "schedule.change-permanent";
+    /// <summary>设置班级科目的授课教师（写入 ClassIsland 档案）。</summary>
+    public const string ScheduleSubjectTeacher = "schedule.subject-teacher";
+    /// <summary>在设备上执行远程终端命令并取回输出。</summary>
+    public const string TerminalExecute = "terminal.execute";
+    /// <summary>把文件分发到设备的用户文件夹。</summary>
+    public const string FileDistribute = "file.distribute";
+    /// <summary>同步扩展分组与设置页，并接受远程修改扩展设置。</summary>
+    public const string ExtensionsSettings = "extensions.settings";
 
     /// <summary>没有上报能力列表的旧 V3 端自动获得的基础能力。</summary>
     public static IReadOnlyList<string> Baseline { get; } =
@@ -178,6 +260,12 @@ public static class RemoteCiCapabilities
         ExtensionsRun,
     ];
 
+    /// <summary>当前版本支持的能力；新能力不能加入旧端默认获得的 Baseline。</summary>
+    public static IReadOnlyList<string> Current { get; } =
+        [.. Baseline, VoiceMessageSend, SoftwareInventory, SoftwareUpgradePlugins, SoftwareUpgradeClassIsland,
+            PluginInstall, PluginUninstall, PluginEnable, PluginManagementPolicy, ProfileDistribute, TimeLayoutUpdate, ManagementJoin,
+            ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings];
+
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
     {
@@ -186,12 +274,27 @@ public static class RemoteCiCapabilities
         SchedulePull => "拉取课表",
         ScheduleChange => "修改课表",
         NotificationSend => "发送通知",
+        VoiceMessageSend => "发送语音消息",
         NotificationClear => "清除通知",
         TeacherComing => "老师来了",
         MainMenuVisibility => "控制主界面显示",
         PowerControl => "电源控制",
         VolumeControl => "音量控制",
         ExtensionsRun => "运行扩展功能",
+        SoftwareInventory => "读取软件版本",
+        SoftwareUpgradePlugins => "升级插件",
+        SoftwareUpgradeClassIsland => "升级 ClassIsland",
+        PluginInstall => "安装插件",
+        PluginUninstall => "卸载插件",
+        PluginEnable => "启用或禁用插件",
+        PluginManagementPolicy => "远程插件管理策略",
+        ProfileDistribute => "分发档案",
+        TimeLayoutUpdate => "修改时间表",
+        ManagementJoin => "加入集控",
+        ScheduleSubjectTeacher => "设置科目教师",
+        TerminalExecute => "远程终端",
+        FileDistribute => "文件分发",
+        ExtensionsSettings => "修改扩展设置",
         _ => "未知能力",
     };
 
@@ -199,12 +302,27 @@ public static class RemoteCiCapabilities
     {
         CommandKind.ChangeSchedule => ScheduleChange,
         CommandKind.SendNotification => NotificationSend,
+        CommandKind.SendVoiceMessage => VoiceMessageSend,
         CommandKind.ClearNotifications => NotificationClear,
         CommandKind.TeacherComing => TeacherComing,
         CommandKind.SetMainMenuVisibility => MainMenuVisibility,
         CommandKind.Power => PowerControl,
         CommandKind.Volume => VolumeControl,
         CommandKind.RunExtension => ExtensionsRun,
+        CommandKind.RefreshSoftwareInventory => SoftwareInventory,
+        CommandKind.UpgradePlugins => SoftwareUpgradePlugins,
+        CommandKind.UpgradeClassIsland => SoftwareUpgradeClassIsland,
+        CommandKind.InstallPlugins => PluginInstall,
+        CommandKind.UninstallPlugins => PluginUninstall,
+        CommandKind.SetPluginEnabled => PluginEnable,
+        CommandKind.SetPluginManagementPolicy => PluginManagementPolicy,
+        CommandKind.DistributeProfile => ProfileDistribute,
+        CommandKind.UpdateTimeLayout => TimeLayoutUpdate,
+        CommandKind.JoinManagement => ManagementJoin,
+        CommandKind.SetSubjectTeacher => ScheduleSubjectTeacher,
+        CommandKind.ExecuteTerminalCommand => TerminalExecute,
+        CommandKind.SendFile => FileDistribute,
+        CommandKind.ApplyExtensionSettings => ExtensionsSettings,
         _ => null,
     };
 }
@@ -223,6 +341,7 @@ public enum ScheduleSyncSource
     Watch = 3,
     Automatic = 4,
     Connection = 5,
+    Mobile = 6,
 }
 
 public enum ScheduleSyncTaskState

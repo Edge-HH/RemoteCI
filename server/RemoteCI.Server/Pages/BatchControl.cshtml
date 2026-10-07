@@ -1,0 +1,19 @@
+@page
+@model BatchControlModel
+@{
+    ViewData["Title"] = "批量控制";
+    var onlineDevices = Model.Devices.Count(device => device.Online);
+}
+<div class="page-head">
+    <div>
+        <p class="eyebrow">系统管理员</p>
+        <h1>批量控制</h1>
+        <p class="muted">选择功能并填写参数，再选择目标班级、分组或设备。</p>
+    </div>
+    <span class="status-pill @(onlineDevices > 0 ? "online" : "offline")">@onlineDevices 台设备在线</span>
+</div>
+
+@await Html.PartialAsync("_BatchResults", Model)
+
+@* 动作卡片、参数弹窗与目标选择复用班级控制页共享的局部视图；此处保留完整的目标选择。 *@
+@await Html.PartialAsync("_BatchControlActions", Model)

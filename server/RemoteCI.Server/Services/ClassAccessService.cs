@@ -1,0 +1,209 @@
+using Microsoft.EntityFrameworkCore;
+using RemoteCI.Server.Data;
+using RemoteCI.Shared;
+using RemoteCI.Shared.Models;
+
+namespace RemoteCI.Server.Services;
+
+/// <summary>
+/// 用户与班级的访问关系及按班级的有效权限计算。
+/// 系统管理员自动可访问全部班级；普通用户按 ClassMembership 成员关系与班内角色判定；
+/// “老师”角色账号额外按显示名绑定课表科目教师名获得任教班级的访问与默认权限。
+/// 方法以 userId/role/granted 表达身份，REST 主体（UserProfile）与页面实体（AppUser）都能调用。
+/// </summary>
+public sealed class ClassAccessService(AppDbContext db, TeacherBindingService teachers)
+{
+    /// <summary>老师账号按显示名绑定任教班级时的身份信息：绑定名、全局角色默认权限与角色名。</summary>
+    private sealed record TeacherBinding(string BoundName, UserPermissions RoleDefaults, string RoleName);
+
+    /// <summary>用户的全局角色为内置“老师”时返回其绑定上下文；其他角色返回 null。</summary>
+    private async Task<TeacherBinding?> GetTeacherBindingAsync(Guid userId, CancellationToken ct)
+    {
+        var info = await db.Users.AsNoTracking()
+            .Where(x => x.Id == userId && x.RoleDefinition!.Kind == AccountRoleKind.Teacher)
+            .Select(x => new { x.DisplayName, RoleName = x.RoleDefinition!.Name, x.RoleDefinition!.DefaultPermissions })
+            .SingleOrDefaultAsync(ct);
+        return info is null ? null : new TeacherBinding(info.DisplayName, info.DefaultPermissions, info.RoleName);
+    }
+    /// <summary>用户可访问的班级列表（含每班角色与有效权限），供班级切换器与客户端使用。</summary>
+    public async Task<IReadOnlyList<ClassSummary>> GetAccessibleClassesAsync(
+        Guid userId, UserRole role, UserPermissions granted = UserPermissions.None, CancellationToken ct = default)
+    {
+        if (role == UserRole.Admin)
+        {
+            // SQLite 不支持 DateTimeOffset 排序的 SQL 翻译；班级数量极少，取回后内存排序。
+            var all = await db.Classrooms
+                .Include(x => x.GroupAssignments).ThenInclude(a => a.Group)
+                .AsNoTracking().ToListAsync(ct);
+            return all.OrderBy(x => x.CreatedAt).Select(x => new ClassSummary
+            {
+                Id = x.Id,
+                Name = x.Name,
+                RoleName = "管理员",
+                RoleKind = (int)AccountRoleKind.Administrator,
+                Permissions = UserPermissions.All,
+                VisitorEnabled = x.VisitorAccessEnabled,
+                GroupNames = x.GroupAssignments.Select(a => a.Group.Name).ToList(),
+                HasAvatar = x.Avatar != null,
+            }).ToList();
+        }
+
+        var memberships = await db.ClassMemberships.AsNoTracking()
+            .Where(x => x.UserId == userId)
+            .Join(db.Classrooms, x => x.ClassroomId, y => y.Id, (x, y) => new { Membership = x, Classroom = y })
+            .Join(db.AccountRoles, x => x.Membership.RoleDefinitionId, y => y.Id,
+                (x, y) => new
+                {
+                    x.Classroom.Id,
+                    x.Classroom.Name,
+                    x.Classroom.VisitorAccessEnabled,
+                    x.Classroom.CreatedAt,
+                    x.Classroom.Avatar,
+                    GroupNames = x.Classroom.GroupAssignments.Select(a => a.Group.Name).ToList(),
+                    RoleName = y.Name,
+                    RoleKind = y.Kind,
+                    RoleDefaults = y.DefaultPermissions,
+                })
+            .ToListAsync(ct);
+        var results = memberships.OrderBy(x => x.CreatedAt).Select(x => new ClassSummary
+        {
+            Id = x.Id,
+            Name = x.Name,
+            RoleName = x.RoleName,
+            RoleKind = (int)x.RoleKind,
+            Permissions = EffectiveForMembership(role, x.RoleDefaults, granted),
+            VisitorEnabled = x.VisitorAccessEnabled,
+            GroupNames = x.GroupNames,
+            HasAvatar = x.Avatar != null,
+        }).ToList();
+
+        // 老师按显示名绑定任教班级：成员班级合并任教权限，非成员的任教班级也进入班级列表。
+        var binding = await GetTeacherBindingAsync(userId, ct);
+        if (binding is not null)
+        {
+            var taught = await teachers.GetTaughtClassesAsync(binding.BoundName, ct);
+            foreach (var taughtClass in taught)
+            {
+                var taughtPermissions = EffectiveForMembership(role, binding.RoleDefaults, granted);
+                var member = results.FirstOrDefault(x => x.Id == taughtClass.ClassId);
+                if (member is not null)
+                {
+                    member.Permissions |= taughtPermissions;
+                    continue;
+                }
+                results.Add(new ClassSummary
+                {
+                    Id = taughtClass.ClassId,
+                    Name = taughtClass.ClassName,
+                    RoleName = binding.RoleName,
+                    RoleKind = (int)AccountRoleKind.Teacher,
+                    Permissions = taughtPermissions,
+                    VisitorEnabled = taughtClass.VisitorEnabled,
+                    GroupNames = [],
+                    HasAvatar = taughtClass.HasAvatar,
+                });
+            }
+        }
+        return results;
+    }
+
+    public async Task<IReadOnlyList<Guid>> GetAccessibleClassIdsAsync(
+        Guid userId, UserRole role, CancellationToken ct = default)
+    {
+        if (role == UserRole.Admin)
+        {
+            var ids = await db.Classrooms.AsNoTracking().ToListAsync(ct);
+            return ids.OrderBy(x => x.CreatedAt).Select(x => x.Id).ToList();
+        }
+        var results = await db.ClassMemberships.AsNoTracking()
+            .Where(x => x.UserId == userId)
+            .OrderBy(x => x.ClassroomId)
+            .Select(x => x.ClassroomId)
+            .ToListAsync(ct);
+        var binding = await GetTeacherBindingAsync(userId, ct);
+        if (binding is not null)
+            results.AddRange((await teachers.GetTaughtClassesAsync(binding.BoundName, ct))
+                .Select(x => x.ClassId).Except(results));
+        return results;
+    }
+
+    /// <summary>用户在指定班级的有效权限；非成员且非任教老师返回 None。</summary>
+    public async Task<UserPermissions> GetEffectivePermissionsAsync(
+        Guid userId, UserRole role, Guid classId, UserPermissions granted = UserPermissions.None, CancellationToken ct = default)
+    {
+        if (role == UserRole.Admin) return UserPermissions.All;
+        var roleDefaults = await db.ClassMemberships.AsNoTracking()
+            .Where(x => x.UserId == userId && x.ClassroomId == classId)
+            .Join(db.AccountRoles, x => x.RoleDefinitionId, y => y.Id, (x, y) => (UserPermissions?)y.DefaultPermissions)
+            .SingleOrDefaultAsync(ct);
+        var binding = await GetTeacherBindingAsync(userId, ct);
+        // 任教班级的老师：任教权限来自其全局老师角色的默认权限（角色设置中可追加），
+        // 与班内成员角色权限取并集，保证班主任等成员身份不被覆盖。
+        var taughtPermissions = binding is not null && teachers.IsTaughtClass(binding.BoundName, classId)
+            ? EffectiveForMembership(role, binding.RoleDefaults, granted)
+            : UserPermissions.None;
+        if (roleDefaults is null) return taughtPermissions;
+        return EffectiveForMembership(role, roleDefaults.Value, granted) | taughtPermissions;
+    }
+
+    /// <summary>用户是否可以访问指定班级（访问本身，不含具体权限位判断）。</summary>
+    public async Task<bool> CanAccessAsync(Guid userId, UserRole role, Guid classId, CancellationToken ct = default)
+    {
+        if (role == UserRole.Admin)
+            return await db.Classrooms.AnyAsync(x => x.Id == classId, ct);
+        if (await db.ClassMemberships.AnyAsync(x => x.UserId == userId && x.ClassroomId == classId, ct)) return true;
+        var binding = await GetTeacherBindingAsync(userId, ct);
+        return binding is not null && teachers.IsTaughtClass(binding.BoundName, classId);
+    }
+
+    /// <summary>
+    /// 是否可以管理班级信息（班名/班头像）：系统管理员，或该班级中班内角色为“班主任”的成员。
+    /// </summary>
+    public Task<bool> IsClassAdminAsync(Guid userId, UserRole role, Guid classId, CancellationToken ct = default) =>
+        role == UserRole.Admin
+            ? Task.FromResult(true)
+            : db.ClassMemberships.AsNoTracking()
+                .Where(x => x.UserId == userId && x.ClassroomId == classId)
+                .Join(db.AccountRoles, x => x.RoleDefinitionId, y => y.Id, (x, y) => y.Kind)
+                .AnyAsync(kind => kind == AccountRoleKind.ClassAdministrator, ct);
+
+    /// <summary>
+    /// 用户在指定班级可以自行完成的班级管理操作：系统管理员全部允许；
+    /// 本班班主任按系统管理员统一设置的班级自治策略；其他账号全部禁止。
+    /// </summary>
+    public async Task<ClassSelfServicePolicy> GetClassSelfServiceAsync(
+        Guid userId, UserRole role, Guid classId, CancellationToken ct = default)
+    {
+        if (role == UserRole.Admin) return ClassSelfServicePolicy.All;
+        if (!await IsClassAdminAsync(userId, role, classId, ct)) return ClassSelfServicePolicy.None;
+        return await ClassSelfServiceSettings.ReadAsync(db, ct);
+    }
+
+    /// <summary>解析用户未显式选择班级时的默认班级：第一个可访问班级；没有可访问班级返回 null。</summary>
+    public async Task<Guid?> ResolveDefaultClassIdAsync(Guid userId, UserRole role, CancellationToken ct = default)
+    {
+        if (role == UserRole.Admin)
+        {
+            // 管理员优先落默认班级，保持单班级部署的管理体验。
+            var classes = await db.Classrooms.AsNoTracking().ToListAsync(ct);
+            return classes.OrderBy(x => x.Id == Classroom.DefaultId ? 0 : 1).ThenBy(x => x.CreatedAt)
+                .Select(x => (Guid?)x.Id).FirstOrDefault();
+        }
+        var membershipClassId = await db.ClassMemberships.AsNoTracking().Where(x => x.UserId == userId)
+            .OrderBy(x => x.ClassroomId)
+            .Select(x => (Guid?)x.ClassroomId).FirstOrDefaultAsync(ct);
+        if (membershipClassId is not null) return membershipClassId;
+        // 没有成员关系的老师落到第一个任教班级，保持登录即有所属班级的体验。
+        var binding = await GetTeacherBindingAsync(userId, ct);
+        if (binding is null) return null;
+        return (await teachers.GetTaughtClassesAsync(binding.BoundName, ct))
+            .Select(x => (Guid?)x.ClassId).FirstOrDefault();
+    }
+
+    /// <summary>按成员角色的有效权限：与全局角色同一套规则（ViewCurrentCourse 为底 + 角色默认 + 个人授予）。</summary>
+    public static UserPermissions EffectiveForMembership(
+        UserRole role, UserPermissions membershipRoleDefaults, UserPermissions granted = UserPermissions.None) =>
+        role == UserRole.Admin
+            ? UserPermissions.All
+            : RolePermissions.Effective(UserRole.User, granted, membershipRoleDefaults);
+}

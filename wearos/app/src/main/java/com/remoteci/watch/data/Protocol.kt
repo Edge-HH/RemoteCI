@@ -1,5 +1,6 @@
 package com.remoteci.watch.data
 
+import java.time.Instant
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -47,6 +48,7 @@ object Protocol {
     const val CMD_VOLUME = 6
     const val CMD_RUN_EXTENSION = 7
     const val CMD_TEACHER_COMING = 8
+    const val CMD_SEND_VOICE_MESSAGE = 9
     const val POWER_SHUTDOWN = 1
     const val POWER_RESTART = 2
     const val POWER_SLEEP = 3
@@ -61,6 +63,8 @@ object Protocol {
 
     const val ROLE_USER = 1
     const val ROLE_ADMIN = 2
+    const val ROLE_KIND_CLASS_ADMINISTRATOR = 4
+    const val ROLE_KIND_TEACHER = 5
     const val PERMISSION_VIEW_CURRENT = 1
     const val PERMISSION_ACCESS_WEB_UI = 2
     const val PERMISSION_MANAGE_USERS = 4
@@ -71,6 +75,7 @@ object Protocol {
     const val PERMISSION_TEACHER_COMING = 64
     const val PERMISSION_RUN_EXTENSIONS = 128
     const val PERMISSION_MAIN_MENU_CONTROL = 256
+    const val PERMISSION_SEND_VOICE_MESSAGES = 512
 
     const val SCHEDULE_SOURCE_PLUGIN = 1
     const val SCHEDULE_SOURCE_WEB_UI = 2
@@ -88,6 +93,7 @@ object Protocol {
     const val CAP_SCHEDULE_PULL = "schedule.pull"
     const val CAP_SCHEDULE_CHANGE = "schedule.change"
     const val CAP_NOTIFICATION_SEND = "notification.send"
+    const val CAP_VOICE_MESSAGE_SEND = "voice-message.send"
     const val CAP_NOTIFICATION_CLEAR = "notification.clear"
     const val CAP_TEACHER_COMING = "teacher-coming"
     const val CAP_MAIN_MENU_VISIBILITY = "main-menu.visibility"
@@ -108,6 +114,7 @@ object Protocol {
         CAP_VOLUME_CONTROL,
         CAP_EXTENSIONS_RUN,
     )
+    val CURRENT_CAPABILITIES = BASELINE_CAPABILITIES + CAP_VOICE_MESSAGE_SEND
 }
 
 @Serializable
@@ -116,7 +123,8 @@ data class Envelope(
     val type: String,
     @SerialName("messageId") val messageId: String = "",
     @SerialName("replyToMessageId") val replyToMessageId: String? = null,
-    val timestamp: String = "",
+    // 服务端与插件按 DateTimeOffset 解析：空字符串会让整条消息被丢弃，必须写出有效的 ISO-8601 时间。
+    val timestamp: String = Instant.now().toString(),
     val sender: Int? = null,
     val payload: JsonElement? = null,
 )
@@ -130,11 +138,21 @@ data class PeerCapabilities(
 @Serializable
 data class CapabilitiesSync(
     val server: PeerCapabilities = PeerCapabilities(capabilities = Protocol.BASELINE_CAPABILITIES.toList()),
+    /** 旧版服务端或局域网直连时唯一的插件能力；新版服务端改用 [classPlugins] 按班级下发。 */
     val plugin: PeerCapabilities? = null,
+    /** 每个可访问班级当前主插件的能力；未出现的班级表示该班插件离线。旧版服务端为 null。 */
+    @SerialName("classPlugins") val classPlugins: List<ClassPluginCapabilities>? = null,
+)
+
+@Serializable
+data class ClassPluginCapabilities(
+    @SerialName("classId") val classId: String = "",
+    val plugin: PeerCapabilities = PeerCapabilities(),
 )
 
 @Serializable
 data class ClassStateSnapshot(
+    @SerialName("classId") val classId: String? = null,
     @SerialName("scheduleDate") val scheduleDate: String? = null,
     @SerialName("currentSubject") val currentSubject: String? = null,
     @SerialName("nextClassSubject") val nextClassSubject: String? = null,
@@ -162,6 +180,7 @@ data class ClassStateSnapshot(
 data class ScheduleSyncRequest(
     @SerialName("taskId") val taskId: String,
     val source: Int = Protocol.SCHEDULE_SOURCE_WATCH,
+    @SerialName("classId") val classId: String? = null,
 )
 
 @Serializable
@@ -177,6 +196,7 @@ data class ScheduleSyncStatus(
 
 @Serializable
 data class ScheduleBundle(
+    @SerialName("classId") val classId: String? = null,
     @SerialName("fromDate") val fromDate: String = "",
     @SerialName("generatedAt") val generatedAt: String? = null,
     val days: List<ScheduleDay> = emptyList(),
@@ -208,6 +228,7 @@ data class SubjectEntry(val id: String, val name: String)
 
 @Serializable
 data class ClassEvent(
+    @SerialName("classId") val classId: String? = null,
     val id: String = "",
     val event: Int,
     val subject: String? = null,
@@ -223,6 +244,7 @@ data class ScheduleChangeRequest(
     @SerialName("targetIndex") val targetIndex: Int? = null,
     @SerialName("replacementSubjectId") val replacementSubjectId: String? = null,
     @SerialName("expectedRevision") val expectedRevision: String,
+    val permanent: Boolean = false,
 )
 
 @Serializable
@@ -270,13 +292,21 @@ data class ConnectionBootstrapInfo(
 @Serializable
 data class CommandMessage(
     val command: Int,
+    @SerialName("classId") val classId: String? = null,
     @SerialName("scheduleChange") val scheduleChange: ScheduleChangeRequest? = null,
     val notification: NotificationRequest? = null,
+    @SerialName("voiceMessage") val voiceMessage: VoiceMessageRequest? = null,
     @SerialName("mainMenuVisible") val mainMenuVisible: Boolean? = null,
     @SerialName("powerAction") val powerAction: Int? = null,
     val volume: VolumeControlRequest? = null,
     @SerialName("extensionId") val extensionId: String? = null,
     @SerialName("extensionArgs") val extensionArgs: Map<String, String?>? = null,
+)
+
+@Serializable
+data class VoiceMessageRequest(
+    val format: String = "pcm_s16le_16000_mono",
+    @SerialName("audioBase64") val audioBase64: String,
 )
 
 @Serializable
@@ -295,6 +325,7 @@ data class CommandResult(
 
 @Serializable
 data class ExtensionDefinition(
+    @SerialName("classId") val classId: String? = null,
     val id: String,
     @SerialName("displayName") val displayName: String,
     val icon: String? = null,
@@ -310,7 +341,37 @@ data class ExtensionParameter(
     @SerialName("defaultValue") val defaultValue: String? = null,
     val required: Boolean = false,
     val options: List<String> = emptyList(),
-)
+    /** 与 options 按下标对应的显示名称；缺失或数量不一致时显示原值。 */
+    @SerialName("optionLabels") val optionLabels: List<String>? = null,
+) {
+    /** 候选值在表盘上的显示名称；提交仍使用原始候选值。 */
+    fun optionLabel(value: String?): String {
+        val index = if (value == null) -1 else options.indexOf(value)
+        val labels = optionLabels
+        return when {
+            index < 0 -> value.orEmpty()
+            labels != null && labels.size == options.size && labels[index].isNotBlank() -> labels[index]
+            else -> options[index]
+        }
+    }
+}
+
+@Serializable
+data class ClassSummary(
+    val id: String = "",
+    val name: String = "",
+    @SerialName("roleName") val roleName: String? = null,
+    @SerialName("roleKind") val roleKind: Int? = null,
+    val permissions: Int? = null,
+    @SerialName("visitorEnabled") val visitorEnabled: Boolean = false,
+    @SerialName("groupName") val groupName: String? = null,
+) {
+    /** 本班班主任：优先按角色种类判断；旧版服务端或插件镜像未下发 roleKind 时退回内置角色名。 */
+    val isClassAdministrator: Boolean
+        get() = roleKind?.let { it == Protocol.ROLE_KIND_CLASS_ADMINISTRATOR } ?: (roleName == "班主任" || roleName == "班管理员")
+    val effectivePermissions: Int
+        get() = permissions ?: Protocol.PERMISSION_VIEW_CURRENT
+}
 
 @Serializable
 data class UserProfile(
@@ -318,13 +379,18 @@ data class UserProfile(
     val username: String = "",
     @SerialName("displayName") val displayName: String = "",
     val role: Int = Protocol.ROLE_USER,
+    @SerialName("roleKind") val roleKind: Int? = null,
     @SerialName("grantedPermissions") val grantedPermissions: Int = 0,
     val permissions: Int = Protocol.PERMISSION_VIEW_CURRENT,
     @SerialName("allowedExtensionIds") val allowedExtensionIds: List<String>? = null,
     @SerialName("visibleExtensionIds") val visibleExtensionIds: List<String>? = null,
+    val classes: List<ClassSummary>? = null,
     val version: Long = 0,
 ) {
     val isAdmin: Boolean get() = role == Protocol.ROLE_ADMIN
+    /** 是否可管理指定班级的课表拉取：系统管理员，或该班级的班主任（与服务端按班级校验一致）。 */
+    fun canPullScheduleFor(classId: String?): Boolean =
+        isAdmin || classes?.firstOrNull { it.id == classId }?.isClassAdministrator == true
     fun has(permission: Int): Boolean = permissions and permission == permission
     fun canInvoke(extension: ExtensionDefinition): Boolean =
         has(Protocol.PERMISSION_RUN_EXTENSIONS) &&
@@ -347,11 +413,13 @@ data class RefreshSessionRequest(
 @Serializable
 data class AuthResponse(
     @SerialName("accessToken") val accessToken: String,
+    @SerialName("passwordPending") val passwordPending: Boolean? = null,
+    @SerialName("setupToken") val setupToken: String? = null,
     @SerialName("accessExpiresAt") val accessExpiresAt: String,
     @SerialName("deviceSessionId") val deviceSessionId: String,
     @SerialName("deviceSecret") val deviceSecret: String,
     @SerialName("deviceExpiresAt") val deviceExpiresAt: String,
-    val user: UserProfile,
+    val user: UserProfile = UserProfile(),
 )
 
 @Serializable

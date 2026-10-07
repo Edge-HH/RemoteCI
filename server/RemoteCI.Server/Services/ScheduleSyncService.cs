@@ -1,10 +1,11 @@
+using RemoteCI.Server.Data;
 using RemoteCI.Shared;
 using RemoteCI.Shared.Models;
 
 namespace RemoteCI.Server.Services;
 
 /// <summary>
-/// 服务端课表任务编排：在 WebUI、云端手表、自动任务和连接初始化之间共享运行状态，
+/// 服务端课表任务编排：在 WebUI、云端手表、自动任务和连接初始化之间按班级共享运行状态，
 /// 插件端仍执行最终互斥，以覆盖局域网直连和插件本地按钮。
 /// </summary>
 public sealed class ScheduleSyncService(
@@ -13,20 +14,25 @@ public sealed class ScheduleSyncService(
     ILogger<ScheduleSyncService> logger)
 {
     private static readonly TimeSpan TaskTimeout = TimeSpan.FromSeconds(15);
-    private CancellationTokenSource? _timeout;
+    private readonly Dictionary<Guid, CancellationTokenSource> _timeouts = new();
 
-    public ScheduleSyncStatus? Current => tracker.Current;
+    public ScheduleSyncStatus? Current(Guid classId) => tracker.Current(classId);
 
     public Task<ScheduleSyncStatus> StartAsync(
-        ScheduleSyncSource source, CancellationToken ct = default, string? taskId = null) =>
-        StartCoreAsync(ScheduleSyncRequest.Create(source, taskId), null, ct);
+        ScheduleSyncSource source, Guid classId, CancellationToken ct = default, string? taskId = null)
+    {
+        var request = ScheduleSyncRequest.Create(source, taskId);
+        request.ClassId = classId;
+        return StartCoreAsync(request, null, ct);
+    }
 
     public async Task<ScheduleSyncStatus> StartFromPluginAsync(
-        Guid pluginConnectionId, ScheduleSyncSource source, CancellationToken ct = default)
+        Guid pluginConnectionId, Guid classId, ScheduleSyncSource source, CancellationToken ct = default)
     {
         // 新插件接入拉取直接定向发送；插件端全局闸门负责最终互斥，
         // 避免握手阶段尚未回传 Running 状态时把其他真实请求误判为重复。
         var request = ScheduleSyncRequest.Create(source);
+        request.ClassId = classId;
         var sent = await peers.RequestSchedulePullFromAsync(pluginConnectionId, request, ct);
         return new ScheduleSyncStatus
         {
@@ -36,12 +42,13 @@ public sealed class ScheduleSyncService(
             Message = sent ? "已请求新连接插件同步课表" : "插件连接已失效，无法同步课表",
             StartedAt = DateTimeOffset.UtcNow,
             FinishedAt = sent ? null : DateTimeOffset.UtcNow,
+            ClassId = classId,
         };
     }
 
-    public async Task CompleteFromScheduleAsync(CancellationToken ct = default)
+    public async Task CompleteFromScheduleAsync(Guid classId, CancellationToken ct = default)
     {
-        if (tracker.Current is not { } running) return;
+        if (tracker.Current(classId) is not { } running) return;
         await ObserveAndPublishAsync(new ScheduleSyncStatus
         {
             TaskId = running.TaskId,
@@ -50,19 +57,20 @@ public sealed class ScheduleSyncService(
             Message = "课表已生成并推送完成",
             StartedAt = running.StartedAt,
             FinishedAt = DateTimeOffset.UtcNow,
+            ClassId = classId,
         }, ct);
     }
 
-    public async Task FailActiveAsync(string message, CancellationToken ct = default)
+    public async Task FailActiveAsync(string message, Guid classId, CancellationToken ct = default)
     {
-        if (tracker.Current is not { } running) return;
+        if (tracker.Current(classId) is not { } running) return;
         await ObserveAndPublishAsync(Failure(running, message), ct);
     }
 
     public async Task<ScheduleSyncStatus> StartAndWaitAsync(
-        ScheduleSyncSource source, CancellationToken ct = default)
+        ScheduleSyncSource source, Guid classId, CancellationToken ct = default)
     {
-        var initial = await StartAsync(source, ct);
+        var initial = await StartAsync(source, classId, ct);
         if (initial.State != ScheduleSyncTaskState.Running) return initial;
         try
         {
@@ -82,16 +90,18 @@ public sealed class ScheduleSyncService(
             "插件课表任务状态：{TaskId} {Source} {State} - {Message}",
             status.TaskId, status.Source, status.State, status.Message);
         tracker.Observe(status);
-        if (status.State == ScheduleSyncTaskState.Running) ArmTimeout(status);
-        else if (status.State == ScheduleSyncTaskState.Busy && tracker.Current is { } active) ArmTimeout(active);
-        else if (status.State is ScheduleSyncTaskState.Completed or ScheduleSyncTaskState.Failed) CancelTimeout();
+        var classId = status.ClassId ?? Classroom.DefaultId;
+        if (status.State == ScheduleSyncTaskState.Running) ArmTimeout(status, classId);
+        else if (status.State == ScheduleSyncTaskState.Busy && tracker.Current(classId) is { } active) ArmTimeout(active, classId);
+        else if (status.State is ScheduleSyncTaskState.Completed or ScheduleSyncTaskState.Failed) CancelTimeout(classId);
         await peers.SendScheduleSyncStatusToWatchesAsync(status, ct);
     }
 
     private async Task<ScheduleSyncStatus> StartCoreAsync(
         ScheduleSyncRequest request, Guid? pluginConnectionId, CancellationToken ct)
     {
-        var initial = tracker.TryBegin(request);
+        var classId = request.ClassId ?? Classroom.DefaultId;
+        var initial = tracker.TryBegin(request, classId);
         if (initial.State == ScheduleSyncTaskState.Busy)
         {
             await peers.SendScheduleSyncStatusToWatchesAsync(initial, ct);
@@ -109,32 +119,34 @@ public sealed class ScheduleSyncService(
             return failed;
         }
 
-        ArmTimeout(initial);
+        ArmTimeout(initial, classId);
         return initial;
     }
 
     private async Task ObserveAndPublishAsync(ScheduleSyncStatus status, CancellationToken ct)
     {
         tracker.Observe(status);
-        if (status.State is ScheduleSyncTaskState.Completed or ScheduleSyncTaskState.Failed) CancelTimeout();
+        if (status.State is ScheduleSyncTaskState.Completed or ScheduleSyncTaskState.Failed)
+            CancelTimeout(status.ClassId ?? Classroom.DefaultId);
         await peers.SendScheduleSyncStatusToWatchesAsync(status, ct);
     }
 
-    private void ArmTimeout(ScheduleSyncStatus running)
+    private void ArmTimeout(ScheduleSyncStatus running, Guid classId)
     {
-        CancelTimeout();
+        CancelTimeout(classId);
         var timeout = new CancellationTokenSource();
         var token = timeout.Token;
-        _timeout = timeout;
+        _timeouts[classId] = timeout;
         _ = Task.Run(async () =>
         {
             try
             {
                 await Task.Delay(TaskTimeout, token);
-                if (tracker.Current?.TaskId != running.TaskId) return;
+                if (tracker.Current(classId)?.TaskId != running.TaskId) return;
                 var failed = Failure(running, "课表任务执行超时，请检查插件日志和网络连接");
                 await ObserveAndPublishAsync(failed, CancellationToken.None);
-                logger.LogWarning("课表任务 {TaskId} 执行超时，来源 {Source}", running.TaskId, running.Source);
+                logger.LogWarning("班级 {ClassId} 课表任务 {TaskId} 执行超时，来源 {Source}",
+                    classId, running.TaskId, running.Source);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
@@ -143,11 +155,11 @@ public sealed class ScheduleSyncService(
         });
     }
 
-    private void CancelTimeout()
+    private void CancelTimeout(Guid classId)
     {
-        var timeout = Interlocked.Exchange(ref _timeout, null);
-        timeout?.Cancel();
-        timeout?.Dispose();
+        if (!_timeouts.Remove(classId, out var timeout)) return;
+        timeout.Cancel();
+        timeout.Dispose();
     }
 
     private static ScheduleSyncStatus Failure(ScheduleSyncStatus running, string message) => new()
@@ -158,5 +170,6 @@ public sealed class ScheduleSyncService(
         Message = message,
         StartedAt = running.StartedAt,
         FinishedAt = DateTimeOffset.UtcNow,
+        ClassId = running.ClassId,
     };
 }

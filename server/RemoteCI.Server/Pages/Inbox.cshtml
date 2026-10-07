@@ -1,0 +1,48 @@
+@page
+@model InboxModel
+@{
+    ViewData["Title"] = "通知";
+}
+
+<div class="page-head">
+    <div>
+        <p class="eyebrow">个人</p>
+        <h1>通知</h1>
+        <p class="muted">换课申请、审批结果与强制换课提醒。</p>
+    </div>
+    <form method="post" asp-page-handler="ReadAll">
+        <button type="submit" class="ghost" disabled="@(!Model.Items.Any(x => x.ReadAt is null))">全部标为已读</button>
+    </form>
+</div>
+
+<section class="panel push-settings" data-push-settings data-vapid-key="@Model.VapidPublicKey"
+         data-subscribe-url="@Url.Page("/Inbox", "Subscribe")" data-unsubscribe-url="@Url.Page("/Inbox", "Unsubscribe")">
+    @Html.AntiForgeryToken()
+    <div>
+        <h2>浏览器通知</h2>
+        <p class="muted" data-push-status>开启后，即使关闭网页也会在系统通知中心收到换课提醒。</p>
+    </div>
+    <div class="push-actions">
+        <button type="button" data-push-enable hidden>开启浏览器通知</button>
+        <button type="button" class="ghost" data-push-disable hidden>关闭本浏览器通知</button>
+    </div>
+</section>
+
+<section class="panel">
+    @if (Model.Items.Count == 0)
+    {
+        <p class="muted">暂时没有通知。</p>
+    }
+    <ul class="inbox-list">
+        @foreach (var item in Model.Items)
+        {
+            <li class="inbox-item@(item.ReadAt is null ? " unread" : "")">
+                <a href="@(item.SwapRequestId is null ? "#" : Url.Page("/SwapRequests") + InboxModel.SwapTab(item.Kind))" data-inbox-read="@item.Id">
+                    <strong>@item.Title</strong>
+                    <span class="inbox-body">@item.Body</span>
+                    <time class="muted" datetime="@item.CreatedAt.ToString("O")">@InboxModel.Ago(item.CreatedAt)</time>
+                </a>
+            </li>
+        }
+    </ul>
+</section>

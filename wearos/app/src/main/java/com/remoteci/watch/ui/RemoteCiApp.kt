@@ -31,6 +31,7 @@ import kotlinx.coroutines.withContext
 
 private enum class Screen {
     Login,
+    ClassPicker,
     Home,
     ScheduleOverview,
     ScheduleDatePicker,
@@ -40,6 +41,7 @@ private enum class Screen {
     SubjectPicker,
     Control,
     Notification,
+    VoiceMessage,
     ExtensionForm,
     Power,
     Volume,
@@ -76,6 +78,7 @@ fun RemoteCiApp(context: Context) {
     var sourceIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     var targetIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     var replacementSubjectId by rememberSaveable { mutableStateOf<String?>(null) }
+    var permanentSwap by rememberSaveable { mutableStateOf(false) }
     // 主界面课程按钮直达换课页时标记来源，返回键直接回主页而不是先回日期选择。
     var quickSwapFromHome by rememberSaveable { mutableStateOf(false) }
     var noticeTitle by rememberSaveable { mutableStateOf("") }
@@ -91,6 +94,7 @@ fun RemoteCiApp(context: Context) {
     val connectedServerVersion by ConnectionManager.serverVersion.collectAsState()
     val availableCapabilities by ConnectionManager.availableCapabilities.collectAsState()
     val currentUser by ConnectionManager.currentUser.collectAsState()
+    val currentClassId by ConnectionManager.currentClassId.collectAsState()
     val liveSnapshot by ConnectionManager.snapshot.collectAsState()
     val liveSchedule by ConnectionManager.schedule.collectAsState()
     val liveExtensions by ConnectionManager.extensions.collectAsState()
@@ -144,7 +148,10 @@ fun RemoteCiApp(context: Context) {
     }
     LaunchedEffect(currentUser, availableCapabilities) {
         val user = currentUser
-        if (user != null && screen == Screen.Login) screen = Screen.Home
+        if (user != null && screen == Screen.Login) {
+            // 多班级账号登录后先选班级；单班级账号直接进首页。
+            screen = if (ConnectionManager.classes.value.size > 1) Screen.ClassPicker else Screen.Home
+        }
         if (user != null && (!user.has(Protocol.PERMISSION_MANAGE_SCHEDULE) ||
                 Protocol.CAP_SCHEDULE_CHANGE !in availableCapabilities) &&
             screen in listOf(
@@ -160,10 +167,13 @@ fun RemoteCiApp(context: Context) {
         if (user != null && !user.has(Protocol.PERMISSION_POWER_CONTROL) &&
             screen in listOf(Screen.Power, Screen.Volume))
             screen = Screen.Home
+        if ((user == null || !user.has(Protocol.PERMISSION_SEND_VOICE_MESSAGES) ||
+                Protocol.CAP_VOICE_MESSAGE_SEND !in availableCapabilities) && screen == Screen.VoiceMessage)
+            screen = Screen.Home
         if (user != null && !user.has(Protocol.PERMISSION_SEND_NOTIFICATIONS) &&
+            !user.has(Protocol.PERMISSION_SEND_VOICE_MESSAGES) &&
             !user.has(Protocol.PERMISSION_POWER_CONTROL) &&
             !user.has(Protocol.PERMISSION_MAIN_MENU_CONTROL) &&
-            !user.has(Protocol.PERMISSION_TEACHER_COMING) &&
             !user.has(Protocol.PERMISSION_RUN_EXTENSIONS) && screen == Screen.Control)
             screen = Screen.Home
         val active = activeExtension
@@ -191,6 +201,7 @@ fun RemoteCiApp(context: Context) {
             }
             Screen.ScheduleDatePicker -> Screen.ScheduleOverview
             Screen.Notification -> Screen.Control
+            Screen.VoiceMessage -> Screen.Control
             Screen.ExtensionForm -> Screen.Control
             Screen.Power -> Screen.Control
             Screen.Volume -> Screen.Control
@@ -233,6 +244,10 @@ fun RemoteCiApp(context: Context) {
                 },
             )
 
+            Screen.ClassPicker -> ClassPickerScreen(
+                onPicked = { screen = Screen.Home },
+            )
+
             Screen.Home -> {
                 val scheduleDate = displayedSnapshot?.scheduleDate ?: today.toString()
                 val scheduleDay = displayedSchedule?.days?.firstOrNull { it.date == scheduleDate }
@@ -273,6 +288,9 @@ fun RemoteCiApp(context: Context) {
                     onRetryConnection = {
                         if (ConnectionManager.hasSavedSession()) ConnectionManager.connect(settings) else screen = Screen.Login
                     },
+                    onSwitchClass = if (ConnectionManager.classes.value.size > 1) {
+                        { screen = Screen.ClassPicker }
+                    } else null,
                 )
             }
 
@@ -282,6 +300,7 @@ fun RemoteCiApp(context: Context) {
                 connectionReady = (connectionState is ConnectionManager.State.LanConnected ||
                     connectionState is ConnectionManager.State.CloudConnected) &&
                     Protocol.CAP_SCHEDULE_PULL in availableCapabilities,
+                canPullSchedule = currentUser?.canPullScheduleFor(currentClassId) == true,
                 pullState = schedulePullState,
                 onRequestSchedule = ConnectionManager::requestSchedulePull,
                 onPickDate = { screen = Screen.ScheduleDatePicker },
@@ -317,6 +336,8 @@ fun RemoteCiApp(context: Context) {
                     context.getString(if (it.success) R.string.result_success else R.string.result_failure, it.message)
                 },
                 onModeChange = { swapMode = it },
+                permanent = permanentSwap,
+                onPermanentChange = { permanentSwap = it },
                 onPickSource = { pickerTarget = LessonTarget.Source; screen = Screen.LessonPicker },
                 onPickTarget = {
                     screen = if (swapMode == SwapMode.Exchange) {
@@ -335,6 +356,7 @@ fun RemoteCiApp(context: Context) {
                             targetIndex = if (swapMode == SwapMode.Exchange) targetIndex else null,
                             replacementSubjectId = if (swapMode == SwapMode.Replace) replacementSubjectId else null,
                             expectedRevision = day.revision,
+                            permanent = permanentSwap,
                         ),
                     )
                 },
@@ -365,8 +387,8 @@ fun RemoteCiApp(context: Context) {
                 resultText = commandResult?.let {
                     context.getString(if (it.success) R.string.result_success else R.string.result_failure, it.message)
                 },
-                onTeacherComing = ConnectionManager::teacherComing,
                 onOpenNotification = { screen = Screen.Notification },
+                onOpenVoiceMessage = { screen = Screen.VoiceMessage },
                 onClearNotifications = ConnectionManager::clearNotifications,
                 onToggleMainMenu = {
                     ConnectionManager.setMainMenuVisible(!(displayedSnapshot?.isMainMenuVisible ?: true))
@@ -420,6 +442,12 @@ fun RemoteCiApp(context: Context) {
             onBack = { screen = Screen.Control },
         )
 
+        Screen.VoiceMessage -> VoiceMessageScreen(
+            connectionReady = connectionState is ConnectionManager.State.LanConnected ||
+                connectionState is ConnectionManager.State.CloudConnected,
+            onBack = { screen = Screen.Control },
+        )
+
         Screen.Notification -> NotificationScreen(
             title = noticeTitle,
             message = noticeMessage,
@@ -468,7 +496,14 @@ fun RemoteCiApp(context: Context) {
             stateText = describeConnection(connectionState),
             onSettingsChange = { settings = it; settingsStore.save(it) },
             onReconnect = { settingsStore.save(settings); ConnectionManager.connect(settings) },
-            onLogout = { ConnectionManager.logout(settings); screen = Screen.Login },
+            onLogout = {
+                ConnectionManager.logout(settings)
+                snapshotStore.clear()
+                eventHistory.clear()
+                cachedSnapshot = null
+                cachedSchedule = null
+                screen = Screen.Login
+            },
             onBack = { screen = Screen.Settings },
         )
 

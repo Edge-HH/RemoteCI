@@ -1,0 +1,17 @@
+@model RemoteCI.Shared.Models.SwapRequestView
+@using RemoteCI.Shared.Models
+<div class="swap-slots">
+    @if (Model.Mode == SwapMode.Exchange && Model.Source is not null)
+    {
+        <span class="swap-slot-text">@SwapRequestsModel.SlotText(Model.Source)</span>
+        <span class="swap-arrow" aria-label="互换">⇄</span>
+        <span class="swap-slot-text">@SwapRequestsModel.SlotText(Model.Target)</span>
+    }
+    else
+    {
+        <span class="swap-slot-text">@SwapRequestsModel.SlotText(Model.Target)</span>
+        <span class="swap-arrow" aria-label="替换为">→</span>
+        <span class="swap-slot-text">@Model.SubjectName · @Model.RequesterName</span>
+    }
+</div>
+<p class="muted swap-meta">@Model.CreatedAt.ToLocalTime().ToString("M月d日 HH:mm") 提交 · 编号 @Model.ShortId</p>

@@ -1,16 +1,16 @@
 # Issue tracker: GitHub
 
-RemoteCI 的 issues 和 PRDs 存放在 `MEMZ-Edge01/RemoteCI` 的 GitHub Issues 中，使用 `gh` CLI 操作。
+RemoteCI 的 issues 和 PRDs 存放在 `Edge-HH/RemoteCI` 的 GitHub Issues 中，使用 `gh` CLI 操作。
 
 ## Target guardrail
 
-从本仓库 clone 内运行命令。第一次写入前，运行以下命令；只有输出严格等于 `MEMZ-Edge01/RemoteCI` 时才继续：
+从本仓库 clone 内运行命令。第一次写入前，运行以下命令；只有输出严格等于 `Edge-HH/RemoteCI` 时才继续：
 
 ```powershell
 gh repo view --json nameWithOwner --jq .nameWithOwner
 ```
 
-如果不在本仓库目录中，为每条命令显式添加 `--repo MEMZ-Edge01/RemoteCI`。
+如果不在本仓库目录中，为每条命令显式添加 `--repo Edge-HH/RemoteCI`。
 
 ## Conventions
 
@@ -31,7 +31,7 @@ gh repo view --json nameWithOwner --jq .nameWithOwner
 - **List external PRs for triage**: 使用 REST response 中真实存在的 `author_association` 字段：
 
   ```powershell
-  gh api --paginate 'repos/MEMZ-Edge01/RemoteCI/pulls?state=open&per_page=100' --jq '.[] | select(.author_association != "OWNER" and .author_association != "MEMBER" and .author_association != "COLLABORATOR") | {number, title, author: .user.login, authorAssociation: .author_association, labels: [.labels[].name]}'
+  gh api --paginate 'repos/Edge-HH/RemoteCI/pulls?state=open&per_page=100' --jq '.[] | select(.author_association != "OWNER" and .author_association != "MEMBER" and .author_association != "COLLABORATOR") | {number, title, author: .user.login, authorAssociation: .author_association, labels: [.labels[].name]}'
   ```
 
 - **Comment / label / close**: `gh pr comment`、`gh pr edit --add-label`/`--remove-label`、`gh pr close`。

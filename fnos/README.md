@@ -29,15 +29,15 @@
 
    ```bash
    bash fnos/build.sh          # 使用最近 git tag
-   bash fnos/build.sh 3.2.1.2  # 指定稳定版本
+   bash fnos/build.sh 3.2.1.4  # 指定稳定版本
    ```
 
 3. 构建单架构离线包时，先用 `docker save` 导出带有正式版本标签的镜像，再指定模式、架构和归档路径：
 
    ```bash
-   docker pull --platform linux/amd64 ghcr.io/memz-edge01/remoteci:3.2.1.2
-   docker save ghcr.io/memz-edge01/remoteci:3.2.1.2 | gzip -1 > remoteci-amd64.tar.gz
-   REMOTECI_VERSION=3.2.1.2 \
+   docker pull --platform linux/amd64 ghcr.io/edge-hh/remoteci:3.2.1.4
+   docker save ghcr.io/edge-hh/remoteci:3.2.1.4 | gzip -1 > remoteci-amd64.tar.gz
+   REMOTECI_VERSION=3.2.1.4 \
      REMOTECI_FPK_MODE=offline \
      REMOTECI_FPK_ARCH=amd64 \
      REMOTECI_IMAGE_ARCHIVE=remoteci-amd64.tar.gz \
@@ -45,6 +45,10 @@
    ```
 
 `REMOTECI_FPK_ARCH` 支持 `amd64` 和 `arm64`；脚本会校验 docker-save 归档中的标签、架构和 Image ID，拒绝错误镜像。
+飞牛应用中心把 Intel/AMD 设备记为 `x86`、把 ARM64 设备记为 `arm`，这与 Docker 的 `amd64`/`arm64` 是同一 64 位架构，不是 32 位。
+`x86_64-offline` 包接受 `x86`/`x86_64`/`amd64`，`arm64-offline` 包接受 `arm`/`arm64`/`aarch64`；当前不提供 i386 32 位离线包。
+离线镜像在 `install_init`/`upgrade_init` 阶段导入；该阶段应用数据临时目录可能尚未创建，因此加载器只使用应用中心已准备好的安装解压目录或系统可写临时目录。
+生命周期脚本按 `root` 运行，仅用于访问 fnOS 管理的 Docker daemon、导入随包镜像和检查容器状态；RemoteCI 服务本身仍运行在应用中心管理的容器内。
 
 每个 GitHub Release 发布三种产物：
 
@@ -56,7 +60,7 @@
 
 离线包体积取决于对应版本镜像的压缩结果，表中数值用于下载选择，不是固定上限。
 
-GitHub Actions 的 `release.yml` 会在推送四段稳定标签（如 `3.2.1.2`）或保留的 Beta 标签（如 `v3.2.2-beta.1`）时构建并验证多架构镜像，生成以上三个 FPK，再附加到同一个 GitHub Release。稳定标签同时用于 ClassIsland 插件市场；Beta 仅供测试，不进入市场。当前不向飞牛应用商店提交安装包。
+GitHub Actions 的 `release.yml` 会在推送四段稳定标签（如 `3.2.1.4`）或保留的 Beta 标签（如 `v3.2.2-beta.1`）时构建并验证多架构镜像，生成以上三个 FPK，再附加到同一个 GitHub Release。稳定标签同时用于 ClassIsland 插件市场；Beta 仅供测试，不进入市场。当前不向飞牛应用商店提交安装包。
 
 ## 安装与更新
 

@@ -13,6 +13,6 @@ internal static class PluginAppInfo
     public static PeerCapabilities Capabilities() => new()
     {
         SoftwareVersion = Version,
-        Capabilities = RemoteCiCapabilities.Baseline,
+        Capabilities = RemoteCiCapabilities.Current,
     };
 }

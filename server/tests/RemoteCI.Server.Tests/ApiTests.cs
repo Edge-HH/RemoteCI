@@ -354,6 +354,68 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
     }
 
     [Fact]
+    public async Task DatabaseRestart_PreservesClassRename()
+    {
+        // 同一个数据库文件模拟服务端重启：班主任改过的班名必须落库，重启后仍在。
+        var databasePath = Path.Combine(Path.GetTempPath(), "RemoteCI.Tests", Guid.NewGuid().ToString("N"), "class-rename.db");
+        var renamed = "重启保留班名（改）";
+        Guid classId;
+        await using (var first = TestWebApplicationFactory.ForDatabase(databasePath))
+        {
+            var admin = await first.LoginAsync();
+            var created = await first.CreateClient().SendAsync(TestWebApplicationFactory.Bearer(
+                HttpMethod.Post,
+                "/api/classes",
+                admin.AccessToken,
+                new CreateClassRequest { Name = "重启保留班名" }));
+            created.EnsureSuccessStatusCode();
+            classId = (await created.Content.ReadFromJsonAsync<ClassDetail>())!.Id;
+
+            var renamedResponse = await first.CreateClient().SendAsync(TestWebApplicationFactory.Bearer(
+                HttpMethod.Put,
+                $"/api/classes/{classId}/info",
+                admin.AccessToken,
+                new UpdateClassRequest { Name = renamed }));
+            Assert.Equal(HttpStatusCode.NoContent, renamedResponse.StatusCode);
+        }
+
+        await using var second = TestWebApplicationFactory.ForDatabase(databasePath);
+        var secondAdmin = await second.LoginAsync();
+        var classes = (await (await second.CreateClient().SendAsync(TestWebApplicationFactory.Bearer(
+                HttpMethod.Get,
+                "/api/classes",
+                secondAdmin.AccessToken)))
+            .Content.ReadFromJsonAsync<List<ClassDetail>>())!;
+        Assert.Equal(renamed, classes.Single(x => x.Id == classId).Name);
+    }
+
+    [Fact]
+    public async Task MobileLoginTicket_RedeemsOnceAndCreatesDeviceSession()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        var admin = await factory.LoginAsync();
+        var client = factory.CreateClient();
+
+        using var scope = factory.Services.CreateScope();
+        var identities = scope.ServiceProvider.GetRequiredService<IdentityCoordinator>();
+        var issued = await identities.CreateMobileLoginTicketAsync(admin.User.Id);
+
+        var redeem = await client.PostAsJsonAsync(
+            "/api/auth/mobile-login",
+            new MobileLoginRequest { Ticket = issued.Ticket, DeviceName = "Android Test" });
+        redeem.EnsureSuccessStatusCode();
+        var auth = (await redeem.Content.ReadFromJsonAsync<AuthResponse>())!;
+        Assert.Equal(admin.User.Id, auth.User.Id);
+        Assert.NotEmpty(auth.DeviceSecret);
+
+        // 票据一次性使用：再次兑换同一张票据会被拒绝。
+        var second = await client.PostAsJsonAsync(
+            "/api/auth/mobile-login",
+            new MobileLoginRequest { Ticket = issued.Ticket, DeviceName = "Android Test" });
+        Assert.Equal(HttpStatusCode.Unauthorized, second.StatusCode);
+    }
+
+    [Fact]
     public async Task RazorLogin_PostWithoutCsrfToken_IsRejected()
     {
         var response = await _client.PostAsync("/Login", new FormUrlEncodedContent(new Dictionary<string, string>
@@ -383,6 +445,8 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var usersHtml = WebUtility.HtmlDecode(await browser.GetStringAsync("/Users"));
         Assert.Contains("角色配置", usersHtml);
         Assert.Contains("创建角色", usersHtml);
+        Assert.Contains("自动进入访客页", usersHtml);
+        Assert.Contains("班级管理", usersHtml);
         Assert.Contains("""class="user-account-table role-summary-table""", usersHtml);
         Assert.Contains("""<dialog id="role-create-dialog""", usersHtml);
         var roleTableStart = usersHtml.IndexOf("""class="user-account-table role-summary-table""", StringComparison.Ordinal);
@@ -408,7 +472,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         using (var scope = _factory.Services.CreateScope())
         {
             var store = scope.ServiceProvider.GetRequiredService<IStateStore>();
-            store.SaveSnapshot(new ClassStateSnapshot
+            store.SaveSnapshot(Classroom.DefaultId, new ClassStateSnapshot
             {
                 IsNotificationPlaying = true,
                 IsMainMenuVisible = false,
@@ -418,7 +482,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
                 VolumePercent = 42,
                 IsMuted = false,
             });
-            store.SaveExtensions(new[]
+            store.SaveExtensions(Classroom.DefaultId, new[]
             {
                 new ExtensionDefinition
                 {
@@ -447,13 +511,15 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Contains(@"href=""/Control""", html);
         Assert.DoesNotContain("nav-submenu", html);
         Assert.DoesNotContain(@"href=""/Notifications""", html);
-        Assert.Contains(@"id=""send-notification""", html);
-        Assert.Contains("发送并等待回执", html);
-        Assert.Contains("老师来了", html);
+        Assert.Contains(@"data-batch-open=""Notify""", html);
+        Assert.Contains("通知广播", html);
+        Assert.DoesNotContain("老师来了", html);
         Assert.DoesNotContain("向插件发送单一指令，由插件显示强调提醒并在 1 秒后自动清除。", html);
         Assert.DoesNotContain("正文留空时显示原标题", html);
-        Assert.Contains("清除当前提醒", html);
-        Assert.Contains("显示主菜单", html);
+        Assert.Contains(@"data-batch-open=""ClearNotifications""", html);
+        Assert.Contains(@"data-batch-open=""UpdateTimeLayout""", html);
+        Assert.Contains(@"data-batch-open=""InstallPlugins""", html);
+        Assert.Contains("显示主界面", html);
         Assert.Matches(@"name=""visible""\s+value=""true""", html);
         Assert.Contains("当前音量 42%", html);
         Assert.Matches(@"name=""muted""\s+value=""true""", html);
@@ -502,7 +568,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var subjectId = Guid.NewGuid();
         using (var setupScope = _factory.Services.CreateScope())
         {
-            setupScope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(new ScheduleBundle
+            setupScope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(Classroom.DefaultId, new ScheduleBundle
             {
                 FromDate = "2026-08-17",
                 Days =
@@ -551,7 +617,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Contains("class=\"schedule-pull-button\"", scheduleHtml);
         Assert.Contains("class=\"schedule-submit-button\"", scheduleHtml);
         Assert.Contains("<span>课表</span>", scheduleHtml);
-        Assert.Contains("强制覆盖服务端缓存", scheduleHtml);
+        Assert.Contains("覆盖服务端缓存", scheduleHtml);
         Assert.Contains("data-schedule-pull-progress", scheduleHtml);
         Assert.Contains("""class="schedule-table""", scheduleHtml);
         Assert.Contains("""class="schedule-period-heading">节次""", scheduleHtml);
@@ -661,7 +727,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
     {
         using var scope = _factory.Services.CreateScope();
         var tracker = scope.ServiceProvider.GetRequiredService<ScheduleSyncTaskTracker>();
-        var running = tracker.TryBegin(ScheduleSyncRequest.Create(ScheduleSyncSource.Automatic));
+        var running = tracker.TryBegin(ScheduleSyncRequest.Create(ScheduleSyncSource.Automatic), Classroom.DefaultId);
         try
         {
             using var browser = CreateBrowserClient();
@@ -768,6 +834,272 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/Account")).StatusCode);
     }
 
+    [Fact]
+    public async Task RazorWebUi_ChangeDisplayNameHiddenWithoutPermissionAndRejectedOnPost()
+    {
+        var admin = await _factory.LoginAsync();
+        var create = await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Post,
+            "/api/users",
+            admin.AccessToken,
+            new CreateUserRequest
+            {
+                Username = "name.student",
+                DisplayName = "学生初始用户名",
+                Password = "Name-Student-Password-2026",
+            }));
+        create.EnsureSuccessStatusCode();
+        var created = (await create.Content.ReadFromJsonAsync<UserListItem>())!;
+        Assert.Equal(UserPermissions.None, created.GrantedPermissions);
+
+        using var browser = CreateBrowserClient();
+        await LoginWebUiAsync(browser, "name.student", "Name-Student-Password-2026");
+        var accountHtml = await browser.GetStringAsync("/Account");
+
+        // 学生角色默认不授予“修改用户名”：表单不渲染，绕过界面直接提交也会被拒绝。
+        Assert.DoesNotContain("修改用户名", accountHtml);
+        Assert.DoesNotContain("DisplayName.DisplayName", accountHtml);
+        var denied = await PostRazorFormAsync(browser, "/Account?handler=DisplayName", accountHtml, new Dictionary<string, string>
+        {
+            ["DisplayName.DisplayName"] = "篡改后的用户名",
+        });
+        Assert.Equal(HttpStatusCode.Redirect, denied.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var profile = await scope.ServiceProvider.GetRequiredService<IdentityCoordinator>().GetProfileAsync(created.Id);
+        Assert.Equal("学生初始用户名", profile!.DisplayName);
+    }
+
+    [Fact]
+    public async Task RazorWebUi_ChangeDisplayNameIsAdminOnlyEvenWhenLegacyPermissionRequested()
+    {
+        var admin = await _factory.LoginAsync();
+        var create = await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Post,
+            "/api/users",
+            admin.AccessToken,
+            new CreateUserRequest
+            {
+                Username = "name.granted",
+                DisplayName = "旧用户名",
+                Password = "Name-Granted-Password-2026",
+                GrantedPermissions = UserPermissions.ChangeDisplayName,
+            }));
+        create.EnsureSuccessStatusCode();
+        var created = (await create.Content.ReadFromJsonAsync<UserListItem>())!;
+        // “修改用户名”权限位仅为兼容旧数据保留：新授予会被丢弃，账号也不能自助改名。
+        Assert.Equal(UserPermissions.None, created.GrantedPermissions);
+
+        using var browser = CreateBrowserClient();
+        await LoginWebUiAsync(browser, "name.granted", "Name-Granted-Password-2026");
+        var accountHtml = await browser.GetStringAsync("/Account");
+        Assert.DoesNotContain("DisplayName.DisplayName", accountHtml);
+
+        var denied = await PostRazorFormAsync(browser, "/Account?handler=DisplayName", accountHtml, new Dictionary<string, string>
+        {
+            ["DisplayName.DisplayName"] = "新用户名",
+        });
+        Assert.Equal(HttpStatusCode.Redirect, denied.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var profile = await scope.ServiceProvider.GetRequiredService<IdentityCoordinator>().GetProfileAsync(created.Id);
+        Assert.Equal("旧用户名", profile!.DisplayName);
+    }
+
+    [Fact]
+    public async Task RazorWebUi_AdminChangesOwnDisplayNameAndBlankValueIsRejected()
+    {
+        var admin = await _factory.LoginAsync();
+        var original = admin.User.DisplayName;
+        using var browser = CreateBrowserClient();
+        await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
+        var accountHtml = await browser.GetStringAsync("/Account");
+        Assert.Contains("修改用户名", accountHtml);
+        Assert.Contains("DisplayName.DisplayName", accountHtml);
+
+        var blank = await PostRazorFormAsync(browser, "/Account?handler=DisplayName", accountHtml, new Dictionary<string, string>
+        {
+            ["DisplayName.DisplayName"] = "   ",
+        });
+        Assert.Equal(HttpStatusCode.OK, blank.StatusCode);
+        Assert.Contains("用户名需为 1-40 个字符", WebUtility.HtmlDecode(await blank.Content.ReadAsStringAsync()));
+
+        try
+        {
+            var updated = await PostRazorFormAsync(browser, "/Account?handler=DisplayName", accountHtml, new Dictionary<string, string>
+            {
+                ["DisplayName.DisplayName"] = "新管理员名",
+            });
+            Assert.Equal(HttpStatusCode.Redirect, updated.StatusCode);
+            using var scope = _factory.Services.CreateScope();
+            var profile = await scope.ServiceProvider.GetRequiredService<IdentityCoordinator>().GetProfileAsync(admin.User.Id);
+            Assert.Equal("新管理员名", profile!.DisplayName);
+        }
+        finally
+        {
+            // 管理员账号由整个测试类共享，恢复原名避免影响其他用例。
+            var restoreHtml = await browser.GetStringAsync("/Account");
+            await PostRazorFormAsync(browser, "/Account?handler=DisplayName", restoreHtml, new Dictionary<string, string>
+            {
+                ["DisplayName.DisplayName"] = original,
+            });
+        }
+    }
+
+    [Fact]
+    public async Task ChangeDisplayNamePermissionIsNotAssignableToAccounts()
+    {
+        using var browser = CreateBrowserClient();
+        await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
+        var html = await browser.GetStringAsync("/Users");
+        Assert.DoesNotContain("TeacherComing", html);
+        Assert.DoesNotContain("老师来了", html);
+        Assert.DoesNotContain("Create.ChangeDisplayName", html);
+        Assert.DoesNotContain("\"Edit.ChangeDisplayName\"", html);
+        Assert.Equal(UserPermissions.None, new RemoteCI.Server.Pages.UsersModel.UserInput { ChangeDisplayName = true }.Grants);
+    }
+
+    [Fact]
+    public async Task ApiKey_AuthenticatesAsUserAndUsesCurrentPermissions()
+    {
+        var admin = await _factory.LoginAsync();
+        var create = await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Post,
+            "/api/users",
+            admin.AccessToken,
+            new CreateUserRequest
+            {
+                Username = "api.key.user",
+                DisplayName = "API 用户",
+                Password = "Api-Key-Password-2026",
+                GrantedPermissions = UserPermissions.ApiAccess | UserPermissions.ManageSchedule,
+            }));
+        create.EnsureSuccessStatusCode();
+        var user = (await create.Content.ReadFromJsonAsync<UserListItem>())!;
+
+        ApiKeyCreationResult created;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            created = await scope.ServiceProvider.GetRequiredService<IdentityCoordinator>()
+                .CreateApiKeyAsync(user.Id, "自动化脚本");
+        }
+
+        Assert.StartsWith(IdentityCoordinator.ApiKeyPrefix, created.Key);
+        var me = await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Get, "/api/me", created.Key));
+        me.EnsureSuccessStatusCode();
+        var profile = (await me.Content.ReadFromJsonAsync<UserProfile>())!;
+        Assert.Equal(user.Id, profile.Id);
+        Assert.True(profile.Permissions.HasFlag(UserPermissions.ApiAccess));
+
+        // 用户权限是动态计算的：没有人员管理权限时不能调用用户管理接口。
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Get, "/api/users", created.Key))).StatusCode);
+
+        var update = await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Put,
+            $"/api/users/{user.Id}",
+            admin.AccessToken,
+            new UpdateUserRequest
+            {
+                DisplayName = user.DisplayName,
+                Role = UserRole.User,
+                RoleId = user.RoleId,
+                Enabled = true,
+                GrantedPermissions = UserPermissions.ApiAccess | UserPermissions.ManageUsers,
+            }));
+        update.EnsureSuccessStatusCode();
+
+        // 同一个 Key 无需重建，立即继承账号新增的权限。
+        Assert.Equal(HttpStatusCode.OK, (await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Get, "/api/users", created.Key))).StatusCode);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<IdentityCoordinator>()
+                .RevokeApiKeyAsync(user.Id, created.ApiKey.Id);
+        }
+        Assert.Equal(HttpStatusCode.Unauthorized, (await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Get, "/api/me", created.Key))).StatusCode);
+    }
+
+    [Fact]
+    public async Task ApiKey_RequiresApiAccessPermission()
+    {
+        var admin = await _factory.LoginAsync();
+        var create = await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Post,
+            "/api/users",
+            admin.AccessToken,
+            new CreateUserRequest
+            {
+                Username = "api.no.access",
+                DisplayName = "无 API 权限",
+                Password = "Api-No-Access-2026",
+            }));
+        create.EnsureSuccessStatusCode();
+        var user = (await create.Content.ReadFromJsonAsync<UserListItem>())!;
+
+        using var scope = _factory.Services.CreateScope();
+        var identities = scope.ServiceProvider.GetRequiredService<IdentityCoordinator>();
+        var exception = await Assert.ThrowsAsync<IdentityOperationException>(
+            () => identities.CreateApiKeyAsync(user.Id, "不应创建"));
+        Assert.Equal(ApiErrorCodes.Forbidden, exception.Code);
+        Assert.True(IdentityCoordinator.ClassAdministratorDefaultPermissions.HasFlag(UserPermissions.ApiAccess));
+    }
+
+    [Fact]
+    public async Task ApiKeyPermissionAppearsInUserAndRoleAssignmentForms()
+    {
+        using var browser = CreateBrowserClient();
+        await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
+        var html = await browser.GetStringAsync("/Users");
+        Assert.Contains("Create.ApiAccess", html);
+        Assert.Contains("Edit.ApiAccess", html);
+        Assert.Contains("RoleEdit.ApiAccess", html);
+        Assert.Equal(UserPermissions.ApiAccess, new RemoteCI.Server.Pages.UsersModel.UserInput { ApiAccess = true }.Grants);
+    }
+
+    [Fact]
+    public async Task RazorWebUi_CreatesAndRevealsApiKeyOnce()
+    {
+        var admin = await _factory.LoginAsync();
+        var create = await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Post,
+            "/api/users",
+            admin.AccessToken,
+            new CreateUserRequest
+            {
+                Username = "api.web.user",
+                DisplayName = "网页 API 用户",
+                Password = "Api-Web-Password-2026",
+                GrantedPermissions = UserPermissions.ApiAccess,
+            }));
+        create.EnsureSuccessStatusCode();
+
+        using var browser = CreateBrowserClient();
+        await LoginWebUiAsync(browser, "api.web.user", "Api-Web-Password-2026");
+        var accountHtml = await browser.GetStringAsync("/Account");
+        Assert.Contains("NewApiKey.Name", accountHtml);
+        var response = await PostRazorFormAsync(browser, "/Account?handler=CreateApiKey", accountHtml, new Dictionary<string, string>
+        {
+            ["NewApiKey.Name"] = "网页测试",
+        });
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+
+        var revealedHtml = await browser.GetStringAsync("/Account");
+        var revealedText = WebUtility.HtmlDecode(revealedHtml);
+        Assert.Contains("网页测试", revealedText);
+        var keyMatch = Regex.Match(revealedText, @"rci_[A-Za-z0-9_-]+");
+        Assert.True(keyMatch.Success, "创建后页面必须显示一次完整 API Key");
+        var me = await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Get, "/api/me", keyMatch.Value));
+        Assert.Equal(HttpStatusCode.OK, me.StatusCode);
+
+        var refreshedText = WebUtility.HtmlDecode(await browser.GetStringAsync("/Account"));
+        Assert.DoesNotContain(keyMatch.Value, refreshedText);
+    }
+
     [Theory]
     [InlineData("非法 ID", "Valid-Password-2026", "Create.Username")]
     [InlineData("admin", "Valid-Password-2026", "Create.Username")]
@@ -789,7 +1121,8 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
                 ["Create.Username"] = username,
                 ["Create.DisplayName"] = "应保留的用户名",
                 ["Create.Password"] = password,
-                ["Create.Role"] = ((int)UserRole.Admin).ToString(),
+                // 页面提交的是角色预设 ID；管理员角色不需要分配班级，才能只暴露目标字段错误。
+                ["Create.RoleId"] = AccountRole.AdministratorId.ToString(),
                 ["Create.AccessWebUi"] = "true",
                 ["Create.ManageSchedule"] = "true",
             },
@@ -804,6 +1137,79 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             $"无效字段不匹配：{payload.RootElement}");
         Assert.False(payload.RootElement.TryGetProperty("password", out _));
         Assert.False(payload.RootElement.TryGetProperty("displayName", out _));
+    }
+
+    [Fact]
+    public async Task RazorWebUi_CreateUserRequiresClassForNonAdministratorRole()
+    {
+        using var browser = CreateBrowserClient();
+        await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
+        var usersHtml = await browser.GetStringAsync("/Users");
+        Assert.Contains("data-create-class-select", usersHtml);
+
+        var response = await PostRazorFormAsync(
+            browser,
+            "/Users?handler=Create",
+            usersHtml,
+            new Dictionary<string, string>
+            {
+                ["Create.Username"] = "class.required.user",
+                ["Create.DisplayName"] = "缺班级的学生",
+                ["Create.Password"] = "Class-Required-Password-2026",
+                ["Create.RoleId"] = AccountRole.StudentId.ToString(),
+            },
+            ajax: true);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var invalidFields = payload.RootElement.GetProperty("invalidFields").EnumerateArray()
+            .Select(item => item.GetString()!).ToArray();
+        Assert.Equal(new[] { "Create.ClassId" }, invalidFields);
+
+        // 校验失败时不能留下半个账号。
+        using var scope = _factory.Services.CreateScope();
+        var identities = scope.ServiceProvider.GetRequiredService<IdentityCoordinator>();
+        Assert.DoesNotContain(await identities.ListUsersAsync(), x => x.Username == "class.required.user");
+    }
+
+    [Fact]
+    public async Task RazorWebUi_CreateUserAssignsSelectedClassForNonAdministratorRole()
+    {
+        Guid classId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            classId = (await scope.ServiceProvider.GetRequiredService<ClassroomService>()
+                .CreateAsync("班级分配测试班")).Id;
+        }
+
+        using var browser = CreateBrowserClient();
+        await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
+        var usersHtml = await browser.GetStringAsync("/Users");
+        var response = await PostRazorFormAsync(
+            browser,
+            "/Users?handler=Create",
+            usersHtml,
+            new Dictionary<string, string>
+            {
+                ["Create.Username"] = "class.assigned.user",
+                ["Create.DisplayName"] = "已分配班级的班主任",
+                ["Create.Password"] = "Class-Assigned-Password-2026",
+                ["Create.RoleId"] = AccountRole.ClassAdministratorId.ToString(),
+                ["Create.ClassId"] = classId.ToString(),
+            },
+            ajax: true);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(string.IsNullOrWhiteSpace(payload.RootElement.GetProperty("redirectUrl").GetString()));
+
+        using var verifyScope = _factory.Services.CreateScope();
+        var db = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var user = await db.Users.AsNoTracking().SingleAsync(x => x.UserName == "class.assigned.user");
+        Assert.Equal(AccountRole.ClassAdministratorId, user.RoleDefinitionId);
+        var membership = await db.ClassMemberships.AsNoTracking()
+            .SingleAsync(x => x.UserId == user.Id && x.ClassroomId == classId);
+        Assert.Equal(AccountRole.ClassAdministratorId, membership.RoleDefinitionId);
     }
 
     [Fact]
@@ -955,6 +1361,9 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var overviewHtml = await browser.GetStringAsync("/");
         Assert.Contains("生成配对码", overviewHtml);
         Assert.Contains("重新检测连接", overviewHtml);
+        Assert.Contains("data-mobile-login-qr", overviewHtml);
+        Assert.Contains("手机扫码登录", WebUtility.HtmlDecode(overviewHtml));
+        Assert.Contains(WebUtility.HtmlEncode(_factory.Server.BaseAddress.ToString().TrimEnd('/')), overviewHtml);
         Assert.DoesNotContain("去重试连接</a>", overviewHtml);
 
         var retry = await PostRazorFormAsync(browser, "/?handler=RetryConnection", overviewHtml);
@@ -1036,7 +1445,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             new CreateUserRequest
             {
                 Username = "teacher.alert",
-                DisplayName = "老师来了权限测试",
+                DisplayName = "快捷提醒权限测试",
                 Password = "Teacher-Alert-Password-2026",
                 GrantedPermissions = UserPermissions.AccessWebUi | UserPermissions.TeacherComing,
             }));
@@ -1064,9 +1473,10 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         using var browser = CreateBrowserClient();
         await LoginWebUiAsync(browser, "teacher.alert", "Teacher-Alert-Password-2026");
         var html = WebUtility.HtmlDecode(await browser.GetStringAsync("/Control"));
-        Assert.Contains("老师来了", html);
-        Assert.DoesNotContain(@"id=""send-notification""", html);
-        Assert.DoesNotContain("清除当前提醒", html);
+        Assert.DoesNotContain("老师来了", html);
+        Assert.DoesNotContain(@"data-batch-open=""Notify""", html);
+        Assert.DoesNotContain(@"data-batch-open=""Power""", html);
+        Assert.DoesNotContain(@"id=""batch-target-dialog""", html);
     }
 
     [Fact]
@@ -1083,7 +1493,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         {
             var identities = scope.ServiceProvider.GetRequiredService<IdentityCoordinator>();
             var policies = scope.ServiceProvider.GetRequiredService<ExtensionPolicyService>();
-            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveExtensions([definition]);
+            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveExtensions(Classroom.DefaultId, [definition]);
             await policies.EnsureRegisteredAsync([definition]);
             var admin = (await identities.ListUsersAsync()).Single(x => x.Role == UserRole.Admin);
             await policies.UpdateAdminAsync(admin.Id, definition.Id, enabled: true, allowNonAdmin: true, showOnWatch: true);
@@ -1143,7 +1553,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Contains("<span>控制</span>", accountHtml);
         var control = await browser.GetAsync("/Control");
         Assert.Equal(HttpStatusCode.OK, control.StatusCode);
-        Assert.Contains("老师来了", WebUtility.HtmlDecode(await control.Content.ReadAsStringAsync()));
+        Assert.DoesNotContain("老师来了", WebUtility.HtmlDecode(await control.Content.ReadAsStringAsync()));
     }
 
     [Fact]
@@ -1169,8 +1579,8 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Equal(HttpStatusCode.OK, schedule.StatusCode);
         var scheduleHtml = WebUtility.HtmlDecode(await schedule.Content.ReadAsStringAsync());
         Assert.Contains("未来七日课表", scheduleHtml);
-        Assert.Contains("立即拉取课表", scheduleHtml);
-        Assert.DoesNotContain("提交修改", scheduleHtml);
+        Assert.DoesNotContain("立即拉取课表", scheduleHtml);
+        Assert.DoesNotContain("提交换课", scheduleHtml);
         Assert.DoesNotContain("自动拉取课表", scheduleHtml);
         var pull = await PostRazorFormAsync(
             browser,
@@ -1466,6 +1876,47 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
     }
 
     [Fact]
+    public async Task DeviceInventory_ExcludesRevokedCredentialsButKeepsAuditList()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), "RemoteCI.Tests", Guid.NewGuid().ToString("N"), "device-inventory.db");
+        await using var factory = TestWebApplicationFactory.ForDatabase(databasePath);
+        var client = factory.CreateClient();
+        await factory.GetPluginTokenAsync();
+        var admin = await factory.LoginAsync();
+
+        var list = await client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Get, "/api/plugins/credentials", admin.AccessToken));
+        list.EnsureSuccessStatusCode();
+        var credential = Assert.Single((await list.Content.ReadFromJsonAsync<List<PluginCredentialInfo>>())!);
+
+        // 已分配且启用的凭据出现在批量控制的设备目录里（离线也保留，用于解释为什么不能选择）。
+        using (var scope = factory.Services.CreateScope())
+        {
+            var inventory = scope.ServiceProvider.GetRequiredService<DeviceInventoryService>();
+            var devices = await inventory.ListAsync();
+            Assert.Contains(devices, x => x.CredentialId == credential.Id);
+        }
+
+        // 吊销后：设备目录不再包含它，但管理页仍保留禁用记录用于审计。
+        var revoke = await client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Delete, $"/api/plugins/credentials/{credential.Id}", admin.AccessToken));
+        Assert.Equal(HttpStatusCode.NoContent, revoke.StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var inventory = scope.ServiceProvider.GetRequiredService<DeviceInventoryService>();
+            var devices = await inventory.ListAsync();
+            Assert.DoesNotContain(devices, x => x.CredentialId == credential.Id);
+        }
+
+        var after = await client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Get, "/api/plugins/credentials", admin.AccessToken));
+        after.EnsureSuccessStatusCode();
+        var audited = (await after.Content.ReadFromJsonAsync<List<PluginCredentialInfo>>())!;
+        Assert.False(audited.Single(x => x.Id == credential.Id).Enabled);
+    }
+
+    [Fact]
     public async Task RazorWebUi_PluginCredentialsVisibleToAdminAndRevocable()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), "RemoteCI.Tests", Guid.NewGuid().ToString("N"), "credential-ui.db");
@@ -1543,6 +1994,59 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.True(admin.AccessToken.Length > 0);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task VoicePermission_IsIndependentInRestAndWebUi(bool voiceGranted)
+    {
+        var username = voiceGranted ? "voice.only" : "notice.only";
+        var admin = await _factory.LoginAsync();
+        var create = await _client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post, "/api/users", admin.AccessToken,
+            new CreateUserRequest
+            {
+                Username = username, DisplayName = "语音权限测试", Password = "Voice-Password-2026",
+                GrantedPermissions = UserPermissions.AccessWebUi |
+                    (voiceGranted ? UserPermissions.SendVoiceMessages : UserPermissions.SendNotifications),
+            }));
+        create.EnsureSuccessStatusCode();
+        var auth = await LoginAsync(username, "Voice-Password-2026");
+        var response = await _client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post, "/api/commands", auth.AccessToken,
+            new CommandMessage { Command = CommandKind.SendVoiceMessage, VoiceMessage = new() { AudioBase64 = "AAA=" } }));
+        Assert.Equal(voiceGranted ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.Forbidden, response.StatusCode);
+        using var browser = CreateBrowserClient();
+        await LoginWebUiAsync(browser, username, "Voice-Password-2026");
+        var html = await browser.GetStringAsync("/Control");
+        Assert.Equal(voiceGranted, html.Contains("data-voice-form"));
+        Assert.Equal(!voiceGranted, html.Contains(@"data-batch-open=""Notify"""));
+        // 二进制上传仍受 Razor 防伪保护，不能通过跨站请求触发教室播放。
+        using var missingToken = new ByteArrayContent([0, 0]);
+        missingToken.Headers.ContentType = new("application/octet-stream");
+        Assert.Equal(HttpStatusCode.BadRequest, (await browser.PostAsync("/Control?handler=VoiceMessage", missingToken)).StatusCode);
+        var token = Regex.Match(html, "name=\"__RequestVerificationToken\"[^>]+value=\"([^\"]+)\"").Groups[1].Value;
+        using var upload = new HttpRequestMessage(HttpMethod.Post, "/Control?handler=VoiceMessage") { Content = new ByteArrayContent([0, 0]) };
+        upload.Headers.Add("X-CSRF-TOKEN", WebUtility.HtmlDecode(token));
+        upload.Content.Headers.ContentType = new("application/octet-stream");
+        var uploaded = await browser.SendAsync(upload);
+        if (voiceGranted)
+        {
+            uploaded.EnsureSuccessStatusCode();
+            Assert.Equal(CommandResultCodes.PluginOffline, (await uploaded.Content.ReadFromJsonAsync<CommandResult>())!.Code);
+        }
+        else Assert.Equal(HttpStatusCode.Redirect, uploaded.StatusCode);
+    }
+
+    [Fact]
+    public async Task VoicePermissionAppearsInUserAndRoleAssignmentForms()
+    {
+        using var browser = CreateBrowserClient();
+        await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
+        var html = await browser.GetStringAsync("/Users");
+        Assert.Contains("Create.SendVoiceMessages", html);
+        Assert.Contains("Edit.SendVoiceMessages", html);
+        Assert.Contains("RoleEdit.SendVoiceMessages", html);
+        Assert.Equal(UserPermissions.SendVoiceMessages, new RemoteCI.Server.Pages.UsersModel.UserInput { SendVoiceMessages = true }.Grants);
+    }
+
     private HttpClient CreateBrowserClient() => _factory.CreateClient(new WebApplicationFactoryClientOptions
     {
         AllowAutoRedirect = false,
@@ -1563,7 +2067,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             ["Input.Password"] = password,
             ["__RequestVerificationToken"] = WebUtility.HtmlDecode(match.Groups[1].Value),
         }));
-        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal(HttpStatusCode.SeeOther, response.StatusCode);
     }
 
     private static async Task<HttpResponseMessage> PostRazorFormAsync(
@@ -1638,6 +2142,26 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             return JsonSerializer.Deserialize<T>(
                 JsonSerializer.Serialize(envelope.Payload), JsonDefaults.Options)!;
         }
+    }
+
+    [Fact]
+    public async Task MobileAdminApis_RolesAndVisitorRoundTrip()
+    {
+        var admin = await LoginViaAsync(_client, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
+        var roles = await _client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, "/api/roles", admin.AccessToken));
+        roles.EnsureSuccessStatusCode();
+        var visitor = await _client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, "/api/visitor", admin.AccessToken));
+        visitor.EnsureSuccessStatusCode();
+        var updated = await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Put, "/api/visitor", admin.AccessToken,
+            new VisitorAutoEnterBody(true)));
+        updated.EnsureSuccessStatusCode();
+        var state = await updated.Content.ReadFromJsonAsync<Dictionary<string, object>>();
+        Assert.NotNull(state);
+        var reset = await _client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Put, "/api/visitor", admin.AccessToken,
+            new VisitorAutoEnterBody(false)));
+        reset.EnsureSuccessStatusCode();
     }
 
     private static async Task<AuthResponse> LoginViaAsync(HttpClient client, string username, string password)

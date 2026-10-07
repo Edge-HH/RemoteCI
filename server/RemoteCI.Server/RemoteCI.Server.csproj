@@ -7,7 +7,7 @@
     <RootNamespace>RemoteCI.Server</RootNamespace>
     <LangVersion>latest</LangVersion>
     <!-- 软件版本与协议版本独立；任意 3.x.x 软件通过协议 V3 的能力协商互通。 -->
-    <Version>3.2.1.2</Version>
+    <Version>3.2.1.4</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,8 +28,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.105.1" />
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.11" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+    <PackageReference Include="QRCoder" Version="1.7.0" />
     <!-- 2.1.12 覆盖 EF 的易受攻击传递版本 2.1.11。 -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.11">

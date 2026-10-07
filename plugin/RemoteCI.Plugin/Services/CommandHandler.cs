@@ -16,25 +16,46 @@ public sealed class CommandHandler
     private readonly IProfileWriteOperations _profileOps;
     private readonly RemoteNotificationProvider _notifications;
     private readonly ClassIslandHostControlService _hostControl;
+    private readonly SoftwareInventoryService _softwareInventory;
+    private readonly PluginManagementService _pluginManagement;
+    private readonly ProfileManagementService _profileManagement;
+    private readonly ManagementJoinService _managementJoin;
+    private readonly TerminalCommandService _terminal;
+    private readonly FileReceiveService _files;
     private readonly ILogger _logger;
     private readonly ExtensionCommandRouter _extensionRouter;
+    private readonly VoiceMessagePlayer _voiceMessages;
 
     public CommandHandler(
         ScheduleCatalog schedules,
         IScheduleBackend scheduleBackend,
         IProfileWriteOperations profileOps,
         ClassIslandHostControlService hostControl,
+        SoftwareInventoryService softwareInventory,
+        PluginManagementService pluginManagement,
+        ProfileManagementService profileManagement,
+        ManagementJoinService managementJoin,
         IEnumerable<IHostedService> hostedServices,
         IRemoteCiExtensionRegistry extensions,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        VoiceMessagePlayer? voiceMessages = null,
+        TerminalCommandService? terminal = null,
+        FileReceiveService? files = null)
     {
         _schedules = schedules;
         _scheduleBackend = scheduleBackend;
         _profileOps = profileOps;
         _hostControl = hostControl;
+        _softwareInventory = softwareInventory;
+        _pluginManagement = pluginManagement;
+        _profileManagement = profileManagement;
+        _managementJoin = managementJoin;
         _notifications = hostedServices.OfType<RemoteNotificationProvider>().Single();
+        _terminal = terminal ?? new TerminalCommandService(loggerFactory.CreateLogger<TerminalCommandService>());
+        _files = files ?? new FileReceiveService(loggerFactory.CreateLogger<FileReceiveService>());
         _logger = loggerFactory.CreateLogger<CommandHandler>();
         _extensionRouter = new ExtensionCommandRouter(extensions, loggerFactory);
+        _voiceMessages = voiceMessages ?? new VoiceMessagePlayer();
     }
 
     public event Action<ClassEvent>? NotificationSent;
@@ -43,13 +64,23 @@ public sealed class CommandHandler
 
     /// <summary>插件停止时取消尚未执行的睡眠/休眠电源操作。</summary>
     public void CancelPendingPowerActions() => _hostControl.CancelPendingPowerActions();
+    public void StopVoiceMessage() => _voiceMessages.Stop();
 
     public async Task<CommandResult> HandleAsync(CommandMessage command)
     {
         // 扩展命令同时使用独立扩展权限、服务端策略和注册项动态权限，不走静态命令表。
         if (command.Command == CommandKind.RunExtension)
             return await _extensionRouter.RunAsync(command);
+        if (command.Command == CommandKind.ApplyExtensionSettings)
+            return await _extensionRouter.ApplySettingsAsync(command);
 
+        // 远程升级、插件管理、集控、终端与文件分发属于宿主级维护，即使账号被授予 ManageUsers 也只允许系统管理员执行。
+        if (command.Command is (CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
+            CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
+            CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
+            CommandKind.JoinManagement or CommandKind.RestartClassIsland or
+            CommandKind.ExecuteTerminalCommand or CommandKind.SendFile) && command.RequestedBy?.Role != UserRole.Admin)
+            return CommandResult.Failure(CommandResultCodes.Forbidden, "仅系统管理员可以执行远程维护操作");
         var required = CommandPermissions.Required(command.Command);
         if (required == UserPermissions.None)
             return CommandResult.Failure(CommandResultCodes.InvalidRequest, $"未知指令：{command.Command}");
@@ -61,14 +92,29 @@ public sealed class CommandHandler
             return command.Command switch
             {
                 CommandKind.ChangeSchedule => await HandleScheduleChangeAsync(command.ScheduleChange),
+                CommandKind.SetSubjectTeacher => await HandleSetSubjectTeacherAsync(command.SubjectTeacher),
                 CommandKind.SendNotification => await HandleNotificationAsync(
                     command.Notification,
+                    GetNotificationSenderName(command.RequestedBy)),
+                CommandKind.SendVoiceMessage => await HandleVoiceMessageAsync(command.VoiceMessage,
                     GetNotificationSenderName(command.RequestedBy)),
                 CommandKind.ClearNotifications => await HandleClearNotificationsAsync(),
                 CommandKind.TeacherComing => await HandleTeacherComingAsync(),
                 CommandKind.SetMainMenuVisibility => await HandleMainMenuVisibilityAsync(command.MainMenuVisible),
                 CommandKind.Power => HandlePowerAction(command.PowerAction),
                 CommandKind.Volume => HandleVolume(command.Volume),
+                CommandKind.RefreshSoftwareInventory => _softwareInventory.Refresh(),
+                CommandKind.UpgradePlugins => _softwareInventory.StartPluginUpgrade(command.SoftwareUpgrade),
+                CommandKind.UpgradeClassIsland => _softwareInventory.StartClassIslandUpgrade(command.SoftwareUpgrade),
+                CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled =>
+                    await _pluginManagement.HandleAsync(command.Command, command.PluginManagement),
+                CommandKind.SetPluginManagementPolicy => _pluginManagement.SetPolicy(command.PluginManagementPolicy),
+                CommandKind.UpdateTimeLayout => await _profileManagement.UpdateTimeLayoutAsync(command.TimeLayoutUpdate),
+                CommandKind.DistributeProfile => await _profileManagement.DistributeProfileAsync(command.ProfileDistribution),
+                CommandKind.JoinManagement => await _managementJoin.JoinAsync(command.ManagementJoin),
+                CommandKind.RestartClassIsland => HandleClassIslandRestart(),
+                CommandKind.ExecuteTerminalCommand => await _terminal.ExecuteAsync(command.TerminalCommand),
+                CommandKind.SendFile => await _files.SaveAsync(command.FileDistribution),
                 _ => CommandResult.Failure(CommandResultCodes.InvalidRequest, $"未知指令：{command.Command}"),
             };
         }
@@ -85,6 +131,18 @@ public sealed class CommandHandler
             return CommandResult.Failure(CommandResultCodes.InvalidRequest, validationError);
 
         var result = await Dispatcher.UIThread.InvokeAsync(() => ApplyScheduleChange(date, request!));
+        if (result.Success) ScheduleChanged?.Invoke();
+        return result;
+    }
+
+    private async Task<CommandResult> HandleSetSubjectTeacherAsync(SubjectTeacherRequest? request)
+    {
+        if (SubjectTeacherExecutor.Validate(request) is { } validationError)
+            return validationError;
+
+        var result = await Dispatcher.UIThread.InvokeAsync(() =>
+            SubjectTeacherExecutor.Apply(request!, _profileOps,
+                ex => _logger.LogError(ex, "保存科目教师失败：{SubjectId}", request!.SubjectId)));
         if (result.Success) ScheduleChanged?.Invoke();
         return result;
     }
@@ -122,7 +180,11 @@ public sealed class CommandHandler
             message,
             request.IsNotificationEffectEnabled,
             request.IsNotificationSoundEnabled,
-            request.IsSpeechEnabled);
+            request.IsSpeechEnabled,
+            request.IsNotificationTopmostEnabled,
+            request.EffectiveDurationSeconds,
+            request.EffectiveRepeatCounts,
+            request.IsRollingEnabled);
         NotificationSent?.Invoke(new ClassEvent
         {
             Event = ClassEventKind.Custom,
@@ -130,6 +192,23 @@ public sealed class CommandHandler
             Message = message,
         });
         return Success("通知已在 ClassIsland 显示并广播到在线手表");
+    }
+
+    private async Task<CommandResult> HandleVoiceMessageAsync(VoiceMessageRequest? request, string senderName)
+    {
+        if (!VoiceMessageRequest.TryDecode(request, out var audio))
+            return CommandResult.Failure(CommandResultCodes.InvalidRequest, "语音格式无效或超过 60 秒");
+        var title = $"来自{senderName}的语音消息";
+        var result = await Dispatcher.UIThread.InvokeAsync(() => _voiceMessages.Play(audio, title));
+        if (!result.Success) return result;
+        try
+        {
+            // 语音自行播放，通知不叠加提示音或文字朗读。
+            await _notifications.ShowVoiceMessageNotificationAsync(title);
+        }
+        catch { _voiceMessages.Stop(); throw; }
+        NotificationSent?.Invoke(new ClassEvent { Event = ClassEventKind.Custom, Subject = title, Message = string.Empty });
+        return result;
     }
 
     private async Task<CommandResult> HandleClearNotificationsAsync()
@@ -189,6 +268,12 @@ public sealed class CommandHandler
             PowerActionKind.Hibernate => "Windows 即将进入休眠",
             _ => "电源操作已提交",
         });
+    }
+
+    private CommandResult HandleClassIslandRestart()
+    {
+        _hostControl.ScheduleClassIslandRestart();
+        return Success("ClassIsland 即将重启");
     }
 
     private CommandResult HandleVolume(VolumeControlRequest? request)

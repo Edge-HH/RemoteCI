@@ -1,0 +1,12 @@
+# fnOS 用 TRIM_SYS_ARCH 传入与 manifest.platform 一致的值：Intel/AMD 为 x86，ARM64 为 arm。
+# 离线镜像仍按 Docker 架构校验；此处只做安装包架构与设备架构的别名匹配。
+remoteci_image_arch_compatible() {
+  case "$1:$2" in
+    amd64:x86_64|amd64:amd64|amd64:x86|arm64:aarch64|arm64:arm64|arm64:arm)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}

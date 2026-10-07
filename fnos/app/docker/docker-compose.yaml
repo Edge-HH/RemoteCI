@@ -3,7 +3,7 @@
 # 镜像标签中的版本占位符在打包时被替换为具体版本号（见 fnos/build.sh）。
 services:
   remoteci:
-    image: ghcr.io/memz-edge01/remoteci:__REMOTECI_VERSION__
+    image: ghcr.io/edge-hh/remoteci:__REMOTECI_VERSION__
     container_name: remoteci
     restart: unless-stopped
     networks:

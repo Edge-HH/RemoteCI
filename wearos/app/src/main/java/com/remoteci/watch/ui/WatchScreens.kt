@@ -40,18 +40,21 @@ import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.School
+import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -226,6 +229,7 @@ internal fun HomeScreen(
     onOpenNotification: () -> Unit,
     onOpenSettings: () -> Unit,
     onRetryConnection: () -> Unit,
+    onSwitchClass: (() -> Unit)? = null,
 ) {
     var now by remember(snapshot?.generatedAt, snapshot?.timeZoneOffsetMinutes) {
         mutableStateOf(pluginLocalNow(snapshot?.generatedAt, snapshot?.timeZoneOffsetMinutes, 0L, 0L))
@@ -271,6 +275,7 @@ internal fun HomeScreen(
                         onOpenScheduleChange = onOpenScheduleChange,
                         onOpenNotification = onOpenNotification,
                         onOpenSettings = onOpenSettings,
+                        onSwitchClass = onSwitchClass,
                     )
                 }
             }
@@ -414,14 +419,20 @@ private fun HomeMenuPage(
     onOpenScheduleChange: () -> Unit,
     onOpenNotification: () -> Unit,
     onOpenSettings: () -> Unit,
+    onSwitchClass: (() -> Unit)? = null,
 ) {
-    val actions = homeActionLabels(user, capabilities).map { label ->
-        when (label) {
-            "课表" -> HomeAction(label, Icons.AutoMirrored.Rounded.List, onOpenScheduleOverview)
-            "换课" -> HomeAction(label, Icons.Rounded.SwapHoriz, onOpenScheduleChange)
-            "控制" -> HomeAction(label, Icons.Rounded.Wifi, onOpenNotification)
-            else -> HomeAction(label, Icons.Rounded.Settings, onOpenSettings)
+    val actions = buildList {
+        if (onSwitchClass != null) {
+            add(HomeAction("切换班级", Icons.Rounded.Group, onSwitchClass))
         }
+        homeActionLabels(user, capabilities).map { label ->
+            when (label) {
+                "课表" -> HomeAction(label, Icons.AutoMirrored.Rounded.List, onOpenScheduleOverview)
+                "换课" -> HomeAction(label, Icons.Rounded.SwapHoriz, onOpenScheduleChange)
+                "控制" -> HomeAction(label, Icons.Rounded.Wifi, onOpenNotification)
+                else -> HomeAction(label, Icons.Rounded.Settings, onOpenSettings)
+            }
+        }.forEach { add(it) }
     }
     // 首页菜单不显示“菜单”标题，让选项直接占满一屏，避免旋转翻页后还要滚动。
     WatchList(title = stringResource(R.string.home_menu_title), showTitle = false) {
@@ -453,6 +464,7 @@ internal fun ScheduleOverviewScreen(
     day: ScheduleDay?,
     today: LocalDate,
     connectionReady: Boolean,
+    canPullSchedule: Boolean = false,
     pullState: ConnectionManager.SchedulePullState,
     onRequestSchedule: () -> Unit,
     onPickDate: () -> Unit,
@@ -478,7 +490,7 @@ internal fun ScheduleOverviewScreen(
         is ConnectionManager.SchedulePullState.Error -> item { Hint(pullState.message) }
         ConnectionManager.SchedulePullState.Idle -> Unit
     }
-    if (shouldOfferSchedulePull(day, connectionReady)) {
+    if (shouldOfferSchedulePull(day, connectionReady, canPullSchedule)) {
         val pulling = !schedulePullActionEnabled(pullState)
         item {
             ActionButton(
@@ -493,7 +505,11 @@ internal fun ScheduleOverviewScreen(
 }
 
 /** 无论本地是否已有缓存，只要在线就允许强制拉取并覆盖旧课表。 */
-internal fun shouldOfferSchedulePull(day: ScheduleDay?, connectionReady: Boolean): Boolean = connectionReady
+internal fun shouldOfferSchedulePull(
+    day: ScheduleDay?,
+    connectionReady: Boolean,
+    canPullSchedule: Boolean = true,
+): Boolean = connectionReady && canPullSchedule
 
 /** 任一端的课表任务正在运行时，本端按钮禁用，避免重复提交。 */
 internal fun schedulePullActionEnabled(state: ConnectionManager.SchedulePullState): Boolean =
@@ -541,6 +557,8 @@ internal fun SwapScreen(
     replacementSubject: String?,
     connectionReady: Boolean,
     resultText: String?,
+    permanent: Boolean,
+    onPermanentChange: (Boolean) -> Unit,
     onModeChange: (SwapMode) -> Unit,
     onPickSource: () -> Unit,
     onPickTarget: () -> Unit,
@@ -549,6 +567,7 @@ internal fun SwapScreen(
     item { ModeSelector(mode, onModeChange) }
     item { LessonButton(stringResource(R.string.swap_source_label), sourceLesson?.subject ?: stringResource(R.string.pick_placeholder), onPickSource) }
     item { LessonButton(stringResource(R.string.swap_target_label), if (mode == SwapMode.Exchange) targetLesson?.subject ?: stringResource(R.string.pick_placeholder) else replacementSubject ?: stringResource(R.string.pick_subject_placeholder), onPickTarget) }
+    item { Toggle("永久换课", permanent, onPermanentChange) }
     val validTarget = if (mode == SwapMode.Exchange) targetLesson != null && targetLesson.index != sourceLesson?.index else replacementSubject != null
     item { ActionButton(stringResource(if (mode == SwapMode.Exchange) R.string.confirm_exchange else R.string.confirm_replace), Icons.Rounded.Check, connectionReady && sourceLesson != null && validTarget, onSubmit) }
     if (!resultText.isNullOrBlank()) item { Hint(resultText) }
@@ -590,8 +609,8 @@ internal fun ControlScreen(
     capabilities: Set<String> = Protocol.BASELINE_CAPABILITIES,
     extensions: List<ExtensionDefinition>,
     resultText: String?,
-    onTeacherComing: () -> Unit,
     onOpenNotification: () -> Unit,
+    onOpenVoiceMessage: () -> Unit,
     onClearNotifications: () -> Unit,
     onToggleMainMenu: () -> Unit,
     onOpenVolume: () -> Unit,
@@ -599,14 +618,14 @@ internal fun ControlScreen(
     onRunExtension: (ExtensionDefinition) -> Unit,
     onBack: () -> Unit,
 ) = WatchList(title = stringResource(R.string.control_title)) {
-    val canTeacherComing = user?.has(Protocol.PERMISSION_TEACHER_COMING) == true && Protocol.CAP_TEACHER_COMING in capabilities
     val canNotify = user?.has(Protocol.PERMISSION_SEND_NOTIFICATIONS) == true && Protocol.CAP_NOTIFICATION_SEND in capabilities
     val canClearNotifications = user?.has(Protocol.PERMISSION_SEND_NOTIFICATIONS) == true && Protocol.CAP_NOTIFICATION_CLEAR in capabilities
     val canControlMainMenu = user?.has(Protocol.PERMISSION_MAIN_MENU_CONTROL) == true && Protocol.CAP_MAIN_MENU_VISIBILITY in capabilities
     val canControlPower = user?.has(Protocol.PERMISSION_POWER_CONTROL) == true && Protocol.CAP_POWER_CONTROL in capabilities
     val canControlVolume = user?.has(Protocol.PERMISSION_POWER_CONTROL) == true && Protocol.CAP_VOLUME_CONTROL in capabilities
-    if (canTeacherComing) item { ActionButton(stringResource(R.string.teacher_coming), Icons.Rounded.School, true, onTeacherComing) }
     if (canNotify) item { ActionButton(stringResource(R.string.send_notification), Icons.Rounded.EditNotifications, true, onOpenNotification) }
+    if (user?.has(Protocol.PERMISSION_SEND_VOICE_MESSAGES) == true && Protocol.CAP_VOICE_MESSAGE_SEND in capabilities)
+        item { ActionButton("发送语音", Icons.Rounded.EditNotifications, true, onOpenVoiceMessage) }
     if (canClearNotifications && shouldShowClearNotifications(snapshot)) item {
         ActionButton(stringResource(R.string.clear_notifications), Icons.Rounded.NotificationsOff, true, onClearNotifications)
     }
@@ -654,24 +673,6 @@ internal fun visibleExtensionsFor(
     extensions: List<ExtensionDefinition>,
 ): List<ExtensionDefinition> = extensions.filter { user?.showsOnWatch(it) == true }
 
-/** Material 图标名白名单映射；未知或缺失时返回 null，界面回退为纯文字。 */
-internal fun extensionIcon(icon: String?): ImageVector? = when (icon?.trim()?.lowercase()) {
-    "school" -> Icons.Rounded.School
-    "notification", "notifications", "message" -> Icons.Rounded.EditNotifications
-    "volume", "volumeup" -> Icons.AutoMirrored.Rounded.VolumeUp
-    "power", "poweroff" -> Icons.Rounded.PowerSettingsNew
-    "settings", "gear" -> Icons.Rounded.Settings
-    "update", "systemupdate" -> Icons.Rounded.SystemUpdate
-    "download" -> Icons.Rounded.Download
-    "restart", "reboot" -> Icons.Rounded.RestartAlt
-    "swap", "exchange" -> Icons.Rounded.SwapHoriz
-    "wifi", "connect" -> Icons.Rounded.Wifi
-    "visibility", "show" -> Icons.Rounded.Visibility
-    "hide", "hidden" -> Icons.Rounded.VisibilityOff
-    "clear", "clearnotifications" -> Icons.Rounded.NotificationsOff
-    else -> null
-}
-
 /** 按参数 schema 生成初始表单值；switch 默认 false，其余使用注册的默认值。 */
 internal fun defaultExtensionArgs(extension: ExtensionDefinition): Map<String, String?> =
     extension.parameters.associate { param ->
@@ -705,7 +706,7 @@ internal fun ExtensionFormScreen(
                 }
 
                 Protocol.EXT_PARAM_SELECT -> ActionButton(
-                    "${param.label}：${values[param.key] ?: ""}",
+                    "${param.label}：${param.optionLabel(values[param.key])}",
                     null,
                     param.options.isNotEmpty(),
                     onClick = { values = values + (param.key to nextSelectValue(param.options, values[param.key])) },
@@ -1126,7 +1127,7 @@ internal fun NotificationSettingsScreen(
 }
 
 @Composable
-private fun WatchList(
+internal fun WatchList(
     title: String,
     showTitle: Boolean = true,
     content: androidx.wear.compose.foundation.lazy.ScalingLazyListScope.() -> Unit,
@@ -1160,7 +1161,7 @@ private fun WatchSurface(content: @Composable BoxScope.(Dp) -> Unit) {
 }
 
 @Composable
-private fun ActionButton(
+internal fun ActionButton(
     label: String,
     icon: ImageVector?,
     enabled: Boolean,
@@ -1190,13 +1191,13 @@ internal fun homeActionLabels(
 ): List<String> = buildList {
     if (user != null && Protocol.CAP_SCHEDULE_READ in capabilities) add("课表")
     if (user?.has(Protocol.PERMISSION_MANAGE_SCHEDULE) == true && Protocol.CAP_SCHEDULE_CHANGE in capabilities) add("换课")
-    if (user?.has(Protocol.PERMISSION_TEACHER_COMING) == true && Protocol.CAP_TEACHER_COMING in capabilities ||
-        user?.has(Protocol.PERMISSION_SEND_NOTIFICATIONS) == true &&
+    if (user?.has(Protocol.PERMISSION_SEND_NOTIFICATIONS) == true &&
             (Protocol.CAP_NOTIFICATION_SEND in capabilities || Protocol.CAP_NOTIFICATION_CLEAR in capabilities) ||
         user?.has(Protocol.PERMISSION_POWER_CONTROL) == true &&
             (Protocol.CAP_POWER_CONTROL in capabilities || Protocol.CAP_VOLUME_CONTROL in capabilities) ||
         user?.has(Protocol.PERMISSION_MAIN_MENU_CONTROL) == true && Protocol.CAP_MAIN_MENU_VISIBILITY in capabilities ||
-        user?.has(Protocol.PERMISSION_RUN_EXTENSIONS) == true && Protocol.CAP_EXTENSIONS_RUN in capabilities) add("控制")
+        user?.has(Protocol.PERMISSION_RUN_EXTENSIONS) == true && Protocol.CAP_EXTENSIONS_RUN in capabilities ||
+        user?.has(Protocol.PERMISSION_SEND_VOICE_MESSAGES) == true && Protocol.CAP_VOICE_MESSAGE_SEND in capabilities) add("控制")
     add("设置")
 }
 
@@ -1492,4 +1493,35 @@ internal fun pluginToday(
         runCatching { OffsetDateTime.parse(raw).toInstant().atOffset(offset).toLocalDateTime() }.getOrNull()
     } ?: LocalDateTime.now(offset)
     return base.plusNanos((nowElapsedMs - baseElapsedMs) * 1_000_000L).toLocalDate()
+}
+
+/** 登录后的班级选择屏：多班级账号先选一个进入，进入后可再次进入本屏切换。 */
+@Composable
+internal fun ClassPickerScreen(onPicked: () -> Unit) {
+    val classes by ConnectionManager.classes.collectAsState()
+    val currentClassId by ConnectionManager.currentClassId.collectAsState()
+    Column(
+        modifier = Modifier.fillMaxSize().padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("选择班级", style = MaterialTheme.typography.titleMedium)
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            classes.forEach { classroom ->
+                val selected = classroom.id == currentClassId
+                Text(
+                    text = (if (selected) "● " else "○ ") + classroom.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            ConnectionManager.switchClass(classroom.id)
+                            onPicked()
+                        }
+                        .padding(vertical = 6.dp),
+                )
+            }
+        }
+    }
 }

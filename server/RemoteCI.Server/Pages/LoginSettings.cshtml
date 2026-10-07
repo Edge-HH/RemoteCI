@@ -1,0 +1,80 @@
+@page
+@model LoginSettingsModel
+@using RemoteCI.Server.Data
+@{
+    ViewData["Title"] = "登录页设置";
+    // 预览按当前表单值渲染：管理员保存前就能看到主题、不透明度与卡片位置的组合效果。
+    var previewTheme = Model.Appearance.Theme switch
+    {
+        LoginTheme.Light => "light",
+        LoginTheme.Dark => "dark",
+        _ => "follow",
+    };
+    var previewAlign = Model.Appearance.CardPosition switch
+    {
+        LoginCardPosition.Left => "start",
+        LoginCardPosition.Right => "end",
+        _ => "center",
+    };
+    var previewImage = Model.HasBackground
+        ? $"url('/api/settings/login-background?v={Model.BackgroundUpdatedAt?.Ticks ?? 0}')"
+        : "none";
+    var previewStyle = $"--login-preview-image:{previewImage};--login-preview-opacity:{Math.Clamp(Model.Appearance.Opacity, 0, 100) / 100d:0.##};--login-preview-align:{previewAlign}";
+}
+<div class="page-head">
+    <div>
+        <p class="eyebrow">服务端管理</p>
+        <h1>登录页设置</h1>
+    </div>
+</div>
+<section class="panel">
+    <h2>登录页外观</h2>
+    <form method="post" asp-page-handler="Save" enctype="multipart/form-data" class="stack login-settings-form">
+        <fieldset class="login-theme-fieldset">
+            <legend>主题</legend>
+            <div class="login-theme-options">
+                <label class="check"><input type="radio" name="Appearance.Theme" value="Follow" id="login-theme-follow" data-login-theme-option checked="@(Model.Appearance.Theme == LoginTheme.Follow)" /> 跟随访客偏好</label>
+                <label class="check"><input type="radio" name="Appearance.Theme" value="Light" id="login-theme-light" data-login-theme-option checked="@(Model.Appearance.Theme == LoginTheme.Light)" /> 浅色模式</label>
+                <label class="check"><input type="radio" name="Appearance.Theme" value="Dark" id="login-theme-dark" data-login-theme-option checked="@(Model.Appearance.Theme == LoginTheme.Dark)" /> 深色模式</label>
+            </div>
+        </fieldset>
+        <fieldset class="login-theme-fieldset">
+            <legend>登录卡片位置</legend>
+            <div class="login-theme-options">
+                <label class="check"><input type="radio" name="Appearance.CardPosition" value="Left" data-login-position checked="@(Model.Appearance.CardPosition == LoginCardPosition.Left)" /> 左侧</label>
+                <label class="check"><input type="radio" name="Appearance.CardPosition" value="Center" data-login-position checked="@(Model.Appearance.CardPosition == LoginCardPosition.Center)" /> 居中</label>
+                <label class="check"><input type="radio" name="Appearance.CardPosition" value="Right" data-login-position checked="@(Model.Appearance.CardPosition == LoginCardPosition.Right)" /> 右侧</label>
+            </div>
+        </fieldset>
+        <label>背景图（PNG/JPEG/WebP，≤@(Model.MaxBackgroundKb)KB；留空表示保持不变）
+            <input asp-for="BackgroundFile" type="file" accept="image/png,image/jpeg,image/webp" data-login-background-file />
+        </label>
+        <label>背景不透明度
+            <span class="range-field">
+                <input asp-for="Appearance.Opacity" type="range" min="0" max="100" step="1" data-login-opacity oninput="this.parentElement.querySelector('output').textContent = this.value + '%'" />
+                <output>@(Model.Appearance.Opacity)%</output>
+            </span>
+        </label>
+        <button type="submit">保存设置</button>
+    </form>
+    <div class="login-preview" data-login-preview>
+        <p class="muted">预览（保存后生效）</p>
+        <div class="login-preview-stage" data-login-preview-stage data-preview-theme="@previewTheme" style="@previewStyle">
+            <div class="login-preview-card" aria-hidden="true">
+                <span class="login-preview-logo"></span>
+                <span class="login-preview-line login-preview-line-title"></span>
+                <span class="login-preview-line login-preview-line-sub"></span>
+                <span class="login-preview-field"></span>
+                <span class="login-preview-field"></span>
+                <span class="login-preview-button"></span>
+            </div>
+        </div>
+        @if (Model.HasBackground)
+        {
+            <form method="post" asp-page-handler="RemoveBackground" onsubmit="return confirm('确定移除当前登录页背景图？')">
+                <button type="submit" class="danger ghost">移除背景图</button>
+            </form>
+        }
+    </div>
+</section>
+<script src="~/login-settings.js" asp-append-version="true" defer></script>

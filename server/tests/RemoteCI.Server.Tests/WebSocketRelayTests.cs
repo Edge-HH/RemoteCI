@@ -19,6 +19,79 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     public WebSocketRelayTests(TestWebApplicationFactory factory) => _factory = factory;
 
     [Fact]
+    public async Task VoiceMessage_RelaysFullMinuteWithAuthenticatedSenderAndCorrelatedReply()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
+        await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>().PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.VoiceMessageSend));
+        using var watch = await ConnectWatchAsync();
+        var audio = new byte[VoiceMessageRequest.MaxBytes];
+        new Random(42).NextBytes(audio);
+        var request = Envelope.Command(new CommandMessage
+        {
+            Command = CommandKind.SendVoiceMessage,
+            VoiceMessage = new() { AudioBase64 = Convert.ToBase64String(audio) },
+            RequestedBy = new UserProfile { DisplayName = "伪造发送人", Permissions = UserPermissions.All },
+        });
+        await SendAsync(watch, request);
+        var forwarded = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
+        var command = ConvertPayload<CommandMessage>(forwarded.Payload);
+        Assert.True(VoiceMessageRequest.TryDecode(command.VoiceMessage, out var received));
+        Assert.Equal(audio, received);
+        Assert.NotEqual("伪造发送人", command.RequestedBy!.DisplayName);
+        Assert.Equal(TestWebApplicationFactory.AdminUsername, command.RequestedBy.Username);
+        await SendAsync(plugin, new Envelope
+        {
+            Type = Protocol.MessageTypeCommandResult, ReplyToMessageId = forwarded.MessageId,
+            Payload = new CommandResult { Success = true, Code = CommandResultCodes.Ok },
+        });
+        var reply = await ReceiveEnvelopeAsync(watch, Protocol.MessageTypeCommandResult);
+        Assert.Equal(request.MessageId, reply.ReplyToMessageId);
+        Assert.True(ConvertPayload<CommandResult>(reply.Payload).Success);
+    }
+
+    [Fact]
+    public async Task MobileCommand_RelaysToPluginAndReturnsCorrelatedReply()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
+        using var mobile = await ConnectMobileAsync();
+        await ReceivePayloadAsync<AuthState>(mobile, Protocol.MessageTypeAuthState);
+        var request = Envelope.Command(new CommandMessage
+        {
+            Command = CommandKind.TeacherComing,
+        });
+
+        await SendAsync(mobile, request);
+
+        var forwarded = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
+        Assert.Equal(CommandKind.TeacherComing, ConvertPayload<CommandMessage>(forwarded.Payload).Command);
+        await SendAsync(plugin, new Envelope
+        {
+            Type = Protocol.MessageTypeCommandResult,
+            ReplyToMessageId = forwarded.MessageId,
+            Payload = new CommandResult { Success = true, Code = CommandResultCodes.Ok },
+        });
+        var reply = await ReceiveEnvelopeAsync(mobile, Protocol.MessageTypeCommandResult);
+        Assert.Equal(request.MessageId, reply.ReplyToMessageId);
+        Assert.True(ConvertPayload<CommandResult>(reply.Payload).Success);
+        Assert.Equal(1, _factory.Services.GetRequiredService<PeerRegistry>().MobileCount);
+    }
+
+    [Fact]
+    public async Task VoiceMessage_RejectsMalformedAudioBeforeForwarding()
+    {
+        using var watch = await ConnectWatchAsync();
+        await SendAsync(watch, Envelope.Command(new CommandMessage
+        {
+            Command = CommandKind.SendVoiceMessage, VoiceMessage = new() { AudioBase64 = "AAA" },
+        }));
+        var result = await ReceivePayloadAsync<CommandResult>(watch, Protocol.MessageTypeCommandResult);
+        Assert.Equal(CommandResultCodes.InvalidRequest, result.Code);
+    }
+
+    [Fact]
     public async Task WatchAuthentication_ReportsConnectedServerVersion()
     {
         using var watch = await ConnectWatchAsync();
@@ -116,6 +189,108 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     }
 
     [Fact]
+    public async Task SoftwareInventory_IsCachedPersistedAndReturnedForDevicePage()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities
+        {
+            SoftwareVersion = "3.2.1.4",
+            Capabilities = RemoteCiCapabilities.Current,
+        }));
+        await SendAsync(plugin, Envelope.SoftwareInventory(new SoftwareInventory
+        {
+            DeviceName = "教室电脑-A",
+            OperatingSystem = "Windows",
+            Architecture = "X64",
+            Applications =
+            [
+                new SoftwarePackageInfo
+                {
+                    Id = "classisland",
+                    Name = "ClassIsland",
+                    Version = "2.1.1.1",
+                    LatestVersion = "2.1.2.0",
+                    IsUpdateAvailable = true,
+                    CanUpgrade = true,
+                },
+            ],
+            Plugins =
+            [
+                new SoftwarePackageInfo
+                {
+                    Id = "remoteci.plugin",
+                    Name = "RemoteCI",
+                    Version = "3.2.1.4",
+                    LatestVersion = "3.2.1.4",
+                    CanUpgrade = true,
+                },
+            ],
+            LastUpdate = new SoftwareUpdateStatus
+            {
+                Operation = SoftwareUpdateOperation.InventoryRefresh,
+                State = SoftwareUpdateState.Completed,
+                Message = "版本清单已刷新",
+            },
+        }));
+
+        var registry = _factory.Services.GetRequiredService<PeerRegistry>();
+        await WaitUntilAsync(() => registry.GetPluginDeviceSnapshots().Any(
+            item => item.SoftwareInventory?.DeviceName == "教室电脑-A"));
+        var snapshot = Assert.Single(registry.GetPluginDeviceSnapshots());
+        Assert.Equal("3.2.1.4", snapshot.SoftwareVersion);
+        Assert.Contains(RemoteCiCapabilities.SoftwareInventory, snapshot.EffectiveCapabilities);
+        Assert.NotNull(snapshot.PluginCredentialId);
+        var credentialId = snapshot.PluginCredentialId!.Value;
+        await WaitUntilAsync(() =>
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            return db.PluginCredentials.AsNoTracking().Any(item =>
+                item.Id == credentialId && item.SoftwareInventoryJson != null);
+        });
+        using var persistedScope = _factory.Services.CreateScope();
+        var persistedDb = persistedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var credential = await persistedDb.PluginCredentials.AsNoTracking()
+            .SingleAsync(item => item.Id == credentialId);
+        using var inventoryJson = JsonDocument.Parse(credential.SoftwareInventoryJson!);
+        Assert.Equal("教室电脑-A", inventoryJson.RootElement.GetProperty("deviceName").GetString());
+    }
+
+    [Fact]
+    public async Task DirectCommand_IsSentToSelectedPluginConnection()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities
+        {
+            SoftwareVersion = "3.2.1.4",
+            Capabilities = RemoteCiCapabilities.Current,
+        }));
+
+        var registry = _factory.Services.GetRequiredService<PeerRegistry>();
+        await WaitUntilAsync(() => registry.GetPluginDeviceSnapshots().Count == 1);
+        var target = registry.GetPluginDeviceSnapshots().Single();
+        var pending = registry.SendCommandAndWaitToConnectionAsync(new CommandMessage
+        {
+            Command = CommandKind.RefreshSoftwareInventory,
+        }, target.ConnectionId, TimeSpan.FromSeconds(5));
+
+        var commandEnvelope = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
+        Assert.Equal(CommandKind.RefreshSoftwareInventory,
+            ConvertPayload<CommandMessage>(commandEnvelope.Payload).Command);
+        await SendAsync(plugin, new Envelope
+        {
+            Type = Protocol.MessageTypeCommandResult,
+            ReplyToMessageId = commandEnvelope.MessageId,
+            Payload = new CommandResult { Success = true, Code = CommandResultCodes.Ok, Message = "ok" },
+        });
+
+        var result = await pending;
+        Assert.True(result.Success);
+    }
+
+    [Fact]
     public async Task PluginConnection_ImmediatelyRequestsFreshSchedule()
     {
         using var plugin = await ConnectPluginAsync();
@@ -132,21 +307,16 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         await ReceiveEnvelopeAsync(pluginA, Protocol.MessageTypeSchedulePull); // 连接后的初始拉取。
         using var pluginB = await ConnectPluginAsync();
         await ReceiveEnvelopeAsync(pluginB, Protocol.MessageTypeSchedulePull);
+        // 班级配对码只允许一台设备，新连接会让旧连接失效。
+        await AssertWebSocketClosedAsync(pluginA);
         using var watch = await ConnectWatchAsync();
 
         await SendAsync(watch, Envelope.SchedulePull());
-
-        // 最早接入的插件 A 收到请求；插件 B 在接收超时内不应收到（避免多插件重复执行）。
-        var receiveA = ReceiveEnvelopeAsync(pluginA, Protocol.MessageTypeSchedulePull);
-        var receiveB = ReceiveEnvelopeAsync(pluginB, Protocol.MessageTypeSchedulePull);
-        var winner = await Task.WhenAny(receiveA, receiveB);
-        Assert.Equal(Protocol.MessageTypeSchedulePull, (await winner).Type);
-        var loser = ReferenceEquals(winner, receiveA) ? receiveB : receiveA;
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await loser);
+        await ReceiveEnvelopeAsync(pluginB, Protocol.MessageTypeSchedulePull);
     }
 
     [Fact]
-    public async Task AuthenticatedWatchSchedulePull_IsForwardedWithoutScheduleManagementPermission()
+    public async Task ClassAdministratorWatchSchedulePull_IsForwarded()
     {
         using var plugin = await ConnectPluginAsync();
         await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
@@ -158,8 +328,9 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
             new CreateUserRequest
             {
                 Username = "schedule.reader",
-                DisplayName = "课表查看者",
+                DisplayName = "班级管理员",
                 Password = "Schedule-Reader-Password-2026",
+                RoleId = AccountRole.ClassAdministratorId,
             }));
         create.EnsureSuccessStatusCode();
         using var watch = await ConnectWatchAsync("schedule.reader", "Schedule-Reader-Password-2026");
@@ -409,6 +580,190 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     }
 
     [Fact]
+    public async Task ExtensionGroups_SyncedFromPlugin_AdminAppliesPartialSettingsThroughRest()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
+        await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>()
+            .PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.ExtensionsSettings));
+        await SendAsync(plugin, Envelope.ExtensionGroupsSync(new List<ExtensionGroupDefinition>
+        {
+            new()
+            {
+                Id = "demo.settings",
+                DisplayName = "演示插件",
+                Settings =
+                [
+                    new ExtensionParameter { Key = "volume", Label = "音量", Type = ExtensionParameterType.Number, Min = 0, Max = 100 },
+                    new ExtensionParameter
+                    {
+                        Key = "mode", Label = "模式", Type = ExtensionParameterType.Select,
+                        Options = ["a", "b"], OptionLabels = ["模式 A", "模式 B"],
+                    },
+                ],
+                Values = new Dictionary<string, string?> { ["volume"] = "50", ["mode"] = "a" },
+            },
+        }));
+        await WaitUntilAsync(() => _factory.Services.GetRequiredService<IStateStore>()
+            .GetLatestExtensionGroups(Classroom.DefaultId)?.Any(x => x.Id == "demo.settings") == true);
+
+        var admin = await _factory.LoginAsync();
+        using var client = _factory.CreateClient();
+        var listed = await (await client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Get, "/api/extension-groups", admin.AccessToken))).Content.ReadFromJsonAsync<JsonElement>();
+        var group = listed.EnumerateArray().Single(x => x.GetProperty("id").GetString() == "demo.settings");
+        Assert.True(group.GetProperty("canEditSettings").GetBoolean());
+        Assert.Equal("50", group.GetProperty("values").GetProperty("volume").GetString());
+
+        // 服务端按插件声明预校验，非法值不会下发到设备。
+        var invalid = await client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Put, $"/api/classes/{Classroom.DefaultId}/extension-groups/demo.settings/settings", admin.AccessToken,
+            new { values = new Dictionary<string, string?> { ["volume"] = "120" } }));
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, invalid.StatusCode);
+
+        var apply = client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Put, $"/api/classes/{Classroom.DefaultId}/extension-groups/demo.settings/settings", admin.AccessToken,
+            new { values = new Dictionary<string, string?> { ["volume"] = "30" } }));
+        var forwarded = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
+        var command = ConvertPayload<CommandMessage>(forwarded.Payload);
+        Assert.Equal(CommandKind.ApplyExtensionSettings, command.Command);
+        Assert.Equal("demo.settings", command.ExtensionSettings!.GroupId);
+        // 部分更新：只下发本次修改的字段，未提交的 mode 保持设备原值。
+        var change = Assert.Single(command.ExtensionSettings.Values);
+        Assert.Equal(("volume", "30"), (change.Key, change.Value));
+        Assert.Equal(UserRole.Admin, command.RequestedBy?.Role);
+        await SendAsync(plugin, new Envelope
+        {
+            Type = Protocol.MessageTypeCommandResult,
+            ReplyToMessageId = forwarded.MessageId,
+            Payload = new CommandResult { Success = true, Code = CommandResultCodes.Ok, Message = "已保存" },
+        });
+        var response = await apply;
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("已保存", (await response.Content.ReadFromJsonAsync<CommandResult>())!.Message);
+    }
+
+    [Fact]
+    public async Task ExtensionSettings_QueuedWhileOffline_AreReplayedWhenPluginSyncsGroups()
+    {
+        var group = new ExtensionGroupDefinition
+        {
+            Id = "demo.queued",
+            DisplayName = "离线补发插件",
+            Settings = [new ExtensionParameter { Key = "volume", Label = "音量", Type = ExtensionParameterType.Number, Min = 0, Max = 100 }],
+            Values = new Dictionary<string, string?> { ["volume"] = "50" },
+        };
+        // 插件曾经上报过分组，但现在离线：下发应保存为待补发并返回 202。
+        _factory.Services.GetRequiredService<IStateStore>().SaveExtensionGroups(Classroom.DefaultId, [group]);
+        await WaitUntilAsync(() => !_factory.Services.GetRequiredService<PeerRegistry>().HasPluginFor(Classroom.DefaultId));
+        var admin = await _factory.LoginAsync();
+        using var client = _factory.CreateClient();
+        var queued = await client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Put, $"/api/classes/{Classroom.DefaultId}/extension-groups/demo.queued/settings", admin.AccessToken,
+            new { values = new Dictionary<string, string?> { ["volume"] = "20" } }));
+        Assert.Equal(System.Net.HttpStatusCode.Accepted, queued.StatusCode);
+        Assert.Equal(CommandResultCodes.Queued, (await queued.Content.ReadFromJsonAsync<CommandResult>())!.Code);
+        Assert.True(await PendingExistsAsync("demo.queued"));
+
+        using var plugin = await ConnectPluginAsync();
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
+        await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>()
+            .PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.ExtensionsSettings));
+        await SendAsync(plugin, Envelope.ExtensionGroupsSync(new List<ExtensionGroupDefinition> { group }));
+
+        var forwarded = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
+        var command = ConvertPayload<CommandMessage>(forwarded.Payload);
+        Assert.Equal(CommandKind.ApplyExtensionSettings, command.Command);
+        Assert.Equal("20", command.ExtensionSettings!.Values["volume"]);
+        await SendAsync(plugin, new Envelope
+        {
+            Type = Protocol.MessageTypeCommandResult,
+            ReplyToMessageId = forwarded.MessageId,
+            Payload = new CommandResult { Success = true, Code = CommandResultCodes.Ok, Message = "已保存" },
+        });
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (await PendingExistsAsync("demo.queued")) await Task.Delay(20, timeout.Token);
+    }
+
+    [Fact]
+    public async Task CapabilitiesSync_OnlyIncludesPluginsOfClassesTheViewerCanAccess()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
+        await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>()
+            .PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.ExtensionsSettings));
+
+        using (var adminWatch = await ConnectWatchAsync())
+        {
+            var sync = await ReceivePayloadAsync<CapabilitiesSync>(adminWatch, Protocol.MessageTypeCapabilitiesSync);
+            var entry = Assert.Single(sync.ClassPlugins!, x => x.ClassId == Classroom.DefaultId);
+            Assert.Contains(RemoteCiCapabilities.ExtensionsSettings, entry.Plugin.Capabilities);
+        }
+
+        // 只属于另一个班级的账号：默认班级的插件不能被当作它所在班级的能力来源。
+        var admin = await _factory.LoginAsync();
+        using var client = _factory.CreateClient();
+        var created = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post, "/api/classes", admin.AccessToken,
+            new CreateClassRequest { Name = "能力隔离班" }));
+        created.EnsureSuccessStatusCode();
+        var otherClass = (await created.Content.ReadFromJsonAsync<ClassDetail>())!;
+        var user = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post, "/api/users", admin.AccessToken,
+            new CreateUserRequest
+            {
+                Username = "caps.isolated", DisplayName = "能力隔离", Password = "Caps-Isolated-Password-2026",
+                RoleId = AccountRole.StudentId,
+            }));
+        user.EnsureSuccessStatusCode();
+        var userId = (await user.Content.ReadFromJsonAsync<UserListItem>())!.Id;
+        (await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Put, $"/api/classes/{otherClass.Id}/members", admin.AccessToken,
+            new UpdateClassMembersRequest { Members = [new ClassMemberInput { UserId = userId, RoleId = AccountRole.StudentId }] })))
+            .EnsureSuccessStatusCode();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            // 新账号可能被默认放入默认班级；移除后它只属于“能力隔离班”。
+            await scope.ServiceProvider.GetRequiredService<AppDbContext>().ClassMemberships
+                .Where(x => x.UserId == userId && x.ClassroomId == Classroom.DefaultId).ExecuteDeleteAsync();
+        }
+
+        using var isolatedWatch = await ConnectWatchAsync("caps.isolated", "Caps-Isolated-Password-2026");
+        var isolated = await ReceivePayloadAsync<CapabilitiesSync>(isolatedWatch, Protocol.MessageTypeCapabilitiesSync);
+        Assert.Empty(isolated.ClassPlugins!);
+        Assert.Null(isolated.Plugin);
+    }
+
+    private async Task<bool> PendingExistsAsync(string groupId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.PendingExtensionSettings.AnyAsync(x => x.GroupId == groupId);
+    }
+
+    [Fact]
+    public async Task ExtensionSettingsCommand_FromWatchOrGenericApi_IsRejected()
+    {
+        using var plugin = await ConnectPluginAsync();
+        using var watch = await ConnectWatchAsync();
+        var request = Envelope.Command(new CommandMessage
+        {
+            Command = CommandKind.ApplyExtensionSettings,
+            ExtensionSettings = new ExtensionSettingsRequest
+            {
+                GroupId = "demo.settings",
+                Values = new Dictionary<string, string?> { ["volume"] = "1" },
+            },
+        });
+        await SendAsync(watch, request);
+        var reply = await ReceiveEnvelopeAsync(watch, Protocol.MessageTypeCommandResult);
+        Assert.Equal(request.MessageId, reply.ReplyToMessageId);
+        Assert.Equal(CommandResultCodes.Forbidden, ConvertPayload<CommandResult>(reply.Payload).Code);
+
+        var admin = await _factory.LoginAsync();
+        var generic = await _factory.CreateClient().SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Post, "/api/commands", admin.AccessToken, request.Payload));
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, generic.StatusCode);
+    }
+
+    [Fact]
     public async Task WatchReceivesDefaultSettings_AndNotificationCommandGetsServerPolicyInjected()
     {
         using var plugin = await ConnectPluginAsync();
@@ -453,7 +808,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
 
         var store = factory.Services.GetRequiredService<IStateStore>();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (store.GetLatestSnapshot()?.CurrentSubject != "性能回归-2")
+        while (store.GetLatestSnapshot(Classroom.DefaultId)?.CurrentSubject != "性能回归-2")
             await Task.Delay(10, timeout.Token);
 
         Assert.Equal(0, commands.Count);
@@ -599,11 +954,15 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         string password = TestWebApplicationFactory.AdminPassword) =>
         await ConnectAsync((await _factory.LoginAsync(username, password)).AccessToken);
 
-    private async Task<WebSocket> ConnectAsync(string token)
+    private async Task<WebSocket> ConnectMobileAsync() =>
+        await ConnectAsync((await _factory.LoginAsync()).AccessToken, "mobile");
+
+    private async Task<WebSocket> ConnectAsync(string token, string? clientKind = null)
     {
-        var client = _factory.Server.CreateWebSocketClient();
-        return await client.ConnectAsync(
-            new Uri(_factory.Server.BaseAddress, $"/ws?{Protocol.QueryToken}={Uri.EscapeDataString(token)}"),
+        var socketClient = _factory.Server.CreateWebSocketClient();
+        var clientQuery = string.IsNullOrWhiteSpace(clientKind) ? string.Empty : $"&client={Uri.EscapeDataString(clientKind)}";
+        return await socketClient.ConnectAsync(
+            new Uri(_factory.Server.BaseAddress, $"/ws?{Protocol.QueryToken}={Uri.EscapeDataString(token)}{clientQuery}"),
             CancellationToken.None);
     }
 
@@ -648,8 +1007,15 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         while (true)
         {
             var buffer = new byte[256 * 1024];
-            var result = await socket.ReceiveAsync(buffer, timeout.Token);
-            var json = Encoding.UTF8.GetString(buffer, 0, result.Count);
+            using var message = new MemoryStream();
+            WebSocketReceiveResult result;
+            do
+            {
+                result = await socket.ReceiveAsync(buffer, timeout.Token);
+                Assert.NotEqual(WebSocketMessageType.Close, result.MessageType);
+                message.Write(buffer, 0, result.Count);
+            } while (!result.EndOfMessage);
+            var json = Encoding.UTF8.GetString(message.ToArray());
             var envelope = JsonSerializer.Deserialize<Envelope>(json, JsonDefaults.Options)!;
             if (envelope.Type == expectedType) return envelope;
         }

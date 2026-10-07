@@ -21,6 +21,7 @@ public sealed class RemoteCiService : IDisposable
     private readonly CloudTokenStore _tokenStore;
     private readonly IRemoteCiExtensionRegistry _extensions;
     private readonly ScheduleSyncTaskCoordinator _scheduleSync;
+    private readonly SoftwareInventoryService _softwareInventory;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<RemoteCiService> _logger;
     private LanServer? _lanServer;
@@ -39,6 +40,7 @@ public sealed class RemoteCiService : IDisposable
         CloudTokenStore tokenStore,
         IRemoteCiExtensionRegistry extensions,
         ScheduleSyncTaskCoordinator scheduleSync,
+        SoftwareInventoryService softwareInventory,
         ILoggerFactory loggerFactory)
     {
         _collector = collector;
@@ -49,6 +51,7 @@ public sealed class RemoteCiService : IDisposable
         _tokenStore = tokenStore;
         _extensions = extensions;
         _scheduleSync = scheduleSync;
+        _softwareInventory = softwareInventory;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<RemoteCiService>();
     }
@@ -59,6 +62,9 @@ public sealed class RemoteCiService : IDisposable
     public ScheduleSyncStatus? CurrentScheduleSyncStatus => _scheduleSync.Current;
     public CloudConnectionStatus CurrentCloudConnectionStatus =>
         _cloudClient?.CurrentStatus ?? CloudConnectionStatus.Stopped();
+
+    /// <summary>插件归属班级名称（来自按班级生成的授权镜像）；旧版服务端为 null。</summary>
+    public string? CurrentClassName => _accounts.ClassName;
 
     public void Start()
     {
@@ -81,7 +87,9 @@ public sealed class RemoteCiService : IDisposable
         _commandHandler.HostStateChanged += OnHostStateChanged;
         _notificationBridge.NotificationCaptured += OnEventOccurred;
         _extensions.ExtensionsChanged += OnExtensionsChanged;
+        _extensions.GroupsChanged += OnGroupsChanged;
         _scheduleSync.StatusChanged += OnScheduleSyncStatusChanged;
+        _softwareInventory.InventoryChanged += OnSoftwareInventoryChanged;
         _notificationBridge.Start();
 
         if (_settings.EnableLanServer)
@@ -111,6 +119,7 @@ public sealed class RemoteCiService : IDisposable
 
         _collector.Start();
         PublishExtensions(); // 注册表可能在连接建立前已就绪，启动时先推送一次当前快照。
+        PublishGroups();
     }
 
     public void Stop()
@@ -125,6 +134,8 @@ public sealed class RemoteCiService : IDisposable
         _commandHandler.HostStateChanged -= OnHostStateChanged;
         _notificationBridge.NotificationCaptured -= OnEventOccurred;
         _extensions.ExtensionsChanged -= OnExtensionsChanged;
+        _extensions.GroupsChanged -= OnGroupsChanged;
+        _softwareInventory.InventoryChanged -= OnSoftwareInventoryChanged;
         if (_scheduleSync.Current is { } active)
             _scheduleSync.TryFail(active.TaskId, "RemoteCI 服务已停止，课表任务已取消", out _);
         _scheduleSync.StatusChanged -= OnScheduleSyncStatusChanged;
@@ -132,6 +143,7 @@ public sealed class RemoteCiService : IDisposable
         _notificationBridge.Stop();
         _cts?.Cancel();
         _commandHandler.CancelPendingPowerActions();
+        _commandHandler.StopVoiceMessage();
         if (_cloudClient is { } cloudClient)
         {
             // Dispose 会发布最终的“已停止”状态，先保留转发订阅供设置页刷新。
@@ -275,11 +287,26 @@ public sealed class RemoteCiService : IDisposable
 
     private void OnExtensionsChanged(object? sender, EventArgs e) => PublishExtensions();
 
+    private void OnGroupsChanged(object? sender, EventArgs e) => PublishGroups();
+
     // 首次连接或重连时补发当前扩展快照，避免注册早于 WebSocket 就绪时丢失 extensions_sync。
-    private void OnCloudConnected(object? sender, EventArgs e) => PublishExtensions();
+    private void OnCloudConnected(object? sender, EventArgs e)
+    {
+        PublishExtensions();
+        PublishGroups();
+        PublishSoftwareInventory();
+    }
+
+    private void OnSoftwareInventoryChanged() => PublishSoftwareInventory();
 
     private void OnCloudConnectionStatusChanged(CloudConnectionStatus status) =>
         CloudConnectionStatusChanged?.Invoke(status);
+
+    private void PublishSoftwareInventory()
+    {
+        if (_cloudClient is not { } cloud) return;
+        Observe(cloud.SendSoftwareInventoryAsync(_softwareInventory.Build()), "软件版本清单");
+    }
 
     private void PublishExtensions()
     {
@@ -291,6 +318,45 @@ public sealed class RemoteCiService : IDisposable
         {
             Observe(cloud.SendExtensionsAsync(definitions), "扩展清单");
         }
+    }
+
+    /// <summary>扩展分组与设置值只供服务端 WebUI 使用：局域网手表不需要，因此只发往云端。</summary>
+    private void PublishGroups()
+    {
+        if (_cloudClient is not { } cloud) return;
+        var definitions = _extensions.GetGroups().Select(ToGroupDefinition).ToList();
+        Observe(cloud.SendExtensionGroupsAsync(definitions), "扩展分组");
+    }
+
+    private ExtensionGroupDefinition ToGroupDefinition(IRemoteCiExtensionGroup group)
+    {
+        var settings = group.Settings ?? [];
+        Dictionary<string, string?>? values = null;
+        if (settings.Count > 0)
+        {
+            try
+            {
+                // 只上报声明过的字段，避免第三方插件把无关或敏感数据带到服务端。
+                var current = group.GetSettings() ?? new Dictionary<string, string?>();
+                values = settings.ToDictionary(
+                    field => field.Key,
+                    field => current.GetValueOrDefault(field.Key),
+                    StringComparer.Ordinal);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "读取扩展分组当前设置失败：{GroupId}", group.Id);
+            }
+        }
+        return new ExtensionGroupDefinition
+        {
+            Id = group.Id,
+            DisplayName = group.DisplayName,
+            Description = group.Description,
+            Icon = group.Icon,
+            Settings = settings.Count == 0 ? null : settings.ToList(),
+            Values = values,
+        };
     }
 
     /// <summary>fire-and-forget 发送统一挂异常观察器，避免未观察异常在重连竞态下丢失。</summary>
@@ -308,6 +374,8 @@ public sealed class RemoteCiService : IDisposable
         Icon = extension.Icon,
         RequiredPermission = extension.RequiredPermission,
         Parameters = extension.Parameters.Count == 0 ? null : extension.Parameters.ToList(),
+        Description = extension.Description,
+        GroupId = extension.GroupId,
     };
 
     public void Dispose() => Stop();

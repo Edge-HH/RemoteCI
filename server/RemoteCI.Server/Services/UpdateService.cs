@@ -47,7 +47,7 @@ public sealed class UpdateService
 {
     public const string FnosManagedMessage = "由 fnOS 应用中心管理，请从 GitHub Releases 下载 FPK 手动升级。";
     public const string DevelopmentManagedMessage = "开发环境由 Visual Studio 或 dotnet build 管理，已禁用 WebUI 覆盖更新。";
-    private const string Repo = "MEMZ-Edge01/RemoteCI";
+    private const string Repo = "Edge-HH/RemoteCI";
     private const string ReleasesApiUrl = $"https://api.github.com/repos/{Repo}/releases?per_page=20";
     private static readonly string UserAgent = $"RemoteCI-Server/{AppVersion.Version}";
 

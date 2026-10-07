@@ -11,20 +11,27 @@ import androidx.core.content.ContextCompat
 import com.remoteci.watch.notif.NotificationHelper
 import com.remoteci.watch.ui.RemoteCiApp
 
-/** Wear OS 入口：申请通知权限后进入主界面。 */
+/** Wear OS 入口：申请通知和 Android 17 局域网权限后进入主界面。 */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         NotificationHelper.ensureChannel(this)
 
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
+        val permissions = buildList {
+            if (Build.VERSION.SDK_INT >= 33 &&
+                ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED
+            ) add(Manifest.permission.POST_NOTIFICATIONS)
+            if (Build.VERSION.SDK_INT >= 37 &&
+                ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.ACCESS_LOCAL_NETWORK) !=
+                PackageManager.PERMISSION_GRANTED
+            ) add(Manifest.permission.ACCESS_LOCAL_NETWORK)
+        }
+        if (permissions.isNotEmpty()) {
             ActivityCompat.requestPermissions(
                 this,
-                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                REQUEST_NOTIFICATION_PERMISSION,
+                permissions.toTypedArray(),
+                REQUEST_PERMISSIONS,
             )
         }
 
@@ -35,6 +42,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private companion object {
-        const val REQUEST_NOTIFICATION_PERMISSION = 1001
+        const val REQUEST_PERMISSIONS = 1001
     }
 }

@@ -2,6 +2,7 @@ package com.remoteci.watch.data
 
 import android.content.Context
 import android.os.Build
+import androidx.core.content.ContextCompat
 import com.remoteci.watch.BuildConfig
 import java.io.IOException
 import java.security.MessageDigest
@@ -57,7 +58,8 @@ object ConnectionManager {
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+    // WebSocket 信封必须写出默认的 protocolVersion，否则服务端会把省略字段识别为协议缺失。
+    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
     private val okHttp = OkHttpClient.Builder()
         .connectTimeout(6, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
@@ -67,8 +69,11 @@ object ConnectionManager {
         .build()
     private val lanDiscoveryClient = LanDiscoveryClient(okHttp, json)
     private lateinit var sessions: SessionStorage
+    private var appContext: Context? = null
     // 以下字段会被 OkHttp 回调线程、IO 协程与主线程并发读写，必须保证跨线程可见性。
     @Volatile private var webSocket: WebSocket? = null
+    /** 最近一次能力快照：切换班级时按新班级重新计算可用控制项。 */
+    @Volatile private var lastCapabilitiesSync: CapabilitiesSync? = null
     private var activeJob: Job? = null
     private var refreshJob: Job? = null
     private var volumeJob: Job? = null
@@ -88,12 +93,41 @@ object ConnectionManager {
     /** 本机、服务端与当前主插件共同支持的功能；旧 V3 端缺少声明时按基础能力回退。 */
     val availableCapabilities = MutableStateFlow(Protocol.BASELINE_CAPABILITIES)
     val currentUser = MutableStateFlow<UserProfile?>(null)
+    /** 账号可访问的班级与当前选中班级；单班级部署列表只有一个元素，界面据此隐藏切换器。 */
+    val classes = MutableStateFlow<List<ClassSummary>>(emptyList())
+    val currentClassId = MutableStateFlow<String?>(null)
     val snapshot = MutableStateFlow<ClassStateSnapshot?>(null)
     val schedule = MutableStateFlow<ScheduleBundle?>(null)
     val extensions = MutableStateFlow<List<ExtensionDefinition>>(emptyList())
     val settings = MutableStateFlow<SettingsSync?>(null)
     val events = MutableSharedFlow<ClassEvent>(extraBufferCapacity = 32)
     val lastCommandResult = MutableStateFlow<CommandResult?>(null)
+    private val voiceReplies = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<CommandResult>>()
+
+    /** 语音体积较大，在后台编码，并只接受本条消息的回执；断线时不自动重发。 */
+    suspend fun sendVoiceMessage(audio: ByteArray): CommandResult = withContext(Dispatchers.IO) {
+        if (!hasClassPermission(Protocol.PERMISSION_SEND_VOICE_MESSAGES))
+            return@withContext CommandResult(false, "FORBIDDEN", "没有发送语音权限")
+        if (!supports(Protocol.CAP_VOICE_MESSAGE_SEND))
+            return@withContext CommandResult(false, "CAPABILITY_UNSUPPORTED", "请更新服务端和插件以支持语音")
+        if (audio.isEmpty() || audio.size > 16000 * 2 * 60 || audio.size % 2 != 0)
+            return@withContext CommandResult(false, "INVALID_REQUEST", "录音无效或超过 60 秒")
+        val id = newMessageId()
+        val reply = kotlinx.coroutines.CompletableDeferred<CommandResult>()
+        voiceReplies[id] = reply
+        try {
+            val command = CommandMessage(command = Protocol.CMD_SEND_VOICE_MESSAGE,
+                classId = currentClassId.value,
+                voiceMessage = VoiceMessageRequest(audioBase64 = android.util.Base64.encodeToString(audio, android.util.Base64.NO_WRAP)))
+            val envelope = Envelope(type = Protocol.TYPE_COMMAND, messageId = id,
+                payload = json.encodeToJsonElement(CommandMessage.serializer(), command))
+            if (webSocket?.send(json.encodeToString(Envelope.serializer(), envelope)) != true)
+                return@withContext CommandResult(false, "OFFLINE", "连接已断开，语音未发送")
+            withTimeout(20_000) { reply.await() }
+        } catch (_: TimeoutCancellationException) {
+            CommandResult(false, "COMMAND_TIMEOUT", "未收到回执，请确认课表端是否已播放后再重试")
+        } finally { voiceReplies.remove(id) }
+    }
     val schedulePullState = MutableStateFlow<SchedulePullState>(SchedulePullState.Idle)
     /** 网络发现或成功直连后产生的本地设置更新，由界面层持久化。 */
     val discoveredSettings = MutableSharedFlow<WatchSettings>(extraBufferCapacity = 1)
@@ -105,6 +139,7 @@ object ConnectionManager {
 
     fun initialize(context: Context) {
         if (!::sessions.isInitialized) sessions = SecureSessionStore(context.applicationContext)
+        appContext = context.applicationContext
     }
 
     /** 仅供 JVM 单元测试注入内存会话存储，绕开 Android Keystore。 */
@@ -116,9 +151,44 @@ object ConnectionManager {
 
     fun supports(capability: String): Boolean = capability in availableCapabilities.value
 
+    /** 统一写入用户档案：同时刷新班级列表；已选班级失效时回退到第一个可访问班级。 */
+    private fun applyUserProfile(user: UserProfile?) {
+        currentUser.value = user
+        val accessible = user?.classes.orEmpty()
+        classes.value = accessible
+        val selected = currentClassId.value
+        currentClassId.value =
+            if (selected != null && accessible.any { it.id == selected }) selected
+            else accessible.firstOrNull()?.id
+    }
+
+    /** 班级内的有效权限；服务端未下发班级信息（旧服务端）时回退到全局权限。 */
+    fun hasClassPermission(permission: Int): Boolean {
+        val classContext = classes.value.firstOrNull { it.id == currentClassId.value }
+        val effective = classContext?.effectivePermissions ?: currentUser.value?.permissions ?: 0
+        return effective and permission == permission
+    }
+
+    /** 切换当前班级：清空旧班数据并立即拉取新班课表，之后的命令都会路由到新班级。 */
+    fun switchClass(classId: String) {
+        if (classes.value.none { it.id == classId }) return
+        if (currentClassId.value == classId) return
+        currentClassId.value = classId
+        snapshot.value = null
+        schedule.value = null
+        extensions.value = emptyList()
+        lastCapabilitiesSync?.let { availableCapabilities.value = effectiveCapabilities(it, classId) }
+        if (state.value == State.LanConnected || state.value == State.CloudConnected) requestSchedulePull()
+    }
+
     fun scanLanPlugins() {
         discoveryJob?.cancel()
         lanPlugins.value = emptyList()
+        if (!hasLocalNetworkPermission()) {
+            lanDiscoveryStatus.value = "系统未授予局域网权限，请在设置中允许后重试"
+            lanDiscoveryScanning.value = false
+            return
+        }
         lanDiscoveryStatus.value = "正在扫描同一局域网中的 RemoteCI 插件…"
         lanDiscoveryScanning.value = true
         discoveryJob = scope.launch {
@@ -206,6 +276,10 @@ object ConnectionManager {
             try {
                 if (plan.bootstrapCloudAuthentication) {
                     val auth = loginCloud(settings, password!!)
+                    if (auth.passwordPending == true) {
+                        // 手表输入不便：待激活账号引导到网页端完成首次密码设置。
+                        throw IOException("该账号尚未设置密码，请先在网页端用空密码登录并设置密码")
+                    }
                     persist(auth)
                     val session = sessions.load() ?: throw MissingSessionException()
                     if (plan.preferLanAfterCloudAuthentication) {
@@ -236,11 +310,11 @@ object ConnectionManager {
             } catch (_: AuthenticationException) {
                 state.value = State.Error("用户名或密码错误")
                 serverVersion.value = null
-                currentUser.value = null
+                applyUserProfile(null)
             } catch (_: MissingSessionException) {
                 state.value = State.Error("请先使用账号密码登录")
                 serverVersion.value = null
-                currentUser.value = null
+                applyUserProfile(null)
             } catch (error: CancellationException) {
                 // 旧连接任务被新连接取消：直接透出，不得用旧任务的取消异常
                 // 覆盖新任务刚写入的 Connecting 状态或清空用户信息。
@@ -252,7 +326,7 @@ object ConnectionManager {
                 }
                 serverVersion.value = null
                 // 登录虽成功但连接已失败，残留的用户信息会让界面误判为“在线”。
-                currentUser.value = null
+                applyUserProfile(null)
             }
         }
     }
@@ -269,7 +343,11 @@ object ConnectionManager {
         webSocket = null
         serverVersion.value = null
         accessToken = null
-        if (clearUser) currentUser.value = null
+        if (clearUser) {
+            applyUserProfile(null)
+            snapshot.value = null
+            schedule.value = null
+        }
         extensions.value = emptyList()
         this@ConnectionManager.settings.value = null
         state.value = State.Idle
@@ -315,7 +393,7 @@ object ConnectionManager {
         }
 
         lastCommandResult.value = null
-        val envelope = schedulePullEnvelope()
+        val envelope = schedulePullEnvelope(currentClassId.value)
         schedulePullState.value = SchedulePullState.Pulling("正在连接插件…")
         if (!socket.send(json.encodeToString(Envelope.serializer(), envelope))) {
                 schedulePullState.value = SchedulePullState.Error("发送拉取请求失败，请重试")
@@ -413,7 +491,8 @@ object ConnectionManager {
     }
 
     private fun sendCommand(command: CommandMessage, requiredPermission: Int) {
-        if (currentUser.value?.has(requiredPermission) != true) {
+        // 权限按当前班级计算（班主任只在所属班级有管理权限），命令随班级路由。
+        if (!hasClassPermission(requiredPermission)) {
             lastCommandResult.value = CommandResult(false, "FORBIDDEN", "权限不足")
             return
         }
@@ -422,7 +501,10 @@ object ConnectionManager {
             Envelope(
                 type = Protocol.TYPE_COMMAND,
                 messageId = newMessageId(),
-                payload = json.encodeToJsonElement(CommandMessage.serializer(), command),
+                payload = json.encodeToJsonElement(
+                    CommandMessage.serializer(),
+                    command.copy(classId = command.classId ?: currentClassId.value),
+                ),
             ),
         )
     }
@@ -432,8 +514,9 @@ object ConnectionManager {
         session: PersistedDeviceSession,
         attempt: Int,
     ): Boolean {
-        // 明文 ws:// 直连只允许私网/环回主机，公网候选一律跳过。
-        for (host in lanEndpointHosts(settings).filter(::isCleartextSafeHost)) {
+        if (!hasLocalNetworkPermission()) return false
+        // 局域网候选统一尝试；如果云端地址使用 HTTP，界面会持续提示不安全。
+        for (host in lanEndpointHosts(settings)) {
             if (!connectWebSocket(
                     url = lanWebSocketUrl(host, settings.lanPort),
                     successState = State.LanConnected,
@@ -453,8 +536,14 @@ object ConnectionManager {
         return false
     }
 
+    private fun hasLocalNetworkPermission(): Boolean =
+        Build.VERSION.SDK_INT < 37 ||
+            ContextCompat.checkSelfPermission(
+                appContext ?: return true,
+                "android.permission.ACCESS_LOCAL_NETWORK",
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
     private suspend fun connectCloud(settings: WatchSettings, auth: AuthResponse, attempt: Int) {
-        requireCleartextPrivateUrl(settings.cloudServerUrl)
         accessToken = auth.accessToken
         // 服务端令牌是标准 Base64，含 +/；不编码时 + 会被服务端解码成空格导致 401。
         if (!connectWebSocket(
@@ -490,7 +579,6 @@ object ConnectionManager {
 
     private suspend fun postAuth(settings: WatchSettings, path: String, bodyJson: String): AuthResponse =
         withContext(Dispatchers.IO) {
-            requireCleartextPrivateUrl(settings.cloudServerUrl)
             val request = Request.Builder()
                 .url("${settings.cloudServerUrl.trimEnd('/')}$path")
                 .post(bodyJson.toRequestBody("application/json".toMediaType()))
@@ -511,7 +599,7 @@ object ConnectionManager {
                 deviceExpiresAt = auth.deviceExpiresAt,
             ),
         )
-        currentUser.value = auth.user
+        applyUserProfile(auth.user)
     }
 
     private suspend fun connectWebSocket(
@@ -621,25 +709,31 @@ object ConnectionManager {
         if (webSocket !== socket) return
         webSocket = null
         serverVersion.value = null
+        lastCapabilitiesSync = null
         availableCapabilities.value = Protocol.BASELINE_CAPABILITIES
     }
 
     private fun handleEnvelope(envelope: Envelope): AuthState? = when (envelope.type) {
         Protocol.TYPE_AUTH_STATE -> decodePayload(envelope.payload, AuthState.serializer())?.also { auth ->
-            currentUser.value = if (auth.authenticated) auth.user else null
+            applyUserProfile(if (auth.authenticated) auth.user else null)
             serverVersion.value = if (auth.authenticated) auth.serverVersion else null
             if (!auth.authenticated) state.value = State.Error(auth.error ?: "登录已失效")
         }
         Protocol.TYPE_STATE_PUSH -> {
-            decodePayload(envelope.payload, ClassStateSnapshot.serializer())?.let { snapshot.value = it }
+            decodePayload(envelope.payload, ClassStateSnapshot.serializer())?.let { incoming ->
+                // 多班级：只接受当前班级（或旧服务端不带班级标识）的推送。
+                if (incoming.classId == null || incoming.classId == currentClassId.value) snapshot.value = incoming
+            }
             null
         }
         Protocol.TYPE_SCHEDULE_SYNC -> {
-            decodePayload(envelope.payload, ScheduleBundle.serializer())?.let {
-                schedule.value = it
-                // 兼容未实现状态消息的旧插件：收到新课表本身也可作为成功终态。
-                if (schedulePullState.value is SchedulePullState.Pulling)
-                    finishSchedulePull(SchedulePullState.Success("课表拉取完成，已使用插件最新课表"))
+            decodePayload(envelope.payload, ScheduleBundle.serializer())?.let { incoming ->
+                if (incoming.classId == null || incoming.classId == currentClassId.value) {
+                    schedule.value = incoming
+                    // 兼容未实现状态消息的旧插件：收到新课表本身也可作为成功终态。
+                    if (schedulePullState.value is SchedulePullState.Pulling)
+                        finishSchedulePull(SchedulePullState.Success("课表拉取完成，已使用插件最新课表"))
+                }
             }
             null
         }
@@ -648,8 +742,11 @@ object ConnectionManager {
             null
         }
         Protocol.TYPE_EXTENSIONS_SYNC -> {
-            decodePayload(envelope.payload, ListSerializer(ExtensionDefinition.serializer()))
-                ?.let { extensions.value = it }
+            decodePayload(envelope.payload, ListSerializer(ExtensionDefinition.serializer()))?.let { incoming ->
+                if (incoming.firstOrNull()?.classId == null ||
+                    incoming.firstOrNull()?.classId == currentClassId.value
+                ) extensions.value = incoming
+            }
             null
         }
         Protocol.TYPE_SETTINGS_SYNC -> {
@@ -662,16 +759,22 @@ object ConnectionManager {
         }
         Protocol.TYPE_CAPABILITIES_SYNC -> {
             decodePayload(envelope.payload, CapabilitiesSync.serializer())?.let { sync ->
-                availableCapabilities.value = effectiveCapabilities(sync)
+                lastCapabilitiesSync = sync
+                availableCapabilities.value = effectiveCapabilities(sync, currentClassId.value)
             }
             null
         }
         Protocol.TYPE_EVENT_NOTIFY -> {
-            decodePayload(envelope.payload, ClassEvent.serializer())?.let { events.tryEmit(it) }
+            decodePayload(envelope.payload, ClassEvent.serializer())?.let { incoming ->
+                if (incoming.classId == null || incoming.classId == currentClassId.value) events.tryEmit(incoming)
+            }
             null
         }
         Protocol.TYPE_COMMAND_RESULT -> {
-            decodePayload(envelope.payload, CommandResult.serializer())?.let { lastCommandResult.value = it }
+            decodePayload(envelope.payload, CommandResult.serializer())?.let {
+                lastCommandResult.value = it
+                envelope.replyToMessageId?.let { id -> voiceReplies[id]?.complete(it) }
+            }
             null
         }
         else -> null
@@ -680,7 +783,7 @@ object ConnectionManager {
     private fun sendCapabilitiesReport(socket: WebSocket) {
         val report = PeerCapabilities(
             softwareVersion = BuildConfig.VERSION_NAME,
-            capabilities = Protocol.BASELINE_CAPABILITIES.toList(),
+            capabilities = Protocol.CURRENT_CAPABILITIES.toList(),
         )
         socket.send(
             json.encodeToString(
@@ -784,10 +887,18 @@ object ConnectionManager {
     private class AuthenticationException : Exception()
 }
 
-internal fun effectiveCapabilities(sync: CapabilitiesSync): Set<String> =
-    Protocol.BASELINE_CAPABILITIES
+/** 当前班级可用能力 = 手表本地 ∩ 服务端 ∩ 该班主插件；不能借用其他班级插件的能力。 */
+internal fun effectiveCapabilities(sync: CapabilitiesSync, classId: String? = null): Set<String> {
+    val perClass = sync.classPlugins
+    val plugin = when {
+        // 旧版服务端或局域网直连（插件只代表自己的班级）。
+        perClass == null || classId == null -> sync.plugin
+        else -> perClass.firstOrNull { it.classId.equals(classId, ignoreCase = true) }?.plugin
+    }
+    return Protocol.CURRENT_CAPABILITIES
         .intersect(sync.server.capabilities.toSet())
-        .intersect(sync.plugin?.capabilities?.toSet() ?: emptySet())
+        .intersect(plugin?.capabilities?.toSet() ?: emptySet())
+}
 
 internal data class ConnectionPlan(
     val bootstrapCloudAuthentication: Boolean,
@@ -850,50 +961,6 @@ internal fun bootstrapUrlChanged(previous: String, current: String): Boolean {
     return old.isBlank() || !old.equals(fresh, ignoreCase = true)
 }
 
-/**
- * 明文连接允许的目标主机：RFC1918 私网 IPv4 字面量，或本机环回
- * （localhost/127.x，无窃听面，模拟器与本地调试必需）；
- * 其余主机与所有域名一律拒绝，避免 DNS 解析把明文流量带出私网。
- */
-internal fun isCleartextSafeHost(hostname: String): Boolean =
-    hostname.equals("localhost", ignoreCase = true) ||
-        isRfc1918Host(hostname) ||
-        isLoopbackHost(hostname)
-
-/** 仅当 hostname 是 RFC1918 私有网段（10/8、172.16/12、192.168/16）的 IPv4 字面量时返回 true。 */
-internal fun isRfc1918Host(hostname: String): Boolean {
-    val octets = hostname.split('.')
-    if (octets.size != 4) return false
-    val values = IntArray(4)
-    for (i in 0..3) {
-        val octet = octets[i]
-        if (octet.isEmpty() || !octet.all(Char::isDigit)) return false
-        val value = octet.toIntOrNull() ?: return false
-        if (value > 255) return false
-        values[i] = value
-    }
-    return values[0] == 10 ||
-        (values[0] == 172 && values[1] in 16..31) ||
-        (values[0] == 192 && values[1] == 168)
-}
-
-/** 环回地址段 127.0.0.0/8 的 IPv4 字面量。 */
-internal fun isLoopbackHost(hostname: String): Boolean {
-    val octets = hostname.split('.')
-    if (octets.size != 4 || octets[0] != "127") return false
-    return octets.drop(1).all { it.isNotEmpty() && it.all(Char::isDigit) && (it.toIntOrNull() ?: -1) in 0..255 }
-}
-
-/**
- * 明文（http/ws）连接只允许指向私网/环回主机，其余立即拒绝；
- * 与 networkSecurityConfig 配合，确保凭据类明文流量永远不出私网。
- */
-internal fun requireCleartextPrivateUrl(url: String) {
-    if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("ws://", ignoreCase = true)) return
-    val host = url.substringAfter("://").substringBefore('/').substringBefore(':').substringBefore('?')
-    if (!isCleartextSafeHost(host)) throw IOException("明文连接拒绝：$host 不是 RFC1918 私网地址")
-}
-
 /** 密码只能由云端验证，因此密码登录始终允许一次云端引导；开发者开关只控制后续连接回退。 */
 internal fun planConnection(settings: WatchSettings, password: String?): ConnectionPlan = ConnectionPlan(
     bootstrapCloudAuthentication = !password.isNullOrEmpty(),
@@ -902,14 +969,14 @@ internal fun planConnection(settings: WatchSettings, password: String?): Connect
     allowCloudFallback = settings.cloudConnectionEnabled,
 )
 
-internal fun schedulePullEnvelope(): Envelope {
+internal fun schedulePullEnvelope(classId: String? = null): Envelope {
     val taskId = UUID.randomUUID().toString().replace("-", "")
     return Envelope(
         type = Protocol.TYPE_SCHEDULE_PULL,
         messageId = taskId,
         payload = Json.encodeToJsonElement(
             ScheduleSyncRequest.serializer(),
-            ScheduleSyncRequest(taskId = taskId, source = Protocol.SCHEDULE_SOURCE_WATCH),
+            ScheduleSyncRequest(taskId = taskId, source = Protocol.SCHEDULE_SOURCE_WATCH, classId = classId),
         ),
     )
 }

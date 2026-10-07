@@ -1,8 +1,10 @@
+using Microsoft.EntityFrameworkCore;
+using RemoteCI.Server.Data;
 using RemoteCI.Shared;
 
 namespace RemoteCI.Server.Services;
 
-/// <summary>按数据库中的管理员设置定时请求插件重新生成七日课表。</summary>
+/// <summary>按数据库中的管理员设置定时请求各班级在线插件重新生成七日课表。</summary>
 public sealed class SchedulePullWorker(
     IServiceScopeFactory scopeFactory,
     ScheduleSyncService scheduleSync,
@@ -32,13 +34,19 @@ public sealed class SchedulePullWorker(
         var interval = await settings.GetIntervalAsync(ct);
         if (!_cadence.IsDue(interval, now)) return;
 
+        // 拉取间隔是全局设置；每个班级的插件各自执行互斥的任务，班级间互不挤占。
+        var classIds = await scope.ServiceProvider.GetRequiredService<AppDbContext>()
+            .Classrooms.AsNoTracking().Select(x => x.Id).ToListAsync(ct);
         _cadence.MarkAttempt(now);
-        var status = await scheduleSync.StartAsync(ScheduleSyncSource.Automatic, ct);
-        if (status.State == ScheduleSyncTaskState.Running)
-            logger.LogInformation("已按 {Interval} 分钟周期请求插件刷新七日课表", (int)interval);
-        else if (status.State == ScheduleSyncTaskState.Busy)
-            logger.LogInformation("已到课表拉取周期，但已有课表任务正在执行，本次自动拉取已跳过");
-        else
-            logger.LogDebug("自动课表拉取未启动：{Message}", status.Message);
+        foreach (var classId in classIds)
+        {
+            var status = await scheduleSync.StartAsync(ScheduleSyncSource.Automatic, classId, ct);
+            if (status.State == ScheduleSyncTaskState.Running)
+                logger.LogInformation("已按 {Interval} 分钟周期请求班级 {ClassId} 的插件刷新课表", (int)interval, classId);
+            else if (status.State == ScheduleSyncTaskState.Busy)
+                logger.LogInformation("班级 {ClassId} 已到课表拉取周期，但已有课表任务正在执行，本次自动拉取已跳过", classId);
+            else
+                logger.LogDebug("班级 {ClassId} 自动课表拉取未启动：{Message}", classId, status.Message);
+        }
     }
 }

@@ -109,6 +109,8 @@ public sealed class CloudClient : IDisposable
     public Task<bool> SendScheduleSyncStatusAsync(ScheduleSyncStatus value) => TrySendAsync(Envelope.ScheduleSyncStatus(value));
     public Task SendEventAsync(ClassEvent value) => SendAsync(Envelope.EventNotify(value));
     public Task SendExtensionsAsync(IReadOnlyList<ExtensionDefinition> value) => SendAsync(Envelope.ExtensionsSync(value));
+    public Task SendExtensionGroupsAsync(IReadOnlyList<ExtensionGroupDefinition> value) => SendAsync(Envelope.ExtensionGroupsSync(value));
+    public Task SendSoftwareInventoryAsync(SoftwareInventory value) => SendAsync(Envelope.SoftwareInventory(value));
 
     private async Task RunLoopAsync(CancellationToken ct)
     {
@@ -182,7 +184,14 @@ public sealed class CloudClient : IDisposable
 
         var response = await _http.PostAsJsonAsync(
             $"{_settings.CloudServerUrl.TrimEnd('/')}/api/plugin/pair",
-            new PairRequest { PairCode = _settings.PluginPairCode, Role = "plugin" },
+            new PairRequest
+            {
+                PairCode = _settings.PluginPairCode,
+                Role = "plugin",
+                ClassNameRemark = string.IsNullOrWhiteSpace(_settings.ClassNameRemark)
+                    ? null
+                    : _settings.ClassNameRemark.Trim(),
+            },
             ct);
         // 409=配对码已用、401=配对码无效、403=端点拒绝（反向代理或权限配置），均视为凭据失效。
         if (response.StatusCode is HttpStatusCode.Conflict or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
@@ -319,7 +328,7 @@ public sealed class CloudClient : IDisposable
                     return;
                 }
                 stream.Write(buffer, 0, result.Count);
-                if (stream.Length > 256 * 1024) throw new InvalidDataException("云端消息超过 256 KiB");
+                if (stream.Length > VoiceMessageRequest.MaxEnvelopeBytes) throw new InvalidDataException("云端消息过大");
             } while (!result.EndOfMessage);
 
             await HandleMessageAsync(Encoding.UTF8.GetString(stream.ToArray()), ct);

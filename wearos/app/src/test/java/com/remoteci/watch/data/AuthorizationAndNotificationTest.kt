@@ -1,16 +1,33 @@
 package com.remoteci.watch.data
 
-import java.io.IOException
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
 import kotlin.test.assertTrue
 
 class AuthorizationAndNotificationTest {
+    @Test
+    fun `voice requires explicit capability from both server and plugin`() {
+        assertFalse(Protocol.CAP_VOICE_MESSAGE_SEND in Protocol.BASELINE_CAPABILITIES)
+        assertFalse(Protocol.CAP_VOICE_MESSAGE_SEND in effectiveCapabilities(CapabilitiesSync(
+            server = PeerCapabilities(capabilities = Protocol.CURRENT_CAPABILITIES.toList()),
+            plugin = PeerCapabilities(capabilities = Protocol.BASELINE_CAPABILITIES.toList()),
+        )))
+        assertTrue(Protocol.CAP_VOICE_MESSAGE_SEND in effectiveCapabilities(CapabilitiesSync(
+            server = PeerCapabilities(capabilities = Protocol.CURRENT_CAPABILITIES.toList()),
+            plugin = PeerCapabilities(capabilities = Protocol.CURRENT_CAPABILITIES.toList()),
+        )))
+        val command = Json.decodeFromString<CommandMessage>("""{"command":9,"voiceMessage":{"format":"pcm_s16le_16000_mono","audioBase64":"AAA="}}""")
+        assertEquals(Protocol.CMD_SEND_VOICE_MESSAGE, command.command)
+        assertEquals("AAA=", command.voiceMessage?.audioBase64)
+        assertEquals(0, Protocol.PERMISSION_SEND_VOICE_MESSAGES and Protocol.PERMISSION_SEND_NOTIFICATIONS)
+    }
+
     @Test
     fun `effective capabilities require watch server and plugin support`() {
         val effective = effectiveCapabilities(
@@ -22,6 +39,21 @@ class AuthorizationAndNotificationTest {
 
         assertEquals(setOf(Protocol.CAP_SCHEDULE_READ), effective)
         assertTrue(effectiveCapabilities(CapabilitiesSync()).isEmpty())
+    }
+
+    @Test
+    fun `effective capabilities follow the current class plugin`() {
+        val sync = CapabilitiesSync(
+            server = PeerCapabilities(capabilities = Protocol.CURRENT_CAPABILITIES.toList()),
+            plugin = PeerCapabilities(capabilities = listOf(Protocol.CAP_SCHEDULE_READ)),
+            classPlugins = listOf(
+                ClassPluginCapabilities("class-b", PeerCapabilities(capabilities = listOf(Protocol.CAP_VOLUME_CONTROL))),
+            ),
+        )
+
+        assertEquals(setOf(Protocol.CAP_VOLUME_CONTROL), effectiveCapabilities(sync, "CLASS-B"))
+        assertTrue(effectiveCapabilities(sync, "class-a").isEmpty())
+        assertEquals(setOf(Protocol.CAP_SCHEDULE_READ), effectiveCapabilities(sync.copy(classPlugins = null), "class-a"))
     }
 
     @Test
@@ -198,28 +230,15 @@ class AuthorizationAndNotificationTest {
     }
 
     @Test
-    fun `cleartext is permitted only for rfc1918 ipv4 literals`() {
-        assertTrue(isRfc1918Host("192.168.1.100"))
-        assertTrue(isRfc1918Host("10.0.2.2"))
-        assertTrue(isRfc1918Host("172.16.0.1"))
-        assertTrue(isRfc1918Host("172.31.255.254"))
-        assertFalse(isRfc1918Host("172.32.0.1"))
-        assertFalse(isRfc1918Host("8.8.8.8"))
-        assertFalse(isRfc1918Host("ci.example.com"))
-        assertFalse(isRfc1918Host("192.168.1"))
-        assertFalse(isRfc1918Host("192.168.1.256"))
-        assertFalse(isRfc1918Host("192.168.1.+1"))
+    fun `cleartext cloud urls are allowed and warned by the connection flow`() {
+        assertTrue(cloudWebSocketUrl("http://110.42.96.65", "token").startsWith("ws://"))
+        assertTrue(cloudWebSocketUrl("https://ci.example.com", "token").startsWith("wss://"))
     }
 
     @Test
-    fun `cleartext urls are rejected outside rfc1918`() {
-        // 私网、环回明文与任何 TLS 地址放行。
-        requireCleartextPrivateUrl("http://192.168.1.5:8080/api")
-        requireCleartextPrivateUrl("ws://10.0.2.2:9123/ws")
-        requireCleartextPrivateUrl("ws://localhost:9123/ws")
-        requireCleartextPrivateUrl("https://ci.example.com")
-        // 公网主机的明文连接一律拒绝。
-        assertFailsWith<IOException> { requireCleartextPrivateUrl("http://ci.example.com") }
-        assertFailsWith<IOException> { requireCleartextPrivateUrl("ws://8.8.8.8:9123/ws") }
+    fun `websocket envelopes always include protocol version`() {
+        val json = Json { encodeDefaults = true }
+        val encoded = json.encodeToString(Envelope.serializer(), Envelope(type = Protocol.TYPE_PEER_CAPABILITIES))
+        assertTrue(encoded.contains("\"protocolVersion\":3"))
     }
 }

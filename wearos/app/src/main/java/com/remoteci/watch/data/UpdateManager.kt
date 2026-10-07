@@ -53,7 +53,7 @@ enum class UpdateChannel
  * 首次安装正式签名版后后续更新即可在同一签名下自动覆盖。
  */
 object UpdateManager {
-    private const val REPO = "MEMZ-Edge01/RemoteCI"
+    private const val REPO = "Edge-HH/RemoteCI"
     private const val API_RELEASES = "https://api.github.com/repos/$REPO/releases?per_page=20"
     private val USER_AGENT = "RemoteCI-Watch/${BuildConfig.VERSION_NAME}"
     private val STABLE_RELEASE_TAG = Regex("""^3\.[0-9]+\.[0-9]+\.[0-9]+$""")
