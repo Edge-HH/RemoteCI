@@ -158,6 +158,11 @@ public sealed class LanServer : IDisposable
 
     internal async Task OnMessageAsync(IWebSocketConnection socket, string message)
     {
+        if (System.Text.Encoding.UTF8.GetByteCount(message) > VoiceMessageRequest.MaxEnvelopeBytes)
+        {
+            socket.Close();
+            return;
+        }
         if (!_clients.TryGetValue(socket.ConnectionInfo.Id, out var client)) return;
         // 同一条连接的消息串行处理，避免命令并发执行与回执乱序。
         try
@@ -216,7 +221,11 @@ public sealed class LanServer : IDisposable
         // 因此需要单独检查镜像状态，避免绕过“仅允许查看课程”的限制。
         var mirrorExpired = !_accounts.AllowsPrivilegedOperations;
         CommandResult result;
-        if (LanSessionLogic.CommandDenied(mirrorExpired, client.User.Permissions, required))
+        if (LanSessionLogic.IsServerOnly(command.Command))
+        {
+            result = CommandResult.Failure(CommandResultCodes.Forbidden, LanSessionLogic.ServerOnlyMessage);
+        }
+        else if (LanSessionLogic.CommandDenied(mirrorExpired, client.User.Permissions, required))
         {
             result = new CommandResult
             {
@@ -290,6 +299,7 @@ public sealed class LanServer : IDisposable
         client.User = user;
         client.SessionId = proof.DeviceSessionId;
         SendAuthenticatedState(client, user);
+        SendCapabilities(client);
         if (_snapshotProvider() is { } snapshot) Send(client.Socket, Envelope.StatePush(snapshot));
         if (_scheduleProvider() is { } schedule) Send(client.Socket, Envelope.ScheduleSync(schedule));
         Send(client.Socket, Envelope.ExtensionsSync(VisibleExtensions(user, Volatile.Read(ref _latestExtensions))));
@@ -315,6 +325,7 @@ public sealed class LanServer : IDisposable
             }
             client.User = refreshed;
             SendAuthenticatedState(client, refreshed);
+            SendCapabilities(client);
             Send(client.Socket, Envelope.ExtensionsSync(VisibleExtensions(refreshed, Volatile.Read(ref _latestExtensions))));
         }
     }
@@ -325,6 +336,17 @@ public sealed class LanServer : IDisposable
             Authenticated = true,
             ServerVersion = _accounts.ServerVersion,
             User = user,
+        }));
+
+    private void SendCapabilities(LanClient client) =>
+        Send(client.Socket, Envelope.CapabilitiesSync(new CapabilitiesSync
+        {
+            Server = new PeerCapabilities
+            {
+                SoftwareVersion = _accounts.ServerVersion,
+                Capabilities = _accounts.ServerCapabilities,
+            },
+            Plugin = PluginAppInfo.Capabilities(),
         }));
 
     private IEnumerable<LanClient> AuthenticatedClients() =>

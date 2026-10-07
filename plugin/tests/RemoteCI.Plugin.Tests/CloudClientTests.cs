@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -32,13 +34,14 @@ public sealed class CloudClientTests
         public WebSocketReceiveResult? NextReceive { get; set; }
         public Exception? ReceiveError { get; set; }
         public Exception? SendError { get; set; }
+        public Exception? ConnectError { get; set; }
         public TimeSpan SendDelay { get; set; }
         public ConcurrentQueue<byte[]> SentMessages { get; } = new();
 
         public Task ConnectAsync(Uri uri, CancellationToken ct)
         {
             ConnectCount++;
-            return Task.CompletedTask;
+            return ConnectError is null ? Task.CompletedTask : Task.FromException(ConnectError);
         }
 
         public async Task SendAsync(byte[] buffer, WebSocketMessageType messageType, bool endOfMessage, CancellationToken ct)
@@ -127,6 +130,32 @@ public sealed class CloudClientTests
     }
 
     [Fact]
+    public async Task Connect_ReportsSoftwareVersionAndCapabilities()
+    {
+        var socket = new FakeSocket();
+        var (client, _) = Create(preSeeded: socket);
+        try
+        {
+            _ = client.StartAsync();
+            await WaitUntilAsync(() => socket.SentMessages.Any(bytes =>
+                JsonSerializer.Deserialize<Envelope>(bytes, JsonDefaults.Options)?.Type ==
+                Protocol.MessageTypePeerCapabilities), 2000);
+
+            var envelope = socket.SentMessages
+                .Select(bytes => JsonSerializer.Deserialize<Envelope>(bytes, JsonDefaults.Options)!)
+                .First(value => value.Type == Protocol.MessageTypePeerCapabilities);
+            var report = JsonSerializer.Deserialize<PeerCapabilities>(
+                JsonSerializer.Serialize(envelope.Payload), JsonDefaults.Options)!;
+            Assert.Equal("3.2.1.4", report.SoftwareVersion);
+            Assert.Contains(RemoteCiCapabilities.ScheduleChange, report.Capabilities);
+        }
+        finally
+        {
+            client.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task ReceiveFailure_ReleasesSocketAndReconnects()
     {
         var failing = new FakeSocket { ReceiveError = new WebSocketException("connection lost") };
@@ -145,6 +174,274 @@ public sealed class CloudClientTests
         finally
         {
             cts.Cancel();
+            client.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task ConnectionStatus_ReportsConnectedAndSanitizedFailure()
+    {
+        var failing = new FakeSocket { ReceiveError = new WebSocketException("connection lost") };
+        var (client, _) = Create(preSeeded: failing);
+        var statuses = new ConcurrentQueue<CloudConnectionStatus>();
+        client.ConnectionStatusChanged += statuses.Enqueue;
+        try
+        {
+            _ = client.StartAsync();
+            await WaitUntilAsync(
+                () => statuses.Any(status => status.State == CloudConnectionState.WaitingToRetry), 2000);
+
+            Assert.Contains(statuses, status => status.State == CloudConnectionState.Connected);
+            var failed = statuses.First(status => status.State == CloudConnectionState.WaitingToRetry);
+            Assert.Contains("connection lost", failed.Error);
+            Assert.DoesNotContain("test-token", failed.Error);
+        }
+        finally
+        {
+            client.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task ConnectionStatus_RedactsCredentialFromHandshakeError()
+    {
+        const string secret = "secret-token";
+        var failing = new FakeSocket
+        {
+            ConnectError = new WebSocketException($"connect wss://server/ws?token={secret} failed"),
+        };
+        var settings = new PluginSettings { CloudToken = secret, EnableCloud = true };
+        var (client, _) = Create(settings, preSeeded: failing);
+        try
+        {
+            _ = client.StartAsync();
+            await WaitUntilAsync(
+                () => client.CurrentStatus.State == CloudConnectionState.WaitingToRetry, 2000);
+
+            Assert.DoesNotContain(secret, client.CurrentStatus.Error);
+            Assert.Contains("token=***", client.CurrentStatus.Error);
+        }
+        finally
+        {
+            client.Dispose();
+        }
+    }
+
+    [Theory]
+    [InlineData(401, true)]
+    [InlineData(403, true)]
+    [InlineData(404, false)]
+    public async Task ClientWebSocketAdapter_ClassifiesOnlyAuthenticationHandshakeFailures(
+        int statusCode,
+        bool shouldBeAuthenticationFailure)
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var server = Task.Run(async () =>
+        {
+            using var client = await listener.AcceptTcpClientAsync();
+            await using var stream = client.GetStream();
+            var request = new byte[4096];
+            _ = await stream.ReadAsync(request);
+            var reason = statusCode switch
+            {
+                401 => "Unauthorized",
+                403 => "Forbidden",
+                _ => "Not Found",
+            };
+            var response = Encoding.ASCII.GetBytes(
+                $"HTTP/1.1 {statusCode} {reason}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            await stream.WriteAsync(response);
+        });
+
+        using var adapter = new ClientWebSocketAdapter(new ClientWebSocket());
+        var error = await Record.ExceptionAsync(() => adapter.ConnectAsync(
+            new Uri($"ws://127.0.0.1:{port}/ws?token=%3CREDACTED%3E"),
+            CancellationToken.None));
+        await server;
+
+        Assert.NotNull(error);
+        Assert.Equal(shouldBeAuthenticationFailure, error.GetType().Name == "PluginAuthenticationException");
+        if (!shouldBeAuthenticationFailure) Assert.IsType<WebSocketException>(error);
+    }
+
+    [Fact]
+    public async Task ClientWebSocketAdapter_StillCompletesSuccessfulUpgrade()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var releaseServer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = Task.Run(async () =>
+        {
+            using var client = await listener.AcceptTcpClientAsync();
+            await using var stream = client.GetStream();
+            var request = new byte[4096];
+            var count = await stream.ReadAsync(request);
+            var requestText = Encoding.ASCII.GetString(request, 0, count);
+            var webSocketKey = requestText
+                .Split("\r\n", StringSplitOptions.RemoveEmptyEntries)
+                .Single(line => line.StartsWith("Sec-WebSocket-Key:", StringComparison.OrdinalIgnoreCase))
+                .Split(':', 2)[1]
+                .Trim();
+            var accept = Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes(
+                webSocketKey + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
+            var response = Encoding.ASCII.GetBytes(
+                "HTTP/1.1 101 Switching Protocols\r\n" +
+                "Connection: Upgrade\r\n" +
+                "Upgrade: websocket\r\n" +
+                $"Sec-WebSocket-Accept: {accept}\r\n\r\n");
+            await stream.WriteAsync(response);
+            await releaseServer.Task;
+        });
+
+        using var adapter = new ClientWebSocketAdapter(new ClientWebSocket());
+        try
+        {
+            adapter.KeepAliveInterval = TimeSpan.FromSeconds(20);
+            await adapter.ConnectAsync(new Uri($"ws://127.0.0.1:{port}/ws"), CancellationToken.None);
+            Assert.Equal(WebSocketState.Open, adapter.State);
+        }
+        finally
+        {
+            releaseServer.TrySetResult();
+            await server;
+        }
+    }
+
+    [Fact]
+    public async Task HandshakeAuthenticationFailure_ClearsOldTokenAndUsesSavedPairCode()
+    {
+        var settings = new PluginSettings
+        {
+            CloudToken = "stale-token",
+            PluginPairCode = "fresh-pair-code",
+            EnableCloud = true,
+        };
+        var storePath = Path.Combine(
+            Path.GetTempPath(), "RemoteCI.Plugin.Tests", Guid.NewGuid().ToString("N"), "token.bin");
+        var store = new CloudTokenStore(storePath);
+        store.Save("stale-token");
+        var pairRequests = 0;
+        var handler = new StubHandler(_ =>
+        {
+            Interlocked.Increment(ref pairRequests);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"token":"replacement-token","role":"plugin"}""",
+                    Encoding.UTF8,
+                    "application/json"),
+            };
+        });
+        var rejected = new FakeSocket
+        {
+            ConnectError = new PluginAuthenticationException(new WebSocketException("handshake rejected")),
+        };
+        var connected = new FakeSocket();
+        var (client, _) = Create(
+            settings,
+            tokenStore: store,
+            httpHandler: handler,
+            preSeeded: [rejected, connected]);
+        try
+        {
+            _ = client.StartAsync();
+            await WaitUntilAsync(
+                () => client.CurrentStatus.IsConnected && settings.CloudToken == "replacement-token",
+                3000);
+
+            Assert.Equal(1, pairRequests);
+            Assert.Equal("replacement-token", store.Load());
+            Assert.Empty(settings.PluginPairCode);
+            Assert.True(rejected.DisposeCount >= 1);
+            Assert.Equal(1, connected.ConnectCount);
+        }
+        finally
+        {
+            client.Dispose();
+            if (File.Exists(storePath)) File.Delete(storePath);
+        }
+    }
+
+    [Fact]
+    public async Task ManualTest_WakesCredentialWaitAndUsesRealWebSocketFlow()
+    {
+        var settings = new PluginSettings { EnableCloud = true };
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"token":"paired-token","role":"plugin"}""", Encoding.UTF8, "application/json"),
+        });
+        var socket = new FakeSocket();
+        var (client, _) = Create(settings, httpHandler: handler, preSeeded: socket);
+        try
+        {
+            _ = client.StartAsync();
+            await WaitUntilAsync(
+                () => client.CurrentStatus.State == CloudConnectionState.WaitingForCredentials, 2000);
+
+            settings.PluginPairCode = "new-pair-code";
+            var result = await client.TestConnectionAsync();
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(CloudConnectionState.Connected, result.Status.State);
+            Assert.Equal(1, socket.ConnectCount);
+            Assert.Contains(socket.SentMessages, bytes =>
+                JsonSerializer.Deserialize<Envelope>(bytes, JsonDefaults.Options)?.Type ==
+                Protocol.MessageTypePluginNetworkInfo);
+        }
+        finally
+        {
+            client.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task ManualTest_WhenCloudDisabledExplainsRequiredAction()
+    {
+        var (client, _) = Create(new PluginSettings { EnableCloud = false });
+        try
+        {
+            _ = client.StartAsync();
+            var result = await client.TestConnectionAsync();
+
+            Assert.False(result.Success);
+            Assert.Equal(CloudConnectionState.Disabled, result.Status.State);
+            Assert.Contains("开发者设置", result.Message);
+        }
+        finally
+        {
+            client.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task ManualTest_ReportsWhenSavedServerAddressNeedsRestart()
+    {
+        var settings = new PluginSettings
+        {
+            CloudToken = "test-token",
+            CloudServerUrl = "https://old.example.com",
+            EnableCloud = true,
+        };
+        var (client, _) = Create(settings, preSeeded: new FakeSocket());
+        try
+        {
+            _ = client.StartAsync();
+            await WaitUntilAsync(() => client.CurrentStatus.IsConnected, 2000);
+
+            settings.CloudServerUrl = "https://new.example.com";
+            var result = await client.TestConnectionAsync();
+
+            Assert.True(result.Success, result.Message);
+            Assert.Contains("https://old.example.com", result.Message);
+            Assert.Contains("重启 ClassIsland", result.Message);
+            Assert.Contains("https://old.example.com", result.Status.Summary);
+            Assert.DoesNotContain("https://new.example.com", result.Status.Summary);
+        }
+        finally
+        {
             client.Dispose();
         }
     }

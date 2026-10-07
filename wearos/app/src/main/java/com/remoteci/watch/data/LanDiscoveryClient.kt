@@ -73,8 +73,6 @@ internal class LanDiscoveryClient(
     }
 
     suspend fun fetchBootstrap(candidate: LanPluginCandidate): ConnectionBootstrapInfo = withTimeout(6_000) {
-        // 引导通道同样走明文 ws://，只允许 RFC1918 私网主机。
-        requireCleartextPrivateUrl(lanBootstrapUrl(candidate.host, candidate.port))
         suspendCancellableCoroutine { continuation ->
             val listener = object : WebSocketListener() {
                 override fun onMessage(webSocket: WebSocket, text: String) {

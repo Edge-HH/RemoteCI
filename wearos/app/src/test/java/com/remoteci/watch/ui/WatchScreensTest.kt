@@ -12,7 +12,16 @@ import com.remoteci.watch.data.UserProfile
 import java.time.LocalDate
 import java.time.LocalTime
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.Autorenew
+import androidx.compose.material.icons.rounded.BroadcastOnHome
+import androidx.compose.material.icons.rounded.Cached
+import androidx.compose.material.icons.rounded.Casino
+import androidx.compose.material.icons.rounded.EditNotifications
+import androidx.compose.material.icons.rounded.NotificationsOff
+import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.School
+import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.ui.unit.dp
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -440,11 +449,41 @@ class WatchScreensTest {
     }
 
     @Test
-    fun `extension icon maps whitelist and falls back for unknown names`() {
+    fun `extension icon resolves material names regardless of spelling style`() {
+        // 大小写、下划线、空格和 Icons.Rounded 前缀都归一化到同一个图标。
         assertEquals(Icons.Rounded.School, extensionIcon("school"))
         assertEquals(Icons.Rounded.School, extensionIcon(" School "))
+        assertEquals(Icons.Rounded.BroadcastOnHome, extensionIcon("BroadcastOnHome"))
+        assertEquals(Icons.Rounded.BroadcastOnHome, extensionIcon("broadcast_on_home"))
+        assertEquals(Icons.Rounded.BroadcastOnHome, extensionIcon("Icons.Rounded.BroadcastOnHome"))
+        assertEquals(Icons.Rounded.PowerSettingsNew, extensionIcon("power_settings_new"))
+        assertEquals(Icons.Rounded.Casino, extensionIcon("Casino"))
+        assertEquals(Icons.Rounded.Casino, extensionIcon("casino"))
+        assertEquals(Icons.Rounded.Shuffle, extensionIcon("shuffle"))
+        assertEquals(Icons.Rounded.Autorenew, extensionIcon("autorenew"))
+        assertEquals(Icons.Rounded.Cached, extensionIcon("cached"))
+    }
+
+    @Test
+    fun `extension icon falls back to plain text for unknown or empty names`() {
         assertNull(extensionIcon("unknown-icon"))
+        assertNull(extensionIcon(""))
+        assertNull(extensionIcon("   "))
         assertNull(extensionIcon(null))
+    }
+
+    @Test
+    fun `extension icon keeps legacy aliases ahead of same named material icons`() {
+        // 历史别名语义与 Material 同名图标不同，必须保持不变以免已有插件外观变化。
+        assertEquals(Icons.Rounded.EditNotifications, extensionIcon("notification"))
+        assertEquals(Icons.Rounded.EditNotifications, extensionIcon("notifications"))
+        assertEquals(Icons.Rounded.EditNotifications, extensionIcon("message"))
+        assertEquals(Icons.Rounded.NotificationsOff, extensionIcon("clear"))
+        assertEquals(Icons.Rounded.NotificationsOff, extensionIcon("clear_notifications"))
+        assertEquals(Icons.Rounded.PowerSettingsNew, extensionIcon("power"))
+        assertEquals(Icons.Rounded.PowerSettingsNew, extensionIcon("poweroff"))
+        assertEquals(Icons.AutoMirrored.Rounded.VolumeUp, extensionIcon("volume"))
+        assertEquals(Icons.AutoMirrored.Rounded.VolumeUp, extensionIcon("volumeup"))
     }
 
     @Test
@@ -478,5 +517,18 @@ class WatchScreensTest {
         assertEquals("A", nextSelectValue(options, "C"))
         assertEquals("A", nextSelectValue(options, null))
         assertEquals("X", nextSelectValue(emptyList(), "X"))
+    }
+
+    @Test
+    fun `select parameter shows display labels but keeps raw values`() {
+        val parameter = ExtensionParameter(
+            key = "voice", label = "音色", type = Protocol.EXT_PARAM_SELECT,
+            options = listOf("standard", "soft"), optionLabels = listOf("标准", "柔和"),
+        )
+
+        assertEquals("柔和", parameter.optionLabel("soft"))
+        assertEquals("soft", nextSelectValue(parameter.options, "standard"))
+        assertEquals("custom", parameter.optionLabel("custom"))
+        assertEquals("soft", parameter.copy(optionLabels = listOf("只有一个")).optionLabel("soft"))
     }
 }

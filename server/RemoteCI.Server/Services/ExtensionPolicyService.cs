@@ -120,7 +120,10 @@ public sealed class ExtensionPolicyService(AppDbContext db)
         IReadOnlyCollection<ExtensionPolicy> policies,
         IReadOnlyCollection<string> hiddenExtensionIds)
     {
-        var allowed = profile.Permissions.HasFlag(UserPermissions.RunExtensions)
+        // 全局学生也可能是某班班管理员；允许列表用于策略过滤，调用时仍逐班校验权限。
+        var canRunExtensions = profile.Permissions.HasFlag(UserPermissions.RunExtensions) ||
+            profile.Classes?.Any(x => x.Permissions?.HasFlag(UserPermissions.RunExtensions) == true) == true;
+        var allowed = canRunExtensions
             ? policies.Where(policy => profile.Role == UserRole.Admin || policy.AllowNonAdmin)
                 .Select(policy => policy.ExtensionId).Order(StringComparer.Ordinal).ToList()
             : [];

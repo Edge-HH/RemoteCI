@@ -1,3 +1,4 @@
+using RemoteCI.Server.Data;
 using RemoteCI.Server.Services;
 using RemoteCI.Shared;
 using RemoteCI.Shared.Models;
@@ -11,8 +12,8 @@ public sealed class ScheduleSyncTaskTrackerTests
     public async Task ActiveTask_ReturnsBusyAndCompletionReleasesWaiter()
     {
         var tracker = new ScheduleSyncTaskTracker();
-        var first = tracker.TryBegin(ScheduleSyncRequest.Create(ScheduleSyncSource.WebUi));
-        var second = tracker.TryBegin(ScheduleSyncRequest.Create(ScheduleSyncSource.Automatic));
+        var first = tracker.TryBegin(ScheduleSyncRequest.Create(ScheduleSyncSource.WebUi), Classroom.DefaultId);
+        var second = tracker.TryBegin(ScheduleSyncRequest.Create(ScheduleSyncSource.Automatic), Classroom.DefaultId);
 
         Assert.Equal(ScheduleSyncTaskState.Running, first.State);
         Assert.Equal(ScheduleSyncTaskState.Busy, second.State);
@@ -30,7 +31,11 @@ public sealed class ScheduleSyncTaskTrackerTests
         });
 
         Assert.Equal(ScheduleSyncTaskState.Completed, (await waiting).State);
-        Assert.Null(tracker.Current);
-        Assert.Equal(ScheduleSyncTaskState.Running, tracker.TryBegin(ScheduleSyncRequest.Create(ScheduleSyncSource.Watch)).State);
+        Assert.Null(tracker.Current(Classroom.DefaultId));
+        // 其他班级的任务互不影响：默认班级结束后，新班级可立即启动自己的课表任务。
+        var otherClass = Guid.NewGuid();
+        Assert.Equal(
+            ScheduleSyncTaskState.Running,
+            tracker.TryBegin(ScheduleSyncRequest.Create(ScheduleSyncSource.Watch), otherClass).State);
     }
 }

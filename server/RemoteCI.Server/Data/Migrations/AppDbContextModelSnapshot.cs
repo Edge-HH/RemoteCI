@@ -227,6 +227,9 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Property<string>("PasswordHash")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("PasswordPending")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("PhoneNumber")
                         .HasColumnType("TEXT");
 
@@ -240,6 +243,13 @@ namespace RemoteCI.Server.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SecurityStamp")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("SetupTokenExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SetupTokenHash")
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("TwoFactorEnabled")
@@ -305,6 +315,109 @@ namespace RemoteCI.Server.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("BackupConfigurations");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.ClassGroup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ParentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.HasIndex("ParentId");
+
+                    b.ToTable("ClassGroups");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.ClassGroupAssignment", b =>
+                {
+                    b.Property<Guid>("GroupId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ClassroomId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("GroupId", "ClassroomId");
+
+                    b.HasIndex("ClassroomId");
+
+                    b.ToTable("ClassGroupAssignments");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.ClassMembership", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ClassroomId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RoleDefinitionId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("UserId", "ClassroomId");
+
+                    b.HasIndex("ClassroomId");
+
+                    b.HasIndex("RoleDefinitionId");
+
+                    b.ToTable("ClassMemberships");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.Classroom", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("Avatar")
+                        .HasColumnType("BLOB");
+
+                    b.Property<string>("AvatarContentType")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("AvatarUpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("VisitorAccessEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("Classrooms");
                 });
 
             modelBuilder.Entity("RemoteCI.Server.Data.DeviceSession", b =>
@@ -376,10 +489,86 @@ namespace RemoteCI.Server.Data.Migrations
                     b.ToTable("ExtensionPolicies");
                 });
 
+            modelBuilder.Entity("RemoteCI.Server.Data.LessonTeacherOverride", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Date")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExpectedSubject")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Index")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("SwapRequestId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TeacherName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClassId", "Date", "Index")
+                        .IsUnique();
+
+                    b.ToTable("LessonTeacherOverrides");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.PendingExtensionSetting", b =>
+                {
+                    b.Property<Guid>("ClassroomId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GroupId")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RequestedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ValuesJson")
+                        .IsRequired()
+                        .HasMaxLength(65536)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ClassroomId", "GroupId");
+
+                    b.ToTable("PendingExtensionSettings");
+                });
+
             modelBuilder.Entity("RemoteCI.Server.Data.PluginCredential", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Assigned")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ClassNameRemark")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ClassroomId")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -396,12 +585,21 @@ namespace RemoteCI.Server.Data.Migrations
                         .HasMaxLength(80)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTimeOffset?>("SoftwareInventoryAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SoftwareInventoryJson")
+                        .HasMaxLength(65536)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("TokenHash")
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ClassroomId");
 
                     b.HasIndex("TokenHash")
                         .IsUnique();
@@ -415,6 +613,9 @@ namespace RemoteCI.Server.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid>("ClassroomId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("CodeHash")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -425,6 +626,12 @@ namespace RemoteCI.Server.Data.Migrations
 
                     b.Property<DateTimeOffset>("ExpiresAt")
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsPersistent")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsShared")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset?>("UsedAt")
                         .HasColumnType("TEXT");
@@ -437,6 +644,114 @@ namespace RemoteCI.Server.Data.Migrations
                     b.ToTable("PluginPairingCodes");
                 });
 
+            modelBuilder.Entity("RemoteCI.Server.Data.ScheduleSwapRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AppliedPlanJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ApproverUserIdsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CounterpartClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CounterpartDate")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CounterpartIndex")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DecidedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DecisionNote")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Forced")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Mode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReplacementSubjectName")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RequesterUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SourceClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceDate")
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("SourceIndex")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SourceSubject")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceTeacher")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("TargetClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetDate")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TargetIndex")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TargetSubject")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetTeacher")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RequesterUserId");
+
+                    b.HasIndex("Status", "TargetDate");
+
+                    b.ToTable("ScheduleSwapRequests");
+                });
+
             modelBuilder.Entity("RemoteCI.Server.Data.SystemMetadata", b =>
                 {
                     b.Property<int>("Id")
@@ -446,15 +761,105 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Property<long>("AccountVersion")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("AutoEnterVisitorPage")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("ClassAdminCanChangeAvatar")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("ClassAdminCanEditExtensionSettings")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("ClassAdminCanPullSchedule")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("ClassAdminCanRename")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("ForceSenderInTitle")
                         .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("LoginBackground")
+                        .HasColumnType("BLOB");
+
+                    b.Property<string>("LoginBackgroundContentType")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LoginBackgroundOpacity")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("LoginBackgroundUpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LoginCardPosition")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("LoginTheme")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MobileServerUrl")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("SchedulePullIntervalMinutes")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("VapidPrivateKey")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("VapidPublicKey")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
                     b.ToTable("SystemMetadata");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.UserApiKey", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("KeyHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LastUsedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Prefix")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KeyHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "RevokedAt");
+
+                    b.ToTable("UserApiKeys");
                 });
 
             modelBuilder.Entity("RemoteCI.Server.Data.UserExtensionPreference", b =>
@@ -475,6 +880,83 @@ namespace RemoteCI.Server.Data.Migrations
                     b.HasKey("UserId", "ExtensionId");
 
                     b.ToTable("UserExtensionPreferences");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.UserNotification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ReadAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SwapRequestId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.ToTable("UserNotifications");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.WebPushSubscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Auth")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Endpoint")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("P256dh")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Endpoint")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("WebPushSubscriptions");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>
@@ -539,7 +1021,107 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Navigation("RoleDefinition");
                 });
 
+            modelBuilder.Entity("RemoteCI.Server.Data.ClassGroup", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.ClassGroup", "Parent")
+                        .WithMany("Children")
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Parent");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.ClassGroupAssignment", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.Classroom", "Classroom")
+                        .WithMany("GroupAssignments")
+                        .HasForeignKey("ClassroomId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("RemoteCI.Server.Data.ClassGroup", "Group")
+                        .WithMany("Assignments")
+                        .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Classroom");
+
+                    b.Navigation("Group");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.ClassMembership", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.Classroom", "Classroom")
+                        .WithMany("Memberships")
+                        .HasForeignKey("ClassroomId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("RemoteCI.Server.Data.AccountRole", "RoleDefinition")
+                        .WithMany()
+                        .HasForeignKey("RoleDefinitionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RemoteCI.Server.Data.AppUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Classroom");
+
+                    b.Navigation("RoleDefinition");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("RemoteCI.Server.Data.DeviceSession", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.AppUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.PendingExtensionSetting", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.Classroom", "Classroom")
+                        .WithMany()
+                        .HasForeignKey("ClassroomId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Classroom");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.PluginCredential", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.Classroom", "Classroom")
+                        .WithMany()
+                        .HasForeignKey("ClassroomId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Classroom");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.ScheduleSwapRequest", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.AppUser", "Requester")
+                        .WithMany()
+                        .HasForeignKey("RequesterUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Requester");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.UserApiKey", b =>
                 {
                     b.HasOne("RemoteCI.Server.Data.AppUser", "User")
                         .WithMany()
@@ -561,9 +1143,45 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("RemoteCI.Server.Data.UserNotification", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.AppUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.WebPushSubscription", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.AppUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("RemoteCI.Server.Data.AccountRole", b =>
                 {
                     b.Navigation("Users");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.ClassGroup", b =>
+                {
+                    b.Navigation("Assignments");
+
+                    b.Navigation("Children");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.Classroom", b =>
+                {
+                    b.Navigation("GroupAssignments");
+
+                    b.Navigation("Memberships");
                 });
 #pragma warning restore 612, 618
         }

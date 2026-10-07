@@ -1,4 +1,6 @@
 using System.Reflection;
+using RemoteCI.Shared;
+using RemoteCI.Shared.Models;
 
 namespace RemoteCI.Server.Services;
 
@@ -8,4 +10,10 @@ public static class AppVersion
     public static string Version { get; } = typeof(AppVersion).Assembly
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
         .Split('+', 2)[0] ?? "0.0.0";
+
+    public static PeerCapabilities Capabilities() => new()
+    {
+        SoftwareVersion = Version,
+        Capabilities = RemoteCiCapabilities.Current,
+    };
 }

@@ -19,12 +19,16 @@ public sealed class SystemConfigModel(
     IHostApplicationLifetime lifetime,
     AppDbContext db,
     ConfigurationArchiveService archives,
-    PeerRegistry peers) : WebPageModel(users)
+    PeerRegistry peers,
+    IdentityCoordinator identities,
+    MobileLoginSettings mobileLogin) : WebPageModel(users)
 {
     [BindProperty] public UpdateInput UpdateOptions { get; set; } = new();
     [BindProperty] public BackupInput BackupOptions { get; set; } = new();
     [BindProperty] public ExportInput ExportOptions { get; set; } = new();
     [BindProperty] public ImportInput ImportOptions { get; set; } = new();
+    [BindProperty] public bool ForceSenderInTitle { get; set; }
+    [BindProperty] public string? MobileServerUrl { get; set; }
     public IReadOnlyList<BackupFileInfo> Backups { get; private set; } = [];
 
     public string CurrentVersion => updates.CurrentVersion;
@@ -41,7 +45,32 @@ public sealed class SystemConfigModel(
     {
         if (await RequireAdminAsync() is { } denied) return denied;
         await LoadBackupAsync();
+        ForceSenderInTitle = await identities.GetForceSenderInTitleAsync();
+        MobileServerUrl = await mobileLogin.GetServerUrlAsync();
         return Page();
+    }
+
+    public async Task<IActionResult> OnPostSaveMobileLoginSettingsAsync(CancellationToken ct)
+    {
+        if (await RequireAdminAsync() is { } denied) return denied;
+        try
+        {
+            await mobileLogin.SetServerUrlAsync(MobileServerUrl, ct);
+            TempData["Message"] = string.IsNullOrWhiteSpace(MobileServerUrl)
+                ? "扫码登录二维码将使用当前访问地址"
+                : "扫码登录服务器地址已保存";
+        }
+        catch (ArgumentException ex) { TempData["Error"] = ex.Message; }
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostSaveNotificationSettingsAsync(CancellationToken ct)
+    {
+        if (await RequireAdminAsync() is { } denied) return denied;
+        var settings = await identities.SetForceSenderInTitleAsync(ForceSenderInTitle, ct);
+        await peers.SendSettingsToWatchesAsync(settings, ct);
+        TempData["Message"] = ForceSenderInTitle ? "已开启强制显示发送人" : "已关闭强制显示发送人";
+        return RedirectToPage();
     }
 
     public async Task<IActionResult> OnPostCheckUpdateAsync(CancellationToken ct)
@@ -68,10 +97,10 @@ public sealed class SystemConfigModel(
             var comparison = UpdateService.CompareVersions(latestVersion, CurrentVersion);
             CheckMessage = comparison switch
             {
-                > 0 => $"发现新版本 v{latestVersion}。",
-                0 when UpdateOptions.Force => $"当前已是 v{CurrentVersion}，可强制重新下载并覆盖安装。",
-                0 => $"当前已是最新版本 v{CurrentVersion}。",
-                _ => $"所选渠道最新版本 v{latestVersion} 低于当前版本，拒绝降级。",
+                > 0 => $"发现新版本 {latestVersion}。",
+                0 when UpdateOptions.Force => $"当前已是 {CurrentVersion}，可强制重新下载并覆盖安装。",
+                0 => $"当前已是最新版本 {CurrentVersion}。",
+                _ => $"所选渠道最新版本 {latestVersion} 低于当前版本，拒绝降级。",
             };
         }
         catch (Exception ex)
@@ -114,8 +143,8 @@ public sealed class SystemConfigModel(
             var mode = await updates.BeginApplyAsync(prepared, installDirectory, ct);
 
             CheckMessage = mode == UpdateApplyMode.ExternalInstaller
-                ? $"v{latestVersion} 更新包已准备，服务端退出后将完成替换并自动重启，请稍后刷新页面。"
-                : $"v{latestVersion} 更新包已应用，服务端即将重启，请稍后刷新页面。";
+                ? $"{latestVersion} 更新包已准备，服务端退出后将完成替换并自动重启，请稍后刷新页面。"
+                : $"{latestVersion} 更新包已应用，服务端即将重启，请稍后刷新页面。";
             UpdateSucceeded = true;
             _ = Task.Run(async () =>
             {

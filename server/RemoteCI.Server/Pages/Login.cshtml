@@ -5,11 +5,18 @@
     <img class="login-logo" src="~/logo-mark.svg" alt="RemoteCI" asp-append-version="true" />
     <p class="eyebrow">RemoteCI 管理中心</p>
     <h1>登录你的账号</h1>
-    <p class="muted">普通账号可管理自己的密码与设备；其余页面按有效权限开放。</p>
     <form method="post" class="stack">
         <div asp-validation-summary="ModelOnly" class="validation"></div>
         <label>ID<input asp-for="Input.Username" autocomplete="username" /></label>
         <label>密码<input asp-for="Input.Password" type="password" autocomplete="current-password" /></label>
+        <label class="check remember-me">
+            <input asp-for="Input.RememberMe" />
+            <span>保持登录</span>
+        </label>
         <button type="submit">登录</button>
     </form>
+    @if (Model.VisitorAccessEnabled)
+    {
+        <a class="login-guest" asp-page="/Visitor">仅查看</a>
+    }
 </section>

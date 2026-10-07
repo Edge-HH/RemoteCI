@@ -1,0 +1,56 @@
+@model RemoteCI.Server.Pages.ExtensionFieldsModel
+@using RemoteCI.Shared.Models
+@for (var index = 0; index < Model.Fields.Count; index++)
+{
+    var field = Model.Fields[index];
+    var label = string.IsNullOrWhiteSpace(field.Label) ? field.Key : field.Label;
+    var value = Model.Values is { } values && values.TryGetValue(field.Key, out var current) ? current : field.DefaultValue;
+    var isOn = string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+    var valueName = $"{Model.Prefix}[{index}].Value";
+    // 部分修改模式下未勾选的字段不会提交，因此不能用 required 阻止表单提交。
+    var required = field.Required && !Model.Selectable;
+    <div class="extension-field@(Model.Selectable ? " extension-field-selectable" : "")" data-extension-field>
+        <input type="hidden" name="@($"{Model.Prefix}[{index}].Key")" value="@field.Key" />
+        @if (Model.Selectable)
+        {
+            <label class="check extension-field-apply"><input type="checkbox" name="@($"{Model.Prefix}[{index}].Apply")" value="true" data-extension-field-apply /> 修改此项</label>
+        }
+        <label>
+            <span class="extension-field-label">@label@(field.Required ? " *" : "")</span>
+            @if (field.Type == ExtensionParameterType.Switch)
+            {
+                <select name="@valueName">
+                    <option value="false" selected="@(!isOn)">关闭</option>
+                    <option value="true" selected="@isOn">开启</option>
+                </select>
+            }
+            else if (field.Type == ExtensionParameterType.Select)
+            {
+                <select name="@valueName" required="@required">
+                    @if (!field.Required) { <option value="">未选择</option> }
+                    @for (var optionIndex = 0; optionIndex < (field.Options?.Count ?? 0); optionIndex++)
+                    {
+                        var option = field.Options![optionIndex];
+                        <option value="@option" selected="@(option == value)">@field.OptionLabel(optionIndex)</option>
+                    }
+                </select>
+            }
+            else if (field.Type == ExtensionParameterType.Text && field.Multiline)
+            {
+                <textarea name="@valueName" rows="3" maxlength="@ExtensionFieldValidator.MaxValueLength" placeholder="@field.Placeholder" required="@required">@value</textarea>
+            }
+            else if (field.Type == ExtensionParameterType.Number)
+            {
+                <input name="@valueName" type="number" step="any" min="@field.Min" max="@field.Max" value="@value" placeholder="@field.Placeholder" required="@required" />
+            }
+            else
+            {
+                <input name="@valueName" type="text" maxlength="@ExtensionFieldValidator.MaxValueLength" value="@value" placeholder="@field.Placeholder" required="@required" />
+            }
+        </label>
+        @if (!string.IsNullOrWhiteSpace(field.Description))
+        {
+            <small class="muted extension-field-help">@field.Description</small>
+        }
+    </div>
+}

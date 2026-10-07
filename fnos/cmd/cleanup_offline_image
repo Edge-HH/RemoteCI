@@ -1,0 +1,10 @@
+#!/bin/bash
+# docker load 成功后删除 target 中重复保存的压缩归档；Docker 自身的镜像层不受影响。
+set -u
+
+ARCHIVE="${TRIM_APPDEST:-}/docker/remoteci-image.tar.gz"
+if [ -n "${TRIM_APPDEST:-}" ] && [ -f "$ARCHIVE" ] && ! rm -f "$ARCHIVE"; then
+  printf 'RemoteCI 已安装，但无法清理离线镜像归档：%s\n' "$ARCHIVE" \
+    >> "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>/dev/null || true
+fi
+exit 0

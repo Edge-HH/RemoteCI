@@ -1,9 +1,9 @@
 # RemoteCI fnOS Docker 应用编排。
-# 由飞牛 fnOS 应用中心管理：安装/升级后应用中心会拉取镜像并重建容器。
+# 由飞牛 fnOS 应用中心管理：在线包拉取镜像，离线包在安装前导入镜像并禁止拉取。
 # 镜像标签中的版本占位符在打包时被替换为具体版本号（见 fnos/build.sh）。
 services:
   remoteci:
-    image: ghcr.io/memz-edge01/remoteci:__REMOTECI_VERSION__
+    image: ghcr.io/edge-hh/remoteci:__REMOTECI_VERSION__
     container_name: remoteci
     restart: unless-stopped
     networks:
@@ -14,7 +14,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://0.0.0.0:8080
-      # 标记 fnOS 运行环境，WebUI 系统更新面板只显示由应用商店管理。
+      # 标记 fnOS 运行环境，WebUI 提示用户通过应用中心安装 GitHub Release 中的 FPK。
       REMOTECI_RUNTIME: fnos
       REMOTECI_ADMIN_PASSWORD: "${remoteci_admin_password:-}"
       REMOTECI_PLUGIN_PAIR_CODE: "${remoteci_plugin_pair_code:-}"

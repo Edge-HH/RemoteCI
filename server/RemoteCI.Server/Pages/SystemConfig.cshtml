@@ -5,24 +5,23 @@
     <div>
         <p class="eyebrow">服务端管理</p>
         <h1>系统配置</h1>
-        <p class="muted">管理 RemoteCI 服务端的全局配置与维护功能。</p>
     </div>
 </div>
 <section class="panel update-panel">
     <h2>系统更新@(Model.IsFnos ? "（飞牛 fnOS）" : "")</h2>
     @if (Model.IsFnos)
     {
-        <p class="muted">当前服务端版本 v@(Model.CurrentVersion)。</p>
+        <p class="muted">当前服务端版本 @(Model.CurrentVersion)。</p>
         <p class="notice ok">@UpdateService.FnosManagedMessage</p>
     }
     else if (Model.IsDevelopment)
     {
-        <p class="muted">当前服务端版本 v@(Model.CurrentVersion)（开发构建）。</p>
+        <p class="muted">当前服务端版本 @(Model.CurrentVersion)（开发构建）。</p>
         <p class="notice warn">@UpdateService.DevelopmentManagedMessage</p>
     }
     else
     {
-        <p class="muted">当前服务端版本 v@(Model.CurrentVersion)，更新从 GitHub Release 拉取。</p>
+        <p class="muted">当前服务端版本 @(Model.CurrentVersion)，更新从 GitHub Release 拉取。</p>
         <form method="post" asp-page-handler="CheckUpdate" class="stack system-config-form">
             <label>更新渠道
                 <select asp-for="UpdateOptions.Channel">
@@ -42,7 +41,7 @@
             var latestVersion = UpdateService.NormalizeVersion(Model.LatestRelease.Tag);
             var hasNewer = UpdateService.IsNewer(latestVersion, Model.CurrentVersion);
             var canInstall = UpdateService.CanInstall(latestVersion, Model.CurrentVersion, Model.UpdateOptions.Force);
-            <p class="muted">所选渠道最新版本 v@(latestVersion)@(Model.LatestRelease.Prerelease ? "（Beta）" : "")</p>
+            <p class="muted">所选渠道最新版本 @(latestVersion)@(Model.LatestRelease.Prerelease ? "（Beta）" : "")</p>
             @if (!string.IsNullOrEmpty(Model.LatestRelease.Body))
             {
                 <details class="release-notes"><summary>查看更新说明</summary><pre>@Model.LatestRelease.Body</pre></details>
@@ -52,7 +51,7 @@
                 <form method="post" asp-page-handler="Update" class="stack system-config-form" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='处理中…'">
                     <input type="hidden" asp-for="UpdateOptions.Channel" />
                     <input type="hidden" asp-for="UpdateOptions.Force" />
-                    <button type="submit">@(hasNewer ? $"下载并更新到 v{latestVersion}" : $"重新下载并覆盖安装 v{latestVersion}")</button>
+                    <button type="submit">@(hasNewer ? $"下载并更新到 {latestVersion}" : $"重新下载并覆盖安装 {latestVersion}")</button>
                 </form>
             }
             else if (hasNewer)
@@ -61,6 +60,24 @@
             }
         }
     }
+</section>
+
+<section class="panel">
+    <h2>通知人显示</h2>
+    <p class="muted">自定义通知的标题是否附带发送人，对所有班级生效。</p>
+    <form method="post" asp-page-handler="SaveNotificationSettings" class="stack system-config-form">
+        <label class="check"><input asp-for="ForceSenderInTitle" /> 强制在标题显示发送人</label>
+        <button type="submit">保存通知设置</button>
+    </form>
+</section>
+
+<section class="panel">
+    <h2>手机扫码登录</h2>
+    <p class="muted">仅修改概览页登录二维码中的服务器地址（例如反向代理后的公网地址），不影响服务端监听。留空则使用当前访问地址。</p>
+    <form method="post" asp-page-handler="SaveMobileLoginSettings" class="stack system-config-form">
+        <label>服务器地址<input asp-for="MobileServerUrl" type="url" maxlength="512" placeholder="https://remoteci.example.com" autocomplete="off" /></label>
+        <button type="submit">保存扫码登录设置</button>
+    </form>
 </section>
 
 <section class="panel">
@@ -79,7 +96,7 @@
 <section class="panel">
     <h2>本地备份</h2>
     @if (Model.Backups.Count == 0) { <p class="muted">尚无本地备份。</p> }
-    else { <div class="backup-list">@foreach (var backup in Model.Backups) { <article><div><strong>@backup.Name</strong><small>@backup.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ? @Math.Ceiling(backup.Size / 1024d) KB</small></div><div class="row-actions"><a class="button ghost" asp-page-handler="DownloadBackup" asp-route-name="@backup.Name">下载</a><form method="post" asp-page-handler="RestoreBackup" onsubmit="return confirm('恢复会替换当前配置并重启服务，确定继续？')"><input type="hidden" name="name" value="@backup.Name" /><button type="submit">恢复</button></form><form method="post" asp-page-handler="DeleteBackup" onsubmit="return confirm('确定删除此备份？')"><input type="hidden" name="name" value="@backup.Name" /><button type="submit" class="danger ghost">删除</button></form></div></article> }</div> }
+    else { <div class="backup-list">@foreach (var backup in Model.Backups) { <article><div><strong>@backup.Name</strong><small>@backup.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") · @Math.Ceiling(backup.Size / 1024d) KB</small></div><div class="row-actions"><a class="button ghost" asp-page-handler="DownloadBackup" asp-route-name="@backup.Name">下载</a><form method="post" asp-page-handler="RestoreBackup" onsubmit="return confirm('恢复会替换当前配置并重启服务，确定继续？')"><input type="hidden" name="name" value="@backup.Name" /><button type="submit" class="ghost">恢复</button></form><form method="post" asp-page-handler="DeleteBackup" onsubmit="return confirm('确定删除此备份？')"><input type="hidden" name="name" value="@backup.Name" /><button type="submit" class="danger ghost">删除</button></form></div></article> }</div> }
 </section>
 <section class="panel two-column">
     <div><h2>导出加密配置</h2><p class="muted">包含课程、账号密码哈希、角色权限、插件长期凭据和可修改系统设置。</p><form method="post" asp-page-handler="ExportConfig" class="stack"><label>导出密码<input asp-for="ExportOptions.Password" type="password" minlength="8" required /></label><label>确认密码<input asp-for="ExportOptions.ConfirmPassword" type="password" minlength="8" required /></label><button type="submit">导出配置包</button></form></div>

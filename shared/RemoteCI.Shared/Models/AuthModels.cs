@@ -15,6 +15,16 @@ public sealed class LoginRequest
     public string DeviceName { get; set; } = "Wear OS";
 }
 
+/// <summary>手机扫码登录：凭 WebUI 二维码中的一次性票据换取设备会话。</summary>
+public sealed class MobileLoginRequest
+{
+    [JsonPropertyName("ticket")]
+    public string Ticket { get; set; } = string.Empty;
+
+    [JsonPropertyName("deviceName")]
+    public string DeviceName { get; set; } = "Android";
+}
+
 public sealed class RefreshSessionRequest
 {
     [JsonPropertyName("deviceSessionId")]
@@ -44,6 +54,32 @@ public sealed class AuthResponse
 
     [JsonPropertyName("user")]
     public UserProfile User { get; set; } = new();
+
+    /// <summary>
+    /// 批量导入且未设置密码的账号首次登录时为 true：AccessToken 为空，
+    /// 客户端应改走 /api/auth/setup-password 设置密码后重新登录。
+    /// </summary>
+    [JsonPropertyName("passwordPending")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? PasswordPending { get; set; }
+
+    /// <summary>一次性密码设置令牌，15 分钟有效；仅 passwordPending 为 true 时返回。</summary>
+    [JsonPropertyName("setupToken")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SetupToken { get; set; }
+}
+
+/// <summary>首登设置密码请求：凭登录时下发的一次性令牌补设密码。</summary>
+public sealed class SetupPasswordRequest
+{
+    [JsonPropertyName("username")]
+    public string Username { get; set; } = string.Empty;
+
+    [JsonPropertyName("setupToken")]
+    public string SetupToken { get; set; } = string.Empty;
+
+    [JsonPropertyName("newPassword")]
+    public string NewPassword { get; set; } = string.Empty;
 }
 
 public sealed class UserProfile : UserProfileLike
@@ -70,6 +106,11 @@ public sealed class UserProfile : UserProfileLike
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RoleName { get; set; }
 
+    /// <summary>全局角色种类（AccountRoleKind）；null 表示旧版服务端未下发。客户端据此识别内置“老师”角色。</summary>
+    [JsonPropertyName("roleKind")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RoleKind { get; set; }
+
     [JsonPropertyName("grantedPermissions")]
     public UserPermissions GrantedPermissions { get; set; }
 
@@ -89,8 +130,34 @@ public sealed class UserProfile : UserProfileLike
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? VisibleExtensionIds { get; set; }
 
+    /// <summary>该账号可访问的班级列表；null 表示旧版服务端未下发班级信息。</summary>
+    [JsonPropertyName("classes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ClassSummary>? Classes { get; set; }
+
     [JsonPropertyName("version")]
     public long Version { get; set; }
+
+    /// <summary>
+    /// 以指定权限位生成身份副本：命令的 RequestedBy 必须携带目标班级的有效权限，
+    /// 插件端只信任消息内的权限位，局域网直连与云端路径保持一致。
+    /// </summary>
+    public UserProfile WithPermissions(UserPermissions permissions) => new()
+    {
+        Id = Id,
+        Username = Username,
+        DisplayName = DisplayName,
+        Role = Role,
+        RoleId = RoleId,
+        RoleName = RoleName,
+        RoleKind = RoleKind,
+        GrantedPermissions = GrantedPermissions,
+        Permissions = permissions,
+        AllowedExtensionIds = AllowedExtensionIds,
+        VisibleExtensionIds = VisibleExtensionIds,
+        Classes = Classes,
+        Version = Version,
+    };
 }
 
 public sealed class AuthChallenge
@@ -161,8 +228,18 @@ public sealed class AccountSync
     [JsonPropertyName("serverVersion")]
     public string ServerVersion { get; set; } = string.Empty;
 
+    /// <summary>服务端显式声明的能力；null 表示旧 V3 服务端，按基础能力处理。</summary>
+    [JsonPropertyName("serverCapabilities")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? ServerCapabilities { get; set; }
+
     [JsonPropertyName("generatedAt")]
     public DateTimeOffset GeneratedAt { get; set; }
+
+    /// <summary>镜像目标班级名称；旧版服务端不下发该字段。</summary>
+    [JsonPropertyName("className")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ClassName { get; set; }
 
     [JsonPropertyName("accounts")]
     public List<SyncedAccount> Accounts { get; set; } = [];
@@ -318,6 +395,13 @@ public sealed class ChangePasswordRequest
     public string NewPassword { get; set; } = string.Empty;
 }
 
+/// <summary>账号自助修改用户可见用户名（DisplayName）；登录 ID（Username）不可自行修改。</summary>
+public sealed class ChangeDisplayNameRequest
+{
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = string.Empty;
+}
+
 public sealed class ResetPasswordRequest
 {
     [JsonPropertyName("password")]
@@ -387,4 +471,58 @@ public sealed class UpdateAccountRoleRequest
     public string Name { get; set; } = string.Empty;
     [JsonPropertyName("defaultPermissions")]
     public UserPermissions DefaultPermissions { get; set; }
+}
+
+/// <summary>
+/// API Key 管理视图；密钥明文只在创建时返回一次，服务端仅保存摘要。
+/// </summary>
+public sealed class ApiKeyInfo
+{
+    [JsonPropertyName("id")]
+    public Guid Id { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>用于在列表中区分密钥的前缀，不包含完整密钥。</summary>
+    [JsonPropertyName("prefix")]
+    public string Prefix { get; set; } = string.Empty;
+
+    [JsonPropertyName("createdAt")]
+    public DateTimeOffset CreatedAt { get; set; }
+
+    [JsonPropertyName("lastUsedAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? LastUsedAt { get; set; }
+
+    [JsonPropertyName("expiresAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? ExpiresAt { get; set; }
+
+    [JsonPropertyName("revokedAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? RevokedAt { get; set; }
+}
+
+/// <summary>创建 API Key 时的可选名称。</summary>
+public sealed class CreateApiKeyRequest
+{
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+}
+
+/// <summary>API Key 创建结果；Key 仅在本次响应中出现。</summary>
+public sealed class ApiKeyCreationResult
+{
+    [JsonPropertyName("userId")]
+    public Guid UserId { get; set; }
+
+    [JsonPropertyName("username")]
+    public string Username { get; set; } = string.Empty;
+
+    [JsonPropertyName("apiKey")]
+    public ApiKeyInfo ApiKey { get; set; } = new();
+
+    [JsonPropertyName("key")]
+    public string Key { get; set; } = string.Empty;
 }

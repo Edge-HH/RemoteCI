@@ -10,8 +10,8 @@ public sealed class UpdateServiceTests
     [Fact]
     public void SelectReleaseForChannel_StableSkipsPrereleases()
     {
-        var stable = new ReleaseInfo("v0.3.1", "stable", "", [], Prerelease: false);
-        var beta = new ReleaseInfo("v0.4.0-beta.1", "beta", "", [], Prerelease: true);
+        var stable = new ReleaseInfo("3.1.1.0", "stable", "", [], Prerelease: false);
+        var beta = new ReleaseInfo("v3.2.0-beta.1", "beta", "", [], Prerelease: true);
 
         var selected = UpdateService.SelectReleaseForChannel([beta, stable], UpdateChannel.Stable);
 
@@ -21,13 +21,60 @@ public sealed class UpdateServiceTests
     [Fact]
     public void SelectReleaseForChannel_BetaIncludesPrereleases()
     {
-        var draft = new ReleaseInfo("v0.5.0-beta.1", "draft", "", [], Prerelease: true, Draft: true);
-        var beta = new ReleaseInfo("v0.4.0-beta.1", "beta", "", [], Prerelease: true);
-        var stable = new ReleaseInfo("v0.3.1", "stable", "", []);
+        var draft = new ReleaseInfo("v3.3.0-beta.1", "draft", "", [], Prerelease: true, Draft: true);
+        var beta = new ReleaseInfo("v3.2.0-beta.1", "beta", "", [], Prerelease: true);
+        var stable = new ReleaseInfo("3.1.1.0", "stable", "", []);
 
         var selected = UpdateService.SelectReleaseForChannel([draft, stable, beta], UpdateChannel.Beta);
 
         Assert.Same(beta, selected);
+    }
+
+    [Fact]
+    public void SelectReleaseForChannel_BetaPrefersStableAtSameCoreVersion()
+    {
+        var beta = new ReleaseInfo("v3.2.1-beta.1", "beta", "", [], Prerelease: true);
+        var stable = new ReleaseInfo("3.2.1.0", "stable", "", []);
+
+        var selected = UpdateService.SelectReleaseForChannel([beta, stable], UpdateChannel.Beta);
+
+        Assert.Same(stable, selected);
+    }
+
+    [Fact]
+    public void SelectReleaseForChannel_ExcludesOtherProtocolMajors()
+    {
+        var v3 = new ReleaseInfo("3.9.0.0", "v3", "", []);
+        var v4 = new ReleaseInfo("4.0.0.0", "v4", "", []);
+
+        var selected = UpdateService.SelectReleaseForChannel([v4, v3], UpdateChannel.Stable);
+
+        Assert.Same(v3, selected);
+    }
+
+    [Fact]
+    public void SelectReleaseForChannel_ExcludesLegacyVStableRelease()
+    {
+        var suite = new ReleaseInfo("3.1.1.0", "suite", "", []);
+        var legacy = new ReleaseInfo("v3.2.0", "legacy", "", []);
+
+        var selected = UpdateService.SelectReleaseForChannel(
+            [legacy, suite],
+            UpdateChannel.Stable);
+
+        Assert.Same(suite, selected);
+    }
+
+    [Fact]
+    public void ReleaseTagPredicatesAcceptCanonicalStableAndBetaOnly()
+    {
+        Assert.True(UpdateService.IsCanonicalStableRelease("3.2.1.0"));
+        Assert.True(UpdateService.IsBetaRelease("v3.2.2-beta.1"));
+        Assert.True(UpdateService.IsCurrentProtocolRelease("3.2.1.0"));
+        Assert.True(UpdateService.IsCurrentProtocolRelease("v3.2.2-beta.1"));
+        Assert.False(UpdateService.IsCurrentProtocolRelease("v3.2.1"));
+        Assert.False(UpdateService.IsCurrentProtocolRelease("3.2.1"));
+        Assert.False(UpdateService.IsCurrentProtocolRelease("4.0.0.0"));
     }
 
     [Fact]
@@ -125,6 +172,9 @@ public sealed class UpdateServiceTests
     [InlineData("0.2.0", "0.3.0", false)]
     [InlineData("1.0.0", "0.9.9", true)]
     [InlineData("0.10.0", "0.9.0", true)]
+    [InlineData("3.2.1.0", "3.2.0.9", true)]
+    [InlineData("3.2.1.1", "3.2.1.0", true)]
+    [InlineData("3.2.1.0", "3.2.1", false)]
     public void IsNewer_ComparesSemanticVersions(string latest, string current, bool expected) =>
         Assert.Equal(expected, UpdateService.IsNewer(latest, current));
 

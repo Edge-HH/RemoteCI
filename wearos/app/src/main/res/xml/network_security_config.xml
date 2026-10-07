@@ -1,10 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
     <!--
-        替代全局 usesCleartextTraffic：显式声明信任锚且不配置任何 domain-config 明文例外。
-        声明式配置无法按 IP 段限制明文，因此应用层在发起任何明文（http/ws）连接前
-        都会用 requireCleartextPrivateUrl 复核目标主机，确保明文流量只可能指向
-        RFC1918 私网（见 ConnectionManager）。
+        替代全局 usesCleartextTraffic：显式声明信任锚并允许兼容既有部署的明文连接。
+        手表界面会对 HTTP 地址持续提示风险，生产环境仍应优先使用 HTTPS/WSS。
     -->
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>

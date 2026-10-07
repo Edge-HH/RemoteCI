@@ -28,6 +28,16 @@ public sealed class AccountMirror
     }
     public long Version { get { lock (_gate) return _sync.Version; } }
     public string ServerVersion { get { lock (_gate) return _sync.ServerVersion; } }
+    /// <summary>插件归属班级名称（服务端按班级生成授权镜像时下发）；旧版服务端为 null。</summary>
+    public string? ClassName { get { lock (_gate) return _sync.ClassName; } }
+    public IReadOnlyList<string> ServerCapabilities
+    {
+        get
+        {
+            lock (_gate)
+                return (_sync.ServerCapabilities ?? RemoteCiCapabilities.Baseline.ToList()).ToArray();
+        }
+    }
     public DateTimeOffset GeneratedAt { get { lock (_gate) return _sync.GeneratedAt; } }
     public bool AllowsPrivilegedOperations
     {

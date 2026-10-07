@@ -9,10 +9,10 @@
 请通过 GitHub 的**私密安全公告**（Security Advisory）提交漏洞，不要在 Issue、
 PR 或聊天中公开细节：
 
-1. 打开 [RemoteCI 安全公告](https://github.com/MEMZ-Edge01/RemoteCI/security/advisories/new)。
+1. 打开 [RemoteCI 安全公告](https://github.com/Edge-HH/RemoteCI/security/advisories/new)。
 2. 填写漏洞描述、影响范围与复现信息，并注明“私密报告”。
 3. 文档仓库的问题同样通过 RemoteCI 的安全公告提交，再在正文中关联
-   [RemoteCI-Docs](https://github.com/MEMZ-Edge01/RemoteCI-Docs)。
+   [RemoteCI-Docs](https://github.com/Edge-HH/RemoteCI-Docs)。
 
 收到报告后会尽快评估并回复；修复发布前请不要公开漏洞细节。
 

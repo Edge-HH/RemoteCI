@@ -53,10 +53,11 @@ enum class UpdateChannel
  * 首次安装正式签名版后后续更新即可在同一签名下自动覆盖。
  */
 object UpdateManager {
-    private const val REPO = "MEMZ-Edge01/RemoteCI"
+    private const val REPO = "Edge-HH/RemoteCI"
     private const val API_RELEASES = "https://api.github.com/repos/$REPO/releases?per_page=20"
     private val USER_AGENT = "RemoteCI-Watch/${BuildConfig.VERSION_NAME}"
-    private const val APK_PREFIX = "RemoteCI.Watch-"
+    private val STABLE_RELEASE_TAG = Regex("""^3\.[0-9]+\.[0-9]+\.[0-9]+$""")
+    private val BETA_RELEASE_TAG = Regex("""^v3\.[0-9]+\.[0-9]+-beta\.[1-9][0-9]*$""")
     const val INSTALL_RESULT_ACTION = "com.remoteci.watch.UPDATE_INSTALL_RESULT"
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -65,7 +66,7 @@ object UpdateManager {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    /** 拉取最近发布列表，以便在 WebUI 版本上限内选择最高兼容手表版本。 */
+    /** 拉取最近发布列表，选择当前协议代内最高兼容手表版本。 */
     suspend fun fetchReleases(): List<GitHubRelease> = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(API_RELEASES)
@@ -77,25 +78,31 @@ object UpdateManager {
         }
     }
 
-    /** 在 release 附件中寻找手表 APK。 */
-    fun findApkAsset(release: GitHubRelease): GitHubAsset? =
-        release.assets.firstOrNull { it.name.startsWith(APK_PREFIX) && it.name.endsWith(".apk") }
+    /** 在 release 附件中寻找与该 tag 完全对应的手表 APK。 */
+    fun findApkAsset(release: GitHubRelease): GitHubAsset? {
+        val expectedName = "RemoteCI.Watch-${versionFromTag(release.tagName)}.apk"
+        return release.assets.firstOrNull { it.name == expectedName }
+    }
 
-    /** 按渠道选择可升级或可强制覆盖、且不高于已连接服务端的最高版本。 */
+    /** 按渠道选择同一 V3 协议代内可升级或可强制覆盖的最高版本。 */
     fun selectCompatibleUpdate(
         releases: List<GitHubRelease>,
         currentVersion: String,
-        serverVersion: String,
         channel: UpdateChannel = UpdateChannel.STABLE,
         force: Boolean = false,
     ): CompatibleUpdate? = releases
-        .filterNot { it.draft || channel == UpdateChannel.STABLE && it.prerelease }
+        .filterNot { it.draft }
+        .filter { release ->
+            val stable = STABLE_RELEASE_TAG.matches(release.tagName) && !release.prerelease
+            val beta = BETA_RELEASE_TAG.matches(release.tagName) && release.prerelease
+            if (channel == UpdateChannel.STABLE) stable else stable || beta
+        }
         .mapNotNull { release -> findApkAsset(release)?.let { CompatibleUpdate(release, it) } }
         .filter { candidate ->
             val version = versionFromTag(candidate.release.tagName)
             val currentComparison = compareVersions(version, currentVersion)
             (currentComparison > 0 || force && currentComparison == 0) &&
-                compareVersions(version, serverVersion) <= 0
+                version.substringBefore("-").substringBefore(".").toIntOrNull() == Protocol.VERSION
         }
         .maxWithOrNull { left, right ->
             compareVersions(left.release.tagName, right.release.tagName)

@@ -1,0 +1,165 @@
+@page
+@model SwapRequestsModel
+@using RemoteCI.Shared.Models
+@{
+    ViewData["Title"] = "换课";
+}
+
+<div class="page-head">
+    <div>
+        <p class="eyebrow">临时换课</p>
+        <h1>换课</h1>
+        <p class="muted">向对方老师发起换课申请，对方同意后立即生效；永久换课请联系班主任在课表页操作。</p>
+    </div>
+</div>
+
+<div class="swap-tabs" role="tablist" data-swap-tabs>
+    <button type="button" role="tab" class="swap-tab active" aria-selected="true" data-swap-tab="create">发起申请</button>
+    <button type="button" role="tab" class="swap-tab" aria-selected="false" data-swap-tab="incoming"><span>待我处理</span>@if (Model.PendingIncoming > 0) { <span class="nav-badge">@Model.PendingIncoming</span> }</button>
+    <button type="button" role="tab" class="swap-tab" aria-selected="false" data-swap-tab="outgoing">我的申请</button>
+</div>
+
+<section class="panel" data-swap-panel="create">
+    @if (Model.Catalog.Classes.Count == 0)
+    {
+        <div class="notice warning">暂时没有可换的课表：班级插件在线并同步课表后才能选择课程。</div>
+    }
+    else
+    {
+        <form method="post" asp-page-handler="Create" class="form-grid swap-form" data-swap-form>
+            <script type="application/json" data-swap-catalog>@Html.Raw(Model.CatalogJson)</script>
+            <input type="hidden" name="Input.Force" value="false" data-swap-force />
+            <fieldset class="swap-mode" aria-label="换课方式">
+                <label><input type="radio" name="Input.Mode" value="Exchange" checked data-swap-mode /> 互换两节课</label>
+                <label><input type="radio" name="Input.Mode" value="Replace" data-swap-mode /> 替换为我的课</label>
+            </fieldset>
+
+            <div class="swap-slot" data-swap-slot="source">
+                <h3>要换走的课</h3>
+                <p class="muted">可以选其他班、其他老师的课，但两节课中至少有一节是你的课。</p>
+                <div class="swap-slot-fields">
+                    <label>班级<select name="Input.SourceClassId" data-slot-class></select></label>
+                    <label>日期<select name="Input.SourceDate" data-slot-date></select></label>
+                    <label>节次<select name="Input.SourceIndex" data-slot-course></select></label>
+                </div>
+            </div>
+
+            <div class="swap-slot" data-swap-slot="target">
+                <h3>目标课</h3>
+                <div class="swap-slot-fields">
+                    <label>班级<select name="Input.TargetClassId" data-slot-class required></select></label>
+                    <label>日期<select name="Input.TargetDate" data-slot-date required></select></label>
+                    <label>节次<select name="Input.TargetIndex" data-slot-course required></select></label>
+                </div>
+            </div>
+
+            <label data-swap-subject hidden>换入学科（你任教的学科）
+                <select name="Input.SubjectName" disabled>
+                    @foreach (var subject in Model.Catalog.MySubjects)
+                    {
+                        <option value="@subject">@subject</option>
+                    }
+                </select>
+                <small class="muted">目标课会临时改为你上的这门课，并计入你的个人日程。</small>
+            </label>
+
+            <label class="swap-reason">换课理由
+                <textarea name="Input.Reason" maxlength="200" rows="3" required placeholder="例如：周三下午外出教研，想和你换到周四第 2 节"></textarea>
+            </label>
+
+            <p class="swap-preview muted" data-swap-preview aria-live="polite"></p>
+
+            <div class="swap-actions">
+                <button type="submit">申请换课</button>
+                @if (Model.Catalog.CanForce)
+                {
+                    <button type="button" class="danger" data-swap-force-open>强制换课</button>
+                }
+            </div>
+        </form>
+    }
+</section>
+
+<section class="panel" data-swap-panel="incoming" hidden>
+    @if (Model.Incoming.Count == 0)
+    {
+        <p class="muted">还没有发给你的换课申请。</p>
+    }
+    <div class="swap-list">
+        @foreach (var item in Model.Incoming)
+        {
+            <article class="swap-card@(item.CanDecide || item.CanRevoke ? " actionable" : "")">
+                <header>
+                    <strong>@item.RequesterName@(item.Forced ? " 强制换课" : " 申请换课")</strong>
+                    <span class="@SwapRequestsModel.StatusClass(item.Status)">@SwapRequestsModel.StatusText(item.Status)</span>
+                </header>
+                @await Html.PartialAsync("_SwapSlots", item)
+                <p class="swap-reason-text"><span class="muted">理由</span>@item.Reason</p>
+                @if (!string.IsNullOrEmpty(item.DecisionNote)) { <p class="muted">备注：@item.DecisionNote</p> }
+                @if (item.CanDecide)
+                {
+                    <form method="post" class="swap-decision">
+                        <input type="hidden" name="id" value="@item.Id" />
+                        <input name="note" maxlength="200" placeholder="备注（可选）" aria-label="审批备注" />
+                        <button type="submit" asp-page-handler="Approve">通过</button>
+                        <button type="submit" class="danger ghost" asp-page-handler="Reject">拒绝</button>
+                    </form>
+                }
+                @if (item.CanRevoke)
+                {
+                    <form method="post" asp-page-handler="Revoke" class="swap-decision" data-confirm="撤回后课表恢复原状，对方当天不能再强制换走这节课。确定撤回？">
+                        <input type="hidden" name="id" value="@item.Id" />
+                        <button type="submit" class="danger">撤回强制换课</button>
+                    </form>
+                }
+            </article>
+        }
+    </div>
+</section>
+
+<section class="panel" data-swap-panel="outgoing" hidden>
+    @if (Model.Outgoing.Count == 0)
+    {
+        <p class="muted">你还没有发起过换课申请。</p>
+    }
+    <div class="swap-list">
+        @foreach (var item in Model.Outgoing)
+        {
+            <article class="swap-card">
+                <header>
+                    <strong>@(item.ApproverNames.Count > 0 ? "发给 " + string.Join("、", item.ApproverNames) : "无需审批")</strong>
+                    <span class="@SwapRequestsModel.StatusClass(item.Status)">@SwapRequestsModel.StatusText(item.Status)</span>
+                </header>
+                @await Html.PartialAsync("_SwapSlots", item)
+                <p class="swap-reason-text"><span class="muted">理由</span>@item.Reason</p>
+                @if (!string.IsNullOrEmpty(item.DecisionNote)) { <p class="muted">@(item.DecidedByName ?? "对方")备注：@item.DecisionNote</p> }
+                @if (item.CanCancel)
+                {
+                    <form method="post" asp-page-handler="Cancel" class="swap-decision">
+                        <input type="hidden" name="id" value="@item.Id" />
+                        <button type="submit" class="ghost">撤销申请</button>
+                    </form>
+                }
+            </article>
+        }
+    </div>
+</section>
+
+@if (Model.Catalog.CanForce)
+{
+    <dialog class="user-edit-dialog swap-force-dialog" data-swap-force-dialog aria-labelledby="swap-force-title">
+        <div class="user-edit-dialog-shell">
+            <header class="user-edit-dialog-header"><div><p class="eyebrow">强制换课</p><h2 id="swap-force-title">确认强制换课？</h2></div></header>
+            <div class="stack swap-force-body">
+                <p class="notice warning">@ScheduleSwapService.ForceWarning</p>
+                <p class="muted">确定后立即换课并通知对方老师，对方可以撤回。</p>
+                <div class="dialog-actions">
+                    <button type="button" class="ghost" data-swap-force-cancel>取消</button>
+                    <button type="button" class="danger" data-swap-force-confirm>确定强制换课</button>
+                </div>
+            </div>
+        </div>
+    </dialog>
+}
+
+<script src="~/swap-requests.js" asp-append-version="true" defer></script>

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using RemoteCI.Server.Data;
 using RemoteCI.Server.Services;
 using RemoteCI.Shared;
 using RemoteCI.Shared.Models;
@@ -72,7 +73,7 @@ public sealed class ExtensionPolicyServiceTests
         Assert.Contains(definition.Id, profile!.AllowedExtensionIds!);
         Assert.DoesNotContain(definition.Id, profile.VisibleExtensionIds!);
 
-        var mirrored = (await identities.CreateSyncAsync()).Accounts.Single(x => x.Id == extensionUser.Id);
+        var mirrored = (await identities.CreateSyncAsync(Classroom.DefaultId)).Accounts.Single(x => x.Id == extensionUser.Id);
         Assert.Contains(definition.Id, mirrored.AllowedExtensionIds!);
         Assert.DoesNotContain(definition.Id, mirrored.VisibleExtensionIds!);
     }

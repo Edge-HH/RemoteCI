@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using RemoteCI.Shared;
 
 namespace RemoteCI.Server.Services;
 
@@ -44,9 +45,9 @@ public sealed record PreparedUpdate(
 /// </summary>
 public sealed class UpdateService
 {
-    public const string FnosManagedMessage = "由fnOS应用商店管理";
+    public const string FnosManagedMessage = "由 fnOS 应用中心管理，请从 GitHub Releases 下载 FPK 手动升级。";
     public const string DevelopmentManagedMessage = "开发环境由 Visual Studio 或 dotnet build 管理，已禁用 WebUI 覆盖更新。";
-    private const string Repo = "MEMZ-Edge01/RemoteCI";
+    private const string Repo = "Edge-HH/RemoteCI";
     private const string ReleasesApiUrl = $"https://api.github.com/repos/{Repo}/releases?per_page=20";
     private static readonly string UserAgent = $"RemoteCI-Server/{AppVersion.Version}";
 
@@ -54,16 +55,20 @@ public sealed class UpdateService
     private readonly string[] _serverArguments;
     private readonly SemaphoreSlim _prepareGate = new(1, 1);
 
-    /// <summary>release tag 只接受语义化版本（含预发布/构建元数据），杜绝路径穿越类 tag。</summary>
-    private static readonly Regex VersionTagPattern = new(
-        @"^v?\d+\.\d+\.\d+(-[0-9A-Za-z.\-]+)?(\+[0-9A-Za-z.\-]+)?$",
+    /// <summary>稳定版使用 ClassIsland 要求的四段纯数字标签，Beta 保留 v3.x.x-beta.y 标签。</summary>
+    private static readonly Regex StableVersionTagPattern = new(
+        @"^3\.[0-9]+\.[0-9]+\.[0-9]+$",
+        RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
+
+    private static readonly Regex BetaVersionTagPattern = new(
+        @"^v3\.[0-9]+\.[0-9]+-beta\.[1-9][0-9]*$",
         RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
 
     public UpdateService(string[]? serverArguments = null) => _serverArguments = serverArguments ?? [];
 
     /// <summary>
     /// 是否运行在飞牛 fnOS 应用环境。fpk 的 docker-compose 会注入
-    /// <c>REMOTECI_RUNTIME=fnos</c>；该平台完全由 fnOS 应用商店管理更新。
+    /// <c>REMOTECI_RUNTIME=fnos</c>；该平台通过 fnOS 应用中心安装 GitHub Release 中的 FPK。
     /// </summary>
     public static bool IsFnosRuntime =>
         string.Equals(
@@ -89,7 +94,7 @@ public sealed class UpdateService
 
     /// <summary>
     /// 开发环境的 ContentRoot 通常就是源码目录，绝不能让 release 覆盖；
-    /// fnOS 则必须继续由应用商店管理。
+    /// fnOS 则必须继续由应用中心管理，不能由容器内进程覆盖安装文件。
     /// </summary>
     public static bool CanSelfUpdate(bool isDevelopment, bool isFnos) =>
         !isDevelopment && !isFnos;
@@ -102,16 +107,27 @@ public sealed class UpdateService
 
     public string CurrentVersion => AppVersion.Version;
 
-    /// <summary>正式渠道排除预发布版；Beta 渠道同时接收正式版与预发布版。</summary>
+    /// <summary>正式渠道排除预发布版；Beta 渠道同时接收正式版与预发布版，但都不得跨协议主版本。</summary>
     public static ReleaseInfo? SelectReleaseForChannel(
         IEnumerable<ReleaseInfo> releases,
         UpdateChannel channel) =>
         releases
             .Where(release =>
-                !release.Draft && (channel == UpdateChannel.Beta || !release.Prerelease))
+                !release.Draft &&
+                (channel == UpdateChannel.Stable
+                    ? IsCanonicalStableRelease(release.Tag) && !release.Prerelease
+                    : (IsCanonicalStableRelease(release.Tag) && !release.Prerelease)
+                        || (IsBetaRelease(release.Tag) && release.Prerelease)))
             .MaxBy(
                 release => release.Tag,
                 Comparer<string>.Create((left, right) => CompareVersions(left, right)));
+
+    public static bool IsCanonicalStableRelease(string tag) => StableVersionTagPattern.IsMatch(tag);
+
+    public static bool IsBetaRelease(string tag) => BetaVersionTagPattern.IsMatch(tag);
+
+    public static bool IsCurrentProtocolRelease(string tag) =>
+        IsCanonicalStableRelease(tag) || IsBetaRelease(tag);
 
     /// <summary>按更新渠道拉取最新 release；仓库暂无符合条件的版本时返回 null。</summary>
     public async Task<ReleaseInfo?> FetchLatestReleaseAsync(UpdateChannel channel, CancellationToken ct)
@@ -237,8 +253,8 @@ public sealed class UpdateService
         await _prepareGate.WaitAsync(ct);
         try
         {
-            // 只接受语义化版本 tag，防止恶意 tag（含 ../ 等路径片段）把文件写到暂存目录之外。
-            if (!VersionTagPattern.IsMatch(release.Tag))
+            // 只接受已验证的稳定/Beta tag，防止恶意 tag（含 ../ 等路径片段）把文件写到暂存目录之外。
+            if (!IsCurrentProtocolRelease(release.Tag))
                 throw new InvalidDataException($"Release tag 格式无效：{release.Tag}");
 
             var updatesRoot = GetUpdatesRoot(databasePath, contentRoot);
@@ -417,7 +433,7 @@ public sealed class UpdateService
         var actual = FileVersionInfo.GetVersionInfo(assembly).ProductVersion?.Split('+', 2)[0];
         if (!string.Equals(actual, expectedVersion, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException(
-                $"更新包版本不匹配：Release 为 v{expectedVersion}，包内服务端为 v{actual ?? "未知"}。");
+                $"更新包版本不匹配：Release 为 {expectedVersion}，包内服务端为 {actual ?? "未知"}。");
     }
 
     private static string ResolveDotnetHost()

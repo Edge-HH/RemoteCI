@@ -17,6 +17,7 @@
 | kotlinx.serialization | 手表端 JSON 序列化 | Apache-2.0 | © JetBrains |
 | kotlinx.coroutines | 手表端协程 | Apache-2.0 | © JetBrains |
 | [Bootstrap Icons](https://icons.getbootstrap.com/) | WebUI 导航与操作图标 | MIT | Copyright (c) 2019-2024 The Bootstrap Authors；许可证原文位于 `server/RemoteCI.Server/wwwroot/vendor/bootstrap-icons/LICENSE` |
+| [ClosedXML](https://github.com/ClosedXML/ClosedXML) | 服务端成员 Excel 导入、导出与覆盖导入 | MIT | Copyright (c) ClosedXML contributors；传递依赖包括 DocumentFormat.OpenXml（MIT）与 SixLabors.Fonts（Apache-2.0） |
 
 ## 合规约定
 

@@ -8,6 +8,14 @@ namespace RemoteCI.Plugin.Tests;
 public sealed class LanSessionLogicTests
 {
     [Fact]
+    public void ExtensionSettings_AreServerOnlyOverLan()
+    {
+        Assert.True(LanSessionLogic.IsServerOnly(CommandKind.ApplyExtensionSettings));
+        Assert.False(LanSessionLogic.IsServerOnly(CommandKind.RunExtension));
+        Assert.False(LanSessionLogic.IsServerOnly(CommandKind.SendNotification));
+    }
+
+    [Fact]
     public void ValidateAuthProofRequest_AcceptsFreshProofChallenge()
     {
         var challenge = new AuthChallenge

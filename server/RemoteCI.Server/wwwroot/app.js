@@ -13,14 +13,27 @@ function syncRolePermissions(form) {
     const roleSelect = form.querySelector("[data-role-select]");
     const permissions = form.querySelector("[data-role-permissions]");
     const adminNote = form.querySelector("[data-admin-permission-note]");
+    const teacherUsernameNote = form.querySelector("[data-teacher-username-note]");
     if (!roleSelect) return;
 
     const isAdmin = roleSelect.selectedOptions[0]?.dataset.admin === "true" || roleSelect.value === "Admin" || roleSelect.value === "2";
+    const isTeacher = roleSelect.selectedOptions[0]?.dataset.teacher === "true";
     if (permissions) {
         permissions.hidden = isAdmin;
         permissions.querySelectorAll('input[type="checkbox"]').forEach(input => { input.disabled = isAdmin; });
     }
     if (adminNote) adminNote.hidden = !isAdmin;
+    if (teacherUsernameNote) teacherUsernameNote.hidden = roleSelect.selectedOptions[0]?.dataset.teacher !== "true";
+    // 老师按课表教师名动态绑定班级，不需要在建号时选择班级；隐藏字段时同步解除 required。
+    const classField = form.querySelector("[data-create-class-field]");
+    const classSelect = form.querySelector("[data-create-class-select]");
+    const teacherNote = form.querySelector("[data-create-teacher-note]");
+    if (classField) classField.hidden = isAdmin || isTeacher;
+    if (classSelect) {
+        classSelect.required = !isAdmin && !isTeacher;
+        classSelect.disabled = isTeacher;
+    }
+    if (teacherNote) teacherNote.hidden = !isTeacher;
 }
 
 async function handleCopyClick(event) {
@@ -31,12 +44,12 @@ async function handleCopyClick(event) {
     try {
         await copyText(copyButton.dataset.copyValue);
         copyButton.classList.add("copied");
-        copyButton.setAttribute("aria-label", "配对码已复制");
+        copyButton.setAttribute("aria-label", "已复制");
         copyButton.title = "已复制";
         icon?.classList.replace("bi-copy", "bi-check2");
         window.setTimeout(() => {
             copyButton.classList.remove("copied");
-            copyButton.setAttribute("aria-label", "复制配对码");
+            copyButton.setAttribute("aria-label", "复制");
             copyButton.title = "复制配对码";
             icon?.classList.replace("bi-check2", "bi-copy");
         }, 1600);
@@ -106,6 +119,46 @@ function handlePageActionClick(event) {
     return true;
 }
 
+// 手机扫码登录二维码：按需生成，倒计时结束后隐藏，避免一次性票据长期留在页面上。
+let mobileLoginTimer = 0;
+document.addEventListener("submit", async event => {
+    const form = event.target.closest("[data-mobile-login-form]");
+    if (!form) return;
+    event.preventDefault();
+    const card = form.closest(".mobile-login-card");
+    const qr = card?.querySelector("[data-mobile-login-qr]");
+    const status = form.querySelector("[data-mobile-login-status]");
+    const button = form.querySelector("[data-mobile-login-generate]");
+    window.clearInterval(mobileLoginTimer);
+    button.disabled = true;
+    try {
+        const response = await fetch(form.action, { method: "POST", body: new FormData(form), credentials: "same-origin" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const result = await response.json();
+        qr.innerHTML = result.svg;
+        qr.hidden = false;
+        button.lastChild.textContent = " 重新生成";
+        let remaining = result.expiresInSeconds;
+        const tick = () => {
+            if (remaining <= 0) {
+                window.clearInterval(mobileLoginTimer);
+                qr.hidden = true;
+                qr.innerHTML = "";
+                status.textContent = "二维码已过期，请重新生成。";
+                return;
+            }
+            status.textContent = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")} 后失效`;
+            remaining -= 1;
+        };
+        tick();
+        mobileLoginTimer = window.setInterval(tick, 1000);
+    } catch {
+        status.textContent = "生成失败，请刷新页面后重试。";
+    } finally {
+        button.disabled = false;
+    }
+});
+
 document.addEventListener("click", async event => {
     if (await handleCopyClick(event)) return;
     if (handleDialogClick(event)) return;
@@ -113,8 +166,13 @@ document.addEventListener("click", async event => {
     handlePageActionClick(event);
 });
 
-const savedTheme = localStorage.getItem("remoteci-theme");
-if (savedTheme === "dark") document.documentElement.dataset.theme = "dark";
+// 管理员为登录页强制了主题时不要再用本地偏好覆盖它；data-login-theme-forced 由布局写入。
+const forcedLoginTheme = document.documentElement.dataset.loginThemeForced;
+if (forcedLoginTheme) document.documentElement.dataset.theme = forcedLoginTheme;
+else {
+    const savedTheme = localStorage.getItem("remoteci-theme");
+    if (savedTheme === "dark") document.documentElement.dataset.theme = "dark";
+}
 if (localStorage.getItem("remoteci-sidebar-collapsed") === "1" && !window.matchMedia("(max-width: 820px)").matches) document.body.classList.add("sidebar-collapsed");
 
 const searchInput = document.querySelector("[data-app-search]");
@@ -317,3 +375,131 @@ document.querySelectorAll("[data-backup-settings-form]").forEach(form => {
     cadence.addEventListener("change", syncBackupFields);
     syncBackupFields();
 });
+
+
+// 班级分组树：折叠状态只影响当前页面，不改变服务端选中的分组范围。
+document.querySelectorAll("[data-class-tree-toggle]").forEach(button => {
+    const item = button.closest(".class-tree-item");
+    const children = item?.querySelector(":scope > [data-class-tree-children]");
+    if (!children) return;
+    button.addEventListener("click", () => {
+        const expanded = button.getAttribute("aria-expanded") !== "false";
+        button.setAttribute("aria-expanded", expanded ? "false" : "true");
+        children.hidden = expanded;
+    });
+});
+
+// 班级批量管理：选择、范围全选、按操作类型切换目标分组字段。
+const classBatchForm = document.querySelector("[data-class-batch-form]");
+if (classBatchForm) {
+    const operation = classBatchForm.querySelector("[data-batch-operation]");
+    const groupField = classBatchForm.querySelector("[data-batch-group-field]");
+    const groupSelect = classBatchForm.querySelector("[data-batch-group-select]");
+    const submit = classBatchForm.querySelector("[data-batch-submit]");
+    const selection = classBatchForm.querySelector("[data-batch-selection]");
+    const selectAll = document.querySelector("[data-select-all-classes]");
+    const classChecks = () => [...document.querySelectorAll("[data-class-select]")]
+        .filter(input => input.form === classBatchForm);
+
+    const needsTargetGroups = () => ["addgroups", "removegroups", "replacegroups"]
+        .includes((operation?.value || "").toLowerCase());
+    const isGroupOperation = () => needsTargetGroups() || (operation?.value || "").toLowerCase() === "cleargroups";
+
+    const syncGroupField = () => {
+        const required = needsTargetGroups();
+        if (groupField) groupField.hidden = !isGroupOperation();
+        if (groupSelect) {
+            groupSelect.disabled = !required;
+            groupSelect.required = required && !groupField?.hidden;
+        }
+    };
+
+    const syncSelection = () => {
+        const checkboxes = classChecks();
+        const selectable = checkboxes.filter(input => !input.disabled);
+        const selected = selectable.filter(input => input.checked);
+        if (selection) selection.textContent = `已选 ${selected.length} 个班级`;
+        if (submit) submit.disabled = selected.length === 0;
+        if (selectAll) {
+            selectAll.checked = selectable.length > 0 && selected.length === selectable.length;
+            selectAll.indeterminate = selected.length > 0 && selected.length < selectable.length;
+        }
+    };
+
+    const syncDefaultClassState = () => {
+        const deleting = (operation?.value || "").toLowerCase() === "delete";
+        classChecks()
+            .filter(input => input.dataset.defaultClass === "true")
+            .forEach(input => {
+                input.disabled = deleting;
+                if (deleting) input.checked = false;
+            });
+    };
+
+    selectAll?.addEventListener("change", () => {
+        classChecks().forEach(input => {
+            if (!input.disabled) input.checked = selectAll.checked;
+        });
+        syncSelection();
+    });
+
+    classChecks().forEach(input => input.addEventListener("change", syncSelection));
+    operation?.addEventListener("change", () => {
+        syncDefaultClassState();
+        syncGroupField();
+        syncSelection();
+    });
+
+    classBatchForm.addEventListener("submit", event => {
+        const selected = classChecks().filter(input => input.checked && !input.disabled);
+        if (selected.length === 0) {
+            event.preventDefault();
+            alert("请先勾选要操作的班级。");
+            return;
+        }
+        if (needsTargetGroups() && groupSelect && groupSelect.selectedOptions.length === 0) {
+            event.preventDefault();
+            alert("请选择要批量调整到的目标分组。");
+            groupSelect.focus();
+            return;
+        }
+        if ((operation?.value || "").toLowerCase() === "delete" &&
+            !confirm("删除选中的班级会同时移除成员关系与插件凭据，需重新配对。确定继续？")) {
+            event.preventDefault();
+        }
+    });
+
+    syncDefaultClassState();
+    syncGroupField();
+    syncSelection();
+}
+
+// 菜单只保留一个展开项，避免树节点和行操作菜单互相遮挡。
+document.addEventListener("click", event => {
+    document.querySelectorAll(".tree-node-menu[open], .row-menu[open], .class-menu[open]").forEach(menu => {
+        if (!menu.contains(event.target)) menu.removeAttribute("open");
+    });
+});
+
+document.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    const openMenu = document.querySelector(".class-menu[open]");
+    if (!openMenu) return;
+    openMenu.removeAttribute("open");
+    openMenu.querySelector("summary")?.focus();
+});
+
+// 通知正文较长而未开启滚动时，静态正文可能显示不全；只提示，不替用户改选项。
+function syncRollingHint(scope) {
+    const hint = scope.querySelector("[data-rolling-hint]");
+    const message = scope.querySelector("[data-rolling-message]");
+    const toggle = scope.querySelector("[data-rolling-toggle]");
+    if (!hint || !message || !toggle) return;
+    const threshold = Number(hint.dataset.rollingHint) || 30;
+    hint.hidden = toggle.checked || [...message.value.trim()].length <= threshold;
+}
+
+["input", "change"].forEach(type => document.addEventListener(type, event => {
+    const scope = event.target.closest?.("[data-rolling-scope]");
+    if (scope) syncRollingHint(scope);
+}));

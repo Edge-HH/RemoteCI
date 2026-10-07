@@ -4,9 +4,7 @@
 
 <header class="dashboard-head">
     <div>
-        <p class="eyebrow">REMOTE CLASSROOM OPERATIONS</p>
         <h1>课堂控制总览</h1>
-        <p class="muted">集中查看课程、连接与同步状态，并快速进入常用操作。</p>
     </div>
     <div class="dashboard-actions">
         <form method="post" asp-page-handler="RetryConnection"><button class="primary-action" type="submit"><i class="bi bi-arrow-repeat" aria-hidden="true"></i>重新检测连接</button></form>
@@ -27,6 +25,24 @@
     </div>
 }
 
+@if (Model.PluginProtocolMismatch is { } mismatch)
+{
+    <div class="notice warning" role="alert">
+        <span class="notice-icon"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i></span>
+        <div>
+            <strong>ClassIsland 插件协议不匹配</strong>
+            @if (int.TryParse(mismatch.ActualVersion, out var actualProtocol) && actualProtocol < mismatch.ExpectedVersion)
+            {
+                <span>检测到插件协议 v@(mismatch.ActualVersion)，WebUI 协议 v@(mismatch.ExpectedVersion)。请升级 ClassIsland 插件后重新连接。</span>
+            }
+            else
+            {
+                <span>检测到插件协议 @(mismatch.ActualVersion == "缺失" ? "缺失" : $"v{mismatch.ActualVersion}")，WebUI 协议 v@(mismatch.ExpectedVersion)。请升级 ClassIsland 插件到协议 V@(mismatch.ExpectedVersion)；若插件来自更高协议，请同时升级 WebUI/服务端。</span>
+            }
+        </div>
+    </div>
+}
+
 <section class="metric-grid" aria-label="关键状态">
     <article class="metric-card metric-card-primary">
         <span class="metric-label">当前课程</span>
@@ -35,8 +51,8 @@
     </article>
     <article class="metric-card">
         <span class="metric-label">插件连接</span>
-        <strong class="metric-value">@(Model.PluginOnline ? "在线" : "离线")</strong>
-        <span class="metric-chip @(Model.PluginOnline ? "positive" : "danger")"><i class="bi @(Model.PluginOnline ? "bi-arrow-up" : "bi-exclamation")" aria-hidden="true"></i>@(Model.PluginOnline ? "可执行操作" : "需要检查")</span>
+        <strong class="metric-value">@(Model.PluginOnline ? "在线" : Model.PluginProtocolMismatch is null ? "离线" : "协议不匹配")</strong>
+        <span class="metric-chip @(Model.PluginOnline ? "positive" : "danger")"><i class="bi @(Model.PluginOnline ? "bi-arrow-up" : "bi-exclamation")" aria-hidden="true"></i>@(Model.PluginOnline ? "可执行操作" : Model.PluginProtocolMismatch is null ? "需要检查" : "请升级插件")</span>
     </article>
     <article class="metric-card">
         <span class="metric-label">在线手表</span><strong class="metric-value">@Model.WatchConnections</strong>
@@ -51,7 +67,7 @@
 <div class="dashboard-grid">
     <section class="dashboard-panel classroom-panel">
         <header class="panel-heading">
-            <div><p class="eyebrow">CLASSROOM STATUS</p><h2>实时课堂状态</h2></div>
+            <div><h2>实时课堂状态</h2></div>
             <span class="status-pill @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "在线刷新" : "连接中断")</span>
         </header>
         <div class="course-spotlight">
@@ -68,24 +84,20 @@
 
     <section class="dashboard-panel activity-panel">
         <header class="panel-heading">
-            <div><p class="eyebrow">LIVE SIGNALS</p><h2>运行信号</h2></div><span class="status-pill">自动汇总</span>
+            <div><h2>运行状态</h2></div>
         </header>
         <div class="activity-list">
             <article>
                 <span class="activity-icon @(Model.PluginOnline ? "success" : "alert")"><i class="bi bi-plug" aria-hidden="true"></i></span>
-                <div><strong>ClassIsland 插件@(Model.PluginOnline ? "连接正常" : "当前离线")</strong><small>@(Model.PluginOnline ? "远程任务可以立即执行" : "换课和通知不会离线排队")</small></div><span>现在</span>
+                <div><strong>ClassIsland 插件@(Model.PluginOnline ? "连接正常" : Model.PluginProtocolMismatch is null ? "当前离线" : "协议不匹配")</strong><small>@(Model.PluginOnline ? "可执行远程操作" : Model.PluginProtocolMismatch is null ? "远程操作暂不可用" : "请升级插件")</small></div><span>现在</span>
             </article>
             <article>
                 <span class="activity-icon"><i class="bi bi-calendar-check" aria-hidden="true"></i></span>
-                <div><strong>@(Model.Schedule is null ? "尚无七日课表" : "七日课表已同步")</strong><small>@(Model.Schedule?.GeneratedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "连接插件后可立即拉取")</small></div><span>课表</span>
+                <div><strong>@(Model.Schedule is null ? "尚无课表" : "课表已同步")</strong><small>@(Model.Schedule?.GeneratedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "连接插件后可立即拉取")</small></div><span>课表</span>
             </article>
             <article>
                 <span class="activity-icon"><i class="bi bi-smartwatch" aria-hidden="true"></i></span>
-                <div><strong>@Model.WatchConnections 台手表在线</strong><small>设备连接状态由服务端实时统计</small></div><span>设备</span>
-            </article>
-            <article>
-                <span class="activity-icon"><i class="bi bi-shield-check" aria-hidden="true"></i></span>
-                <div><strong>权限检查已启用</strong><small>所有远程操作都需要服务端授权</small></div><span>安全</span>
+                <div><strong>@Model.WatchConnections 台手表在线</strong></div><span>设备</span>
             </article>
         </div>
     </section>
@@ -94,16 +106,16 @@
 @if (Model.Permissions.HasFlag(UserPermissions.ManageSchedule) || Model.Permissions.HasFlag(UserPermissions.SendNotifications))
 {
     <section class="dashboard-panel execution-panel">
-        <header class="panel-heading execution-heading"><div><p class="eyebrow">EXECUTION BOARD</p><h2>常用任务</h2></div><span class="muted">根据当前账号权限显示</span></header>
+        <header class="panel-heading execution-heading"><div><h2>常用任务</h2></div></header>
         <div class="task-table">
-            @if (Model.Permissions.HasFlag(UserPermissions.ManageSchedule))
+            @if (Model.Permissions.HasFlag(UserPermissions.ManageSchedule) && Model.Supports(RemoteCiCapabilities.ScheduleChange))
             {
-                <a asp-page="/Schedule" data-search-label="七日课表 换课 同步课表">
-                    <span class="task-main"><i class="bi bi-calendar-week" aria-hidden="true"></i><span><strong>七日课表</strong><small>查看、拉取并调整未来七天课程</small></span></span>
+                <a asp-page="/Schedule" data-search-label="课表 换课 同步课表">
+                    <span class="task-main"><i class="bi bi-calendar-week" aria-hidden="true"></i><span><strong>课表</strong><small>查看、拉取并调整未来七天课程</small></span></span>
                     <span class="task-owner">课程管理</span><span class="task-status healthy">可用</span><i class="bi bi-arrow-right" aria-hidden="true"></i>
                 </a>
             }
-            @if (Model.Permissions.HasFlag(UserPermissions.SendNotifications))
+            @if (Model.Permissions.HasFlag(UserPermissions.SendNotifications) && Model.Supports(RemoteCiCapabilities.NotificationSend))
             {
                 <a asp-page="/Control" asp-fragment="send-notification" data-search-label="发送通知 提醒 清除提醒">
                     <span class="task-main"><i class="bi bi-send" aria-hidden="true"></i><span><strong>发送通知</strong><small>向课堂发送文字通知或清除提醒</small></span></span>
@@ -125,20 +137,64 @@
     </section>
 }
 
+<section class="mobile-login-card" aria-labelledby="mobile-login-title">
+    <div class="mobile-login-copy">
+        <p class="eyebrow">ANDROID</p>
+        <h2 id="mobile-login-title">手机扫码登录</h2>
+        <p class="muted">在安卓版登录页点击二维码按钮扫描，直接登录当前账号 @Model.CurrentUser.UserName。二维码 5 分钟内有效且只能使用一次，请勿在投屏或截图中展示。</p>
+        <div class="mobile-login-url">
+            <code>@Model.MobileLoginUrl</code>
+            <button class="copy-button" type="button" data-copy-value="@Model.MobileLoginUrl" aria-label="复制服务器地址" title="复制服务器地址"><i class="bi bi-copy" aria-hidden="true"></i></button>
+        </div>
+        <form method="post" asp-page-handler="MobileLoginQr" class="mobile-login-actions" data-mobile-login-form>
+            <button type="submit" data-mobile-login-generate><i class="bi bi-qr-code" aria-hidden="true"></i> 生成登录二维码</button>
+            <span class="muted" data-mobile-login-status aria-live="polite"></span>
+        </form>
+    </div>
+    <div class="mobile-login-qr" data-mobile-login-qr hidden aria-label="安卓版扫码登录二维码"></div>
+</section>
+
 <div class="dashboard-grid lower-grid">
     <section class="dashboard-panel system-panel">
-        <header class="panel-heading"><div><p class="eyebrow">SYSTEM</p><h2>系统信息</h2></div></header>
+        <header class="panel-heading"><div><h2>系统信息</h2></div></header>
         <dl class="system-table">
-            <div><dt>服务端版本</dt><dd>v@(Model.ServerVersion)</dd></div><div><dt>协议版本</dt><dd>v@(Protocol.Version)</dd></div>
+            <div><dt>服务端版本</dt><dd>@(Model.ServerVersion)</dd></div><div><dt>协议版本</dt><dd>v@(Protocol.Version)</dd></div>
             <div><dt>在线手表</dt><dd>@Model.WatchConnections</dd></div><div><dt>账号数量</dt><dd>@Model.AccountCount</dd></div>
-            <div><dt>插件状态</dt><dd><span class="inline-status @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "在线" : "离线")</span></dd></div>
+            <div><dt>插件状态</dt><dd><span class="inline-status @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "在线" : Model.PluginProtocolMismatch is null ? "离线" : "协议不匹配")</span></dd></div>
         </dl>
     </section>
 
     @if (Model.IsAdmin)
     {
         <section class="dashboard-panel credential-panel">
-            <header class="panel-heading"><div><p class="eyebrow">CREDENTIALS</p><h2>插件凭据</h2></div><span class="status-pill">@Model.PluginCredentials.Count 项</span></header>
+            <header class="panel-heading"><div><h2>连接能力诊断</h2></div><span class="status-pill">@Model.CapabilityDiagnostics.Count 个插件</span></header>
+            @if (Model.CapabilityDiagnostics.Count == 0)
+            {
+                <div class="empty-state"><i class="bi bi-diagram-3" aria-hidden="true"></i><strong>暂无已连接插件</strong><span>插件连接后显示版本与能力。</span></div>
+            }
+            else
+            {
+                <div class="credential-list">
+                    @foreach (var peer in Model.CapabilityDiagnostics)
+                    {
+                        <article>
+                            <div>
+                                <strong>@(peer.Role == PeerRole.Plugin ? "插件" : "手表") · @peer.DisplayName @(peer.IsPrimaryPlugin ? "（主插件）" : "")</strong>
+                                <small>软件 @(peer.SoftwareVersion ?? "未知") · @(peer.IsExplicit ? "显式上报" : "V3 基础回退") · 连接 @(peer.ConnectionId.ToString("N")[..8])</small>
+                                <small>有效：@(peer.EffectiveCapabilities.Count == 0 ? "无" : Model.FormatCapabilities(peer.EffectiveCapabilities))</small>
+                                @if (peer.MissingCapabilities.Count > 0)
+                                {
+                                    <small>缺少：@Model.FormatCapabilities(peer.MissingCapabilities)</small>
+                                }
+                            </div>
+                        </article>
+                    }
+                </div>
+            }
+        </section>
+
+        <section class="dashboard-panel credential-panel">
+            <header class="panel-heading"><div><h2>插件凭据</h2></div><span class="status-pill">@Model.PluginCredentials.Count 项</span></header>
             @if (Model.PluginCredentials.Count == 0)
             {
                 <div class="empty-state"><i class="bi bi-key" aria-hidden="true"></i><strong>暂无插件凭据</strong><span>完成首次配对后可在此查看和吊销。</span></div>
@@ -163,4 +219,4 @@
     }
 </div>
 
-<footer class="workspace-footer"><span><strong>RemoteCI <small>v@(Model.ServerVersion)</small></strong> 远程课堂控制系统</span><span>@DateTimeOffset.Now.ToLocalTime().ToString("yyyy-MM-dd")</span></footer>
+<footer class="workspace-footer"><span><strong>RemoteCI <small>@(Model.ServerVersion)</small></strong> 远程课堂控制系统</span><span>@DateTimeOffset.Now.ToLocalTime().ToString("yyyy-MM-dd")</span></footer>

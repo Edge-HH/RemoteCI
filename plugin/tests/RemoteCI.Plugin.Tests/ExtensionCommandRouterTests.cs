@@ -260,6 +260,109 @@ public sealed class ExtensionCommandRouterTests
         Assert.NotEqual(CommandResultCodes.Busy, retried.Code);
     }
 
+    [Fact]
+    public async Task RunExtension_ValidatesDeclaredTypesAndPassesUndeclaredKeysThrough()
+    {
+        IReadOnlyDictionary<string, string?>? receivedArgs = null;
+        _registry.Register(new ExtensionRegistryTests.FakeExtension(
+            "demo.typed",
+            "类型校验",
+            parameters:
+            [
+                new ExtensionParameter { Key = "count", Label = "次数", Type = ExtensionParameterType.Number, Min = 1, Max = 5 },
+                new ExtensionParameter { Key = "mode", Label = "模式", Type = ExtensionParameterType.Select, Options = ["a", "b"] },
+                new ExtensionParameter { Key = "loud", Label = "大声", Type = ExtensionParameterType.Switch },
+            ],
+            execute: (_, args) =>
+            {
+                receivedArgs = args;
+                return Task.FromResult(new CommandResult { Success = true, Code = CommandResultCodes.Ok });
+            }));
+
+        var outOfRange = await RunWithArgs("demo.typed", new() { ["count"] = "9" });
+        Assert.Equal(CommandResultCodes.InvalidRequest, outOfRange.Code);
+        Assert.Contains("次数", outOfRange.Message);
+        var badOption = await RunWithArgs("demo.typed", new() { ["mode"] = "c" });
+        Assert.Equal(CommandResultCodes.InvalidRequest, badOption.Code);
+
+        var ok = await RunWithArgs("demo.typed", new() { ["count"] = "3", ["loud"] = "TRUE", ["legacy"] = "x" });
+        Assert.True(ok.Success);
+        Assert.Equal("true", receivedArgs!["loud"]);
+        Assert.Equal("x", receivedArgs["legacy"]);
+    }
+
+    [Fact]
+    public async Task ApplySettings_PassesOnlySubmittedFieldsAndNotifiesSettingsChanged()
+    {
+        var group = new ExtensionRegistryTests.FakeGroup("demo.group", "演示插件",
+        [
+            new ExtensionParameter { Key = "volume", Label = "音量", Type = ExtensionParameterType.Number, Min = 0, Max = 100 },
+            new ExtensionParameter { Key = "enabled", Label = "启用", Type = ExtensionParameterType.Switch },
+        ]);
+        group.Current["volume"] = "50";
+        group.Current["enabled"] = "false";
+        _registry.RegisterGroup(group);
+        var notified = 0;
+        _registry.GroupsChanged += (_, _) => notified++;
+
+        var result = await _router.ApplySettingsAsync(SettingsCommand("demo.group", new() { ["enabled"] = "True" }));
+
+        Assert.True(result.Success);
+        Assert.Equal("50", group.Current["volume"]);
+        Assert.Equal("true", group.Current["enabled"]);
+        Assert.Equal(1, notified);
+    }
+
+    [Theory]
+    [InlineData("volume", "abc")]
+    [InlineData("volume", "101")]
+    [InlineData("unknown", "1")]
+    public async Task ApplySettings_RejectsInvalidOrUndeclaredFields(string key, string value)
+    {
+        var group = new ExtensionRegistryTests.FakeGroup("demo.group", "演示插件",
+            [new ExtensionParameter { Key = "volume", Label = "音量", Type = ExtensionParameterType.Number, Min = 0, Max = 100 }]);
+        _registry.RegisterGroup(group);
+
+        var result = await _router.ApplySettingsAsync(SettingsCommand("demo.group", new() { [key] = value }));
+
+        Assert.Equal(CommandResultCodes.InvalidRequest, result.Code);
+        Assert.Empty(group.Current);
+    }
+
+    [Fact]
+    public async Task ApplySettings_RequiresExtensionPermissionAndKnownGroup()
+    {
+        _registry.RegisterGroup(new ExtensionRegistryTests.FakeGroup("demo.group", "演示插件",
+            [new ExtensionParameter { Key = "volume", Label = "音量" }]));
+
+        var forbidden = await _router.ApplySettingsAsync(new CommandMessage
+        {
+            Command = CommandKind.ApplyExtensionSettings,
+            ExtensionSettings = new ExtensionSettingsRequest { GroupId = "demo.group", Values = new() { ["volume"] = "1" } },
+            RequestedBy = User(UserPermissions.ViewCurrentCourse),
+        });
+        var unknown = await _router.ApplySettingsAsync(SettingsCommand("demo.missing", new() { ["volume"] = "1" }));
+
+        Assert.Equal(CommandResultCodes.Forbidden, forbidden.Code);
+        Assert.Equal(CommandResultCodes.InvalidRequest, unknown.Code);
+    }
+
+    private Task<CommandResult> RunWithArgs(string extensionId, Dictionary<string, string?> args) =>
+        _router.RunAsync(new CommandMessage
+        {
+            Command = CommandKind.RunExtension,
+            ExtensionId = extensionId,
+            ExtensionArgs = args,
+            RequestedBy = Admin(),
+        });
+
+    private static CommandMessage SettingsCommand(string groupId, Dictionary<string, string?> values) => new()
+    {
+        Command = CommandKind.ApplyExtensionSettings,
+        ExtensionSettings = new ExtensionSettingsRequest { GroupId = groupId, Values = values },
+        RequestedBy = Admin(),
+    };
+
     private static CommandMessage RunCommand(string extensionId) => new()
     {
         Command = CommandKind.RunExtension,

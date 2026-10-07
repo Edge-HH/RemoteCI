@@ -77,6 +77,19 @@ public sealed class AccountMirrorTests
     }
 
     [Fact]
+    public void ServerCapabilitiesPersistAndLegacySyncFallsBackToBaseline()
+    {
+        var path = TempMirrorPath();
+        var sync = CreateSync(Guid.NewGuid(), Guid.NewGuid(), "00", DateTimeOffset.UtcNow);
+        sync.ServerCapabilities = [RemoteCiCapabilities.ScheduleRead];
+        var mirror = new AccountMirror(path);
+        mirror.Apply(sync);
+
+        Assert.Equal([RemoteCiCapabilities.ScheduleRead], new AccountMirror(path).ServerCapabilities);
+        Assert.Equal(RemoteCiCapabilities.Baseline, new AccountMirror(TempMirrorPath()).ServerCapabilities);
+    }
+
+    [Fact]
     public void VersionRollbackFromNewServerInstanceForceOverwritesMirror()
     {
         var path = TempMirrorPath();

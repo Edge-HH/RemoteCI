@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+        替代全局 usesCleartextTraffic：显式声明信任锚且不配置任何 domain-config 明文例外。
+        声明式配置无法按连接用途区分明文，因此应用层仍限制局域网发现和直连的
+        ws:// 目标只能位于 RFC1918 私网。用户明确填写的云服务器 HTTP 地址会在
+        登录界面持续显示风险提示，但为兼容尚未配置 TLS 的现有部署允许继续连接。
+    -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

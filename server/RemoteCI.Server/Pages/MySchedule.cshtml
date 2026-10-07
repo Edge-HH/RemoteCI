@@ -1,0 +1,54 @@
+@page
+@model MyScheduleModel
+@{
+    ViewData["Title"] = "我的日程";
+}
+
+<div class="page-head">
+    <div>
+        <p class="eyebrow">任教安排</p>
+        <h1>我的日程</h1>
+        <p class="muted">课表中教师名为“@Model.CurrentUser.DisplayName”的课程。</p>
+    </div>
+</div>
+
+@if (Model.Schedule.Days.Count == 0)
+{
+    <div class="notice warning">
+        没有找到教师名与你用户名一致的课程。请让管理员在课表页设置科目教师，或请系统管理员修改你的用户名。
+    </div>
+}
+else
+{
+    <div class="my-schedule-list">
+        @foreach (var day in Model.Schedule.Days)
+        {
+            <section class="panel my-schedule-day">
+                <div class="panel-heading">
+                    <div>
+                        <h2>@MyScheduleModel.FormatDate(day.Date)</h2>
+                    </div>
+                    <span class="muted">@day.Items.Sum(item => item.Courses.Count) 节</span>
+                </div>
+                <div class="my-schedule-classes">
+                    @foreach (var item in day.Items)
+                    {
+                        <article class="my-schedule-class">
+                            <h3>@item.ClassName</h3>
+                            <div class="my-schedule-courses">
+                                @foreach (var course in item.Courses)
+                                {
+                                    <div class="my-schedule-course">
+                                        <span class="my-schedule-course-index">@course.Label</span>
+                                        <strong>@course.Subject</strong>
+                                        <span class="my-schedule-course-time">@(course.StartTime ?? "—")–@(course.EndTime ?? "—")</span>
+                                    </div>
+                                }
+                            </div>
+                        </article>
+                    }
+                </div>
+            </section>
+        }
+    </div>
+}

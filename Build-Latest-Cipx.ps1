@@ -38,14 +38,16 @@ try {
     }
 
     $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8
-    $versionMatch = [regex]::Match($manifest, '(?m)^version:\s*([0-9]+(?:\.[0-9]+){2,3})\s*$')
+    $versionMatch = [regex]::Match(
+        $manifest,
+        '(?m)^version:\s*(3\.[0-9]+\.[0-9]+\.[0-9]+(?:-beta\.[0-9]+)?)\s*$')
     if (-not $versionMatch.Success) {
         throw "??? manifest.yml ???????"
     }
 
-    $manifestVersion = [version]$versionMatch.Groups[1].Value
-    $displayVersion = $manifestVersion.ToString(3)
-    $defaultFileName = "RemoteCI.Plugin-$displayVersion.cipx"
+    $displayVersion = $versionMatch.Groups[1].Value
+    # 市场与稳定 Release 都使用固定资产名，避免四段版本再次被截断或产生第二个市场资产。
+    $defaultFileName = "RemoteCI.Plugin.cipx"
 
     if ([string]::IsNullOrWhiteSpace($OutputPath)) {
         $dialog = New-Object System.Windows.Forms.SaveFileDialog
@@ -78,7 +80,7 @@ try {
 
     Push-Location $repoRoot
     try {
-        & dotnet build $projectPath -c Release -p:CreateCipx=true
+        & dotnet build $projectPath -c Release -t:Rebuild -p:Version="$displayVersion" -p:CreateCipx=true
         if ($LASTEXITCODE -ne 0) {
             throw "CIPX ?????dotnet build ????? $LASTEXITCODE?"
         }
@@ -91,7 +93,15 @@ try {
         throw "?????????????? CIPX ???"
     }
 
-    Copy-Item -LiteralPath $generatedPackage -Destination $OutputPath -Force
+    # 当输出位置就是构建产物本身时，Copy-Item 会报“不能用自身覆盖自身”，此时跳过复制。
+    $isSameFile = [string]::Equals(
+        [IO.Path]::GetFullPath($OutputPath),
+        [IO.Path]::GetFullPath($generatedPackage),
+        [StringComparison]::OrdinalIgnoreCase)
+    if (-not $isSameFile) {
+        Copy-Item -LiteralPath $generatedPackage -Destination $OutputPath -Force
+    }
+
     $hash = (Get-FileHash -LiteralPath $OutputPath -Algorithm SHA256).Hash
 
     Show-ResultMessage `

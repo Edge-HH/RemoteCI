@@ -1,0 +1,157 @@
+package com.remoteci.mobile.data
+
+import java.time.Instant
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
+
+/**
+ * 覆盖 ConnectionManager 中与网络无关的纯逻辑：
+ * 局域网 HMAC 挑战证明（protocol.md 规范向量）与断线重连指数退避。
+ * 这些逻辑原先内嵌在 OkHttp/Android 生命周期里，必须 Robolectric 才能触达；
+ * 提取为顶层函数后用普通 JVM 单测锁定协议兼容性。
+ */
+class ConnectionManagerLogicTest {
+    @Test
+    fun `outgoing envelope always declares protocol version`() {
+        val encoded = encodeEnvelope(Envelope(type = Protocol.TYPE_PEER_CAPABILITIES))
+
+        assertTrue(encoded.contains("\"protocolVersion\":3"), encoded)
+    }
+
+    @Test
+    fun `outgoing envelope timestamp is an iso instant the server can parse`() {
+        // 服务端与插件把 timestamp 解析为 DateTimeOffset：空字符串会让整条消息被丢弃，命令永远收不到回执。
+        val encoded = encodeEnvelope(Envelope(type = Protocol.TYPE_COMMAND))
+        val timestamp = protocolJson.parseToJsonElement(encoded).jsonObject.getValue("timestamp").jsonPrimitive.content
+
+        assertTrue(runCatching { Instant.parse(timestamp) }.isSuccess, encoded)
+    }
+
+    @Test
+    fun `lan proof matches server canonical hmac vector`() {
+        val challenge = AuthChallenge(challengeId = "c1", nonce = "n1", expiresAt = "2030-01-01T00:00:00Z")
+        val session = PersistedDeviceSession(
+            username = "teacher",
+            deviceSessionId = "ABCDEF12-3456-7890-ABCD-EF1234567890",
+            deviceSecret = "secret-value",
+            deviceExpiresAt = "2030-01-01T00:00:00Z",
+        )
+        // 固定 nonce = 字节 0..23，与服务器端 .NET 实现独立计算的向量比对。
+        val fixedNonce = ByteArray(24) { it.toByte() }
+
+        val proof = createAuthProof(challenge, session, fixedNonce)
+
+        assertEquals("AAECAwQFBgcICQoLDA0ODxAREhMUFRYX", proof.clientNonce)
+        assertEquals("c1", proof.challengeId)
+        assertEquals("ABCDEF12-3456-7890-ABCD-EF1234567890", proof.deviceSessionId)
+        // canonical = "3|c1|n1|<clientNonce>|<无横线小写 sessionId>"，密钥 = SHA-256(deviceSecret)
+        assertEquals("7PhyfRLbHDrbGDrVbAWSkP4GbqgO4QCY7k9JxILypjM=", proof.proof)
+    }
+
+    @Test
+    fun `lan proof normalizes session id dashes and case`() {
+        val challenge = AuthChallenge(challengeId = "c2", nonce = "n2", expiresAt = "2030-01-01T00:00:00Z")
+        val fixedNonce = ByteArray(24) { it.toByte() }
+        val mixed = PersistedDeviceSession(
+            username = "teacher",
+            deviceSessionId = "ABCDEF12-3456-7890-ABCD-EF1234567890",
+            deviceSecret = "secret-value",
+            deviceExpiresAt = "2030-01-01T00:00:00Z",
+        )
+        val normalized = mixed.copy(deviceSessionId = "abcdef1234567890abcdef1234567890")
+
+        assertEquals(
+            createAuthProof(challenge, mixed, fixedNonce).proof,
+            createAuthProof(challenge, normalized, fixedNonce).proof,
+        )
+    }
+
+    @Test
+    fun `default client nonce is 24 random bytes`() {
+        val challenge = AuthChallenge(challengeId = "c3", nonce = "n3", expiresAt = "2030-01-01T00:00:00Z")
+        val session = PersistedDeviceSession(
+            username = "teacher",
+            deviceSessionId = "abcdef1234567890abcdef1234567890",
+            deviceSecret = "secret-value",
+            deviceExpiresAt = "2030-01-01T00:00:00Z",
+        )
+
+        val first = createAuthProof(challenge, session)
+        val second = createAuthProof(challenge, session)
+
+        assertEquals(24, java.util.Base64.getDecoder().decode(first.clientNonce).size)
+        assertNotEquals(first.clientNonce, second.clientNonce)
+    }
+
+    @Test
+    fun `reconnect delay doubles each attempt and caps at max`() {
+        assertEquals(10_000L, nextReconnectDelay(InitialReconnectDelayMs))
+
+        var delay = InitialReconnectDelayMs
+        val sequence = buildList {
+            repeat(6) {
+                delay = nextReconnectDelay(delay)
+                add(delay)
+            }
+        }
+        assertEquals(listOf(10_000L, 20_000L, 40_000L, 60_000L, 60_000L, 60_000L), sequence)
+        assertEquals(60_000L, MaxReconnectDelayMs)
+    }
+
+    @Test
+    fun `access expiry follows server clock instead of a skewed phone clock`() {
+        val serverNow = java.time.Instant.parse("2026-10-04T08:00:00Z").toEpochMilli()
+        // 手机时间比服务器慢 10 分钟：仍应在服务器判定的 1 小时后到期，而不是多出 10 分钟。
+        val phoneNow = serverNow - 10 * 60_000L
+
+        val expiry = localAccessExpiryMillis("2026-10-04T09:00:00+00:00", serverNow, phoneNow)
+
+        assertEquals(phoneNow + 60 * 60_000L, expiry)
+    }
+
+    @Test
+    fun `access expiry falls back to local clock and default ttl`() {
+        val now = 1_000_000L
+
+        assertEquals(now + 30_000L, localAccessExpiryMillis(java.time.Instant.ofEpochMilli(now + 30_000L).toString(), null, now))
+        assertEquals(now + DefaultAccessTtlMs, localAccessExpiryMillis("not-a-date", null, now))
+    }
+
+    @Test
+    fun `lan candidates are only used for the class they were advertised for`() {
+        val unknown = WatchSettings(lanHost = "192.168.1.5")
+        val classA = unknown.copy(lanClassId = "a")
+
+        assertTrue(lanCandidatesBelongTo(unknown, "b"))
+        assertTrue(lanCandidatesBelongTo(classA, "a"))
+        assertTrue(lanCandidatesBelongTo(classA, null))
+        assertFalse(lanCandidatesBelongTo(classA, "b"))
+    }
+
+    @Test
+    fun `foreground reconnect keeps user settings but takes discovered network state`() {
+        val ui = WatchSettings(cloudServerUrl = "https://new.example.com", lanHost = "10.0.0.1", selectedClassId = "a")
+        val network = WatchSettings(
+            cloudServerUrl = "https://old.example.com",
+            lanHost = "192.168.1.9",
+            lanHostCandidates = listOf("192.168.1.9", "10.8.0.2"),
+            lanPort = 9000,
+            lanClassId = "b",
+            selectedClassId = "b",
+        )
+
+        val merged = ui.withNetworkStateFrom(network)
+
+        assertEquals("https://new.example.com", merged.cloudServerUrl)
+        assertEquals("192.168.1.9", merged.lanHost)
+        assertEquals(listOf("192.168.1.9", "10.8.0.2"), merged.lanHostCandidates)
+        assertEquals(9000, merged.lanPort)
+        assertEquals("b", merged.lanClassId)
+        assertEquals("b", merged.selectedClassId)
+    }
+}

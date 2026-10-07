@@ -1,0 +1,132 @@
+#!/bin/bash
+# 离线 FPK 在应用中心创建 Docker 项目前导入随包镜像；在线 FPK 没有元数据时直接返回。
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+METADATA_FILE="$SCRIPT_DIR/offline-image.env"
+ARCHIVE_MEMBER="docker/remoteci-image.tar.gz"
+APP_METADATA_MEMBER="docker/remoteci-image.env"
+LOG_FILE="${TRIM_TEMP_LOGFILE:-/dev/stderr}"
+
+write_log() {
+  if ! printf '%s\n' "$1" >> "$LOG_FILE" 2>/dev/null; then
+    printf '%s\n' "$1" >&2
+  fi
+}
+
+fail() {
+  write_log "RemoteCI 离线镜像导入失败：$1"
+  exit 1
+}
+
+metadata_value() {
+  local key="$1"
+  local value
+  value="$(sed -n "s/^${key}=//p" "$METADATA_FILE")"
+  [ -n "$value" ] || fail "镜像元数据缺少 $key"
+  [ "$(grep -c "^${key}=" "$METADATA_FILE")" -eq 1 ] || fail "镜像元数据重复声明 $key"
+  printf '%s\n' "$value"
+}
+
+find_app_archive() {
+  local candidate
+  for candidate in \
+    "${TRIM_TEMP_TPKFILE:-}" \
+    "${TRIM_PKGINST_TEMP_DIR:-}" \
+    "$(cd "$SCRIPT_DIR/.." && pwd)"; do
+    [ -n "$candidate" ] || continue
+    if [ -f "$candidate/app.tgz" ]; then
+      printf '%s\n' "$candidate/app.tgz"
+      return 0
+    fi
+    if [ -f "$candidate" ] && [ "$(basename "$candidate")" = "app.tgz" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+find_writable_temp_root() {
+  local candidate
+  # install_init 早于应用数据目录创建，TRIM_PKGTMP 此时可能尚不存在且不可创建。
+  # 安装包解压目录由应用中心预先准备；若它不可写，再使用系统临时目录。
+  for candidate in \
+    "${TRIM_PKGINST_TEMP_DIR:-}" \
+    "${TMPDIR:-}" \
+    /tmp; do
+    [ -n "$candidate" ] || continue
+    if [ -d "$candidate" ] && [ -w "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# 在线 FPK 不带该文件，仍沿用应用中心从 GHCR 拉取镜像的标准流程。
+[ -f "$METADATA_FILE" ] || exit 0
+
+IMAGE_TAG="$(metadata_value IMAGE_TAG)"
+IMAGE_ARCH="$(metadata_value IMAGE_ARCH)"
+IMAGE_ID="$(metadata_value IMAGE_ID)"
+IMAGE_ARCHIVE_SHA256="$(metadata_value IMAGE_ARCHIVE_SHA256)"
+
+case "$IMAGE_TAG" in
+  ghcr.io/edge-hh/remoteci:*) ;;
+  *) fail "镜像标签不属于 RemoteCI：$IMAGE_TAG" ;;
+esac
+printf '%s\n' "$IMAGE_ID" | grep -Eq '^sha256:[0-9a-f]{64}$' \
+  || fail "镜像 ID 格式无效"
+printf '%s\n' "$IMAGE_ARCHIVE_SHA256" | grep -Eq '^[0-9a-f]{64}$' \
+  || fail "镜像归档 SHA-256 格式无效"
+if [ -n "${TRIM_APPVER:-}" ] && [ "$IMAGE_TAG" != "ghcr.io/edge-hh/remoteci:$TRIM_APPVER" ]; then
+  fail "镜像版本与应用版本 $TRIM_APPVER 不一致"
+fi
+
+# shellcheck source=fnos/cmd/arch_compat
+. "$SCRIPT_DIR/arch_compat"
+SYSTEM_ARCH="${TRIM_SYS_ARCH:-$(uname -m)}"
+remoteci_image_arch_compatible "$IMAGE_ARCH" "$SYSTEM_ARCH" \
+  || fail "安装包架构 $IMAGE_ARCH 与设备架构 $SYSTEM_ARCH 不匹配"
+
+command -v docker >/dev/null 2>&1 || fail "设备未安装 Docker"
+CURRENT_ID="$(docker image inspect --format '{{.Id}}' "$IMAGE_TAG" 2>/dev/null || true)"
+CURRENT_ARCH="$(docker image inspect --format '{{.Architecture}}' "$IMAGE_TAG" 2>/dev/null || true)"
+if [ "$CURRENT_ID" = "$IMAGE_ID" ] && [ "$CURRENT_ARCH" = "$IMAGE_ARCH" ]; then
+  printf 'RemoteCI 离线镜像已存在，跳过重复导入：%s\n' "$IMAGE_TAG"
+  exit 0
+fi
+
+APP_ARCHIVE="$(find_app_archive)" || fail "找不到安装包中的 app.tgz"
+tar -tzf "$APP_ARCHIVE" "$ARCHIVE_MEMBER" >/dev/null 2>&1 || fail "app.tgz 缺少离线镜像归档"
+tar -xOzf "$APP_ARCHIVE" "$APP_METADATA_MEMBER" 2>/dev/null | cmp -s - "$METADATA_FILE" \
+  || fail "app.tgz 中的镜像元数据不一致"
+
+TEMP_ROOT="$(find_writable_temp_root)" || fail "找不到可写的安装临时目录"
+TEMP_ARCHIVE="$(mktemp "$TEMP_ROOT/remoteci-image.XXXXXX.tar.gz")" \
+  || fail "无法创建镜像临时文件"
+LOAD_OUTPUT="$(mktemp "$TEMP_ROOT/remoteci-docker-load.XXXXXX.log")" \
+  || { rm -f "$TEMP_ARCHIVE"; fail "无法创建 Docker 导入日志"; }
+cleanup() {
+  rm -f "$TEMP_ARCHIVE" "$LOAD_OUTPUT"
+}
+trap cleanup EXIT
+
+tar -xOzf "$APP_ARCHIVE" "$ARCHIVE_MEMBER" > "$TEMP_ARCHIVE" \
+  || fail "无法从 app.tgz 提取离线镜像"
+ACTUAL_SHA256="$(sha256sum "$TEMP_ARCHIVE" | awk '{print $1}')"
+[ "$ACTUAL_SHA256" = "$IMAGE_ARCHIVE_SHA256" ] \
+  || fail "镜像归档 SHA-256 校验失败"
+
+if ! docker load --input "$TEMP_ARCHIVE" > "$LOAD_OUTPUT" 2>&1; then
+  write_log "RemoteCI 离线镜像导入失败：docker load 执行失败"
+  sed 's/^/[docker] /' "$LOAD_OUTPUT" >> "$LOG_FILE" 2>/dev/null || true
+  exit 1
+fi
+
+LOADED_ID="$(docker image inspect --format '{{.Id}}' "$IMAGE_TAG" 2>/dev/null || true)"
+LOADED_ARCH="$(docker image inspect --format '{{.Architecture}}' "$IMAGE_TAG" 2>/dev/null || true)"
+[ "$LOADED_ID" = "$IMAGE_ID" ] || fail "导入后的镜像 ID 与发布元数据不一致"
+[ "$LOADED_ARCH" = "$IMAGE_ARCH" ] || fail "导入后的镜像架构与发布元数据不一致"
+printf 'RemoteCI 离线镜像导入完成：%s（%s）\n' "$IMAGE_TAG" "$IMAGE_ARCH"

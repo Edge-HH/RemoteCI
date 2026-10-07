@@ -1,16 +1,45 @@
 import java.util.Properties
 
-val releaseVersion = providers.gradleProperty("releaseVersion").orNull ?: "0.3.2"
-// versionCode 由版本号推导（major*10000 + minor*100 + patch），随发布自然递增：
-// 避免硬编码导致各版本 APK 携带相同 versionCode、依赖“同版本码覆盖”的脆弱行为。
-val releaseVersionCode = releaseVersion
-    .substringBefore("-")
-    .split(".")
-    .let { parts ->
-        (parts.getOrNull(0)?.toIntOrNull() ?: 0) * 10_000 +
-            (parts.getOrNull(1)?.toIntOrNull() ?: 0) * 100 +
-            (parts.getOrNull(2)?.toIntOrNull() ?: 0)
+// 软件版本与协议版本独立，Release 工作流会用标签覆盖此默认值。
+val releaseVersion = providers.gradleProperty("releaseVersion").orNull ?: "3.2.1.4"
+
+// Android versionCode 必须是正整数且 Beta 版本也要严格排在同核心版本的稳定版之前。
+// 版本槽位为 major*100000000 + minor*1000000 + patch*10000 + revision*1000，
+// 稳定版使用槽位末尾 999，v3.x.x-beta.y 使用 y（1..998）。
+val releaseVersionMatch = Regex(
+    """^(?<major>[0-9]+)\.(?<minor>[0-9]+)\.(?<patch>[0-9]+)(?:(?:\.(?<revision>[0-9]+))|(?:-beta\.(?<beta>[0-9]+)))$""",
+).matchEntire(releaseVersion)
+    ?: error("无效的 Wear OS 版本号：$releaseVersion")
+
+fun versionPart(name: String): Int =
+    releaseVersionMatch.groups[name]?.value?.toIntOrNull()
+        ?: 0
+
+val releaseVersionCode = run {
+    val major = versionPart("major")
+    val minor = versionPart("minor")
+    val patch = versionPart("patch")
+    val revision = versionPart("revision")
+    val beta = releaseVersionMatch.groups["beta"]?.value?.toIntOrNull()
+    require(minor in 0..999 && patch in 0..999 && revision in 0..999) {
+        "版本号分段必须处于 0..999：$releaseVersion"
     }
+    val suffix = if (beta != null) {
+        require(beta in 1..998) { "Beta 序号必须处于 1..998：$releaseVersion" }
+        beta
+    } else {
+        999
+    }
+    val code = major.toLong() * 100_000_000L +
+        minor.toLong() * 1_000_000L +
+        patch.toLong() * 10_000L +
+        revision.toLong() * 1_000L +
+        suffix
+    require(code in 1L..2_100_000_000L) {
+        "版本号推导出的 versionCode 超出 Android 范围：$code"
+    }
+    code.toInt()
+}
 
 plugins {
     alias(libs.plugins.android.application)
