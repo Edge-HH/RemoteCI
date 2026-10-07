@@ -144,7 +144,8 @@ fun scheduleWidgetItems(
             .orEmpty()
     }
     if (source.isNotEmpty()) return source.map(::scheduleItem)
-    val fallback = snapshot?.nextClassSubject?.trim().orEmpty()
+    if (snapshot == null) return emptyList()
+    val fallback = snapshot.nextClassSubject?.trim().orEmpty()
     if (fallback.isBlank()) return emptyList()
     return listOf(
         ScheduleWidgetItem(

@@ -63,7 +63,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
 import com.remoteci.mobile.data.AdminApi
 import com.remoteci.mobile.data.ClassSummary
 import com.remoteci.mobile.data.CompatibleUpdate
@@ -372,7 +371,7 @@ fun ConnectionScreen(
         TopAppBar(title = { Text("连接与服务器") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(server, { server = it }, label = { Text("服务器地址") }, modifier = Modifier.fillMaxWidth(), trailingIcon = {
-                IconButton({ scanner.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setPrompt("扫描服务器地址")) }) {
+                IconButton({ scanner.launch(qrScanOptions("扫描服务器地址")) }) {
                     Icon(Icons.Rounded.QrCodeScanner, contentDescription = "扫描")
                 }
             })

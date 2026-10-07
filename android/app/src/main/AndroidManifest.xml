@@ -51,6 +51,13 @@
             </intent-filter>
         </activity>
 
+        <!-- 竖屏扫码页，替代 zxing 默认的横屏 CaptureActivity。 -->
+        <activity
+            android:name=".ui.ScanActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.RemoteCI" />
+
         <receiver
             android:name=".notif.UpdateReceiver"
             android:exported="false" />

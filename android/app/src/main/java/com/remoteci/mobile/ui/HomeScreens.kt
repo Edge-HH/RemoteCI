@@ -83,7 +83,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
 import com.remoteci.mobile.data.AdminApi
 import com.remoteci.mobile.data.ConnectionManager
 import com.remoteci.mobile.data.CourseEntry
@@ -153,7 +152,7 @@ fun LoginScreen(
             Text("登录 RemoteCI", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text("输入服务器地址并用账号登录，或扫描 WebUI 的登录二维码直接登录。", color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedTextField(server, { server = it }, label = { Text("服务器地址") }, modifier = Modifier.fillMaxWidth(), trailingIcon = {
-                IconButton({ scanner.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setPrompt("扫描登录二维码或服务器地址")) }) {
+                IconButton({ scanner.launch(qrScanOptions("扫描登录二维码或服务器地址")) }) {
                     Icon(Icons.Rounded.QrCodeScanner, contentDescription = "扫描")
                 }
             })
