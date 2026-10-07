@@ -1534,18 +1534,8 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
     [Fact]
     public async Task RazorWebUi_RoleDefaultsDriveControlNavigation()
     {
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var role = await scope.ServiceProvider.GetRequiredService<AccountRoleService>()
-                .CreateAsync("Navigation default", UserPermissions.TeacherComing);
-            await scope.ServiceProvider.GetRequiredService<IdentityCoordinator>().CreateUserAsync(new CreateUserRequest
-            {
-                Username = "role.navigation",
-                DisplayName = "Role navigation",
-                Password = "Role-Navigation-Password-2026",
-                RoleId = role.Id,
-            });
-        }
+        // 可见控制权限（通知）由角色默认值授予时显示“控制”入口；同时持有的旧 TeacherComing 不再出现按钮。
+        await CreateRoleUserAsync("Navigation default", UserPermissions.SendNotifications | UserPermissions.TeacherComing, "role.navigation");
 
         using var browser = CreateBrowserClient();
         await LoginWebUiAsync(browser, "role.navigation", "Role-Navigation-Password-2026");
@@ -1554,6 +1544,32 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var control = await browser.GetAsync("/Control");
         Assert.Equal(HttpStatusCode.OK, control.StatusCode);
         Assert.DoesNotContain("老师来了", WebUtility.HtmlDecode(await control.Content.ReadAsStringAsync()));
+    }
+
+    [Fact]
+    public async Task RazorWebUi_LegacyTeacherComingOnlyRole_HidesControlNavigation()
+    {
+        // TeacherComing 仅为旧客户端兼容保留，单独持有它不应再露出“控制”入口。
+        await CreateRoleUserAsync("Legacy teacher coming", UserPermissions.TeacherComing, "role.legacy-coming");
+
+        using var browser = CreateBrowserClient();
+        await LoginWebUiAsync(browser, "role.legacy-coming", "Role-Navigation-Password-2026");
+        var accountHtml = WebUtility.HtmlDecode(await browser.GetStringAsync("/Account"));
+        Assert.DoesNotContain("<span>控制</span>", accountHtml);
+        Assert.DoesNotContain("老师来了", accountHtml);
+    }
+
+    private async Task CreateRoleUserAsync(string roleName, UserPermissions defaults, string username)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var role = await scope.ServiceProvider.GetRequiredService<AccountRoleService>().CreateAsync(roleName, defaults);
+        await scope.ServiceProvider.GetRequiredService<IdentityCoordinator>().CreateUserAsync(new CreateUserRequest
+        {
+            Username = username,
+            DisplayName = username,
+            Password = "Role-Navigation-Password-2026",
+            RoleId = role.Id,
+        });
     }
 
     [Fact]

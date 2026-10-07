@@ -13,6 +13,42 @@ import kotlin.test.assertTrue
 
 class WidgetDataTest {
     @Test
+    fun missingSnapshotAndScheduleProduceNoItems() {
+        assertTrue(
+            scheduleWidgetItems(
+                snapshot = null,
+                schedule = null,
+                now = LocalTime.of(8, 0),
+                today = LocalDate.of(2026, 10, 5),
+            ).isEmpty(),
+        )
+    }
+
+    @Test
+    fun scheduleWithoutSnapshotStillShowsAvailableCourses() {
+        val items = scheduleWidgetItems(
+            snapshot = null,
+            schedule = ScheduleBundle(
+                days = listOf(
+                    ScheduleDay(
+                        date = "2026-10-05",
+                        revision = "1",
+                        enabled = true,
+                        courses = listOf(
+                            CourseEntry(0, "第1节", "math", "数学", "08:00", "08:40"),
+                        ),
+                    ),
+                ),
+            ),
+            now = LocalTime.of(7, 45),
+            today = LocalDate.of(2026, 10, 5),
+        )
+
+        assertEquals(listOf("数学"), items.map { it.subject })
+        assertEquals("第1节", items.single().period)
+    }
+
+    @Test
     fun statusUsesNextLessonDuringBreak() {
         val content = statusWidgetContent(
             ClassStateSnapshot(

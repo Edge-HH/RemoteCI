@@ -21,7 +21,7 @@ jobs:
       matrix:
         rid: [linux-x64, win-x64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
@@ -50,7 +50,7 @@ jobs:
     name: 插件 CIPX
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
@@ -87,7 +87,7 @@ jobs:
     name: 手表 APK
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -169,7 +169,7 @@ jobs:
     name: Phone APK
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -209,7 +209,7 @@ jobs:
           cp android/app/build/outputs/apk/release/app-release.apk "RemoteCI.Mobile-${version}.apk"
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           "$apksigner" verify --print-certs "RemoteCI.Mobile-${version}.apk"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mobile-apk
           path: RemoteCI.Mobile-*.apk
@@ -221,7 +221,7 @@ jobs:
       contents: write
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: 提取版本号
         id: meta
         run: |
@@ -354,7 +354,7 @@ jobs:
     needs: [build-server, build-plugin, build-wearos, build-android, build-fnos]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           name: server-linux-x64
@@ -375,7 +375,7 @@ jobs:
         with:
           name: mobile-apk
           path: artifacts/mobile-apk
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: fnos-fpk
           path: artifacts/fnos-fpk
