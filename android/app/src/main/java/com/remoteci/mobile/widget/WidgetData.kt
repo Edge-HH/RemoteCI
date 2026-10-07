@@ -144,6 +144,7 @@ fun scheduleWidgetItems(
             .orEmpty()
     }
     if (source.isNotEmpty()) return source.map(::scheduleItem)
+    // 先使用课表；只有快照存在时才尝试“下一节”回退数据。
     if (snapshot == null) return emptyList()
     val fallback = snapshot.nextClassSubject?.trim().orEmpty()
     if (fallback.isBlank()) return emptyList()
