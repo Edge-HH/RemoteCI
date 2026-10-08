@@ -173,6 +173,8 @@ public enum CommandKind
     SendFile = 23,
     /// <summary>修改某个扩展分组在设备上的设置（部分更新），由注册方插件实际写入并生效。</summary>
     ApplyExtensionSettings = 24,
+    /// <summary>应用服务端保存并验证过的档案；仅档案管理页面可以发起。</summary>
+    ApplyProfile = 25,
 }
 
 public enum PowerActionKind
@@ -187,7 +189,7 @@ public static class CommandPermissions
 {
     public static UserPermissions Required(CommandKind command) => command switch
     {
-        CommandKind.ChangeSchedule or CommandKind.SetSubjectTeacher => UserPermissions.ManageSchedule,
+        CommandKind.ChangeSchedule or CommandKind.SetSubjectTeacher or CommandKind.ApplyProfile => UserPermissions.ManageSchedule,
         CommandKind.SendNotification or CommandKind.ClearNotifications => UserPermissions.SendNotifications,
         CommandKind.SendVoiceMessage => UserPermissions.SendVoiceMessages,
         CommandKind.TeacherComing => UserPermissions.TeacherComing,
@@ -243,6 +245,8 @@ public static class RemoteCiCapabilities
     public const string FileDistribute = "file.distribute";
     /// <summary>同步扩展分组与设置页，并接受远程修改扩展设置。</summary>
     public const string ExtensionsSettings = "extensions.settings";
+    /// <summary>按明确选择的方式更新、替换或创建并启用服务端档案。</summary>
+    public const string ProfileApply = "profile.apply";
 
     /// <summary>没有上报能力列表的旧 V3 端自动获得的基础能力。</summary>
     public static IReadOnlyList<string> Baseline { get; } =
@@ -264,7 +268,7 @@ public static class RemoteCiCapabilities
     public static IReadOnlyList<string> Current { get; } =
         [.. Baseline, VoiceMessageSend, SoftwareInventory, SoftwareUpgradePlugins, SoftwareUpgradeClassIsland,
             PluginInstall, PluginUninstall, PluginEnable, PluginManagementPolicy, ProfileDistribute, TimeLayoutUpdate, ManagementJoin,
-            ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings];
+            ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings, ProfileApply];
 
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
@@ -295,6 +299,7 @@ public static class RemoteCiCapabilities
         TerminalExecute => "远程终端",
         FileDistribute => "文件分发",
         ExtensionsSettings => "修改扩展设置",
+        ProfileApply => "应用服务端档案",
         _ => "未知能力",
     };
 
@@ -323,6 +328,7 @@ public static class RemoteCiCapabilities
         CommandKind.ExecuteTerminalCommand => TerminalExecute,
         CommandKind.SendFile => FileDistribute,
         CommandKind.ApplyExtensionSettings => ExtensionsSettings,
+        CommandKind.ApplyProfile => ProfileApply,
         _ => null,
     };
 }

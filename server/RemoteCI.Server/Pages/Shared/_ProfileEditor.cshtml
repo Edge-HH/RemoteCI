@@ -1,0 +1,83 @@
+@model string
+<link rel="stylesheet" href="~/profiles.css" asp-append-version="true" />
+<div data-profile-app>
+    @Html.AntiForgeryToken()
+    @* InitialJson 使用默认 System.Text.Json HTML 安全编码；完整档案仅在脚本里解析，绝不作为 HTML 渲染。 *@
+    <script type="application/json" data-profile-initial>@Html.Raw(Model)</script>
+    <nav class="profile-mode-tabs" aria-label="档案管理入口" data-profile-modes hidden>
+        <button type="button" class="ghost" data-profile-mode="library" aria-pressed="true"><i class="bi bi-folder2" aria-hidden="true"></i> 档案库</button>
+        <button type="button" class="ghost" data-profile-mode="classes" aria-pressed="false"><i class="bi bi-people" aria-hidden="true"></i> 批量编辑</button>
+    </nav>
+    <p class="notice profile-context" data-profile-context>正在加载档案…</p>
+    <div class="flash" role="status" aria-live="polite" data-profile-feedback hidden></div>
+    <div class="profile-workspace">
+        <aside class="panel profile-rail" aria-label="档案或班级列表">
+            <div class="profile-rail-head"><h2 data-profile-list-title>档案库</h2><button type="button" class="ghost" data-profile-action="new" aria-label="新建档案"><i class="bi bi-plus-lg" aria-hidden="true"></i></button></div>
+            <label class="profile-search">查找<input type="search" data-profile-search placeholder="输入名称" /></label>
+            <label class="check" data-profile-select-all-label hidden><input type="checkbox" data-profile-select-all /> 全选班级</label>
+            <div class="profile-record-list" data-profile-records></div>
+        </aside>
+        <section class="panel profile-editor" aria-label="档案编辑区">
+            <div class="profile-editor-toolbar">
+                <div class="profile-editor-identity"><h2 data-profile-editor-title>选择一个档案</h2><span class="muted" data-profile-revision></span></div>
+                <div class="profile-toolbar-actions">
+                    <button type="button" class="ghost" data-profile-action="upload"><i class="bi bi-upload" aria-hidden="true"></i> 上传</button>
+                    <button type="button" class="ghost" data-profile-action="export">导出</button>
+                    <button type="button" class="ghost" data-profile-action="copy">复制</button>
+                    <button type="button" class="ghost" data-profile-action="assign" hidden>分配给班级</button>
+                    <button type="button" class="ghost danger" data-profile-action="delete">删除</button>
+                </div>
+            </div>
+            <div data-profile-empty class="empty-state"><i class="bi bi-folder2-open" aria-hidden="true"></i><strong>尚无档案</strong><span>新建档案，或上传 ClassIsland 档案 JSON 后解析预览。</span></div>
+            <div data-profile-content hidden>
+                <label class="profile-name">档案名称<input data-profile-name maxlength="100" required /></label>
+                <nav class="profile-section-tabs" aria-label="档案内容">
+                    <button type="button" class="ghost" data-profile-section="TimeLayouts" aria-pressed="true">时间表 <span data-profile-count="TimeLayouts">0</span></button>
+                    <button type="button" class="ghost" data-profile-section="ClassPlans" aria-pressed="false">课表 <span data-profile-count="ClassPlans">0</span></button>
+                    <button type="button" class="ghost" data-profile-section="Subjects" aria-pressed="false">科目 <span data-profile-count="Subjects">0</span></button>
+                </nav>
+                <div data-profile-section-content></div>
+                <div class="profile-validation" role="status" data-profile-validation hidden></div>
+                <div class="profile-savebar">
+                    <span class="muted" data-profile-draft-status>已保存</span>
+                    <div class="profile-toolbar-actions"><button type="button" class="ghost" data-profile-action="reload">重新加载</button><button type="button" data-profile-action="save">保存档案</button><button type="button" class="ghost" data-profile-action="apply">下发已保存版本</button></div>
+                </div>
+                <div class="profile-batchbar" data-profile-batchbar hidden><span data-profile-selected-count>未选择班级</span><div class="profile-toolbar-actions"><button type="button" class="ghost" data-profile-action="copy-to-selected">复制当前内容到所选班</button><button type="button" data-profile-action="save-selected">统一保存</button><button type="button" class="ghost" data-profile-action="apply-selected">统一下发</button></div></div>
+            </div>
+        </section>
+    </div>
+    <section class="panel" data-profile-results hidden><div class="panel-heading"><h2>下发结果</h2><button type="button" class="ghost" data-profile-action="retry">重试失败设备</button></div><ul class="broadcast-result" data-profile-result-list></ul></section>
+    <dialog class="batch-dialog batch-dialog-wide profile-dialog" data-profile-upload aria-labelledby="profile-upload-title">
+        <div class="batch-dialog-shell"><header class="batch-dialog-header"><h2 id="profile-upload-title">上传档案</h2><button type="button" class="ghost dialog-close-button" data-profile-close aria-label="关闭">×</button></header>
+            <div class="batch-dialog-body stack"><label>ClassIsland 档案 JSON（最大 5 MB）<input type="file" accept=".json,application/json" data-profile-file /></label><label>或粘贴 JSON<textarea rows="8" data-profile-upload-json spellcheck="false"></textarea></label><button type="button" class="ghost" data-profile-action="preview">解析预览</button><div data-profile-preview hidden></div><div class="flash error" role="alert" data-profile-upload-error hidden></div></div>
+            <footer class="batch-dialog-actions"><button type="button" class="ghost" data-profile-close>取消</button><button type="button" data-profile-action="confirm-upload" disabled>确认保存</button></footer></div>
+    </dialog>
+    <dialog class="batch-dialog batch-dialog-wide profile-dialog" data-profile-apply aria-labelledby="profile-apply-title">
+        <form data-profile-apply-form><div class="batch-dialog-shell"><header class="batch-dialog-header"><div><h2 id="profile-apply-title">下发档案</h2><p class="muted" data-profile-apply-summary></p></div><button type="button" class="ghost dialog-close-button" data-profile-close aria-label="关闭">×</button></header>
+            <div class="batch-dialog-body stack">
+                <fieldset class="profile-choice-list"><legend>应用方式（必须选择）</legend>
+                    <label class="check"><input type="radio" name="applyMode" value="1" required /> <span><strong>更新当前档案</strong><small>更新所选对象及必要依赖，保留设备中的其他内容。</small></span></label>
+                    <label class="check"><input type="radio" name="applyMode" value="2" /> <span><strong>整体替换所选类别</strong><small>清空所选类别后写入此次内容；存在悬空引用时设备将拒绝。</small></span></label>
+                    <label class="check"><input type="radio" name="applyMode" value="3" /> <span><strong>创建并启用新档案</strong><small>在设备上创建独立档案；档案名重名时返回错误。</small></span></label>
+                </fieldset>
+                <label data-profile-import-name-label hidden>设备档案名称<input data-profile-import-name maxlength="100" /></label>
+                <fieldset class="profile-apply-sections"><legend>下发内容</legend><label class="check"><input type="checkbox" value="1" data-profile-apply-section checked /> 时间表</label><label class="check"><input type="checkbox" value="2" data-profile-apply-section checked /> 课表</label><label class="check"><input type="checkbox" value="4" data-profile-apply-section checked /> 科目</label></fieldset>
+                <details data-profile-object-picker><summary>选择具体对象（默认所选类别的全部对象）</summary><div data-profile-apply-objects></div></details>
+                <div class="notice warning" data-profile-replace-warning hidden><div><strong data-profile-replace-summary></strong><label class="check"><input type="checkbox" data-profile-confirm-replace /> 我确认清空并替换上述类别</label></div></div>
+                <div data-profile-targets></div>
+                <label class="check"><input type="checkbox" data-profile-restart /> 应用成功后重启 ClassIsland</label>
+                <div class="flash error" data-profile-apply-error role="alert" hidden></div>
+            </div>
+            <footer class="batch-dialog-actions"><button type="button" class="ghost" data-profile-close>取消</button><button type="submit">确认下发</button></footer></div></form>
+    </dialog>
+    <dialog class="batch-dialog profile-dialog" data-profile-assign aria-labelledby="profile-assign-title"><div class="batch-dialog-shell"><header class="batch-dialog-header"><h2 id="profile-assign-title">分配模板</h2><button type="button" class="ghost dialog-close-button" data-profile-close aria-label="关闭">×</button></header><div class="batch-dialog-body stack"><p class="muted">为各班保存独立副本。已有班级档案会被替换，模板后续更新不会自动覆盖副本。</p><div data-profile-assign-classes></div><div class="flash error" data-profile-assign-error role="alert" hidden></div></div><footer class="batch-dialog-actions"><button type="button" class="ghost" data-profile-close>取消</button><button type="button" data-profile-action="confirm-assign">确认分配</button></footer></div></dialog>
+    @* 共用页面内确认框，兼容桌面应用内置浏览器，并支持键盘取消和输入名称。 *@
+    <dialog class="batch-dialog profile-dialog" data-profile-question aria-labelledby="profile-question-title" aria-describedby="profile-question-message">
+        <form data-profile-question-form><div class="batch-dialog-shell">
+            <header class="batch-dialog-header"><h2 id="profile-question-title" data-profile-question-title>确认操作</h2><button type="button" class="ghost dialog-close-button" data-profile-close aria-label="关闭">×</button></header>
+            <div class="batch-dialog-body stack"><p id="profile-question-message" data-profile-question-message></p><label data-profile-question-label hidden><span data-profile-question-input-label>名称</span><input data-profile-question-input maxlength="100" /></label></div>
+            <footer class="batch-dialog-actions"><button type="button" class="ghost" data-profile-close>取消</button><button type="submit" data-profile-question-accept>确认</button></footer>
+        </div></form>
+    </dialog>
+</div>
+<script src="~/profiles.js" asp-append-version="true" defer></script>

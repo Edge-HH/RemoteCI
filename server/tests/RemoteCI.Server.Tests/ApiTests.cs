@@ -517,7 +517,11 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.DoesNotContain("向插件发送单一指令，由插件显示强调提醒并在 1 秒后自动清除。", html);
         Assert.DoesNotContain("正文留空时显示原标题", html);
         Assert.Contains(@"data-batch-open=""ClearNotifications""", html);
-        Assert.Contains(@"data-batch-open=""UpdateTimeLayout""", html);
+        // 源档案操作有独立入口，控制页继续保留课堂与设备控制。
+        Assert.DoesNotContain(@"data-batch-open=""UpdateTimeLayout""", html);
+        Assert.DoesNotContain(@"data-batch-open=""DistributeProfile""", html);
+        Assert.Contains(@"href=""/ClassProfiles""", html);
+        Assert.Contains(@"href=""/Profiles""", html);
         Assert.Contains(@"data-batch-open=""InstallPlugins""", html);
         Assert.Contains("显示主界面", html);
         Assert.Matches(@"name=""visible""\s+value=""true""", html);

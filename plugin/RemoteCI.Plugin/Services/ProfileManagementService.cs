@@ -23,6 +23,21 @@ public sealed class ProfileManagementService(ILogger<ProfileManagementService> l
         WriteIndented = false,
     };
 
+    /// <summary>新档案页采用候选验证与快照回滚；旧命令保持原协议行为。</summary>
+    public async Task<CommandResult> ApplyProfileAsync(ProfileApplyRequest? request, CancellationToken ct = default)
+    {
+        if (ct.IsCancellationRequested) return CommandResult.Failure(CommandResultCodes.InvalidRequest, "档案应用已取消");
+        var result = await Dispatcher.UIThread.InvokeAsync(() => ProfileApplyExecutor.Apply(request,
+            new ClassIslandProfileApplicationBackend(IAppHost.GetService<IProfileService>()),
+            error => logger.LogError(error, "应用服务端档案失败")));
+        if (result.Success && request?.RestartAfter == true)
+        {
+            ScheduleRestart();
+            result.Message += "，ClassIsland 将自动重启";
+        }
+        return result;
+    }
+
     public async Task<CommandResult> UpdateTimeLayoutAsync(TimeLayoutUpdateRequest? request, CancellationToken ct = default)
     {
         if (ValidateTimeLayoutRequest(request) is { } error)

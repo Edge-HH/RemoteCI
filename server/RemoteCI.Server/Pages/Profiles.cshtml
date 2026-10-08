@@ -1,0 +1,7 @@
+@page
+@model ProfilesModel
+@{
+    ViewData["Title"] = "档案管理";
+}
+<div class="page-head"><div><h1>档案管理</h1><p class="muted">维护全局模板，或分别编辑各班档案后统一保存、下发。</p></div></div>
+@await Html.PartialAsync("_ProfileEditor", Model.InitialJson)

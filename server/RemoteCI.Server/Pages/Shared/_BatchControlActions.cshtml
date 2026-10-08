@@ -41,29 +41,15 @@
 </section>
 }
 
-@if (Model.HasProfileOperations)
+@if (Model.CanUseOperation(BatchOperationKind.JoinManagement) || Model.CanUseOperation(BatchOperationKind.SetPluginManagementPolicy))
 {
 <section class="panel batch-section">
     <div class="panel-heading">
         <div>
-            <h2>档案与集控</h2>
+            <h2>集控与管理策略</h2>
         </div>
     </div>
     <div class="batch-action-grid">
-        @if (Model.CanUseOperation(BatchOperationKind.UpdateTimeLayout))
-        {
-            <button type="button" class="batch-action-card" data-batch-open="UpdateTimeLayout" data-batch-title="修改时间表" data-batch-risk="false">
-                <span class="batch-action-icon"><i class="bi bi-clock-history" aria-hidden="true"></i></span>
-                <span class="batch-action-copy"><strong>修改时间表</strong><small>新建或替换一张时间表，并可设为当前启用。</small></span>
-            </button>
-        }
-        @if (Model.CanUseOperation(BatchOperationKind.DistributeProfile))
-        {
-            <button type="button" class="batch-action-card" data-batch-open="DistributeProfile" data-batch-title="远程分发" data-batch-risk="true">
-                <span class="batch-action-icon"><i class="bi bi-box-arrow-up" aria-hidden="true"></i></span>
-                <span class="batch-action-copy"><strong>远程分发</strong><small>上传档案 JSON，分发时间表、课表或科目。</small></span>
-            </button>
-        }
         @if (Model.CanUseOperation(BatchOperationKind.JoinManagement))
         {
             <button type="button" class="batch-action-card" data-batch-open="JoinManagement" data-batch-title="加入集控" data-batch-risk="true">
@@ -320,67 +306,6 @@ foreach (var extension in Model.BatchExtensionGroups.SelectMany(group => group.E
                     <option value="Hibernate">休眠</option>
                 </select>
             </label>
-        </div>
-        <footer class="batch-dialog-actions">
-            <button type="button" class="ghost" data-batch-close>取消</button>
-            <button type="button" data-batch-next>下一步：选择设备</button>
-        </footer>
-    </div>
-</dialog>
-}
-
-@if (Model.CanUseOperation(BatchOperationKind.UpdateTimeLayout))
-{
-<dialog id="batch-settings-time-layout" class="batch-dialog batch-dialog-wide" data-batch-settings="UpdateTimeLayout" data-batch-title="修改时间表" data-batch-risk="false">
-    <div class="batch-dialog-shell">
-        <header class="batch-dialog-header">
-            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>修改时间表</h2><p class="muted">时间点按开始时间自动排序。</p></div>
-            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
-        </header>
-        <div class="batch-dialog-body stack">
-            <div class="two-column">
-                <label>时间表名称<input name="TimeLayoutName" maxlength="80" value="RemoteCI 时间表" /></label>
-                <label>现有时间表 Id（可选）<input name="TimeLayoutId" placeholder="留空则新建" /></label>
-            </div>
-            <label class="check"><input type="checkbox" name="TimeLayoutActivate" data-batch-bool /> 设为当前启用的时间表</label>
-            <div class="time-layout-editor" data-time-layout-editor>
-                <div class="time-layout-row time-layout-head" aria-hidden="true">
-                    <span>开始</span><span>结束</span><span>类型</span><span>课间名称</span><span></span>
-                </div>
-                <div data-time-layout-rows></div>
-                <button type="button" class="ghost" data-time-layout-add>添加时间点</button>
-                <input type="hidden" name="TimeLayoutPointsJson" data-time-layout-json />
-            </div>
-        </div>
-        <footer class="batch-dialog-actions">
-            <button type="button" class="ghost" data-batch-close>取消</button>
-            <button type="button" data-batch-next>下一步：选择设备</button>
-        </footer>
-    </div>
-</dialog>
-}
-
-@if (Model.CanUseOperation(BatchOperationKind.DistributeProfile))
-{
-<dialog id="batch-settings-distribute" class="batch-dialog batch-dialog-wide" data-batch-settings="DistributeProfile" data-batch-title="分发档案" data-batch-risk="true">
-    <div class="batch-dialog-shell">
-        <header class="batch-dialog-header">
-            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>分发档案</h2><p class="muted">仅支持 ClassIsland 档案 JSON。</p></div>
-            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
-        </header>
-        <div class="batch-dialog-body stack">
-            <label>选择档案 JSON<input type="file" accept=".json,application/json" data-profile-file /></label>
-            <label>导入档案名<input type="text" name="ProfileImportName" maxlength="100" placeholder="留空使用 JSON 中的档案名称" /></label>
-            <label>档案 JSON<textarea name="ProfileJson" rows="8" placeholder="粘贴 ClassIsland 档案 JSON，或选择文件后自动填入"></textarea></label>
-            <fieldset class="batch-check-group">
-                <legend>分发内容</legend>
-                <label class="check"><input type="checkbox" name="ProfileSections" value="TimeLayouts" checked /> 时间表</label>
-                <label class="check"><input type="checkbox" name="ProfileSections" value="ClassPlans" /> 课表</label>
-                <label class="check"><input type="checkbox" name="ProfileSections" value="Subjects" /> 科目</label>
-            </fieldset>
-            <label class="check"><input type="checkbox" name="ProfileReplaceCurrent" data-batch-bool /> 覆盖当前档案</label>
-            <label class="check"><input type="checkbox" name="ProfileEnableImported" data-batch-bool checked /> 启用此档案</label>
-            <label class="check"><input type="checkbox" name="ProfileReplaceExisting" data-batch-bool /> 替换档案中同 Id 的现有数据</label>
         </div>
         <footer class="batch-dialog-actions">
             <button type="button" class="ghost" data-batch-close>取消</button>
@@ -772,21 +697,6 @@ foreach (var extension in Model.BatchExtensionGroups.SelectMany(group => group.E
     </div>
 </dialog>
 }
-
-<template id="time-layout-row-template">
-    <div class="time-layout-row">
-        <input type="time" data-time-layout-start value="08:00" aria-label="开始时间" />
-        <input type="time" data-time-layout-end value="08:45" aria-label="结束时间" />
-        <select data-time-layout-type aria-label="时间点类型">
-            <option value="0">上课</option>
-            <option value="1">课间</option>
-            <option value="2">分割线</option>
-            <option value="3">行动</option>
-        </select>
-        <input type="text" data-time-layout-break maxlength="40" placeholder="可选" aria-label="课间名称" />
-        <button type="button" class="ghost time-layout-remove" data-time-layout-remove aria-label="删除时间点">×</button>
-    </div>
-</template>
 
 <script src="~/batch-control.js" asp-append-version="true" defer></script>
 </div>
