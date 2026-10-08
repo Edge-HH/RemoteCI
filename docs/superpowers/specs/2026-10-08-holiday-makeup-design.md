@@ -134,7 +134,7 @@ RemoteCI 自动获取中国法定节假日与调休安排，并在每台教室�
 - 新增管理员页 `/Holidays`（「调休」），在系统设置导航中添加入口：
   - 总开关、数据源地址（留空使用默认源）、上次成功刷新时间与错误信息、「立即刷新」按钮；
   - 接下来的假期列表：每个假期显示放假日期范围，以及其中每个调休上学日一行，下拉框可选「自动（周X）/ 周一…周五 / 不补课」；无法推算的行标红。
-- 课表页（`Schedule` / `MySchedule`）读取 `dayKind`：放假日显示「放假 · 国庆节」，调休上学日显示「调休 · 国庆节」。
+- 班级课表表格（`_ScheduleTable` 局部视图，课表页与访客页共用）读取 `dayKind`：放假日显示「放假 · 国庆节」，调休上学日显示「调休 · 国庆节」。
 
 ### 4.7 备份
 
@@ -145,7 +145,7 @@ RemoteCI 自动获取中国法定节假日与调休安排，并在每台教室�
 ### 5.1 日历接收与缓存
 
 - `CloudClient` 收到 `holiday_calendar` 后，交给 `HolidayScheduleApplier`。
-- 日历以 JSON 写入插件配置目录下的 `holiday-calendar.json`（先写临时文件再替换，避免写一半断电损坏）；启动时读取，断网也能生效。
+- 日历以 JSON 写入插件配置目录下的 `HolidayCalendar.json`（先写临时文件再替换，避免写一半断电损坏）；启动时读取，断网也能生效。
 - 插件在 `RemoteCiCapabilities.Current` 中声明 `schedule.holiday-calendar`。
 
 ### 5.2 `HolidayScheduleApplier`
@@ -157,25 +157,27 @@ public interface IHolidayHostOperations
 {
     bool? IsClassPlanEnabled { get; set; }   // 宿主没有该设置时返回 null
     ClassPlan? GetClassPlan(DateTime date, out Guid? planId);
-    bool HasOrderedSchedule(DateTime date, out Guid? planId);
+    Guid? GetOrderedSchedulePlanId(DateTime date);   // 该日预定课表指向的课表，没有则为 null
     Guid? CreateTempClassPlan(Guid sourcePlanId, DateTime date);
     void RemoveOrderedSchedule(DateTime date, Guid planId); // 同时删除对应的临时课表
     void SaveProfile();
 }
 ```
 
-插件自身的持久状态（`holiday-state.json`）：
+`IsClassPlanEnabled` 是宿主 `LessonsService` 上的运行时属性（ClassIsland 主界面"启用课表"开关绑定的就是它），**不落盘，ClassIsland 每次启动都是 true**。因此"是不是插件关的"只需要记在内存里。
+
+插件需要持久化的状态只有调休临时课表（`HolidayState.json`）：
 
 ```json
-{ "disabledClassPlanOn": "2026-10-01", "makeupPlans": { "2026-10-10": { "planId": "<临时课表 guid>", "followWeekday": 3 } } }
+{ "makeupPlans": { "2026-10-10": { "planId": "<临时课表 guid>", "followWeekday": 3 } } }
 ```
 
-**放假日——关闭课表**
+**放假日——关闭课表**（内存状态：`disabledByUs`（bool）、`offDayHandled`（DateOnly?））
 
-- 今天是 `off`，且宿主 `IsClassPlanEnabled == true`：把它设为 false，并记录 `disabledClassPlanOn = 今天`。
-- 今天不是 `off`，且 `disabledClassPlanOn` 有值：如果宿主当前是 false，就恢复成 true；然后清除这条记录。
-- 只恢复插件自己关掉的开关。如果放假期间有人手动把课表打开，插件当天不会再关（记录照常清除）。
-- 宿主没有 `IsClassPlanEnabled`（反射找不到）时，记录一条警告日志并跳过放假日处理；调休上学日的处理不受影响。
+- 今天是 `off`，且 `offDayHandled != 今天`：如果宿主 `IsClassPlanEnabled == true`，就设为 false，并置 `disabledByUs = true`；无论是否改动，都置 `offDayHandled = 今天`。所以当天有人手动把课表打开后，插件不会再关。
+- 今天不是 `off`，且 `disabledByUs == true`：如果宿主当前是 false，就恢复成 true；然后清除 `disabledByUs`。
+- 只恢复插件自己关掉的开关，不会去动别人手动关掉的。
+- 宿主的 `LessonsService` 上找不到 `IsClassPlanEnabled`（反射失败）时，记录一条警告日志并跳过放假日处理；调休上学日的处理不受影响。
 
 **调休上学日——开启临时课表**（今天起往后 7 天内）
 
@@ -190,7 +192,7 @@ public interface IHolidayHostOperations
 **日历变化后的清理**
 
 - 对 `makeupPlans` 中的每条记录：如果日期已过，就只删除记录；如果日期在未来，但新日历中这一天已经不是调休上学日、改成了不补课，或者补课周几变了，就在预定课表仍指向这份临时课表时调用 `RemoveOrderedSchedule` 删掉它，再删除记录（补课周几变了的情况会在同一轮里按新值重新创建）。
-- 日历 `enabled=false`：撤销所有未来的临时课表，并按上面的规则恢复课表开关。
+- 日历 `enabled=false` 或为空：撤销所有未来的临时课表；如果 `disabledByUs` 为真，就恢复课表开关。
 
 ### 5.3 课表上报标记
 
