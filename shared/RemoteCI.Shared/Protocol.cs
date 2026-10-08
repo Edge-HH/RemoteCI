@@ -27,6 +27,8 @@ public static class Protocol
     public const string MessageTypeSoftwareInventory = "software_inventory";
     /// <summary>服务端发给某个用户全部在线手机/手表连接的个人通知（例如换课申请），不按班级过滤。</summary>
     public const string MessageTypeUserNotify = "user_notify";
+    /// <summary>服务端发给插件的调休日历（放假日与调休上学日），插件据此开关课表、建立调休临时课表。</summary>
+    public const string MessageTypeHolidayCalendar = "holiday_calendar";
 
     public const int LanDiscoveryPort = 48765;
     public const string LanDiscoveryRequest = "REMOTECI_DISCOVER_V3";
@@ -243,6 +245,8 @@ public static class RemoteCiCapabilities
     public const string FileDistribute = "file.distribute";
     /// <summary>同步扩展分组与设置页，并接受远程修改扩展设置。</summary>
     public const string ExtensionsSettings = "extensions.settings";
+    /// <summary>接收调休日历并在放假日关闭课表、调休上学日建立临时课表。</summary>
+    public const string HolidayCalendar = "schedule.holiday-calendar";
 
     /// <summary>没有上报能力列表的旧 V3 端自动获得的基础能力。</summary>
     public static IReadOnlyList<string> Baseline { get; } =
@@ -264,7 +268,7 @@ public static class RemoteCiCapabilities
     public static IReadOnlyList<string> Current { get; } =
         [.. Baseline, VoiceMessageSend, SoftwareInventory, SoftwareUpgradePlugins, SoftwareUpgradeClassIsland,
             PluginInstall, PluginUninstall, PluginEnable, PluginManagementPolicy, ProfileDistribute, TimeLayoutUpdate, ManagementJoin,
-            ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings];
+            ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings, HolidayCalendar];
 
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
@@ -295,6 +299,7 @@ public static class RemoteCiCapabilities
         TerminalExecute => "远程终端",
         FileDistribute => "文件分发",
         ExtensionsSettings => "修改扩展设置",
+        HolidayCalendar => "调休自动适配",
         _ => "未知能力",
     };
 

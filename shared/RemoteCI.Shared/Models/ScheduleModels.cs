@@ -93,6 +93,16 @@ public sealed class ScheduleDay
 
     [JsonPropertyName("courses")]
     public List<CourseEntry> Courses { get; set; } = [];
+
+    /// <summary>放假日为 "holiday"、调休上学日为 "makeup"，普通日不输出；旧版插件不下发。</summary>
+    [JsonPropertyName("dayKind")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DayKind { get; set; }
+
+    /// <summary>放假日或调休上学日所属的假期名，例如“国庆节”。</summary>
+    [JsonPropertyName("holidayName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? HolidayName { get; set; }
 }
 
 public sealed class CourseEntry
