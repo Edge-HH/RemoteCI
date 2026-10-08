@@ -217,7 +217,10 @@ public sealed class HolidayCalendarService(
                 error = $"{year} 年：{ex.Message}";
             }
         }
-        return new FetchOutcome(null, null, notFound == sources.Count, error ?? $"{year} 年节假日数据尚未发布");
+        // 镜像故障（如 jsDelivr 502）不代表文件不存在；只要有源明确返回 404，就视为该年数据尚未发布。
+        return notFound > 0
+            ? new FetchOutcome(null, null, true, $"{year} 年节假日数据尚未发布")
+            : new FetchOutcome(null, null, false, error ?? $"{year} 年节假日数据获取失败");
     }
 
     private static async Task<string> ReadLimitedAsync(HttpContent content, CancellationToken ct)

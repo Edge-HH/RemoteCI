@@ -49,6 +49,41 @@ public sealed class HolidaySettingsStoreTests
         Assert.False(await restored.RemoveOverrideAsync(new DateOnly(2026, 10, 10)));
     }
 
+    [Fact]
+    public async Task Backup_RestoresHolidaySettingsAndOverrides_LegacyBackupKeepsCurrent()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        await factory.CreateClient().GetAsync("/api/health");
+        ConfigurationSnapshot snapshot;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<HolidaySettingsStore>();
+            await store.SetSettingsAsync(false, "https://mirror.example.com/{year}.json");
+            await store.SetOverrideAsync(new DateOnly(2026, 10, 10), 5, null, DateTimeOffset.UnixEpoch);
+            snapshot = await scope.ServiceProvider.GetRequiredService<ConfigurationArchiveService>().CaptureAsync();
+            await store.SetSettingsAsync(true, null);
+            await store.RemoveOverrideAsync(new DateOnly(2026, 10, 10));
+            await store.SetOverrideAsync(new DateOnly(2026, 9, 20), null, null, DateTimeOffset.UnixEpoch);
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<ConfigurationArchiveService>().ApplyAsync(snapshot);
+            var store = scope.ServiceProvider.GetRequiredService<HolidaySettingsStore>();
+            Assert.Equal(new HolidaySettings(false, "https://mirror.example.com/{year}.json"), await store.GetSettingsAsync());
+            Assert.Equal([new HolidayOverride(new DateOnly(2026, 10, 10), 5)], await store.GetOverridesAsync());
+        }
+
+        // 不含调休字段的旧配置包恢复时保留当前调休设置。
+        using (var scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<ConfigurationArchiveService>().ApplyAsync(snapshot with { Holidays = null });
+            var store = scope.ServiceProvider.GetRequiredService<HolidaySettingsStore>();
+            Assert.False((await store.GetSettingsAsync()).Enabled);
+            Assert.Single(await store.GetOverridesAsync());
+        }
+    }
+
     [Theory]
     [InlineData("http://example.com/{year}.json")]
     [InlineData("https://example.com/2026.json")]

@@ -48,6 +48,8 @@ public sealed class ConfigurationArchiveService(
         var backup = await db.BackupConfigurations.AsNoTracking().SingleAsync(x => x.Id == 1, ct);
         var profiles = await db.StoredProfiles.AsNoTracking().Select(x => new StoredProfileSnapshot(
             x.Id, x.Name, x.ProfileJson, x.Revision, x.ClassId, x.SourceTemplateId, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
+        var holidayOverrides = await db.HolidayMakeupOverrides.AsNoTracking().OrderBy(x => x.Date)
+            .Select(x => new HolidayOverrideSnapshot(x.Date, x.FollowWeekday)).ToListAsync(ct);
         return new ConfigurationSnapshot(5, DateTimeOffset.UtcNow, roles, users, plugins,
             new MetadataSnapshot(
                 metadata.AccountVersion,
@@ -65,7 +67,8 @@ public sealed class ConfigurationArchiveService(
                     metadata.ClassAdminCanEditExtensionSettings)),
             new BackupSettingsSnapshot(backup.Enabled, backup.Cadence, backup.TimeOfDay, backup.DayOfWeek, backup.MaxBackups),
             state.GetLatestSchedule(Classroom.DefaultId), extensionPolicies, extensionPreferences,
-            classrooms, memberships, groups, apiKeys, profiles);
+            classrooms, memberships, groups, apiKeys, profiles,
+            new HolidaySettingsSnapshot(metadata.HolidayCalendarEnabled, metadata.HolidaySourceUrlTemplate, holidayOverrides));
     }
 
     public async Task<BackupFileInfo> CreateLocalBackupAsync(string source, CancellationToken ct = default)
@@ -196,6 +199,17 @@ public sealed class ConfigurationArchiveService(
         metadata.ClassAdminCanChangeAvatar = selfService.CanChangeAvatar;
         metadata.ClassAdminCanPullSchedule = selfService.CanPullSchedule;
         metadata.ClassAdminCanEditExtensionSettings = selfService.CanEditExtensionSettings;
+        // 旧配置包没有调休字段时保留当前调休设置，节假日数据快照不随配置包迁移，恢复后会重新拉取。
+        if (snapshot.Holidays is { } holidays)
+        {
+            metadata.HolidayCalendarEnabled = holidays.Enabled;
+            metadata.HolidaySourceUrlTemplate = HolidaySettingsStore.NormalizeTemplate(holidays.SourceUrlTemplate);
+            await db.HolidayMakeupOverrides.ExecuteDeleteAsync(ct);
+            db.HolidayMakeupOverrides.AddRange(holidays.Overrides.Select(x => new HolidayMakeupOverride
+            {
+                Date = x.Date, FollowWeekday = x.FollowWeekday, UpdatedAt = DateTimeOffset.UtcNow,
+            }));
+        }
         var backup = await db.BackupConfigurations.SingleAsync(x => x.Id == 1, ct);
         backup.Enabled=snapshot.Backup.Enabled; backup.Cadence=snapshot.Backup.Cadence; backup.TimeOfDay=snapshot.Backup.TimeOfDay; backup.DayOfWeek=snapshot.Backup.DayOfWeek; backup.MaxBackups=Math.Clamp(snapshot.Backup.MaxBackups,1,100); backup.LastScheduledAt=null; backup.LastSucceededAt=null; backup.LastError=null;
         await db.SaveChangesAsync(ct);
@@ -249,6 +263,14 @@ public sealed class ConfigurationArchiveService(
                 ProfileDocument.Validate(profile.ProfileJson).Count>0)
                 throw new InvalidDataException("Invalid stored profile");
         }
+        if(value.Holidays is { } holidays)
+        {
+            try { HolidaySettingsStore.NormalizeTemplate(holidays.SourceUrlTemplate); }
+            catch (ArgumentException) { throw new InvalidDataException("Invalid holiday source"); }
+            if(holidays.Overrides is null || holidays.Overrides.Any(x=>x.FollowWeekday is < 1 or > 5) ||
+                holidays.Overrides.Select(x=>x.Date).Distinct().Count()!=holidays.Overrides.Count)
+                throw new InvalidDataException("Invalid holiday overrides");
+        }
     }
     private static StoredProfile RestoreProfile(StoredProfileSnapshot x) => new()
     {
@@ -258,7 +280,9 @@ public sealed class ConfigurationArchiveService(
 }
 
 public sealed record BackupFileInfo(string Name, DateTimeOffset CreatedAt, long Size, string Source);
-public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null, List<ClassroomSnapshot>? Classrooms = null, List<MembershipSnapshot>? Memberships = null, List<GroupSnapshot>? ClassGroups = null, List<ApiKeySnapshot>? ApiKeys = null, List<StoredProfileSnapshot>? Profiles = null);
+public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null, List<ClassroomSnapshot>? Classrooms = null, List<MembershipSnapshot>? Memberships = null, List<GroupSnapshot>? ClassGroups = null, List<ApiKeySnapshot>? ApiKeys = null, List<StoredProfileSnapshot>? Profiles = null, HolidaySettingsSnapshot? Holidays = null);
+public sealed record HolidaySettingsSnapshot(bool Enabled, string? SourceUrlTemplate, List<HolidayOverrideSnapshot> Overrides);
+public sealed record HolidayOverrideSnapshot(DateOnly Date, int? FollowWeekday);
 public sealed record StoredProfileSnapshot(Guid Id, string Name, string ProfileJson, long Revision, Guid? ClassId, Guid? SourceTemplateId, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 public sealed record RoleSnapshot(Guid Id,string Name,AccountRoleKind Kind,UserPermissions DefaultPermissions,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);
 public sealed record UserSnapshot(Guid Id,string Username,string NormalizedUsername,string DisplayName,string PasswordHash,string SecurityStamp,string ConcurrencyStamp,UserRole Role,Guid RoleId,UserPermissions GrantedPermissions,bool Enabled,long Version,DateTimeOffset UpdatedAt);
