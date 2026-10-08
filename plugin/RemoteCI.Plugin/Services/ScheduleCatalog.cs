@@ -6,7 +6,7 @@ using RemoteCI.Shared.Models;
 namespace RemoteCI.Plugin.Services;
 
 /// <summary>七日课表读取和修订号计算的唯一入口（经 IScheduleBackend 防腐层，可单元测试）。</summary>
-public sealed class ScheduleCatalog(IScheduleBackend backend)
+public sealed class ScheduleCatalog(IScheduleBackend backend, IHolidayCalendarLookup? holidays = null)
 {
     public ScheduleBundle BuildBundle(DateTime? start = null)
     {
@@ -29,12 +29,22 @@ public sealed class ScheduleCatalog(IScheduleBackend backend)
     {
         var day = date.Date;
         var plan = backend.GetClassPlan(day, out var planId);
+        var holiday = holidays?.Find(day);
+        // 放假日宿主课表开关已被关闭，按规则匹配到的课表并不会真的上，因此不再上报课程，也不允许换课。
+        var isOff = holiday?.Kind == HolidayDayKinds.Off;
         var result = new ScheduleDay
         {
             Date = day.ToString("yyyy-MM-dd"),
-            ClassPlanName = plan?.Name,
-            Enabled = plan is not null,
-            Courses = plan?.Classes.Select((course, index) => ToCourse(course, index)).ToList() ?? [],
+            ClassPlanName = isOff ? null : plan?.Name,
+            Enabled = !isOff && plan is not null,
+            Courses = isOff ? [] : plan?.Classes.Select((course, index) => ToCourse(course, index)).ToList() ?? [],
+            DayKind = holiday?.Kind switch
+            {
+                HolidayDayKinds.Off => ScheduleDayKinds.Holiday,
+                HolidayDayKinds.Makeup => ScheduleDayKinds.Makeup,
+                _ => null,
+            },
+            HolidayName = holiday?.Name,
         };
         result.Revision = ComputeRevision(result, planId);
         return result;
@@ -70,6 +80,9 @@ public sealed class ScheduleCatalog(IScheduleBackend backend)
         foreach (var course in day.Courses)
             canonical.Append('|').Append(course.Index).Append(':').Append(course.SubjectId).Append(':').Append(course.Enabled)
                 .Append(':').Append(course.StartTime).Append(':').Append(course.EndTime);
+        // 只在有标记时参与计算，普通日期的修订号与旧版本保持一致。
+        if (day.DayKind is not null)
+            canonical.Append("|day:").Append(day.DayKind).Append(':').Append(day.HolidayName);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical.ToString()))).ToLowerInvariant();
     }
 }

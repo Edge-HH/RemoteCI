@@ -22,11 +22,15 @@ public sealed class RemoteCiService : IDisposable
     private readonly IRemoteCiExtensionRegistry _extensions;
     private readonly ScheduleSyncTaskCoordinator _scheduleSync;
     private readonly SoftwareInventoryService _softwareInventory;
+    private readonly HolidayCalendarStore _holidayCalendar;
+    private readonly HolidayScheduleApplier _holidayApplier;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<RemoteCiService> _logger;
     private LanServer? _lanServer;
     private CloudClient? _cloudClient;
     private CancellationTokenSource? _cts;
+    private Timer? _holidayTimer;
+    private DateTime _holidayAppliedDate;
     private CancellationTokenSource? _scheduleSyncTimeout;
     private ClassStateSnapshot? _latestSnapshot;
     private ScheduleBundle? _latestSchedule;
@@ -41,8 +45,12 @@ public sealed class RemoteCiService : IDisposable
         IRemoteCiExtensionRegistry extensions,
         ScheduleSyncTaskCoordinator scheduleSync,
         SoftwareInventoryService softwareInventory,
+        HolidayCalendarStore holidayCalendar,
+        HolidayScheduleApplier holidayApplier,
         ILoggerFactory loggerFactory)
     {
+        _holidayCalendar = holidayCalendar;
+        _holidayApplier = holidayApplier;
         _collector = collector;
         _commandHandler = commandHandler;
         _notificationBridge = notificationBridge;
@@ -115,6 +123,11 @@ public sealed class RemoteCiService : IDisposable
             tokenStore: _tokenStore);
         _cloudClient.Connected += OnCloudConnected;
         _cloudClient.ConnectionStatusChanged += OnCloudConnectionStatusChanged;
+        _cloudClient.HolidayCalendarReceived += _holidayCalendar.Apply;
+        _holidayCalendar.Changed += RunHolidayApply;
+        // 每分钟检查一次本地日期，跨天后（含睡眠唤醒）重新应用；启动时立即应用一次缓存的日历。
+        _holidayTimer = new Timer(_ => { if (DateTime.Today != _holidayAppliedDate) RunHolidayApply(); },
+            null, TimeSpan.Zero, TimeSpan.FromMinutes(1));
         _ = _cloudClient.StartAsync(_cts.Token);
 
         _collector.Start();
@@ -124,6 +137,10 @@ public sealed class RemoteCiService : IDisposable
 
     public void Stop()
     {
+        _holidayTimer?.Dispose();
+        _holidayTimer = null;
+        _holidayCalendar.Changed -= RunHolidayApply;
+        if (_cloudClient is not null) _cloudClient.HolidayCalendarReceived -= _holidayCalendar.Apply;
         _collector.Stop();
         _collector.SnapshotPushed -= OnSnapshotPushed;
         _collector.SchedulePushed -= OnSchedulePushed;
@@ -221,6 +238,21 @@ public sealed class RemoteCiService : IDisposable
     }
 
     private void OnScheduleChanged() => Dispatcher.UIThread.Post(_collector.ForceSchedulePush);
+
+    /// <summary>ClassIsland 课表服务只能在 UI 线程读写；调整后强制重新上报，让 WebUI 立刻看到放假/调休标记。</summary>
+    private void RunHolidayApply() => Dispatcher.UIThread.Post(() =>
+    {
+        try
+        {
+            _holidayAppliedDate = DateTime.Today;
+            _holidayApplier.Apply(_holidayCalendar.Current, DateTime.Now);
+            _collector.ForceSchedulePush();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "应用调休日历失败");
+        }
+    });
 
     private ScheduleSyncStatus RequestScheduleSync(ScheduleSyncRequest request)
     {

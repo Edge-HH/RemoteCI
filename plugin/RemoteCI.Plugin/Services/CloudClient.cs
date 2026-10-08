@@ -43,6 +43,9 @@ public sealed class CloudClient : IDisposable
     /// <summary>连接阶段或最近错误变化时触发，供插件设置页实时展示。</summary>
     public event Action<CloudConnectionStatus>? ConnectionStatusChanged;
 
+    /// <summary>收到服务端下发的调休日历时触发（在接收线程上，订阅方自行切换到 UI 线程）。</summary>
+    public event Action<HolidayCalendar>? HolidayCalendarReceived;
+
     public CloudConnectionStatus CurrentStatus => Volatile.Read(ref _currentStatus);
 
     internal CloudClient(
@@ -350,6 +353,12 @@ public sealed class CloudClient : IDisposable
                 _accounts.Apply(sync);
                 _logger.LogInformation("账号、权限和设备会话已同步到版本 {Version}", sync.Version);
             }
+            return;
+        }
+
+        if (HolidayCalendarMessage.TryRead(envelope, out var holidayCalendar))
+        {
+            HolidayCalendarReceived?.Invoke(holidayCalendar);
             return;
         }
 

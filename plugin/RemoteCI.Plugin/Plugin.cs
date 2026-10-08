@@ -60,6 +60,15 @@ public class Plugin : PluginBase
         services.AddSingleton(Settings);
         services.AddSingleton(tokenStore);
         services.AddSingleton(new AccountMirror(Path.Combine(PluginConfigFolder, "Accounts.json")));
+        // 调休：缓存服务端下发的日历；放假日关闭课表、调休上学日建立临时课表。
+        var holidayCalendar = new HolidayCalendarStore(Path.Combine(PluginConfigFolder, "HolidayCalendar.json"));
+        services.AddSingleton(holidayCalendar);
+        services.AddSingleton<IHolidayCalendarLookup>(holidayCalendar);
+        services.AddSingleton<IHolidayHostOperations, ClassIslandHolidayHost>();
+        services.AddSingleton(sp => new HolidayScheduleApplier(
+            sp.GetRequiredService<IHolidayHostOperations>(),
+            new HolidayStateFile(Path.Combine(PluginConfigFolder, "HolidayState.json")),
+            sp.GetRequiredService<ILogger<HolidayScheduleApplier>>()));
         // 课表读取防腐层:隔离 ClassIsland 服务接口(含 internal 成员),使核心逻辑可单元测试。
         services.AddSingleton<IScheduleBackend, ScheduleBackendAdapter>();
         services.AddSingleton<IProfileWriteOperations, ProfileWriteAdapter>();

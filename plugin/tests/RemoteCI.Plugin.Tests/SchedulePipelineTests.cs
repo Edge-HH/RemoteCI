@@ -52,6 +52,41 @@ public sealed class SchedulePipelineTests
         Assert.NotEqual(first.Revision, catalog.BuildDay(day).Revision);
     }
 
+    private sealed class FixedLookup(params HolidayCalendarDay[] days) : IHolidayCalendarLookup
+    {
+        public HolidayCalendarDay? Find(DateTime date) => days.FirstOrDefault(x => x.Date == date.ToString("yyyy-MM-dd"));
+    }
+
+    [Fact]
+    public void BuildDay_MarksHolidayAndMakeupDays()
+    {
+        var subjectId = Guid.NewGuid();
+        var backend = new FakeBackend
+        {
+            PlanId = Guid.NewGuid(),
+            Plan = new ClassPlan { Name = "主课表", Classes = { new ClassInfo { SubjectId = subjectId, IsEnabled = true } } },
+        };
+        backend.Subjects[subjectId] = new Subject { Name = "语文" };
+        var plain = new ScheduleCatalog(backend);
+        var marked = new ScheduleCatalog(backend, new FixedLookup(
+            new HolidayCalendarDay { Date = "2026-10-01", Kind = HolidayDayKinds.Off, Name = "国庆节" },
+            new HolidayCalendarDay { Date = "2026-10-10", Kind = HolidayDayKinds.Makeup, Name = "国庆节", FollowWeekday = 3 }));
+
+        var off = marked.BuildDay(new DateTime(2026, 10, 1));
+        var makeup = marked.BuildDay(new DateTime(2026, 10, 10));
+        var normal = marked.BuildDay(new DateTime(2026, 10, 9));
+
+        Assert.False(off.Enabled);
+        Assert.Empty(off.Courses);
+        Assert.Equal((ScheduleDayKinds.Holiday, "国庆节"), (off.DayKind, off.HolidayName));
+        Assert.NotEqual(plain.BuildDay(new DateTime(2026, 10, 1)).Revision, off.Revision);
+        Assert.Equal(ScheduleDayKinds.Makeup, makeup.DayKind);
+        Assert.Single(makeup.Courses);
+        Assert.True(makeup.Enabled);
+        Assert.Null(normal.DayKind);
+        Assert.Equal(plain.BuildDay(new DateTime(2026, 10, 9)).Revision, normal.Revision);
+    }
+
     [Fact]
     public void BuildBundle_ListsSevenDaysAndMarksMissingPlanAsDisabled()
     {
