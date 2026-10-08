@@ -27,6 +27,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<LessonTeacherOverride> LessonTeacherOverrides => Set<LessonTeacherOverride>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
     public DbSet<WebPushSubscription> WebPushSubscriptions => Set<WebPushSubscription>();
+    public DbSet<HolidayYearSnapshot> HolidayYearSnapshots => Set<HolidayYearSnapshot>();
+    public DbSet<HolidayMakeupOverride> HolidayMakeupOverrides => Set<HolidayMakeupOverride>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -39,10 +41,19 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.HasIndex(x => x.Version);
             entity.HasOne(x => x.RoleDefinition).WithMany(x => x.Users).HasForeignKey(x => x.RoleDefinitionId).OnDelete(DeleteBehavior.Restrict);
         });
+        builder.Entity<HolidayYearSnapshot>(entity =>
+        {
+            entity.HasKey(x => x.Year);
+            // 年份是业务主键，不能让 SQLite 自增。
+            entity.Property(x => x.Year).ValueGeneratedNever();
+            entity.Property(x => x.SourceUrl).HasMaxLength(600);
+        });
+        builder.Entity<HolidayMakeupOverride>(entity => entity.HasKey(x => x.Date));
         builder.Entity<SystemMetadata>(entity =>
         {
             entity.Property(x => x.LoginBackgroundContentType).HasMaxLength(64);
             entity.Property(x => x.MobileServerUrl).HasMaxLength(512);
+            entity.Property(x => x.HolidaySourceUrlTemplate).HasMaxLength(512);
         });
         builder.Entity<AccountRole>(entity =>
         {

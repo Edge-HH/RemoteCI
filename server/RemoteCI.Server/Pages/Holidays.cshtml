@@ -1,0 +1,70 @@
+@page
+@model HolidaysModel
+@using RemoteCI.Shared.Models
+@{
+    ViewData["Title"] = "调休";
+    var status = Model.Overview.Status;
+}
+<div class="page-head">
+    <div>
+        <p class="eyebrow">服务端管理</p>
+        <h1>调休</h1>
+    </div>
+</div>
+<section class="panel">
+    <h2>自动适配</h2>
+    <p class="muted">放假日自动关闭教室课表；原本是周末但要上学的日子，自动开启一份临时课表，上对应工作日的课。</p>
+    <form method="post" asp-page-handler="Settings" class="stack">
+        <label class="check"><input type="checkbox" asp-for="Settings.Enabled" /> 启用调休自动适配</label>
+        <label>数据源地址（留空使用 holiday-cn 默认镜像）
+            <input type="url" asp-for="Settings.SourceUrlTemplate" maxlength="512" placeholder="@Model.Overview.DefaultSources[0]" />
+        </label>
+        <button type="submit">保存</button>
+    </form>
+    <p class="muted holiday-status">
+        上次成功刷新：@(status.LastSuccessAt?.ToString("yyyy-MM-dd HH:mm") ?? "本次启动后尚未刷新")
+        @if (status.LastError is { } error) { <span class="holiday-error">（最近一次失败：@error）</span> }
+    </p>
+    <form method="post" asp-page-handler="Refresh"><button type="submit" class="secondary">立即刷新</button></form>
+</section>
+<section class="panel">
+    <h2>近期假期与补课</h2>
+    @if (Model.Overview.Periods.Count == 0)
+    {
+        <p class="muted">暂无数据。请检查数据源，或点击“立即刷新”。</p>
+    }
+    @foreach (var period in Model.Overview.Periods)
+    {
+        <div class="holiday-period">
+            <h3>@period.Name @if (period.OffStart is not null) { <small>@period.OffStart 至 @period.OffEnd 放假</small> }</h3>
+            @foreach (var makeup in period.MakeupDays)
+            {
+                var autoLabel = makeup.AutoWeekday is { } auto ? $"自动（{HolidaysModel.WeekdayNames[auto]}）" : "自动（无法推算）";
+                var selected = makeup.FollowSource switch
+                {
+                    HolidayFollowSources.Manual => makeup.FollowWeekday!.Value.ToString(),
+                    HolidayFollowSources.Skip => "skip",
+                    _ => "auto",
+                };
+                <form method="post" asp-page-handler="Override" class="holiday-makeup-row @(makeup.FollowSource == HolidayFollowSources.Unresolved ? "unresolved" : null)">
+                    <input type="hidden" name="date" value="@makeup.Date" />
+                    <span>@makeup.Date（@HolidaysModel.WeekdayOf(makeup.Date)）调休上学</span>
+                    <select name="follow" aria-label="@makeup.Date 补课安排">
+                        <option value="auto" selected="@(selected == "auto")">@autoLabel</option>
+                        @for (var weekday = 1; weekday <= 5; weekday++)
+                        {
+                            <option value="@weekday" selected="@(selected == weekday.ToString())">上@(HolidaysModel.WeekdayNames[weekday])的课</option>
+                        }
+                        <option value="skip" selected="@(selected == "skip")">不补课</option>
+                    </select>
+                    <button type="submit" class="secondary">保存</button>
+                    @if (makeup.FollowSource == HolidayFollowSources.Unresolved) { <span class="holiday-error">无法自动推算，请手动指定</span> }
+                </form>
+            }
+        </div>
+    }
+    @if (Model.Overview.StaleOverrideDates.Count > 0)
+    {
+        <p class="muted">以下手动安排已失效（这些日期已不是调休上学日）：@string.Join("、", Model.Overview.StaleOverrideDates)</p>
+    }
+</section>

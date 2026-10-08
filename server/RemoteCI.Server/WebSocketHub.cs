@@ -279,8 +279,15 @@ public static class WebSocketHub
         if (envelope.Type == Protocol.MessageTypePeerCapabilities)
         {
             if (ConvertPayload<PeerCapabilities>(envelope.Payload) is { } capabilities)
+            {
                 await session.Registry.ReportCapabilitiesAsync(
                     session.ConnectionId, capabilities, session.CancellationToken);
+                // 能力上报晚于连接建立，因此调休日历在这里补发；旧插件不声明能力就不会收到。
+                if (session.Principal.IsPlugin &&
+                    capabilities.Capabilities.Contains(RemoteCiCapabilities.HolidayCalendar, StringComparer.Ordinal))
+                    await session.Context.RequestServices.GetRequiredService<HolidayCalendarService>()
+                        .SendToConnectionAsync(session.ConnectionId, session.CancellationToken);
+            }
             return;
         }
 

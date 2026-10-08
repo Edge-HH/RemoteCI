@@ -90,6 +90,7 @@ builder.Services.AddScoped<ExtensionPolicyService>();
 builder.Services.AddScoped<AuthorizationSyncService>();
 builder.Services.AddScoped<ConfigurationArchiveService>();
 builder.Services.AddScoped<SchedulePullSettings>();
+builder.Services.AddScoped<HolidaySettingsStore>();
 builder.Services.AddScoped<VisitorAccessSettings>();
 builder.Services.AddScoped<LoginPageSettings>();
 builder.Services.AddScoped<MobileLoginSettings>();
@@ -123,6 +124,14 @@ builder.Services.AddSingleton<PeerRegistry>();
 builder.Services.AddSingleton<ScheduleSyncTaskTracker>();
 builder.Services.AddSingleton<ScheduleSyncService>();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<HolidayClock>();
+builder.Services.AddSingleton<HolidayCalendarService>();
+builder.Services.AddHttpClient(HolidayCalendarService.HttpClientName, client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("RemoteCI-Server");
+});
+builder.Services.AddHostedService<HolidayCalendarWorker>();
 builder.Services.AddHostedService<SchedulePullWorker>();
 builder.Services.AddHostedService<PeerAuthorizationRefreshWorker>();
 builder.Services.AddHostedService<AutomaticBackupWorker>();
@@ -1191,6 +1200,7 @@ app.MapPost("/api/admin/backups/{name}/restore", async (string name, HttpContext
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok", protocolVersion = Protocol.Version }));
 app.MapRazorPages();
+app.MapHolidayEndpoints();
 app.Run();
 
 static async Task<AuthPrincipal?> AuthorizeAsync(HttpContext ctx, IdentityCoordinator identities, CancellationToken ct)

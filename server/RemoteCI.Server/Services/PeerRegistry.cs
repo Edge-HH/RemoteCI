@@ -397,6 +397,26 @@ public sealed class PeerRegistry(
     }
 
     /// <summary>
+    /// 向所有声明了指定能力的在线插件广播。调休日历要在每台教室电脑上各自生效，
+    /// 所以不像命令那样只发给班级主插件。
+    /// </summary>
+    public async Task<int> BroadcastToPluginsWithCapabilityAsync(
+        string capability, Envelope envelope, CancellationToken ct = default)
+    {
+        var sent = 0;
+        var targets = _pluginPeers.Values
+            .Where(IsLocallyAuthorized)
+            .Where(peer => EffectiveCapabilities(peer).Contains(capability, StringComparer.Ordinal))
+            .ToList();
+        foreach (var peer in targets)
+        {
+            if (await TrySendAsync(peer, envelope, ct)) sent++;
+            else await UnregisterAsync(peer.Id, WebSocketCloseStatus.PolicyViolation);
+        }
+        return sent;
+    }
+
+    /// <summary>
     /// 向指定班级在线的插件发送：命令与只读请求只投递给该班最早接入的健康插件，
     /// 避免同一命令被多个 ClassIsland 实例重复执行（换课/关机/通知各执行一次以上）。
     /// </summary>

@@ -9,7 +9,7 @@
 }
 <div class="schedule-table-wrap">
     <table class="schedule-table">
-        <thead><tr><th scope="col" class="schedule-period-heading">节次</th>@foreach (var day in Model.Days) { var dayTitle = DateTime.TryParse(day.Date, out var parsedDate) ? weekNames[(int)parsedDate.DayOfWeek] : day.Date; <th scope="col"><strong>@dayTitle</strong><small>@day.Date</small></th> }</tr></thead>
+        <thead><tr><th scope="col" class="schedule-period-heading">节次</th>@foreach (var day in Model.Days) { var dayTitle = DateTime.TryParse(day.Date, out var parsedDate) ? weekNames[(int)parsedDate.DayOfWeek] : day.Date; <th scope="col"><strong>@dayTitle</strong><small>@day.Date</small>@if (day.DayKind == RemoteCI.Shared.Models.ScheduleDayKinds.Holiday) { <em class="schedule-day-tag holiday">放假 · @day.HolidayName</em> } else if (day.DayKind == RemoteCI.Shared.Models.ScheduleDayKinds.Makeup) { <em class="schedule-day-tag makeup">调休 · @day.HolidayName</em> }</th> }</tr></thead>
         <tbody>
         @foreach (var row in courseRows)
         {

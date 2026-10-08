@@ -136,6 +136,12 @@ public sealed class SystemMetadata
     /// <summary>浏览器 Web Push 的 VAPID 密钥对（Base64Url），首次启动自动生成；更换后旧订阅失效。</summary>
     public string? VapidPublicKey { get; set; }
     public string? VapidPrivateKey { get; set; }
+
+    /// <summary>调休自动适配总开关：放假日关闭教室课表、调休上学日建立临时课表；默认开启。</summary>
+    public bool HolidayCalendarEnabled { get; set; } = true;
+
+    /// <summary>自定义节假日数据源地址模板（含 {year}）；null 表示使用内置的 holiday-cn 镜像。</summary>
+    public string? HolidaySourceUrlTemplate { get; set; }
 }
 
 /// <summary>登录页主题策略：跟随访客本地偏好，或由管理员强制浅色/深色。</summary>

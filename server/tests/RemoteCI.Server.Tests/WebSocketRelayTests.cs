@@ -979,6 +979,23 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         Assert.True(refreshed.User!.Permissions.HasFlag(UserPermissions.SendNotifications));
     }
 
+    [Fact]
+    public async Task HolidayCalendar_IsSentAfterPluginDeclaresCapability()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities
+        {
+            SoftwareVersion = "3.3.0",
+            Capabilities = RemoteCiCapabilities.Current,
+        }));
+
+        var envelope = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeHolidayCalendar);
+        var calendar = ConvertPayload<HolidayCalendar>(envelope.Payload);
+
+        Assert.True(calendar.Enabled);
+    }
+
     private async Task<WebSocket> ConnectPluginAsync() => await ConnectAsync(await _factory.GetPluginTokenAsync());
 
     private async Task<WebSocket> ConnectWatchAsync(

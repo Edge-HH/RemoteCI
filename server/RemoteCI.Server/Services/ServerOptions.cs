@@ -23,4 +23,7 @@ public sealed class ServerOptions
     /// 改用 REMOTECI_ADMIN_PASSWORD / REMOTECI_PLUGIN_PAIR_CODE 环境变量。
     /// </summary>
     public bool LogBootstrapSecrets { get; set; } = true;
+
+    /// <summary>是否在后台定时拉取节假日数据；测试环境关闭以免访问外网。</summary>
+    public bool HolidayAutoRefresh { get; set; } = true;
 }
