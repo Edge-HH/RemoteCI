@@ -71,6 +71,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | `plugin_network_info` | 插件 → 服务端 → 手表 | 插件局域网直连地址与端口（每次云端重连时重新发现网卡） |
 | `connection_bootstrap` | 插件 → 手表 | 用户选中局域网插件后，插件返回的云端连接信息 |
 | `user_notify` | 服务端 → 手机/手表 | 面向当前账号的个人通知 `UserNotificationView {id, kind, title, body, swapRequestId?, createdAt, readAt?}`，投递给该账号全部在线连接，不按班级过滤；旧客户端忽略未知类型 |
+| `holiday_calendar` | 服务端 → 插件 | 调休日历 `HolidayCalendar {enabled, generatedAt, days[]}`，见下文“调休”；只发给声明了 `schedule.holiday-calendar` 能力的插件 |
 
 ## 局域网设备发现
 
@@ -90,7 +91,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 ## 能力协商
 
-V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute` 和 `extensions.settings` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
+V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings` 和 `schedule.holiday-calendar` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
 
 WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手机的有效能力是“本地 ∩ 服务端 ∩ 当前班级主插件”。服务端在 `capabilities_sync.classPlugins` 中按接收方可访问的班级逐个下发主插件能力，客户端切换班级时按新班级重算；没有对应条目表示该班插件离线。旧服务端没有该字段时客户端退回 `plugin`。多插件时，当前主插件仍是最早接入的健康插件；主插件切换、断开或能力更新后，服务端重新广播能力快照。界面应隐藏缺失能力的入口，服务端转发命令前仍需按统一映射复核主插件能力，缺少能力时返回 `CAPABILITY_UNSUPPORTED`。能力声明不能绕过账号权限或扩展策略检查。
 
@@ -127,6 +128,16 @@ WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手
 手机端的能力快照只用于界面提示，不能代替服务端鉴权；换课入口在当前班级拥有 `ManageSchedule` 时仍可提交，最终由服务端和目标班级主插件复核能力并返回 `CAPABILITY_UNSUPPORTED` 等结果。
 
 插件发现修订号已变化时返回 `SCHEDULE_STALE` 和最新修订号，不覆盖别人刚完成的修改。
+
+## 调休
+
+服务端定时从 holiday-cn 拉取法定节假日与调休安排，组装今天往前 1 天到往后 60 天的调休日历，经 `holiday_calendar` 消息推送给声明了 `schedule.holiday-calendar` 能力的插件：插件上报能力后立即发送一次，之后内容变化（刷新、管理员修改设置或补课安排、跨天窗口滚动）时再广播给所有此类插件，而不只发给班级主插件。
+
+`days[]` 每项为 `{date, kind, name, followWeekday?, followSource?}`：`kind` 为 `off`（放假日）或 `makeup`（调休上学日）；调休上学日的 `followWeekday` 为 1-5（周一至周五），为 null 时表示不补课或无法推算，`followSource` 为 `auto` / `manual` / `skip` / `unresolved`。`enabled` 为 `false` 时 `days` 为空，插件应撤销此前做过的全部调整。
+
+插件把日历缓存到本地，断网时继续生效：放假日把宿主 `LessonsService.IsClassPlanEnabled` 设为 `false`，并且只恢复自己关掉的开关；调休上学日在今天起 7 天内用 `CreateTempClassPlan` 复制该周对应工作日的课表作为临时课表，已有他人安排的预定课表时不覆盖。
+
+插件上报的 `ScheduleDay` 新增可选字段 `dayKind`（`holiday` / `makeup`）和 `holidayName`，普通日期不输出。放假日 `enabled` 为 `false` 且不含课程，因此换课会被拒绝。
 
 ## 换课申请
 
