@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using RemoteCI.Server.Data;
 using RemoteCI.Server.Services;
+using RemoteCI.Shared;
 
 namespace RemoteCI.Server.Pages;
 
@@ -68,6 +69,12 @@ public sealed class HolidaysModel(UserManager<AppUser> users, HolidayCalendarSer
         var status = await holidays.RefreshAsync(ct);
         TempData[status.LastError is null ? "Message" : "Error"] = status.LastError ?? "节假日数据已刷新。";
         return RedirectToPage();
+    }
+
+    private async Task<IActionResult?> RequireAdminAsync()
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        return CurrentUser.Role == UserRole.Admin ? null : RedirectToPage("/Denied");
     }
 
     public sealed class SettingsInput
