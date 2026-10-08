@@ -1,0 +1,75 @@
+/* 档案页延用 app.css 的语义主题变量，保持明暗主题与控制页一致。 */
+.profile-mode-tabs, .profile-section-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.profile-mode-tabs button[aria-pressed="true"], .profile-section-tabs button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-faint); color: var(--accent-strong); }
+.profile-section-tabs { padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.profile-section-tabs span { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--muted); }
+.profile-context { font-size: 13px; }
+.profile-workspace { display: grid; grid-template-columns: 235px minmax(0, 1fr); gap: 16px; align-items: start; }
+.profile-rail { position: sticky; top: 98px; padding: 16px; max-height: calc(100vh - 125px); overflow-y: auto; }
+.profile-rail-head, .profile-section-heading, .profile-editor-toolbar, .profile-savebar, .profile-batchbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.profile-rail-head { margin-bottom: 14px; }
+.profile-rail-head button { min-height: 36px; padding: 0 11px; }
+.profile-search { display: grid; gap: 5px; margin-bottom: 12px; font-size: 12px; color: var(--muted); }
+.profile-search input { width: 100%; min-width: 0; }
+.profile-record-list { display: grid; gap: 5px; margin-top: 10px; }
+.profile-record { display: flex; align-items: center; border-radius: 8px; border: 1px solid transparent; }
+.profile-record.active { border-color: var(--line-strong); background: var(--accent-faint); }
+.profile-record-select { padding: 9px 0 9px 9px; }
+.profile-record-select input { width: 17px; height: 17px; }
+.profile-record > button { display: grid; flex: 1; min-width: 0; justify-content: start; justify-items: start; gap: 3px; padding: 10px; border: 0; background: transparent; text-align: left; }
+.profile-record > button:hover { background: var(--surface-soft); }
+.profile-record strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.profile-record small { font-size: 11px; color: var(--muted); font-weight: 500; }
+.profile-dirty { color: var(--warning) !important; }
+.profile-dirty::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: middle; }
+.profile-editor { min-width: 0; padding: 20px; }
+.profile-editor-toolbar { align-items: flex-start; margin-bottom: 18px; }
+.profile-editor-identity { min-width: 0; }
+.profile-editor-identity h2 { overflow-wrap: anywhere; }
+.profile-editor-identity span { font-size: 12px; }
+.profile-toolbar-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.profile-toolbar-actions button { min-height: 38px; padding: 0 11px; font-size: 12px; }
+.profile-name { display: grid; max-width: 440px; gap: 6px; margin-bottom: 20px; font-size: 13px; }
+.profile-section-heading { margin-bottom: 16px; }
+.profile-section-heading h3 { margin-bottom: 0; font-size: 15px; }
+.profile-section-heading > label { display: grid; gap: 6px; width: min(360px, 60%); font-size: 13px; }
+.profile-object-name { display: grid; gap: 6px; width: min(100%, 400px); margin-bottom: 18px; font-size: 13px; }
+.profile-plan-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
+.profile-plan-settings > label:not(.check) { display: grid; gap: 6px; font-size: 13px; }
+.profile-table-scroll { overflow-x: auto; margin-bottom: 12px; }
+.profile-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.profile-table th, .profile-table td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+.profile-table thead th { color: var(--muted); font-size: 12px; font-weight: 600; background: var(--surface-soft); }
+.profile-table tbody tr:hover { background: var(--accent-faint); }
+.profile-table input:not([type="checkbox"]), .profile-table select { width: 100%; min-width: 105px; min-height: 38px; padding: 7px; border-radius: 6px; }
+.profile-table .check { white-space: nowrap; margin: 0; font-size: 12px; }
+.profile-time-table { min-width: 900px; }
+.profile-time-table td:first-child input, .profile-time-table td:nth-child(2) input { min-width: 118px; }
+.profile-row-actions { display: flex; gap: 4px; }
+.profile-row-actions button { min-height: 34px; padding: 0 8px; font-size: 12px; }
+.profile-help { margin-top: 14px; font-size: 12px; }
+.profile-savebar { margin-top: 24px; padding-top: 17px; border-top: 1px solid var(--line); }
+.profile-savebar > span { font-size: 12px; }
+.profile-batchbar { margin-top: 14px; padding: 13px 14px; border-radius: 8px; background: var(--surface-soft); font-size: 12px; }
+.profile-validation { margin-top: 14px; padding: 12px 14px; border-radius: 8px; background: var(--warning-soft); color: var(--warning); font-size: 12px; }
+.profile-validation ul { margin: 8px 0 0; padding-left: 20px; }
+.profile-section-empty, .profile-list-empty { padding: 20px 4px; font-size: 13px; }
+.profile-preview-counts { display: grid; grid-template-columns: repeat(3, 1fr); margin: 16px 0; border-block: 1px solid var(--line); }
+.profile-preview-counts > div { padding: 14px 0; }
+.profile-preview-counts dt { color: var(--muted); font-size: 12px; }
+.profile-preview-counts dd { margin: 4px 0 0; font-size: 24px; font-variant-numeric: tabular-nums; }
+.profile-choice-list { display: grid; gap: 12px; }
+.profile-choice-list small { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; }
+.profile-choice-list .check { align-items: flex-start; }
+.profile-choice-list input { margin-top: 5px; }
+.profile-apply-sections { display: flex; flex-wrap: wrap; gap: 18px; }
+.profile-dialog fieldset { padding: 14px; border: 1px solid var(--line); border-radius: 8px; }
+.profile-dialog legend { padding: 0 6px; font-size: 13px; font-weight: 650; }
+.profile-dialog details summary { cursor: pointer; padding: 10px 0; font-size: 13px; font-weight: 650; }
+.profile-device-targets { display: grid; gap: 12px; padding: 10px 0; }
+[data-profile-assign-classes] { display: grid; gap: 12px; }
+.profile-dialog textarea { font-family: Consolas, monospace; font-size: 12px; }
+.profile-dialog .notice label { margin-top: 10px; }
+@media (max-width: 1200px) { .profile-workspace { grid-template-columns: 195px minmax(0, 1fr); } .profile-editor-toolbar, .profile-savebar { flex-wrap: wrap; } }
+@media (max-width: 800px) { .profile-workspace { grid-template-columns: minmax(0, 1fr); } .profile-rail { position: static; max-height: 260px; } .profile-record-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } .profile-editor { padding: 16px; } .profile-plan-settings { grid-template-columns: minmax(0, 1fr); } .profile-batchbar { flex-wrap: wrap; } .profile-toolbar-actions { justify-content: flex-start; } .profile-section-heading { align-items: flex-end; } .profile-section-heading > label { width: 55%; } }
+@media (max-width: 480px) { .profile-record-list { grid-template-columns: minmax(0, 1fr); } .profile-toolbar-actions button, .profile-row-actions button { min-height: 44px; } .profile-mode-tabs button { flex: 1; } .profile-section-tabs { gap: 5px; } .profile-section-tabs button { padding: 0 10px; font-size: 13px; } }

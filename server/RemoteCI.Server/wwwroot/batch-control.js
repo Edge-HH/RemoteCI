@@ -178,22 +178,9 @@
         payload.appendChild(input);
     };
 
-    const serializeTimeLayout = dialog => {
-        const rows = [...dialog.querySelectorAll("[data-time-layout-rows] .time-layout-row")];
-        const points = rows.map(row => ({
-            startTime: row.querySelector("[data-time-layout-start]")?.value ?? "",
-            endTime: row.querySelector("[data-time-layout-end]")?.value ?? "",
-            timeType: Number(row.querySelector("[data-time-layout-type]")?.value ?? 0),
-            breakName: row.querySelector("[data-time-layout-break]")?.value?.trim() || null,
-        })).filter(point => point.startTime && point.endTime);
-        const hidden = dialog.querySelector("[data-time-layout-json]");
-        if (hidden) hidden.value = JSON.stringify(points);
-    };
-
     const copySettings = () => {
         payload.innerHTML = "";
         if (!currentSettingsDialog) return;
-        if (currentOperation === "UpdateTimeLayout") serializeTimeLayout(currentSettingsDialog);
         currentSettingsDialog.querySelectorAll("input, select, textarea").forEach(field => {
             if (!field.name || field.disabled || field.type === "file") return;
             if (field.type === "checkbox") {
@@ -268,12 +255,6 @@
         }
     };
 
-    const addTimeLayoutRow = dialog => {
-        const template = document.getElementById("time-layout-row-template");
-        const row = template?.content?.firstElementChild?.cloneNode(true);
-        if (!row) return;
-        dialog.querySelector("[data-time-layout-rows]")?.appendChild(row);
-    };
 
 
     const openOperation = (operation, title, risk, dialogId) => {
@@ -305,9 +286,6 @@
         currentSettingsDialog = settingsDialog;
         openDialog(currentSettingsDialog);
         prepareSingleDialog(currentSettingsDialog, risk);
-        if (operation === "UpdateTimeLayout" && currentSettingsDialog.querySelectorAll("[data-time-layout-rows] .time-layout-row").length === 0) {
-            addTimeLayoutRow(currentSettingsDialog);
-        }
         currentSettingsDialog.querySelector("input:not([type=hidden]), select, textarea")?.focus();
     };
 
@@ -390,22 +368,8 @@
         boxes.forEach(box => { box.checked = !allChecked; });
         return true;
     };
-    const handleTimeLayoutClick = event => {
-        const add = findTarget(event, "[data-time-layout-add]");
-        if (add) {
-            addTimeLayoutRow(add.closest("dialog"));
-            return true;
-        }
-        const remove = findTarget(event, "[data-time-layout-remove]");
-        if (remove) {
-            remove.closest(".time-layout-row")?.remove();
-            return true;
-        }
-        return false;
-    };
     const clickHandlers = [handleOpenClick, handleCloseClick, handleNextClick, handleBackClick,
-        handleVoiceTargetClick, handleVoiceSendClick, handleTargetTabClick, handleSelectOnlineClick,
-        handleTimeLayoutClick];
+        handleVoiceTargetClick, handleVoiceSendClick, handleTargetTabClick, handleSelectOnlineClick];
     document.addEventListener("click", event => {
         if (clickHandlers.some(handler => handler(event))) return;
         if (event.target.matches("dialog.batch-dialog")) closeDialog(event.target);
@@ -420,15 +384,6 @@
         if (!validateTargets()) event.preventDefault();
     });
 
-    document.querySelectorAll("[data-profile-file]").forEach(input => {
-        input.addEventListener("change", async () => {
-            const file = input.files?.[0];
-            if (!file) return;
-            const textarea = input.closest("dialog")?.querySelector('textarea[name="ProfileJson"]');
-            if (!textarea) return;
-            textarea.value = await file.text();
-        });
-    });
 
     // 集控配置文件：选择 ManagementPreset.json 后填入 JSON 文本框，再由表单下发。
     document.querySelectorAll("[data-management-preset-file]").forEach(input => {

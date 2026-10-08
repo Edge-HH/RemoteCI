@@ -607,9 +607,9 @@ public static class WebSocketHub
         IStateStore store,
         Guid classId)
     {
-        // 扩展设置需要按班级自治策略复核，手表与手机的通用命令通道不提供该操作。
-        if (command.Command == CommandKind.ApplyExtensionSettings)
-            return new CommandError(CommandResultCodes.Forbidden, "扩展设置只能在 WebUI 或扩展设置 API 中修改");
+        // 档案和扩展设置由独立 WebUI 入口复核班级身份，通用设备命令通道不提供这些操作。
+        if (command.Command is CommandKind.ApplyExtensionSettings or CommandKind.ApplyProfile)
+            return new CommandError(CommandResultCodes.Forbidden, "档案和扩展设置只能通过各自的服务端管理入口修改");
         if (command.Command == CommandKind.RunExtension)
             return GetExtensionValidationError(command, classPermissions, allowedExtensionIds, store, classId);
 

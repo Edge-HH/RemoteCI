@@ -71,6 +71,11 @@ public sealed class CommandMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ProfileDistributionRequest? ProfileDistribution { get; set; }
 
+    /// <summary>服务端档案管理页面确认后的档案应用参数。</summary>
+    [JsonPropertyName("profileApply")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ProfileApplyRequest? ProfileApply { get; set; }
+
     /// <summary>加入 ClassIsland 内置集控的参数。</summary>
     [JsonPropertyName("managementJoin")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

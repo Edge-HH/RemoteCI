@@ -27,12 +27,23 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<LessonTeacherOverride> LessonTeacherOverrides => Set<LessonTeacherOverride>();
     public DbSet<UserNotification> UserNotifications => Set<UserNotification>();
     public DbSet<WebPushSubscription> WebPushSubscriptions => Set<WebPushSubscription>();
+    public DbSet<StoredProfile> StoredProfiles => Set<StoredProfile>();
     public DbSet<HolidayYearSnapshot> HolidayYearSnapshots => Set<HolidayYearSnapshot>();
     public DbSet<HolidayMakeupOverride> HolidayMakeupOverrides => Set<HolidayMakeupOverride>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+        builder.Entity<StoredProfile>(entity =>
+        {
+            entity.Property(x => x.Name).HasMaxLength(100);
+            entity.Property(x => x.Revision).IsConcurrencyToken();
+            // SQLite 的唯一索引允许多个 NULL：模板不限数量，班级只有一个工作副本。
+            entity.HasIndex(x => x.ClassId).IsUnique();
+            entity.HasOne(x => x.Classroom).WithMany().HasForeignKey(x => x.ClassId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.SourceTemplate).WithMany().HasForeignKey(x => x.SourceTemplateId).OnDelete(DeleteBehavior.SetNull);
+        });
 
         builder.Entity<AppUser>(entity =>
         {

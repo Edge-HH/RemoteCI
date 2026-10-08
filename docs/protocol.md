@@ -91,7 +91,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 ## 能力协商
 
-V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings` 和 `schedule.holiday-calendar` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
+V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings` 和 `schedule.holiday-calendar` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
 
 WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手机的有效能力是“本地 ∩ 服务端 ∩ 当前班级主插件”。服务端在 `capabilities_sync.classPlugins` 中按接收方可访问的班级逐个下发主插件能力，客户端切换班级时按新班级重算；没有对应条目表示该班插件离线。旧服务端没有该字段时客户端退回 `plugin`。多插件时，当前主插件仍是最早接入的健康插件；主插件切换、断开或能力更新后，服务端重新广播能力快照。界面应隐藏缺失能力的入口，服务端转发命令前仍需按统一映射复核主插件能力，缺少能力时返回 `CAPABILITY_UNSUPPORTED`。能力声明不能绕过账号权限或扩展策略检查。
 
@@ -184,12 +184,32 @@ RemoteCI 插件在云端连接建立后通过 `software_inventory` 上报设备�
 命令值 13 为 `InstallPlugins`、14 为 `UninstallPlugins`、15 为 `SetPluginEnabled`、16 为 `SetPluginManagementPolicy`、17 为 `DistributeProfile`、18 为 `UpdateTimeLayout`、19 为 `JoinManagement`。这些命令都要求 `ManageUsers` 权限，并在服务端和插件端再次确认系统管理员身份；能力标识分别为 `plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`schedule.time-layout` 和 `management.join`。
 
 - 插件安装使用 ClassIsland 官方插件市场解析依赖并下载 `.cipx` 缓存，卸载和启停使用宿主公开的 `PluginInfo` 状态接口；RemoteCI 拒绝操作自身，避免远程控制链路被卸载或禁用。
-- `DistributeProfile` 只接收 ClassIsland 档案 JSON 和分发范围（时间表、课表、科目），不接收任意文件路径；请求可带 `importProfileName`、`replaceCurrentProfile`（默认 `false`）和 `enableImportedProfile`（默认 `true`）。默认会把选中的内容写入一个新档案并启用该档案；只有明确开启 `replaceCurrentProfile` 才会写入当前档案。`replaceExisting` 仍只控制选中分发范围内的同 Id 数据是否先清空。`UpdateTimeLayout` 接收结构化时间点并由插件在 UI 线程写入档案。
+- `DistributeProfile` 只接收 ClassIsland 档案 JSON 和分发范围（时间表、课表、科目），不接收任意文件路径；请求可带 `importProfileName`、`replaceCurrentProfile`（默认 `false`）和 `enableImportedProfile`（默认 `true`）。默认会把选中的内容写入一个新档案并启用该档案；只有明确开启 `replaceCurrentProfile` 才会写入当前档案。旧命令的 `replaceExisting=true` 会先清空整个所选类别，再写入源数据；关闭时按同 Id 更新并保留其他项目。`UpdateTimeLayout` 接收结构化时间点并由插件在 UI 线程写入档案。
 - 插件对 `Profile` 的字典属性按属性名运行时读取，以兼容 ClassIsland 2.0 的 `ObservableDictionary` 与后续 2.x 的字典实现；因此升级宿主后无需重新生成档案 JSON。
 - `JoinManagement` 由管理员上传 ClassIsland 集控配置文件 `ManagementPreset.json`（即宿主 ManagementSettings 的 JSON）发起。插件解析后按配置文件里的服务器类型（Serverless manifest 模板或 ManagementServer 的 API + gRPC）注册，先校验集控清单核心版本，再写入宿主的 Management 配置并重启；配置文件里的 ID（ClassIdentity）由服务端按目标设备所属班级名自动填充，不需要管理员填写。
 - `SetPluginManagementPolicy` 只约束 RemoteCI 后续发起的远程插件安装或卸载。ClassIsland 当前没有公开的宿主级“禁止本地安装/卸载插件”策略 API，因此该策略不阻止用户在 ClassIsland 本地设置页操作。
 
 WebUI 批量控制页把功能参数和目标设备分成两步：先填写参数，再选择班级、分组或具体设备。班级级选择只投递到该班最早接入的在线设备；具体设备选择按插件连接逐台投递。命令下发成功只表示设备端已接受任务，下载、部署、重启或档案拉取的最终结果由后续 `software_inventory`、连接状态或用户再次查看时体现。
+
+## 服务端档案库与档案应用
+
+WebUI 管理区的 `/Profiles` 提供全局档案库和批量编辑；每班菜单的 `/ClassProfiles` 只管理当前班级。时间表修改与档案分发从“控制”和“批量控制”页移入档案页，“加入集控”和远程插件管理策略仍保留在控制页。课表页继续展示七日课表、换课和科目教师设置；档案页编辑服务端保存的源档案，不读取或自动同步设备当前档案。
+
+服务端通过 SQLite／EF Core 保存全局模板与每班一份独立工作副本，记录完整 JSON、修订号、来源模板和更新时间。分配模板时保留 ClassIsland 对象 ID 并复制 JSON，模板与班级副本的后续修改相互隔离。上传 JSON 上限为 5 MB，先解析预览档案名称、时间表、课表与科目数量及引用错误，确认后才保存。编辑只覆盖相关节点的字段，保留未知字段和附加配置；无效时间、缺失时间表或科目引用阻止保存和下发。调整上课时段时保留原时段对应课程、新时段留空，删除已有课程的时段需确认。
+
+档案读写通过带 Cookie 与防伪令牌的 Razor Page handlers 完成，不新增 REST 档案管理端点。系统管理员可管理全局及所有班级；班主任必须在目标班级的成员身份为班主任且拥有 `ManageSchedule`，只能管理本班副本。每次上传、保存、导出和下发均重新鉴权，普通老师即使拥有 `ManageSchedule` 也不能管理档案。批量保存先验证所有草稿和预期修订号，在一个事务内提交；任一修订冲突使整批不写入，浏览器保留草稿。保存与下发分开，离线时可保存；下发只使用已经保存并匹配预期修订号的版本。
+
+命令值 25 为 `ApplyProfile`，能力标识 `profile.apply`，仅进入当前能力列表。`profileApply` 载荷为 `ProfileApplyRequest`，字段包含 `profileJson`、`sections`（位掩码：1 时间表、2 课表、4 科目）、`mode`（1 `MergeCurrent`、2 `ReplaceSections`、3 `CreateAndActivate`）、可选 `importProfileName` 和 `restartAfter`（默认 `false`）。应用方式每次必须明确选择，界面不预选：
+
+- **更新当前档案**：更新所选对象及其必要依赖，保留其他内容。
+- **整体替换所选类别**：清空明确列出的类别后写入新数据，操作前必须确认；合并后的档案存在悬空引用时拒绝执行。
+- **创建并启用新档案**：使用填写的设备档案名创建并启用，重名返回错误。
+
+`ApplyProfile` 为 `serverOnly` 命令，仅由服务端档案页面构造并定向发送；手机、手表的通用 WebSocket 命令通道、`POST /api/commands`、广播接口及插件局域网直连均拒绝。服务端校验管理员或本班班主任身份及 `ManageSchedule`，插件再次验证认证发送人的 `ManageSchedule` 权限。目标可选班级、分组或具体设备；班级级选择只发送到最早接入的在线设备，班主任目标固定本班。各班不同档案按目标设备所属班级组装，离线、缺少 `profile.apply` 或设备执行失败逐台返回结果，不排队；失败后可手动重试。旧插件仍可用于服务端档案编辑，但下发必须升级到支持 `profile.apply` 的插件，不能用旧命令模拟新应用方式。
+
+插件在 UI 线程验证、应用并保存档案，失败恢复原状态，成功后立即重新同步七日课表。旧命令 17 `DistributeProfile`、18 `UpdateTimeLayout` 的编号、载荷、管理员权限和既有语义继续保留，档案页面使用命令 25。
+
+配置备份 schema 升为 5，包含全局档案库与班级工作副本；恢复旧备份时缺少档案数据按空库处理。设备本地修改不会回写服务端，首次使用档案管理需上传或新建档案。
 
 ## 远程终端与文件分发
 

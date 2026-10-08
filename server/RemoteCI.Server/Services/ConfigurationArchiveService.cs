@@ -46,7 +46,9 @@ public sealed class ConfigurationArchiveService(
             .Select(x => new ExtensionPreferenceSnapshot(x.UserId, x.ExtensionId, x.ShowOnWatch, x.UpdatedAt)).ToListAsync(ct);
         var metadata = await db.SystemMetadata.AsNoTracking().SingleAsync(x => x.Id == 1, ct);
         var backup = await db.BackupConfigurations.AsNoTracking().SingleAsync(x => x.Id == 1, ct);
-        return new ConfigurationSnapshot(4, DateTimeOffset.UtcNow, roles, users, plugins,
+        var profiles = await db.StoredProfiles.AsNoTracking().Select(x => new StoredProfileSnapshot(
+            x.Id, x.Name, x.ProfileJson, x.Revision, x.ClassId, x.SourceTemplateId, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
+        return new ConfigurationSnapshot(5, DateTimeOffset.UtcNow, roles, users, plugins,
             new MetadataSnapshot(
                 metadata.AccountVersion,
                 metadata.ForceSenderInTitle,
@@ -63,7 +65,7 @@ public sealed class ConfigurationArchiveService(
                     metadata.ClassAdminCanEditExtensionSettings)),
             new BackupSettingsSnapshot(backup.Enabled, backup.Cadence, backup.TimeOfDay, backup.DayOfWeek, backup.MaxBackups),
             state.GetLatestSchedule(Classroom.DefaultId), extensionPolicies, extensionPreferences,
-            classrooms, memberships, groups, apiKeys);
+            classrooms, memberships, groups, apiKeys, profiles);
     }
 
     public async Task<BackupFileInfo> CreateLocalBackupAsync(string source, CancellationToken ct = default)
@@ -117,6 +119,8 @@ public sealed class ConfigurationArchiveService(
     {
         Validate(snapshot);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        // 显式删除自引用对象，恢复前不遗留模板或班级副本；旧配置包恢复为空档案库。
+        await db.StoredProfiles.ExecuteDeleteAsync(ct);
         await db.DeviceSessions.ExecuteDeleteAsync(ct);
         await db.UserApiKeys.ExecuteDeleteAsync(ct);
         await db.PluginPairingCodes.ExecuteDeleteAsync(ct);
@@ -195,6 +199,12 @@ public sealed class ConfigurationArchiveService(
         var backup = await db.BackupConfigurations.SingleAsync(x => x.Id == 1, ct);
         backup.Enabled=snapshot.Backup.Enabled; backup.Cadence=snapshot.Backup.Cadence; backup.TimeOfDay=snapshot.Backup.TimeOfDay; backup.DayOfWeek=snapshot.Backup.DayOfWeek; backup.MaxBackups=Math.Clamp(snapshot.Backup.MaxBackups,1,100); backup.LastScheduledAt=null; backup.LastSucceededAt=null; backup.LastError=null;
         await db.SaveChangesAsync(ct);
+        var profiles = snapshot.Profiles ?? [];
+        // 来源模板须先落库，否则班级副本的自引用外键无效。
+        db.StoredProfiles.AddRange(profiles.Where(x => x.ClassId is null).Select(RestoreProfile));
+        await db.SaveChangesAsync(ct);
+        db.StoredProfiles.AddRange(profiles.Where(x => x.ClassId is not null).Select(RestoreProfile));
+        await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         if (snapshot.Schedule is not null) state.SaveSchedule(Classroom.DefaultId, snapshot.Schedule);
     }
@@ -214,11 +224,42 @@ public sealed class ConfigurationArchiveService(
         snapshotVersion == 1 && permissions.HasFlag(UserPermissions.PowerControl)
             ? permissions | UserPermissions.MainMenuControl
             : permissions;
-    private static void Validate(ConfigurationSnapshot value) { if(value.Version is not (1 or 2 or 3 or 4) || value.Roles.Count==0 || value.Users.Count==0) throw new InvalidDataException("Invalid backup schema"); var roleIds=value.Roles.Select(x=>x.Id).ToHashSet(); if(value.Users.Any(x=>!roleIds.Contains(x.RoleId))) throw new InvalidDataException("Unknown role reference"); if(!value.Users.Any(x=>x.Enabled && x.Role==UserRole.Admin)) throw new InvalidDataException("At least one enabled administrator is required"); if(value.Users.Select(x=>x.Username.ToUpperInvariant()).Distinct().Count()!=value.Users.Count) throw new InvalidDataException("Duplicate account ID"); var userIds=value.Users.Select(x=>x.Id).ToHashSet(); if((value.ExtensionPreferences??[]).Any(x=>!userIds.Contains(x.UserId))) throw new InvalidDataException("Unknown extension preference user"); if((value.Memberships??[]).Any(x=>!userIds.Contains(x.UserId))) throw new InvalidDataException("Unknown membership user"); if((value.ApiKeys??[]).Any(x=>!userIds.Contains(x.UserId))) throw new InvalidDataException("Unknown API key user"); var classroomIds=(value.Classrooms??[]).Select(x=>x.Id).ToHashSet(); if((value.Memberships??[]).Any(x=>!classroomIds.Contains(x.ClassroomId))) throw new InvalidDataException("Unknown membership classroom"); }
+    private static void Validate(ConfigurationSnapshot value)
+    {
+        if(value.Version is not (1 or 2 or 3 or 4 or 5) || value.Roles.Count==0 || value.Users.Count==0) throw new InvalidDataException("Invalid backup schema");
+        var roleIds=value.Roles.Select(x=>x.Id).ToHashSet();
+        if(value.Users.Any(x=>!roleIds.Contains(x.RoleId))) throw new InvalidDataException("Unknown role reference");
+        if(!value.Users.Any(x=>x.Enabled && x.Role==UserRole.Admin)) throw new InvalidDataException("At least one enabled administrator is required");
+        if(value.Users.Select(x=>x.Username.ToUpperInvariant()).Distinct().Count()!=value.Users.Count) throw new InvalidDataException("Duplicate account ID");
+        var userIds=value.Users.Select(x=>x.Id).ToHashSet();
+        if((value.ExtensionPreferences??[]).Any(x=>!userIds.Contains(x.UserId))) throw new InvalidDataException("Unknown extension preference user");
+        if((value.Memberships??[]).Any(x=>!userIds.Contains(x.UserId))) throw new InvalidDataException("Unknown membership user");
+        if((value.ApiKeys??[]).Any(x=>!userIds.Contains(x.UserId))) throw new InvalidDataException("Unknown API key user");
+        var classroomIds=(value.Classrooms??[]).Select(x=>x.Id).ToHashSet();
+        if((value.Memberships??[]).Any(x=>!classroomIds.Contains(x.ClassroomId))) throw new InvalidDataException("Unknown membership classroom");
+        var profiles=value.Profiles??[];
+        if(profiles.Select(x=>x.Id).Distinct().Count()!=profiles.Count || profiles.Where(x=>x.ClassId is not null).GroupBy(x=>x.ClassId).Any(x=>x.Count()>1))
+            throw new InvalidDataException("Duplicate profile or classroom profile");
+        var templates=profiles.Where(x=>x.ClassId is null).Select(x=>x.Id).ToHashSet();
+        foreach(var profile in profiles)
+        {
+            if(profile.Revision<1 || string.IsNullOrWhiteSpace(profile.Name) || profile.Name.Length>100 ||
+                profile.ClassId is { } id && !classroomIds.Contains(id) ||
+                profile.SourceTemplateId is { } templateId && (profile.ClassId is null || !templates.Contains(templateId)) ||
+                ProfileDocument.Validate(profile.ProfileJson).Count>0)
+                throw new InvalidDataException("Invalid stored profile");
+        }
+    }
+    private static StoredProfile RestoreProfile(StoredProfileSnapshot x) => new()
+    {
+        Id=x.Id, Name=x.Name, ProfileJson=x.ProfileJson, Revision=x.Revision, ClassId=x.ClassId,
+        SourceTemplateId=x.SourceTemplateId, CreatedAt=x.CreatedAt, UpdatedAt=x.UpdatedAt,
+    };
 }
 
 public sealed record BackupFileInfo(string Name, DateTimeOffset CreatedAt, long Size, string Source);
-public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null, List<ClassroomSnapshot>? Classrooms = null, List<MembershipSnapshot>? Memberships = null, List<GroupSnapshot>? ClassGroups = null, List<ApiKeySnapshot>? ApiKeys = null);
+public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null, List<ClassroomSnapshot>? Classrooms = null, List<MembershipSnapshot>? Memberships = null, List<GroupSnapshot>? ClassGroups = null, List<ApiKeySnapshot>? ApiKeys = null, List<StoredProfileSnapshot>? Profiles = null);
+public sealed record StoredProfileSnapshot(Guid Id, string Name, string ProfileJson, long Revision, Guid? ClassId, Guid? SourceTemplateId, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 public sealed record RoleSnapshot(Guid Id,string Name,AccountRoleKind Kind,UserPermissions DefaultPermissions,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);
 public sealed record UserSnapshot(Guid Id,string Username,string NormalizedUsername,string DisplayName,string PasswordHash,string SecurityStamp,string ConcurrencyStamp,UserRole Role,Guid RoleId,UserPermissions GrantedPermissions,bool Enabled,long Version,DateTimeOffset UpdatedAt);
 public sealed record ClassroomSnapshot(Guid Id,string Name,bool VisitorAccessEnabled,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);

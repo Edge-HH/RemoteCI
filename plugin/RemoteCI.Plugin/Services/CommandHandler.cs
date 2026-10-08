@@ -111,6 +111,7 @@ public sealed class CommandHandler
                 CommandKind.SetPluginManagementPolicy => _pluginManagement.SetPolicy(command.PluginManagementPolicy),
                 CommandKind.UpdateTimeLayout => await _profileManagement.UpdateTimeLayoutAsync(command.TimeLayoutUpdate),
                 CommandKind.DistributeProfile => await _profileManagement.DistributeProfileAsync(command.ProfileDistribution),
+                CommandKind.ApplyProfile => await HandleApplyProfileAsync(command.ProfileApply),
                 CommandKind.JoinManagement => await _managementJoin.JoinAsync(command.ManagementJoin),
                 CommandKind.RestartClassIsland => HandleClassIslandRestart(),
                 CommandKind.ExecuteTerminalCommand => await _terminal.ExecuteAsync(command.TerminalCommand),
@@ -143,6 +144,13 @@ public sealed class CommandHandler
         var result = await Dispatcher.UIThread.InvokeAsync(() =>
             SubjectTeacherExecutor.Apply(request!, _profileOps,
                 ex => _logger.LogError(ex, "保存科目教师失败：{SubjectId}", request!.SubjectId)));
+        if (result.Success) ScheduleChanged?.Invoke();
+        return result;
+    }
+
+    private async Task<CommandResult> HandleApplyProfileAsync(ProfileApplyRequest? request)
+    {
+        var result = await _profileManagement.ApplyProfileAsync(request);
         if (result.Success) ScheduleChanged?.Invoke();
         return result;
     }

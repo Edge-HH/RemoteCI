@@ -278,7 +278,7 @@ public sealed class VisitorAccessTests
             await scope.ServiceProvider.GetRequiredService<VisitorAccessSettings>()
                 .SetAutoEnterAsync(true);
             var snapshot = await scope.ServiceProvider.GetRequiredService<ConfigurationArchiveService>().CaptureAsync();
-            Assert.Equal(4, snapshot.Version);
+            Assert.Equal(5, snapshot.Version);
             Assert.NotNull(snapshot.Classrooms);
             Assert.Contains(snapshot.Classrooms!, x => x.Id == Classroom.DefaultId && x.VisitorAccessEnabled);
             Assert.True(snapshot.Metadata.AutoEnterVisitorPage);
