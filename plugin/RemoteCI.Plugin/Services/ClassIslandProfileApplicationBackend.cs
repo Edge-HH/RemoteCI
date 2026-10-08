@@ -13,7 +13,9 @@ namespace RemoteCI.Plugin.Services;
 /// </summary>
 internal sealed class ClassIslandProfileApplicationBackend(object service) : IProfileApplicationBackend
 {
-    private static readonly string[] DictionaryProperties = ["Subjects", "TimeLayouts", "ClassPlans", "ClassPlanGroups"];
+    // 预定课表与临时课表指针随课表一起写入，候选中已清除的悬空引用才会真正离开宿主档案。
+    private static readonly string[] DictionaryProperties = ["Subjects", "TimeLayouts", "ClassPlans", "ClassPlanGroups",
+        "OrderedSchedules", "TempClassPlanId", "OverlayClassPlanId"];
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     private string? _createdPath;
     private object? _createdProfile;

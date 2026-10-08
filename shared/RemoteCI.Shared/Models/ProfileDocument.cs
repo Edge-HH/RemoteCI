@@ -186,12 +186,7 @@ public static class ProfileDocument
         Set(profile, "TimeLayouts", Filter(layouts, selectedLayouts));
         Set(profile, "ClassPlans", Filter(plans, selectedPlans));
         Set(profile, "Subjects", Filter(subjects, selectedSubjects));
-        foreach (var field in new[] { "OverlayClassPlanId", "TempClassPlanId" })
-            if (ReferenceGuid(profile, field) is { } id && !selectedPlans.Contains(id)) Set(profile, field, null);
-        if (Get(profile, "OrderedSchedules") is JsonObject ordered)
-            foreach (var key in ordered.Where(entry => entry.Value is JsonObject schedule &&
-                         ReferenceGuid(schedule, "ClassPlanId") is { } id && !selectedPlans.Contains(id)).Select(entry => entry.Key).ToList())
-                ordered.Remove(key);
+        DropDanglingPlanReferences(profile);
         ThrowIfInvalid(profile);
         return Serialize(profile);
     }
@@ -226,8 +221,27 @@ public static class ProfileDocument
             foreach (var (id, value) in sourceGroups) groups[id] = value?.DeepClone();
             Set(target, "ClassPlanGroups", groups);
         }
+        // 整体替换课表会清掉设备上的临时层；宿主清理过期临时课表后也可能留下悬空指针。
+        // 这些引用只指向已不存在的临时安排，清除后才能通过校验，否则设备档案将再也无法下发。
+        DropDanglingPlanReferences(target);
         ThrowIfInvalid(target);
         return Serialize(target);
+    }
+
+    /// <summary>
+    /// 清除指向不存在课表的预定课表与临时课表指针。指针置为空 GUID 而不是 null，
+    /// 以便宿主无论把字段声明为 Guid 还是 Guid? 都能反序列化。
+    /// </summary>
+    private static void DropDanglingPlanReferences(JsonObject profile)
+    {
+        var plans = Dictionary(profile, "ClassPlans");
+        bool Missing(Guid id) => FindByGuid(plans, id.ToString()) is null;
+        foreach (var field in new[] { "OverlayClassPlanId", "TempClassPlanId" })
+            if (ReferenceGuid(profile, field) is { } id && Missing(id)) Set(profile, field, Guid.Empty.ToString());
+        if (Get(profile, "OrderedSchedules") is JsonObject ordered)
+            foreach (var key in ordered.Where(entry => entry.Value is JsonObject schedule &&
+                         ReferenceGuid(schedule, "ClassPlanId") is { } id && Missing(id)).Select(entry => entry.Key).ToList())
+                ordered.Remove(key);
     }
 
     private static void ValidateSections(ProfileDistributionSection sections)

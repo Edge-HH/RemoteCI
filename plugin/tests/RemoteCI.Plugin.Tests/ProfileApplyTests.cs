@@ -164,6 +164,65 @@ public sealed class ProfileApplyTests
         Assert.Contains("不存在", error.Message);
     }
 
+    private static readonly Guid OverlayId = Guid.Parse("ee111111-1111-1111-1111-111111111111");
+
+    /// <summary>RemoteCI 换课或 ClassIsland 临时课表会留下的设备状态：临时层课表、预定课表与临时课表指针。</summary>
+    private static string ProfileWithTemporaryPlans()
+    {
+        var current = ProfileDocument.Parse(ProfileJson("原老师"));
+        var overlay = current["ClassPlans"]![PlanId.ToString()]!.DeepClone().AsObject();
+        overlay["IsOverlay"] = true;
+        overlay["OverlaySourceId"] = PlanId.ToString();
+        current["ClassPlans"]![OverlayId.ToString()] = overlay;
+        current["OrderedSchedules"] = new JsonObject
+        {
+            ["2026-10-10T00:00:00"] = new JsonObject { ["ClassPlanId"] = OverlayId.ToString() },
+            ["2026-10-12T00:00:00"] = new JsonObject { ["ClassPlanId"] = PlanId.ToString() },
+        };
+        current["TempClassPlanId"] = OverlayId.ToString();
+        return current.ToJsonString();
+    }
+
+    [Fact]
+    public void ReplacingClassPlansDropsTemporaryReferencesToRemovedPlans()
+    {
+        var applied = ProfileDocument.Parse(ProfileDocument.Apply(ProfileWithTemporaryPlans(), Request(ProfileApplyMode.ReplaceSections)));
+
+        Assert.Null(applied["ClassPlans"]![OverlayId.ToString()]);
+        var ordered = applied["OrderedSchedules"]!.AsObject();
+        Assert.False(ordered.ContainsKey("2026-10-10T00:00:00"));
+        Assert.True(ordered.ContainsKey("2026-10-12T00:00:00"));
+        Assert.Equal(Guid.Empty.ToString(), applied["TempClassPlanId"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void DanglingDeviceReferencesDoNotBlockMerge()
+    {
+        var current = ProfileDocument.Parse(ProfileJson("原老师"));
+        current["OrderedSchedules"] = new JsonObject
+        {
+            ["2026-10-10T00:00:00"] = new JsonObject { ["ClassPlanId"] = Guid.NewGuid().ToString() },
+        };
+
+        var applied = ProfileDocument.Parse(ProfileDocument.Apply(current.ToJsonString(), Request(ProfileApplyMode.MergeCurrent)));
+
+        Assert.Empty(applied["OrderedSchedules"]!.AsObject());
+    }
+
+    [Fact]
+    public void HostAdapterReplaceAlsoPrunesHostTemporaryReferences()
+    {
+        using var host = new FakeHost(ProfileWithTemporaryPlans());
+
+        var result = ProfileApplyExecutor.Apply(Request(ProfileApplyMode.ReplaceSections), new ClassIslandProfileApplicationBackend(host));
+
+        Assert.True(result.Success, result.Message);
+        Assert.DoesNotContain(new DateTime(2026, 10, 10), host.Profile.OrderedSchedules.Keys);
+        Assert.Contains(new DateTime(2026, 10, 12), host.Profile.OrderedSchedules.Keys);
+        // 宿主保存后的档案必须仍能通过校验，否则之后的每次下发都会被拒绝。
+        Assert.Empty(ProfileDocument.Validate(JsonSerializer.Serialize(host.Profile)));
+    }
+
     [Theory]
     [InlineData("TimeLayoutId")]
     [InlineData("SubjectId")]

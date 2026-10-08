@@ -59,7 +59,8 @@ public sealed class ProfileDispatchService(ProfileLibraryService library, Device
         var chosen = plan.Targets.Where(x => x.ConnectionId is { } id && connectionIds.Contains(id)).ToList();
         foreach (var classId in await classrooms.ResolveTargetClassIdsAsync(classIds.ToList(), groupIds.ToList(), ct))
         {
-            var primary = snapshots.FirstOrDefault(x => x.ClassId == classId && x.PluginCredentialId is { } credentialId &&
+            // 未分配班级的设备在快照中记为默认班级，不能被当成默认班的主设备。
+            var primary = snapshots.FirstOrDefault(x => x.Assigned && x.ClassId == classId && x.PluginCredentialId is { } credentialId &&
                 inventory.Any(device => device.CredentialId == credentialId));
             if (primary?.PluginCredentialId is not { } primaryCredential) continue;
             var device = inventory.First(x => x.CredentialId == primaryCredential);
