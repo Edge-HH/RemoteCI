@@ -343,6 +343,33 @@ public sealed class ProfileLibraryTests
 }
 
 /// <summary>使用原生对象 ID 与未知字段的真实档案结构，供持久化和页面集成测试共用。</summary>
+public sealed class ProfileCollectTests
+{
+    [Fact]
+    public async Task CollectReportsClassesOutsideTheActorsScopeIndividually()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var scope = factory.Services.CreateScope();
+        var classrooms = scope.ServiceProvider.GetRequiredService<ClassroomService>();
+        var own = await classrooms.CreateAsync("收集本班");
+        var other = await classrooms.CreateAsync("收集他班");
+        var classAdmin = await ProfileTestData.CreateMemberAsync(scope.ServiceProvider, "profile.collector.admin",
+            own.Id, AccountRole.ClassAdministratorId);
+        var dispatch = scope.ServiceProvider.GetRequiredService<ProfileDispatchService>();
+
+        var results = await dispatch.CollectAsync(classAdmin, new ProfileCollectRequest { ClassIds = [own.Id, other.Id] });
+
+        Assert.Contains("未在线", results.Single(x => x.ClassId == own.Id).Message);
+        var denied = results.Single(x => x.ClassId == other.Id);
+        Assert.False(denied.Success);
+        Assert.Equal("无权访问的班级", denied.ClassName);
+        Assert.Contains("没有管理此班级档案的权限", denied.Message);
+        Assert.Contains("尚未保存", ProfileCollectResult.Summary(results));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            dispatch.CollectAsync(classAdmin, new ProfileCollectRequest { ClassIds = [other.Id] }));
+    }
+}
+
 internal static class ProfileTestData
 {
     public const string Password = "Profile-Test-Password-2026";

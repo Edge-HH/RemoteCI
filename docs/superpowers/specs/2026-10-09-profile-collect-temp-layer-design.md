@@ -60,7 +60,7 @@
 
 ## 6. 服务端
 
-- `ProfileDispatchService.CollectAsync(actor, classIds, onlyClass)`：逐班校验管理权限，选该班在线插件，校验能力，并发发送 `ReadProfile`（20 秒超时），返回 `{classId, className, deviceName, success, message, profileJson, errors}`，成功项已规范化。离线、旧插件逐班报告；请求中含无权管理的班级时与下发一致，整批返回 403（界面只列出可管理的班级）。
+- `ProfileDispatchService.CollectAsync(actor, classIds, onlyClass)`：逐班校验管理权限，选该班在线插件，校验能力，并发发送 `ReadProfile`（20 秒超时），返回 `{classId, className, deviceName, success, message, profileJson, errors}`，成功项已规范化。离线、旧插件、无权管理的班级都逐班报告（无权班级以“无权访问的班级”代替名称，不泄露班级名）；所选班级一个都不能管理时整体返回 403。
 - 页面处理器 `?handler=Collect`（班级页锁定当前班级），REST `POST /api/profiles/collect`。
 - 下发：`mode=4` 时不要求 `sections`，按 `tempLayerIds` 构建载荷，要求 `profile.temp-layer` 能力。
 
@@ -76,6 +76,7 @@
 - 插件：`ReadProfile` 回执、`TempLayers` 的跳过过期、同日冲突（拒绝/替换）、时间表一致时引用/不同时生成临时层时间表、今天设置当前临时层、替换常规课表保留临时层；宿主适配器写回 `IsOverlayClassPlanEnabled`。
 - 服务端：收集的权限、离线、旧插件、成功回执与规范化；临时层下发的能力校验与载荷；通用通道拒绝 `ReadProfile`；REST 收集。
 - 前端：临时层列表、新建、改日期、删除、清理过期的纯函数测试。
+- 真机（2026-10-09）：在用户 ClassIsland 2.1.0.1 的隔离副本（改名互斥锁、全新数据目录）中安装本次构建的插件，经本地服务端 REST 接口依次执行：收集（宿主真实序列化通过校验）→ 合并常规内容 → 作为临时层下发今天与 3 天后（今天设为当前临时层、未来使用临时层时间表且常规时间表不变、换课节次标记正确）→ 同日冲突未确认被拒并列出日期、确认后替换 → 重新收集带回临时层 → 整体替换课表后临时层保留 → 创建并启用新档案（新档案文件写入、`SelectedProfile` 切换）。14 项检查全部通过。注意：测试用插件版本须高于插件市场已发布版本，否则宿主启动时会被市场自动更新覆盖。
 
 ## 9. 实现中追加的行为
 

@@ -10,9 +10,9 @@ public sealed class LanSessionLogicTests
     [Fact]
     public void ExtensionSettings_AreServerOnlyOverLan()
     {
-        Assert.True(LanSessionLogic.IsServerOnly(CommandKind.ApplyExtensionSettings));
-        Assert.False(LanSessionLogic.IsServerOnly(CommandKind.RunExtension));
-        Assert.False(LanSessionLogic.IsServerOnly(CommandKind.SendNotification));
+        Assert.True(CommandPermissions.IsServerOnly(CommandKind.ApplyExtensionSettings));
+        Assert.False(CommandPermissions.IsServerOnly(CommandKind.RunExtension));
+        Assert.False(CommandPermissions.IsServerOnly(CommandKind.SendNotification));
     }
 
     [Fact]

@@ -71,12 +71,7 @@ public static class ProfileEndpoints
         profiles.MapPost("/collect", (ProfileCollectRequest body, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
         {
             var results = await services.GetRequiredService<ProfileDispatchService>().CollectAsync(actor, body, ct: ct);
-            return Results.Ok(new
-            {
-                success = results.Any(x => x.Success),
-                results,
-                message = $"已收集 {results.Count(x => x.Success)} 个班级，失败 {results.Count(x => !x.Success)} 个。",
-            });
+            return Results.Ok(new { success = results.Any(x => x.Success), results, message = ProfileCollectResult.Summary(results) });
         }));
 
         // 只下发已保存的修订版本；应用方式、类别与目标都必须显式给出，与 WebUI 的确认步骤一致。

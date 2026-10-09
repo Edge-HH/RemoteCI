@@ -134,21 +134,25 @@ public sealed class ProfileDispatchService(ProfileLibraryService library, Device
         List<Guid> classIds = onlyClass is { } fixedClass ? [fixedClass] : input.ClassIds.Distinct().ToList();
         if (classIds.Count is < 1 or > 100) throw new ArgumentException("请选择 1 至 100 个班级收集档案。");
         // 权限与数据库查询在并发发送前串行完成，DbContext 不支持并发访问。
+        var manageable = new HashSet<Guid>();
         foreach (var classId in classIds)
-            if (!await library.CanManageClassAsync(actor, classId, ct)) throw new UnauthorizedAccessException("不能收集其他班级的档案。");
+            if (await library.CanManageClassAsync(actor, classId, ct)) manageable.Add(classId);
+        // 一个班都不能管理时整体拒绝；混有无权班级时逐班报告，且不回显这些班级的名称。
+        if (manageable.Count == 0) throw new UnauthorizedAccessException("没有管理所选班级档案的权限。");
         var names = (await classrooms.ListAsync(ct)).ToDictionary(x => x.Id, x => x.Name);
         var inventory = await devices.ListAsync(ct);
         var snapshots = peers.GetPluginDeviceSnapshots();
-        var targetIdentities = await IdentitiesAsync(actor, classIds, ct);
+        var targetIdentities = await IdentitiesAsync(actor, manageable, ct);
 
         var tasks = classIds.Select(async classId =>
         {
+            if (!manageable.Contains(classId))
+                return ProfileCollectResult.Failure(classId, "无权访问的班级", null, "没有管理此班级档案的权限。");
             var className = names.GetValueOrDefault(classId) ?? "未知班级";
             if (PrimaryDevice(classId, snapshots, inventory) is not { ConnectionId: { } connectionId } device)
-                return new ProfileCollectResult(classId, className, null, false, "班级设备未在线，无法收集。", null, []);
+                return ProfileCollectResult.Failure(classId, className, null, "班级设备未在线，无法收集。");
             if (!device.Capabilities.Contains(RemoteCiCapabilities.ProfileRead))
-                return new ProfileCollectResult(classId, className, device.DeviceName, false,
-                    "当前插件不支持收集档案，请升级 RemoteCI 插件后重试。", null, []);
+                return ProfileCollectResult.Failure(classId, className, device.DeviceName, "当前插件不支持收集档案，请升级 RemoteCI 插件后重试。");
             var reply = await peers.SendCommandAndWaitToConnectionAsync(new CommandMessage
             {
                 Command = CommandKind.ReadProfile,
@@ -156,7 +160,7 @@ public sealed class ProfileDispatchService(ProfileLibraryService library, Device
                 RequestedBy = targetIdentities[classId],
             }, connectionId, CommandTimeout, ct);
             if (!reply.Success)
-                return new ProfileCollectResult(classId, className, device.DeviceName, false, reply.Message, null, []);
+                return ProfileCollectResult.Failure(classId, className, device.DeviceName, reply.Message);
             try
             {
                 var json = ProfileDocument.NormalizeCollected(reply.Data ?? string.Empty);
@@ -166,7 +170,7 @@ public sealed class ProfileDispatchService(ProfileLibraryService library, Device
             }
             catch (ArgumentException ex)
             {
-                return new ProfileCollectResult(classId, className, device.DeviceName, false, $"设备返回的档案无效：{ex.Message}", null, []);
+                return ProfileCollectResult.Failure(classId, className, device.DeviceName, $"设备返回的档案无效：{ex.Message}");
             }
         });
         return await Task.WhenAll(tasks);
@@ -234,4 +238,12 @@ public sealed class ProfileCollectRequest
 
 /// <summary>收集结果只作草稿返回；ProfileJson 仅在成功时提供。</summary>
 public sealed record ProfileCollectResult(Guid ClassId, string ClassName, string? DeviceName, bool Success, string Message,
-    string? ProfileJson, IReadOnlyList<string> Errors);
+    string? ProfileJson, IReadOnlyList<string> Errors)
+{
+    public static ProfileCollectResult Failure(Guid classId, string className, string? deviceName, string message) =>
+        new(classId, className, deviceName, false, message, null, []);
+
+    /// <summary>WebUI 与 REST 共用的汇总文案。</summary>
+    public static string Summary(IReadOnlyList<ProfileCollectResult> results) =>
+        $"已收集 {results.Count(x => x.Success)} 个班级，失败 {results.Count(x => !x.Success)} 个。收集结果尚未保存。";
+}

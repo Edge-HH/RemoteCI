@@ -191,6 +191,13 @@ public enum PowerActionKind
 
 public static class CommandPermissions
 {
+    /// <summary>
+    /// 只能由服务端专用管理入口构造并定向发送的命令：服务端要按班级自治策略、档案修订号等复核，
+    /// 通用 REST 命令接口、手机/手表命令通道和插件局域网直连一律拒绝。各通道共用这一份清单。
+    /// </summary>
+    public static bool IsServerOnly(CommandKind command) =>
+        command is CommandKind.ApplyExtensionSettings or CommandKind.ApplyProfile or CommandKind.ReadProfile;
+
     public static UserPermissions Required(CommandKind command) => command switch
     {
         CommandKind.ChangeSchedule or CommandKind.SetSubjectTeacher or CommandKind.ApplyProfile or CommandKind.ReadProfile => UserPermissions.ManageSchedule,

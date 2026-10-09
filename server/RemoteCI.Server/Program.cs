@@ -479,18 +479,17 @@ app.MapPost("/api/commands", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    // 档案的读取与应用仅由档案管理入口校验班级身份与修订号，不能通过通用命令 API 绕过。
-    if (command.Command is CommandKind.ApplyProfile or CommandKind.ReadProfile)
-        return Results.Json(Error(ApiErrorCodes.Forbidden,
-            "请通过档案管理页面、POST /api/profiles/collect 或 POST /api/profiles/apply 收集与下发档案"), statusCode: StatusCodes.Status403Forbidden);
+    // 档案与扩展设置只能经各自的专用入口复核班级身份、自治策略与修订号，不能通过通用命令 API 绕过。
+    if (CommandPermissions.IsServerOnly(command.Command))
+        return command.Command == CommandKind.ApplyExtensionSettings
+            ? Results.BadRequest(Error(ApiErrorCodes.InvalidRequest,
+                "请使用 PUT /api/classes/{classId}/extension-groups/{groupId}/settings 修改扩展设置"))
+            : Results.Json(Error(ApiErrorCodes.Forbidden,
+                "请通过档案管理页面、POST /api/profiles/collect 或 POST /api/profiles/apply 收集与下发档案"), statusCode: StatusCodes.Status403Forbidden);
     if (await ResolveClassAsync(principal, command.ClassId ?? classId, access, ct) is not { } target) return Forbidden();
     command.ClassId = target;
     var classPermissions = await access.GetEffectivePermissionsAsync(
         principal.User.Id, principal.User.Role, target, principal.User.GrantedPermissions, ct);
-    // 扩展设置需要按班级自治策略复核，只能走专用的扩展设置接口。
-    if (command.Command == CommandKind.ApplyExtensionSettings)
-        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest,
-            "请使用 PUT /api/classes/{classId}/extension-groups/{groupId}/settings 修改扩展设置"));
     if (command.Command == CommandKind.RunExtension)
     {
         // 与 WS 路径一致：独立扩展权限和管理员逐扩展策略必须同时通过。

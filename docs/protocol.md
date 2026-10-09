@@ -214,7 +214,7 @@ WebUI 的档案读写通过带 Cookie 与防伪令牌的 Razor Page handlers 完
 
 ### 收集设备档案
 
-命令值 26 为 `ReadProfile`，能力标识 `profile.read`，需要 `ManageSchedule`，无载荷。插件在 UI 线程把当前内存档案序列化为 JSON，放在 `CommandResult.data` 中返回；超过 5 MB 返回失败。服务端逐班校验管理权限后，向每班在线插件并发发送（20 秒超时），离线、缺少 `profile.read` 或执行失败逐班报告。成功结果按宿主 `RefreshClassesList` 规则把课程数补齐或截断为上课时段数，并清除悬空的临时课表指针与预定课表，然后连同剩余校验错误返回给调用方。收集结果**只作草稿**：WebUI 载入班级草稿（保留服务端档案 ID 与修订号，保存时照常校验修订号）或新的全局模板草稿，保存前不写入档案库。入口为页面 handler `Collect` 和 `POST /api/profiles/collect`（请求体 `{ "classIds": [...] }`，班级页固定当前班级）。
+命令值 26 为 `ReadProfile`，能力标识 `profile.read`，需要 `ManageSchedule`，无载荷。插件在 UI 线程把当前内存档案序列化为 JSON，放在 `CommandResult.data` 中返回；超过 5 MB 返回失败。服务端逐班校验管理权限后，向每班在线插件并发发送（20 秒超时），离线、缺少 `profile.read`、无权管理（不回显该班名称）或执行失败逐班报告；所选班级一个都不能管理时整体返回 403。成功结果按宿主 `RefreshClassesList` 规则把课程数补齐或截断为上课时段数，并清除悬空的临时课表指针与预定课表，然后连同剩余校验错误返回给调用方。收集结果**只作草稿**：WebUI 载入班级草稿（保留服务端档案 ID 与修订号，保存时照常校验修订号）或新的全局模板草稿，保存前不写入档案库。入口为页面 handler `Collect` 和 `POST /api/profiles/collect`（请求体 `{ "classIds": [...] }`，班级页固定当前班级）。
 
 ### 临时层
 

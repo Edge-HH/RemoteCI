@@ -26,12 +26,6 @@ internal static class LanSessionLogic
     public static string CommandDeniedMessage(bool mirrorExpired) =>
         mirrorExpired ? "授权镜像超过 24 小时，仅允许查看课程" : "权限不足";
 
-    /// <summary>
-    /// 只能经服务端下发的命令：扩展设置需要服务端按“系统管理员或获准的班主任”复核，
-    /// 局域网授权镜像不包含班级自治策略，因此局域网直连一律拒绝。
-    /// </summary>
-    public static bool IsServerOnly(CommandKind command) =>
-        command is CommandKind.ApplyExtensionSettings or CommandKind.ApplyProfile or CommandKind.ReadProfile;
-
+    /// <summary>局域网授权镜像不包含班级自治策略和档案修订号，<see cref="CommandPermissions.IsServerOnly"/> 的命令直连时使用此回执。</summary>
     public const string ServerOnlyMessage = "扩展设置以及档案的收集、下发只能在 RemoteCI 服务端 WebUI 中进行";
 }

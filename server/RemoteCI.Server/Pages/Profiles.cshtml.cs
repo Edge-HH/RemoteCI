@@ -67,8 +67,7 @@ public class ProfilesModel(
     public Task<IActionResult> OnPostCollectAsync([FromBody] ProfileCollectRequest input, CancellationToken ct) => JsonActionAsync(async () =>
     {
         var results = await dispatch.CollectAsync(CurrentUser, input, OnlyClass, ct);
-        return new { success = results.Any(x => x.Success), results,
-            message = $"已收集 {results.Count(x => x.Success)} 个班级，失败 {results.Count(x => !x.Success)} 个。收集结果尚未保存。" };
+        return new { success = results.Any(x => x.Success), results, message = ProfileCollectResult.Summary(results) };
     }, ct);
 
     public async Task<IActionResult> OnGetExportAsync(Guid id, CancellationToken ct)
