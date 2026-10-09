@@ -14,7 +14,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://0.0.0.0:8080
-      # 标记 fnOS 运行环境，WebUI 提示用户通过应用中心安装 GitHub Release 中的 FPK。
+      # 标记 fnOS 运行环境。WebUI 自更新会把新版本装到数据卷（/app/data/app），
+      # 由镜像入口脚本启动；之后在应用中心安装新 FPK 时自动改用 FPK 内的版本。
       REMOTECI_RUNTIME: fnos
       REMOTECI_ADMIN_PASSWORD: "${remoteci_admin_password:-}"
       REMOTECI_PLUGIN_PAIR_CODE: "${remoteci_plugin_pair_code:-}"

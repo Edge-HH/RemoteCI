@@ -9,11 +9,18 @@ RUN if [ -n "$REMOTECI_VERSION" ]; then version_arg="-p:Version=$REMOTECI_VERSIO
     dotnet publish server/RemoteCI.Server/RemoteCI.Server.csproj -c Release $version_arg -o /app/publish
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+ARG REMOTECI_VERSION
 WORKDIR /app
 COPY --from=build /app/publish .
+# 入口脚本优先运行 WebUI 自更新安装到数据卷的版本（容器重建后仍然有效）。
+# IMAGE_VERSION 附带构建时间：镜像任何一次重建都会让旧镜像上安装的自更新版本作废。
+COPY server/RemoteCI.Server/docker-entrypoint.sh /usr/local/bin/remoteci-entrypoint
+RUN sed -i 's/\r$//' /usr/local/bin/remoteci-entrypoint \
+    && chmod 755 /usr/local/bin/remoteci-entrypoint \
+    && printf '%s+%s\n' "${REMOTECI_VERSION:-dev}" "$(date -u +%Y%m%d%H%M%S)" > /app/IMAGE_VERSION
 
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080
 ENV Server__DatabasePath=/app/data/remoteci.db
 VOLUME ["/app/data"]
-ENTRYPOINT ["dotnet", "RemoteCI.Server.dll"]
+ENTRYPOINT ["/usr/local/bin/remoteci-entrypoint"]

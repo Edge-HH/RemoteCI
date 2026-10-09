@@ -19,7 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        rid: [linux-x64, win-x64]
+        # linux-arm64 供 ARM 设备（含 ARM fnOS 容器）在 WebUI 中自更新。
+        rid: [linux-x64, linux-arm64, win-x64]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6

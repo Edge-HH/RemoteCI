@@ -1155,8 +1155,8 @@ app.MapGet("/api/admin/system", async (HttpContext ctx, IdentityCoordinator iden
     return Results.Ok(new
     {
         currentVersion = updates.CurrentVersion,
-        canSelfUpdate = UpdateService.CanSelfUpdate(development, UpdateService.IsFnosRuntime),
-        message = UpdateService.IsFnosRuntime ? UpdateService.FnosManagedMessage : "",
+        canSelfUpdate = UpdateService.CanSelfUpdateNow(development),
+        message = UpdateService.CurrentApplyMode == UpdateApplyMode.ManagedByPlatform ? UpdateService.FnosManagedMessage : "",
     });
 });
 app.MapPost("/api/admin/updates/check", async (UpdateCheckBody body, HttpContext ctx, IdentityCoordinator identities, UpdateService updates, CancellationToken ct) =>

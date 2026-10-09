@@ -772,7 +772,8 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var responseHtml = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
-            Assert.Contains("由 fnOS 应用中心管理，请从 GitHub Releases 下载 FPK 手动升级。", responseHtml);
+            // 没有容器入口脚本的旧 fnOS 镜像仍提示先手动安装一次新版 FPK。
+            Assert.Contains(UpdateService.FnosManagedMessage, responseHtml);
         }
         finally
         {

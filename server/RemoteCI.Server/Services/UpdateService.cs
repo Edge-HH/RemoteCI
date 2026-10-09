@@ -26,6 +26,23 @@ public enum UpdateApplyMode
     ManagedByPlatform,
     InProcessContainer,
     ExternalInstaller,
+    /// <summary>装到数据卷，由容器入口脚本启动（容器重建后仍然有效，见 docker-entrypoint.sh）。</summary>
+    PersistentOverlay,
+}
+
+/// <summary>容器入口脚本声明的数据卷安装位置及当前镜像版本；旧镜像没有入口脚本时不存在。</summary>
+public sealed record OverlayRuntime(string Directory, string ImageVersion)
+{
+    public const string DirectoryEnvVar = "REMOTECI_OVERLAY_DIR";
+    public const string ImageVersionEnvVar = "REMOTECI_IMAGE_VERSION";
+    public const string BaseImageVersionFile = ".base-image-version";
+    public const string PendingStartFile = ".pending-start";
+
+    public static OverlayRuntime? FromEnvironment() =>
+        Environment.GetEnvironmentVariable(DirectoryEnvVar) is { Length: > 0 } directory &&
+        Environment.GetEnvironmentVariable(ImageVersionEnvVar) is { Length: > 0 } version
+            ? new OverlayRuntime(directory, version)
+            : null;
 }
 
 public enum UpdateChannel
@@ -45,7 +62,8 @@ public sealed record PreparedUpdate(
 /// </summary>
 public sealed class UpdateService
 {
-    public const string FnosManagedMessage = "由 fnOS 应用中心管理，请从 GitHub Releases 下载 FPK 手动升级。";
+    public const string FnosManagedMessage =
+        "当前 fnOS 应用镜像不支持自更新：请从 GitHub Releases 下载新版 FPK 在应用中心手动安装一次，之后即可在 WebUI 中直接更新。";
     public const string DevelopmentManagedMessage = "开发环境由 Visual Studio 或 dotnet build 管理，已禁用 WebUI 覆盖更新。";
     private const string Repo = "Edge-HH/RemoteCI";
     private const string ReleasesApiUrl = $"https://api.github.com/repos/{Repo}/releases?per_page=20";
@@ -82,22 +100,29 @@ public sealed class UpdateService
             "true",
             StringComparison.OrdinalIgnoreCase);
 
-    public static UpdateApplyMode DetermineApplyMode(bool isFnos, bool isContainer) =>
-        isFnos
-            ? UpdateApplyMode.ManagedByPlatform
-            : isContainer
-                ? UpdateApplyMode.InProcessContainer
-                : UpdateApplyMode.ExternalInstaller;
+    /// <summary>
+    /// 带入口脚本的镜像（含 fnOS）把更新装到数据卷；没有入口脚本的旧 fnOS 镜像只能由应用中心升级，
+    /// 因为就地覆盖的文件会在应用中心重建容器时丢失。
+    /// </summary>
+    public static UpdateApplyMode DetermineApplyMode(bool isFnos, bool isContainer, bool hasOverlay = false) =>
+        hasOverlay
+            ? UpdateApplyMode.PersistentOverlay
+            : isFnos
+                ? UpdateApplyMode.ManagedByPlatform
+                : isContainer
+                    ? UpdateApplyMode.InProcessContainer
+                    : UpdateApplyMode.ExternalInstaller;
+
+    public static OverlayRuntime? CurrentOverlay => OverlayRuntime.FromEnvironment();
 
     public static UpdateApplyMode CurrentApplyMode =>
-        DetermineApplyMode(IsFnosRuntime, IsContainerRuntime);
+        DetermineApplyMode(IsFnosRuntime, IsContainerRuntime, CurrentOverlay is not null);
 
-    /// <summary>
-    /// 开发环境的 ContentRoot 通常就是源码目录，绝不能让 release 覆盖；
-    /// fnOS 则必须继续由应用中心管理，不能由容器内进程覆盖安装文件。
-    /// </summary>
-    public static bool CanSelfUpdate(bool isDevelopment, bool isFnos) =>
-        !isDevelopment && !isFnos;
+    /// <summary>开发环境的 ContentRoot 通常就是源码目录，绝不能让 release 覆盖；平台托管的旧镜像也不能自更新。</summary>
+    public static bool CanSelfUpdate(bool isDevelopment, UpdateApplyMode mode) =>
+        !isDevelopment && mode != UpdateApplyMode.ManagedByPlatform;
+
+    public static bool CanSelfUpdateNow(bool isDevelopment) => CanSelfUpdate(isDevelopment, CurrentApplyMode);
 
     /// <summary>
     /// 正式部署只替换实际运行程序集所在目录，不使用可能指向源码或外部内容目录的 ContentRoot。
@@ -292,8 +317,17 @@ public sealed class UpdateService
         if (mode == UpdateApplyMode.ManagedByPlatform)
             throw new InvalidOperationException(FnosManagedMessage);
 
+        if (mode == UpdateApplyMode.PersistentOverlay)
+        {
+            EnsureRuntimeCompatible(update.ExtractedDirectory, Environment.Version);
+            await ApplyOverlayAsync(update.ExtractedDirectory, contentRoot, CurrentOverlay!, ct);
+            TryDeleteStaging(update.StagingDirectory);
+            return mode;
+        }
+
         if (mode == UpdateApplyMode.InProcessContainer)
         {
+            EnsureRuntimeCompatible(update.ExtractedDirectory, Environment.Version);
             await UpdateInstaller.ApplyFilesAsync(update.ExtractedDirectory, contentRoot, ct);
             // 容器内就地覆盖成功后清理暂存目录，避免更新包长期占用数据卷空间。
             TryDeleteStaging(update.StagingDirectory);
@@ -302,6 +336,69 @@ public sealed class UpdateService
 
         StartExternalInstaller(update, contentRoot);
         return mode;
+    }
+
+    /// <summary>
+    /// 把更新包装到数据卷中的持久化目录：先完整写到 .next 再整体替换，容器入口脚本下次启动时运行它。
+    /// 当前若正运行在旧的数据卷版本中，Linux 允许移走正在使用的目录，进程退出后由入口脚本清理。
+    /// </summary>
+    internal static async Task ApplyOverlayAsync(
+        string extractedDirectory, string runningDirectory, OverlayRuntime overlay, CancellationToken ct)
+    {
+        var target = Path.GetFullPath(overlay.Directory);
+        var next = target + ".next";
+        var old = target + ".old";
+        if (Directory.Exists(next)) Directory.Delete(next, recursive: true);
+        foreach (var file in Directory.EnumerateFiles(extractedDirectory, "*", SearchOption.AllDirectories))
+        {
+            ct.ThrowIfCancellationRequested();
+            var destination = Path.Combine(next, Path.GetRelativePath(extractedDirectory, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(file, destination, overwrite: true);
+        }
+        if (!File.Exists(Path.Combine(next, "RemoteCI.Server.dll")))
+            throw new InvalidDataException("更新包缺少 RemoteCI.Server.dll，拒绝安装。");
+        // 与其他安装方式一致：保留本机正在使用的配置文件，不用更新包里的默认值覆盖。
+        foreach (var name in UpdateInstaller.PreservedFileNames)
+        {
+            var local = Path.Combine(runningDirectory, name);
+            if (File.Exists(local)) File.Copy(local, Path.Combine(next, name), overwrite: true);
+        }
+        await File.WriteAllTextAsync(Path.Combine(next, OverlayRuntime.BaseImageVersionFile), overlay.ImageVersion, ct);
+        await File.WriteAllTextAsync(Path.Combine(next, OverlayRuntime.PendingStartFile), string.Empty, ct);
+
+        if (Directory.Exists(old)) Directory.Delete(old, recursive: true);
+        if (Directory.Exists(target)) Directory.Move(target, old);
+        Directory.Move(next, target);
+        try { Directory.Delete(old, recursive: true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // 入口脚本下次启动时会清理残留的 .old 目录。
+        }
+    }
+
+    /// <summary>
+    /// 容器内使用镜像自带的共享运行时：新版本要求更高的 .NET 主版本时只能换镜像，
+    /// 否则重启后会因找不到运行时而反复崩溃。
+    /// </summary>
+    internal static void EnsureRuntimeCompatible(string extractedDirectory, Version runtimeVersion)
+    {
+        var config = Path.Combine(extractedDirectory, "RemoteCI.Server.runtimeconfig.json");
+        if (!File.Exists(config)) return;
+        using var document = JsonDocument.Parse(File.ReadAllText(config));
+        if (!document.RootElement.TryGetProperty("runtimeOptions", out var options)) return;
+        var frameworks = new List<JsonElement>();
+        if (options.TryGetProperty("framework", out var single)) frameworks.Add(single);
+        if (options.TryGetProperty("frameworks", out var many) && many.ValueKind == JsonValueKind.Array)
+            frameworks.AddRange(many.EnumerateArray());
+        foreach (var framework in frameworks)
+        {
+            if (framework.TryGetProperty("version", out var versionText) &&
+                Version.TryParse(versionText.GetString(), out var required) &&
+                required.Major > runtimeVersion.Major)
+                throw new InvalidOperationException(
+                    $"新版本需要 .NET {required.Major} 运行时，当前镜像为 .NET {runtimeVersion.Major}；请从 GitHub Releases 下载新版 FPK 或镜像手动升级。");
+        }
     }
 
     /// <summary>更新包统一存放在数据库同级目录的 updates 子目录。</summary>

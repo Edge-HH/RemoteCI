@@ -1,0 +1,2 @@
+# 容器与 fnOS 脚本在 Linux 中执行，必须保持 LF 换行。
+*.sh text eol=lf

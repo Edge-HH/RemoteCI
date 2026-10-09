@@ -37,6 +37,9 @@ public sealed class SystemConfigModel(
     public string? CheckMessage { get; private set; }
     public bool UpdateSucceeded { get; private set; }
     public bool IsFnos => UpdateService.IsFnosRuntime;
+    /// <summary>没有容器入口脚本的旧 fnOS 镜像：只能在应用中心安装新版 FPK。</summary>
+    public bool IsPlatformManaged => UpdateService.CurrentApplyMode == UpdateApplyMode.ManagedByPlatform;
+    public bool UsesPersistentOverlay => UpdateService.CurrentApplyMode == UpdateApplyMode.PersistentOverlay;
     public bool IsDevelopment => environment.IsDevelopment();
     public UpdateChannel SelectedUpdateChannel =>
         UpdateOptions.Channel == UpdateChannel.Beta ? UpdateChannel.Beta : UpdateChannel.Stable;
@@ -77,9 +80,9 @@ public sealed class SystemConfigModel(
     {
         if (await RequireAdminAsync() is { } denied) return denied;
         await LoadBackupAsync();
-        if (!UpdateService.CanSelfUpdate(IsDevelopment, IsFnos))
+        if (!UpdateService.CanSelfUpdateNow(IsDevelopment))
         {
-            CheckMessage = IsFnos
+            CheckMessage = IsPlatformManaged
                 ? UpdateService.FnosManagedMessage
                 : UpdateService.DevelopmentManagedMessage;
             return Page();
@@ -114,9 +117,9 @@ public sealed class SystemConfigModel(
     {
         if (await RequireAdminAsync() is { } denied) return denied;
         await LoadBackupAsync();
-        if (!UpdateService.CanSelfUpdate(IsDevelopment, IsFnos))
+        if (!UpdateService.CanSelfUpdateNow(IsDevelopment))
         {
-            CheckMessage = IsFnos
+            CheckMessage = IsPlatformManaged
                 ? UpdateService.FnosManagedMessage
                 : UpdateService.DevelopmentManagedMessage;
             return Page();

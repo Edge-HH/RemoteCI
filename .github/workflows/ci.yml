@@ -99,6 +99,44 @@ jobs:
           chmod +x gradlew
           ./gradlew :app:assembleDebug :app:testDebugUnitTest --console=plain
 
+  container:
+    # 构建服务端镜像并验证入口脚本：WebUI 自更新装到数据卷的版本会在容器重启后被真正启用。
+    name: container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: 构建镜像并验证自更新入口
+        run: |
+          set -euo pipefail
+          docker build -f server/RemoteCI.Server/Dockerfile --build-arg REMOTECI_VERSION=3.0.0.0 -t remoteci-ci .
+          docker volume create remoteci-ci-data
+          start() {
+            docker run -d --name remoteci-ci -v remoteci-ci-data:/app/data -p 127.0.0.1:18080:8080 \
+              -e REMOTECI_ADMIN_PASSWORD=CiAdminPassword -e REMOTECI_PLUGIN_PAIR_CODE=CiPairCode remoteci-ci
+            for _ in $(seq 1 90); do
+              curl -fsS http://127.0.0.1:18080/api/health >/dev/null && return 0
+              sleep 1
+            done
+            docker logs remoteci-ci
+            return 1
+          }
+          entry() { docker exec remoteci-ci cat /proc/1/cmdline | tr '\0' ' '; }
+          start
+          test "$(entry)" = "dotnet /app/RemoteCI.Server.dll "
+          # 模拟一次 WebUI 自更新：把镜像中的程序（不含数据卷）装到数据卷，并标记为待验证启动。
+          docker exec remoteci-ci sh -c 'mkdir /app/data/app.next \
+            && tar -C /app --exclude=./data --exclude=./IMAGE_VERSION -cf - . | tar -C /app/data/app.next -xf - \
+            && cp /app/IMAGE_VERSION /app/data/app.next/.base-image-version \
+            && : > /app/data/app.next/.pending-start \
+            && mv /app/data/app.next /app/data/app'
+          # 删除并重建容器（与 fnOS 应用中心重启应用相同），数据卷中的版本必须被启用并通过启动验证。
+          docker rm -f remoteci-ci
+          start
+          test "$(entry)" = "dotnet /app/data/app/RemoteCI.Server.dll "
+          docker exec remoteci-ci test -f /app/data/app/.started
+          docker rm -f remoteci-ci
+          docker volume rm remoteci-ci-data
+
   fnos:
     name: fnos fpk 打包检查
     runs-on: ubuntu-latest
@@ -123,6 +161,7 @@ jobs:
             bash fnos/build.sh
 
           bash fnos/tests/test-arch-compat.sh
+          bash fnos/tests/test-container-entrypoint.sh
           python3 fnos/tests/verify-package.py "artifacts/release/RemoteCI-${version}.fpk" "$version" online all
           python3 fnos/tests/verify-package.py \
             "artifacts/release/RemoteCI-${version}-fnos-x86_64-offline.fpk" "$version" offline amd64

@@ -36,6 +36,9 @@ public static class UpdateInstaller
     private static readonly string[] NeverOverwriteFiles =
         ["appsettings.json", "appsettings.Development.json", "appsettings.Production.json", "web.config"];
 
+    /// <summary>更新时保留本机版本、不用更新包覆盖的配置文件。</summary>
+    internal static IReadOnlyList<string> PreservedFileNames => NeverOverwriteFiles;
+
     public static async Task<bool> TryRunAsync(string[] args, CancellationToken ct = default)
     {
         if (args.Length != 2 || !string.Equals(args[0], Command, StringComparison.Ordinal)) return false;

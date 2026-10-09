@@ -99,24 +99,90 @@ public sealed class UpdateServiceTests
     }
 
     [Theory]
-    [InlineData(true, false, UpdateApplyMode.ManagedByPlatform)]
-    [InlineData(false, true, UpdateApplyMode.InProcessContainer)]
-    [InlineData(false, false, UpdateApplyMode.ExternalInstaller)]
+    [InlineData(true, false, false, UpdateApplyMode.ManagedByPlatform)]
+    [InlineData(true, true, true, UpdateApplyMode.PersistentOverlay)]
+    [InlineData(false, true, true, UpdateApplyMode.PersistentOverlay)]
+    [InlineData(false, true, false, UpdateApplyMode.InProcessContainer)]
+    [InlineData(false, false, false, UpdateApplyMode.ExternalInstaller)]
     public void DetermineApplyMode_SelectsSafeStrategyForRuntime(
         bool isFnos,
         bool isContainer,
+        bool hasOverlay,
         UpdateApplyMode expected) =>
-        Assert.Equal(expected, UpdateService.DetermineApplyMode(isFnos, isContainer));
+        Assert.Equal(expected, UpdateService.DetermineApplyMode(isFnos, isContainer, hasOverlay));
 
     [Theory]
-    [InlineData(true, false, false)]
-    [InlineData(false, true, false)]
-    [InlineData(false, false, true)]
+    [InlineData(true, UpdateApplyMode.ExternalInstaller, false)]
+    [InlineData(false, UpdateApplyMode.ManagedByPlatform, false)]
+    [InlineData(false, UpdateApplyMode.PersistentOverlay, true)]
+    [InlineData(false, UpdateApplyMode.InProcessContainer, true)]
+    [InlineData(false, UpdateApplyMode.ExternalInstaller, true)]
     public void CanSelfUpdate_BlocksDevelopmentAndPlatformManagedRuntimes(
         bool isDevelopment,
-        bool isFnos,
+        UpdateApplyMode mode,
         bool expected) =>
-        Assert.Equal(expected, UpdateService.CanSelfUpdate(isDevelopment, isFnos));
+        Assert.Equal(expected, UpdateService.CanSelfUpdate(isDevelopment, mode));
+
+    [Fact]
+    public async Task ApplyOverlay_InstallsIntoDataVolumeAndKeepsLocalConfiguration()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "RemoteCI.Tests", Guid.NewGuid().ToString("N"));
+        var extracted = Path.Combine(root, "extracted");
+        var running = Path.Combine(root, "image");
+        var overlay = Path.Combine(root, "data", "app");
+        Directory.CreateDirectory(Path.Combine(extracted, "wwwroot"));
+        Directory.CreateDirectory(running);
+        File.WriteAllText(Path.Combine(extracted, "RemoteCI.Server.dll"), "new");
+        File.WriteAllText(Path.Combine(extracted, "wwwroot", "app.css"), "new-css");
+        File.WriteAllText(Path.Combine(extracted, "appsettings.json"), "{\"package\":true}");
+        File.WriteAllText(Path.Combine(running, "appsettings.json"), "{\"local\":true}");
+        // 已有的旧自更新版本会被整体替换，不残留旧文件。
+        Directory.CreateDirectory(overlay);
+        File.WriteAllText(Path.Combine(overlay, "obsolete.dll"), "old");
+
+        await UpdateService.ApplyOverlayAsync(extracted, running, new OverlayRuntime(overlay, "3.3.0.2+1"), CancellationToken.None);
+
+        Assert.Equal("new", File.ReadAllText(Path.Combine(overlay, "RemoteCI.Server.dll")));
+        Assert.Equal("new-css", File.ReadAllText(Path.Combine(overlay, "wwwroot", "app.css")));
+        Assert.Equal("{\"local\":true}", File.ReadAllText(Path.Combine(overlay, "appsettings.json")));
+        Assert.Equal("3.3.0.2+1", File.ReadAllText(Path.Combine(overlay, OverlayRuntime.BaseImageVersionFile)));
+        Assert.True(File.Exists(Path.Combine(overlay, OverlayRuntime.PendingStartFile)));
+        Assert.False(File.Exists(Path.Combine(overlay, "obsolete.dll")));
+        Assert.False(Directory.Exists(overlay + ".next"));
+        Assert.False(Directory.Exists(overlay + ".old"));
+    }
+
+    [Fact]
+    public async Task ApplyOverlay_RejectsPackageWithoutServerAssemblyAndKeepsCurrentVersion()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "RemoteCI.Tests", Guid.NewGuid().ToString("N"));
+        var extracted = Path.Combine(root, "extracted");
+        var overlay = Path.Combine(root, "data", "app");
+        Directory.CreateDirectory(extracted);
+        Directory.CreateDirectory(overlay);
+        File.WriteAllText(Path.Combine(overlay, "RemoteCI.Server.dll"), "current");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => UpdateService.ApplyOverlayAsync(
+            extracted, root, new OverlayRuntime(overlay, "3.3.0.2+1"), CancellationToken.None));
+
+        Assert.Equal("current", File.ReadAllText(Path.Combine(overlay, "RemoteCI.Server.dll")));
+    }
+
+    [Theory]
+    [InlineData("""{"runtimeOptions":{"framework":{"name":"Microsoft.AspNetCore.App","version":"10.0.0"}}}""", true)]
+    [InlineData("""{"runtimeOptions":{"frameworks":[{"name":"Microsoft.NETCore.App","version":"11.0.0"}]}}""", false)]
+    [InlineData("""{"runtimeOptions":{"includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"11.0.0"}]}}""", true)]
+    public void EnsureRuntimeCompatible_RejectsNewerSharedRuntime(string runtimeConfig, bool compatible)
+    {
+        var extracted = Path.Combine(Path.GetTempPath(), "RemoteCI.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(extracted);
+        File.WriteAllText(Path.Combine(extracted, "RemoteCI.Server.runtimeconfig.json"), runtimeConfig);
+
+        var error = Record.Exception(() => UpdateService.EnsureRuntimeCompatible(extracted, new Version(10, 0, 3)));
+
+        if (compatible) Assert.Null(error);
+        else Assert.IsType<InvalidOperationException>(error);
+    }
 
     [Fact]
     public void ResolveInstallDirectory_UsesApplicationDirectoryInsteadOfContentRoot()
