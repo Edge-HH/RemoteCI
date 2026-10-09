@@ -8,6 +8,8 @@ public enum ProfileApplyMode
     MergeCurrent = 1,
     ReplaceSections = 2,
     CreateAndActivate = 3,
+    /// <summary>把载荷中按日期安排的临时层写入设备，不改动设备的常规课表与时间表。</summary>
+    TempLayers = 4,
 }
 
 public sealed class ProfileApplyRequest
@@ -44,4 +46,8 @@ public sealed class ProfileApplyRequest
 
     [JsonPropertyName("restartAfter")]
     public bool RestartAfter { get; set; }
+
+    /// <summary>临时层下发时，设备同日已有临时层或预定课表是否替换；为 false 时设备拒绝并说明日期。</summary>
+    [JsonPropertyName("replaceExistingTempLayers")]
+    public bool ReplaceExistingTempLayers { get; set; }
 }

@@ -311,6 +311,14 @@ public sealed class ProfilePagesTests
         var rejected = DeserializePayload<CommandResult>(reply);
         Assert.False(rejected.Success);
         Assert.Equal(CommandResultCodes.Forbidden, rejected.Code);
+
+        // 读取设备档案同样只能经档案管理入口发起。
+        var read = new CommandMessage { Command = CommandKind.ReadProfile };
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post,
+            "/api/commands", admin.AccessToken, read))).StatusCode);
+        await SendAsync(watch, Envelope.Command(read));
+        var readReply = DeserializePayload<CommandResult>(await ReceiveAsync(watch, Protocol.MessageTypeCommandResult));
+        Assert.Equal(CommandResultCodes.Forbidden, readReply.Code);
         await CloseAsync(watch);
     }
 
@@ -422,6 +430,109 @@ public sealed class ProfilePagesTests
         Assert.Contains("未在线", offline["message"]!.GetValue<string>());
         await CloseAsync(firstPlugin);
         await CloseAsync(secondPlugin);
+    }
+
+    [Fact]
+    public async Task CollectReadsTheOnlinePluginAndReturnsAnUnsavedNormalizedDraft()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        using var plugin = await ConnectAsync(factory, await factory.GetPluginTokenAsync());
+        await ReceiveAsync(plugin, Protocol.MessageTypeSchedulePull);
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities
+        {
+            Capabilities = RemoteCiCapabilities.Current.Where(x => x != RemoteCiCapabilities.ProfileRead).ToList(),
+        }));
+        var peers = factory.Services.GetRequiredService<PeerRegistry>();
+        await WaitUntilAsync(() => peers.HasPluginFor(Classroom.DefaultId));
+        using var browser = CreateBrowser(factory);
+        await LoginWebUiAsync(browser);
+        var html = await browser.GetStringAsync("/Profiles");
+        var request = new { classIds = new[] { Classroom.DefaultId } };
+
+        var old = (await (await PostJsonAsync(browser, "/Profiles?handler=Collect", html, request)).Content.ReadFromJsonAsync<JsonObject>())!;
+        var denied = Assert.Single(old["results"]!.AsArray())!;
+        Assert.False(denied["success"]!.GetValue<bool>());
+        Assert.Contains("升级", denied["message"]!.GetValue<string>());
+
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
+        await WaitUntilAsync(() => peers.PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.ProfileRead));
+        var pending = PostJsonAsync(browser, "/Profiles?handler=Collect", html, request);
+        var envelope = await ReceiveAsync(plugin, Protocol.MessageTypeCommand);
+        var forwarded = DeserializePayload<CommandMessage>(envelope);
+        Assert.Equal(CommandKind.ReadProfile, forwarded.Command);
+        Assert.Equal(Classroom.DefaultId, forwarded.ClassId);
+        Assert.Equal(TestWebApplicationFactory.AdminUsername, forwarded.RequestedBy!.Username);
+        // 设备课表的课程数多于上课时段：收集时按宿主规则截断，结果可以直接保存。
+        var device = ProfileDocument.Parse(ProfileTestData.Json("设备档案"));
+        device["ClassPlans"]![ProfileTestData.PlanId]!["Classes"]!.AsArray().Add(new JsonObject { ["SubjectId"] = ProfileTestData.SubjectId });
+        await SendAsync(plugin, new Envelope
+        {
+            Type = Protocol.MessageTypeCommandResult, ReplyToMessageId = envelope.MessageId,
+            Payload = new CommandResult
+            {
+                Success = true, Code = CommandResultCodes.Ok, Message = "已读取设备档案", Data = ProfileDocument.Serialize(device),
+            },
+        });
+        var collected = (await (await pending).Content.ReadFromJsonAsync<JsonObject>())!;
+        var item = Assert.Single(collected["results"]!.AsArray())!;
+        Assert.True(item["success"]!.GetValue<bool>(), item["message"]!.GetValue<string>());
+        Assert.Empty(item["errors"]!.AsArray());
+        var draft = ProfileDocument.Parse(item["profileJson"]!.GetValue<string>());
+        Assert.Single(draft["ClassPlans"]![ProfileTestData.PlanId]!["Classes"]!.AsArray());
+        ProfileTestData.AssertNativeIdsAndAttachments(draft);
+        using (var scope = factory.Services.CreateScope())
+            Assert.Empty(await scope.ServiceProvider.GetRequiredService<AppDbContext>().StoredProfiles.ToListAsync());
+        await CloseAsync(plugin);
+    }
+
+    [Fact]
+    public async Task TempLayerDispatchRequiresCapabilityAndSendsOnlyScheduledLayers()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        StoredProfileDto profile;
+        using (var setup = factory.Services.CreateScope())
+            profile = (await setup.ServiceProvider.GetRequiredService<ProfileLibraryService>().SaveAsync(
+                await ProfileTestData.AdminAsync(setup.ServiceProvider),
+                [ProfileTestData.New("带临时层", Classroom.DefaultId, json: ProfileTestData.WithTempLayer(ProfileTestData.Json(), "2099-01-05"))]))[0];
+        using var plugin = await ConnectAsync(factory, await factory.GetPluginTokenAsync());
+        await ReceiveAsync(plugin, Protocol.MessageTypeSchedulePull);
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities
+        {
+            Capabilities = RemoteCiCapabilities.Current.Where(x => x != RemoteCiCapabilities.ProfileTempLayer).ToList(),
+        }));
+        var peers = factory.Services.GetRequiredService<PeerRegistry>();
+        await WaitUntilAsync(() => peers.PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.ProfileApply));
+        using var browser = CreateBrowser(factory);
+        await LoginWebUiAsync(browser);
+        var html = await browser.GetStringAsync("/Profiles");
+        var request = new ProfileDispatchRequest
+        {
+            Items = [new ProfileIdRequest { Id = profile.Id, Revision = profile.Revision }],
+            ClassIds = [Classroom.DefaultId], Mode = ProfileApplyMode.TempLayers, ReplaceExistingTempLayers = true,
+        };
+
+        var old = (await (await PostJsonAsync(browser, "/Profiles?handler=Apply", html, request)).Content.ReadFromJsonAsync<JsonObject>())!;
+        Assert.Contains("临时层", Assert.Single(old["results"]!.AsArray())!["message"]!.GetValue<string>());
+
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
+        await WaitUntilAsync(() => peers.PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.ProfileTempLayer));
+        var pending = PostJsonAsync(browser, "/Profiles?handler=Apply", html, request);
+        var envelope = await ReceiveAsync(plugin, Protocol.MessageTypeCommand);
+        var forwarded = DeserializePayload<CommandMessage>(envelope).ProfileApply!;
+        Assert.Equal(ProfileApplyMode.TempLayers, forwarded.Mode);
+        Assert.True(forwarded.ReplaceExistingTempLayers);
+        var payload = ProfileDocument.Parse(forwarded.ProfileJson);
+        Assert.StartsWith("2099-01-05", Assert.Single(payload["OrderedSchedules"]!.AsObject()).Key);
+        Assert.True(payload["ClassPlans"]![ProfileTestData.OverlayPlanId]!["IsOverlay"]!.GetValue<bool>());
+        await SendAsync(plugin, new Envelope
+        {
+            Type = Protocol.MessageTypeCommandResult, ReplyToMessageId = envelope.MessageId,
+            Payload = new CommandResult { Success = true, Code = CommandResultCodes.Ok, Message = "已下发 1 个临时层" },
+        });
+        var done = Assert.Single((await (await pending).Content.ReadFromJsonAsync<JsonObject>())!["results"]!.AsArray())!;
+        Assert.True(done["success"]!.GetValue<bool>());
+        Assert.Equal("已下发 1 个临时层", done["message"]!.GetValue<string>());
+        await CloseAsync(plugin);
     }
 
     private static async Task AnswerProfileAsync(WebSocket plugin, Guid classId, string expectedName, bool success)

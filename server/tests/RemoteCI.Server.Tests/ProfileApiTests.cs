@@ -116,5 +116,41 @@ public sealed class ProfileApiTests
         var command = await client.SendAsync(Bearer(HttpMethod.Post, "/api/commands", admin,
             new CommandMessage { Command = CommandKind.ApplyProfile, ClassId = Classroom.DefaultId }));
         Assert.Equal(HttpStatusCode.Forbidden, command.StatusCode);
+
+        // 临时层下发不要求类别，但档案中必须有临时层。
+        var noLayers = await client.SendAsync(Bearer(HttpMethod.Post, "/api/profiles/apply", admin, new
+        {
+            items = new[] { new { id, revision = 1 } }, mode = (int)ProfileApplyMode.TempLayers, classIds = new[] { Classroom.DefaultId },
+        }));
+        Assert.Equal(HttpStatusCode.BadRequest, noLayers.StatusCode);
+    }
+
+    [Fact]
+    public async Task CollectReportsOfflineClassesWithoutSavingAndRejectsOtherClasses()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        var client = factory.CreateClient();
+        var admin = (await factory.LoginAsync()).AccessToken;
+
+        var collected = await client.SendAsync(Bearer(HttpMethod.Post, "/api/profiles/collect", admin,
+            new { classIds = new[] { Classroom.DefaultId } }));
+        collected.EnsureSuccessStatusCode();
+        var body = await collected.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(body.GetProperty("success").GetBoolean());
+        var result = body.GetProperty("results")[0];
+        Assert.Equal(Classroom.DefaultId, result.GetProperty("classId").GetGuid());
+        Assert.Contains("未在线", result.GetProperty("message").GetString());
+        Assert.Equal(JsonValueKind.Null, result.GetProperty("profileJson").ValueKind);
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.SendAsync(Bearer(HttpMethod.Post, "/api/profiles/collect", admin,
+            new { classIds = Array.Empty<Guid>() }))).StatusCode);
+
+        (await client.SendAsync(Bearer(HttpMethod.Post, "/api/users", admin, new CreateUserRequest
+        {
+            Username = "profile.collector", DisplayName = "普通用户", Password = ProfileTestData.Password,
+        }))).EnsureSuccessStatusCode();
+        var reader = (await factory.LoginAsync("profile.collector", ProfileTestData.Password)).AccessToken;
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(Bearer(HttpMethod.Post, "/api/profiles/collect", reader,
+            new { classIds = new[] { Classroom.DefaultId } }))).StatusCode);
     }
 }

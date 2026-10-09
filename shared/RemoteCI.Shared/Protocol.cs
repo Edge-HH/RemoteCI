@@ -177,6 +177,8 @@ public enum CommandKind
     ApplyExtensionSettings = 24,
     /// <summary>应用服务端保存并验证过的档案；仅档案管理页面可以发起。</summary>
     ApplyProfile = 25,
+    /// <summary>读取设备当前档案 JSON，供服务端档案管理收集后编辑；仅档案管理入口可以发起。</summary>
+    ReadProfile = 26,
 }
 
 public enum PowerActionKind
@@ -191,7 +193,7 @@ public static class CommandPermissions
 {
     public static UserPermissions Required(CommandKind command) => command switch
     {
-        CommandKind.ChangeSchedule or CommandKind.SetSubjectTeacher or CommandKind.ApplyProfile => UserPermissions.ManageSchedule,
+        CommandKind.ChangeSchedule or CommandKind.SetSubjectTeacher or CommandKind.ApplyProfile or CommandKind.ReadProfile => UserPermissions.ManageSchedule,
         CommandKind.SendNotification or CommandKind.ClearNotifications => UserPermissions.SendNotifications,
         CommandKind.SendVoiceMessage => UserPermissions.SendVoiceMessages,
         CommandKind.TeacherComing => UserPermissions.TeacherComing,
@@ -249,6 +251,10 @@ public static class RemoteCiCapabilities
     public const string ExtensionsSettings = "extensions.settings";
     /// <summary>按明确选择的方式更新、替换或创建并启用服务端档案。</summary>
     public const string ProfileApply = "profile.apply";
+    /// <summary>读取设备当前档案，供服务端档案管理收集。</summary>
+    public const string ProfileRead = "profile.read";
+    /// <summary>按日期把服务端档案中的临时层写入设备（ProfileApplyMode.TempLayers）。</summary>
+    public const string ProfileTempLayer = "profile.temp-layer";
     /// <summary>接收调休日历并在放假日关闭课表、调休上学日建立临时课表。</summary>
     public const string HolidayCalendar = "schedule.holiday-calendar";
 
@@ -272,7 +278,8 @@ public static class RemoteCiCapabilities
     public static IReadOnlyList<string> Current { get; } =
         [.. Baseline, VoiceMessageSend, SoftwareInventory, SoftwareUpgradePlugins, SoftwareUpgradeClassIsland,
             PluginInstall, PluginUninstall, PluginEnable, PluginManagementPolicy, ProfileDistribute, TimeLayoutUpdate, ManagementJoin,
-            ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings, ProfileApply, HolidayCalendar];
+            ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings, ProfileApply, HolidayCalendar,
+            ProfileRead, ProfileTempLayer];
 
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
@@ -304,6 +311,8 @@ public static class RemoteCiCapabilities
         FileDistribute => "文件分发",
         ExtensionsSettings => "修改扩展设置",
         ProfileApply => "应用服务端档案",
+        ProfileRead => "读取设备档案",
+        ProfileTempLayer => "下发临时层",
         HolidayCalendar => "调休自动适配",
         _ => "未知能力",
     };
@@ -334,6 +343,7 @@ public static class RemoteCiCapabilities
         CommandKind.SendFile => FileDistribute,
         CommandKind.ApplyExtensionSettings => ExtensionsSettings,
         CommandKind.ApplyProfile => ProfileApply,
+        CommandKind.ReadProfile => ProfileRead,
         _ => null,
     };
 }

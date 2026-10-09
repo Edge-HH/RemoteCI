@@ -479,9 +479,10 @@ app.MapPost("/api/commands", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    // ApplyProfile 的班级身份与修订号仅由档案管理入口校验，不能通过通用命令 API 绕过。
-    if (command.Command == CommandKind.ApplyProfile)
-        return Results.Json(Error(ApiErrorCodes.Forbidden, "请通过档案管理页面或 POST /api/profiles/apply 下发档案"), statusCode: StatusCodes.Status403Forbidden);
+    // 档案的读取与应用仅由档案管理入口校验班级身份与修订号，不能通过通用命令 API 绕过。
+    if (command.Command is CommandKind.ApplyProfile or CommandKind.ReadProfile)
+        return Results.Json(Error(ApiErrorCodes.Forbidden,
+            "请通过档案管理页面、POST /api/profiles/collect 或 POST /api/profiles/apply 收集与下发档案"), statusCode: StatusCodes.Status403Forbidden);
     if (await ResolveClassAsync(principal, command.ClassId ?? classId, access, ct) is not { } target) return Forbidden();
     command.ClassId = target;
     var classPermissions = await access.GetEffectivePermissionsAsync(

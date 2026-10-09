@@ -38,6 +38,11 @@ public sealed class ProfileManagementService(ILogger<ProfileManagementService> l
         return result;
     }
 
+    /// <summary>读取宿主当前内存档案，供服务端档案管理收集；不写入任何内容。</summary>
+    public async Task<CommandResult> ReadProfileAsync() => await Dispatcher.UIThread.InvokeAsync(() => ProfileApplyExecutor.Read(
+        new ClassIslandProfileApplicationBackend(IAppHost.GetService<IProfileService>()),
+        error => logger.LogError(error, "读取 ClassIsland 档案失败")));
+
     public async Task<CommandResult> UpdateTimeLayoutAsync(TimeLayoutUpdateRequest? request, CancellationToken ct = default)
     {
         if (ValidateTimeLayoutRequest(request) is { } error)

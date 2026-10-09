@@ -13,6 +13,8 @@ namespace RemoteCI.Shared.Models;
 public static class ProfileDocument
 {
     public const int MaxUtf8Bytes = 5 * 1024 * 1024;
+    /// <summary>ClassIsland 内置“默认”课表群，档案中不一定显式存在。</summary>
+    private static readonly Guid DefaultClassPlanGroupId = Guid.Parse("acaf4ef0-e261-4262-b941-34ea93cb4369");
     private const ProfileDistributionSection AllSections = ProfileDistributionSection.TimeLayouts |
         ProfileDistributionSection.ClassPlans | ProfileDistributionSection.Subjects;
     private static readonly JsonSerializerOptions StorageOptions = new()
@@ -99,7 +101,7 @@ public static class ProfileDocument
             {
                 var groupText = Text(plan, "AssociatedGroup");
                 if (!Guid.TryParse(groupText, out var groupId)) errors.Add($"{prefix}课表群 ID 无效");
-                else if (groupId != Guid.Empty && groupId != Guid.Parse("acaf4ef0-e261-4262-b941-34ea93cb4369") &&
+                else if (groupId != Guid.Empty && groupId != DefaultClassPlanGroupId &&
                          FindByGuid(groups, groupText!) is null) errors.Add($"{prefix}引用了不存在的课表群“{groupId}”");
             }
             var layoutId = CheckReference(plan, "TimeLayoutId", layouts, prefix + "时间表", errors, false);
@@ -138,19 +140,27 @@ public static class ProfileDocument
         CheckReference(profile, "OverlayClassPlanId", plans, "档案临时层课表", errors, true);
         CheckReference(profile, "TempClassPlanId", plans, "档案临时课表", errors, true);
         if (Get(profile, "OrderedSchedules") is JsonObject ordered)
+        {
+            var dates = new HashSet<DateOnly>();
             foreach (var (date, value) in ordered)
             {
                 if (value is JsonObject schedule)
                     CheckReference(schedule, "ClassPlanId", plans, $"预定课表 {date}", errors, false);
                 else errors.Add($"预定课表 {date} 必须是对象");
+                // 宿主以 DateTime 为键，同一天的不同写法（如带时区后缀）会在加载时冲突。
+                if (TryDateKey(date, out var day) && !dates.Add(day)) errors.Add($"{day:yyyy-MM-dd} 安排了多个临时层或预定课表");
             }
+        }
         else if (Has(profile, "OrderedSchedules")) errors.Add("OrderedSchedules 必须是对象");
         CheckOverlayCycles(layouts, "时间表", errors);
         CheckOverlayCycles(plans, "课表", errors);
         return errors;
     }
 
-    /// <summary>选择指定对象并补齐时间表、科目和临时层源课表依赖。null 表示该类别全部对象。</summary>
+    /// <summary>
+    /// 选择指定常规对象并补齐时间表、科目和临时层源课表依赖。null 表示该类别全部常规对象；
+    /// 临时层只能经 <see cref="BuildTempLayerSelection"/> 按日期下发，不属于任何常规类别。
+    /// </summary>
     public static string BuildSelection(string json, ProfileDistributionSection sections,
         IEnumerable<Guid>? timeLayoutIds = null, IEnumerable<Guid>? classPlanIds = null,
         IEnumerable<Guid>? subjectIds = null)
@@ -161,9 +171,40 @@ public static class ProfileDocument
         var layouts = Dictionary(profile, "TimeLayouts");
         var plans = Dictionary(profile, "ClassPlans");
         var subjects = Dictionary(profile, "Subjects");
-        var selectedLayouts = SelectIds(layouts, sections.HasFlag(ProfileDistributionSection.TimeLayouts), timeLayoutIds);
-        var selectedPlans = SelectIds(plans, sections.HasFlag(ProfileDistributionSection.ClassPlans), classPlanIds);
+        var selectedLayouts = SelectIds(layouts, sections.HasFlag(ProfileDistributionSection.TimeLayouts), timeLayoutIds, regularOnly: true);
+        var selectedPlans = SelectIds(plans, sections.HasFlag(ProfileDistributionSection.ClassPlans), classPlanIds, regularOnly: true);
         var selectedSubjects = SelectIds(subjects, sections.HasFlag(ProfileDistributionSection.Subjects), subjectIds);
+        return Serialize(SelectWithDependencies(profile, selectedLayouts, selectedPlans, selectedSubjects));
+    }
+
+    /// <summary>
+    /// 只保留所选临时层课表（null 表示全部按日期安排的临时层）、它们的日期条目及依赖。
+    /// 载荷中的来源课表仅用于设备核对临时层的来源，设备不会因此改动常规课表。
+    /// </summary>
+    public static string BuildTempLayerSelection(string json, IEnumerable<Guid>? tempLayerIds = null)
+    {
+        var profile = Parse(json);
+        ThrowIfInvalid(profile);
+        var scheduled = TempLayerSchedule(profile).Select(item => item.PlanId).ToHashSet();
+        var selected = tempLayerIds?.ToHashSet() ?? scheduled;
+        foreach (var id in selected)
+            if (!scheduled.Contains(id)) throw new ArgumentException($"所选临时层“{id}”不存在或没有安排日期");
+        if (selected.Count == 0) throw new ArgumentException("档案中没有可下发的临时层");
+        var result = SelectWithDependencies(profile, [], [.. selected], []);
+        // 指向常规课表的预定课表不是临时层，载荷只携带所选临时层的日期。
+        if (Get(result, "OrderedSchedules") is JsonObject ordered)
+            foreach (var key in ordered.Where(entry => entry.Value is not JsonObject schedule ||
+                         ReferenceGuid(schedule, "ClassPlanId") is not { } planId || !selected.Contains(planId)).Select(entry => entry.Key).ToList())
+                ordered.Remove(key);
+        return Serialize(result);
+    }
+
+    private static JsonObject SelectWithDependencies(JsonObject profile, HashSet<Guid> selectedLayouts,
+        HashSet<Guid> selectedPlans, HashSet<Guid> selectedSubjects)
+    {
+        var layouts = Dictionary(profile, "TimeLayouts");
+        var plans = Dictionary(profile, "ClassPlans");
+        var subjects = Dictionary(profile, "Subjects");
         // 临时层引用也属于依赖，循环引用不会导致无限循环。
         var queue = new Queue<Guid>(selectedPlans);
         while (queue.TryDequeue(out var id))
@@ -188,15 +229,16 @@ public static class ProfileDocument
         Set(profile, "Subjects", Filter(subjects, selectedSubjects));
         DropDanglingPlanReferences(profile);
         ThrowIfInvalid(profile);
-        return Serialize(profile);
+        return profile;
     }
 
     /// <summary>只构造完整候选，不改变当前档案；替换仅清空明确选中的类别，依赖类别合并。</summary>
     public static string Apply(string currentJson, ProfileApplyRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        ValidateSections(request.Sections);
         if (!Enum.IsDefined(request.Mode)) throw new ArgumentException("请明确选择档案应用方式");
+        if (request.Mode == ProfileApplyMode.TempLayers) return ApplyTempLayers(currentJson, request, DateTime.Today).Json;
+        ValidateSections(request.Sections);
         var source = Parse(BuildSelection(request.ProfileJson, request.Sections));
         if (request.Mode == ProfileApplyMode.CreateAndActivate) return Serialize(source);
         var target = Parse(currentJson);
@@ -204,7 +246,11 @@ public static class ProfileDocument
                      ("ClassPlans", ProfileDistributionSection.ClassPlans), ("Subjects", ProfileDistributionSection.Subjects) })
         {
             var targetDictionary = Dictionary(target, field);
-            if (request.Mode == ProfileApplyMode.ReplaceSections && request.Sections.HasFlag(section)) targetDictionary.Clear();
+            // 临时层不属于常规类别：整体替换只清空常规对象，设备上的临时层留待下面按依赖核对。
+            if (request.Mode == ProfileApplyMode.ReplaceSections && request.Sections.HasFlag(section))
+                foreach (var key in targetDictionary.Where(entry => field == "Subjects" || entry.Value is not JsonObject item || !IsOverlay(item))
+                             .Select(entry => entry.Key).ToList())
+                    targetDictionary.Remove(key);
             foreach (var (id, value) in Dictionary(source, field))
             {
                 // GUID 字符串大小写不影响对象标识，避免同一 GUID 出现两个条目。
@@ -221,12 +267,250 @@ public static class ProfileDocument
             foreach (var (id, value) in sourceGroups) groups[id] = value?.DeepClone();
             Set(target, "ClassPlanGroups", groups);
         }
-        // 整体替换课表会清掉设备上的临时层；宿主清理过期临时课表后也可能留下悬空指针。
+        // 替换或合并后按宿主规则修复设备上的临时层；宿主清理过期临时课表后也可能留下悬空指针。
         // 这些引用只指向已不存在的临时安排，清除后才能通过校验，否则设备档案将再也无法下发。
+        RepairOverlays(target);
         DropDanglingPlanReferences(target);
         ThrowIfInvalid(target);
         return Serialize(target);
     }
+
+    public sealed record TempLayerApplyResult(string Json, int Applied, int Skipped);
+
+    /// <summary>
+    /// 把载荷中按日期安排的临时层写入当前档案的候选副本。早于 <paramref name="today"/> 的跳过；
+    /// 设备同日已有安排时，只有请求明确允许才替换。科目、课表群只补缺，设备常规时间表与课表不被改动。
+    /// </summary>
+    public static TempLayerApplyResult ApplyTempLayers(string currentJson, ProfileApplyRequest request, DateTime today)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var source = Parse(request.ProfileJson);
+        ThrowIfInvalid(source);
+        var schedule = TempLayerSchedule(source);
+        if (schedule.Count == 0) throw new ArgumentException("载荷中没有按日期安排的临时层");
+        var pending = schedule.Where(item => item.Date >= DateOnly.FromDateTime(today)).ToList();
+        if (pending.Count == 0) throw new ArgumentException("所选临时层的日期都已过去，没有可下发的内容");
+        if (pending.GroupBy(item => item.Date).FirstOrDefault(group => group.Count() > 1) is { } duplicate)
+            throw new ArgumentException($"{duplicate.Key:yyyy-MM-dd} 安排了多个临时层，每天只能有一个");
+
+        var target = Parse(currentJson);
+        // 先清除宿主清理后残留的悬空日期条目，它们不算设备上已有的安排。
+        DropDanglingPlanReferences(target);
+        var ordered = Dictionary(target, "OrderedSchedules");
+        var conflicts = pending.Where(item => DateKeys(ordered, item.Date).Count > 0).Select(item => item.Date.ToString("yyyy-MM-dd")).ToList();
+        if (conflicts.Count > 0 && !request.ReplaceExistingTempLayers)
+            throw new ArgumentException($"设备在 {string.Join("、", conflicts)} 已有临时层或预定课表；如需覆盖，请勾选替换后重试");
+
+        var sourcePlans = Dictionary(source, "ClassPlans");
+        var sourceLayouts = Dictionary(source, "TimeLayouts");
+        var sourceSubjects = Dictionary(source, "Subjects");
+        var sourceGroups = Dictionary(source, "ClassPlanGroups");
+        var plans = Dictionary(target, "ClassPlans");
+        var layouts = Dictionary(target, "TimeLayouts");
+        var subjects = Dictionary(target, "Subjects");
+        var groups = Dictionary(target, "ClassPlanGroups");
+        foreach (var (date, sourcePlanId) in pending)
+        {
+            foreach (var key in DateKeys(ordered, date))
+            {
+                var replaced = ordered[key] is JsonObject old ? ReferenceGuid(old, "ClassPlanId") : null;
+                ordered.Remove(key);
+                // 被替换的临时层不再被任何日期引用时一并删除，与宿主清理规则一致；常规课表保留。
+                if (replaced is { } replacedId && FindByGuid(plans, replacedId.ToString()) is JsonObject replacedPlan &&
+                    IsOverlay(replacedPlan) && !ordered.Any(entry => entry.Value is JsonObject other && ReferenceGuid(other, "ClassPlanId") == replacedId))
+                    plans.Remove(KeyOf(plans, replacedId)!);
+            }
+
+            var plan = FindByGuid(sourcePlans, sourcePlanId.ToString())!.DeepClone().AsObject();
+            var sourceLayout = ReferenceGuid(plan, "TimeLayoutId") is { } sourceLayoutId ? FindByGuid(sourceLayouts, sourceLayoutId.ToString()) as JsonObject : null;
+            if (sourceLayout is null) throw new ArgumentException($"{date:yyyy-MM-dd} 的临时层缺少时间表");
+            var neededSubjects = new HashSet<Guid>();
+            foreach (var lesson in (Get(plan, "Classes") as JsonArray ?? new JsonArray()).OfType<JsonObject>())
+                if (ReferenceGuid(lesson, "SubjectId") is { } subjectId) neededSubjects.Add(subjectId);
+            foreach (var point in Points(sourceLayout))
+                if (ReferenceGuid(point, "DefaultClassId") is { } subjectId) neededSubjects.Add(subjectId);
+            foreach (var subjectId in neededSubjects)
+                if (FindByGuid(subjects, subjectId.ToString()) is null && FindByGuid(sourceSubjects, subjectId.ToString()) is { } subject)
+                    subjects[subjectId.ToString()] = subject.DeepClone();
+
+            if (ReferenceGuid(plan, "AssociatedGroup") is { } groupId && groupId != DefaultClassPlanGroupId &&
+                FindByGuid(groups, groupId.ToString()) is null)
+            {
+                if (FindByGuid(sourceGroups, groupId.ToString()) is { } group) groups[groupId.ToString()] = group.DeepClone();
+                else Set(plan, "AssociatedGroup", DefaultClassPlanGroupId.ToString());
+            }
+
+            var layoutId = ReferenceGuid(plan, "TimeLayoutId")!.Value;
+            if (FindByGuid(layouts, layoutId.ToString()) is not JsonObject deviceLayout || !SameTimePoints(deviceLayout, sourceLayout))
+            {
+                // 设备没有这张时间表或时段不同：写成临时层时间表副本，不改动设备的常规时间表。
+                var copy = sourceLayout.DeepClone().AsObject();
+                var layoutOrigin = IsOverlay(sourceLayout) ? ReferenceGuid(sourceLayout, "OverlaySourceId") : layoutId;
+                Set(copy, "IsOverlay", true);
+                Set(copy, "OverlaySourceId", layoutOrigin is { } originId && FindByGuid(layouts, originId.ToString()) is not null ? originId.ToString() : null);
+                if (!IsOverlay(sourceLayout) && Text(copy, "Name") is { } layoutName && !layoutName.EndsWith("（临时层）", StringComparison.Ordinal))
+                    Set(copy, "Name", layoutName + "（临时层）");
+                layoutId = Guid.NewGuid();
+                layouts[layoutId.ToString()] = copy;
+                Set(plan, "TimeLayoutId", layoutId.ToString());
+            }
+
+            var dateText = date.ToString("yyyy-MM-dd") + "T00:00:00";
+            Set(plan, "IsOverlay", true);
+            Set(plan, "OverlaySetupTime", dateText);
+            var originPlan = ReferenceGuid(plan, "OverlaySourceId") is { } originPlanId ? FindByGuid(plans, originPlanId.ToString()) as JsonObject : null;
+            if (originPlan is null) Set(plan, "OverlaySourceId", null);
+            MarkChangedClasses(plan, originPlan);
+            var planId = Guid.NewGuid();
+            plans[planId.ToString()] = plan;
+            ordered[dateText] = new JsonObject { ["ClassPlanId"] = planId.ToString() };
+            if (date == DateOnly.FromDateTime(today))
+            {
+                Set(target, "OverlayClassPlanId", planId.ToString());
+                Set(target, "IsOverlayClassPlanEnabled", true);
+            }
+        }
+        Set(target, "Subjects", subjects);
+        Set(target, "ClassPlanGroups", groups);
+        Set(target, "TimeLayouts", layouts);
+        Set(target, "ClassPlans", plans);
+        Set(target, "OrderedSchedules", ordered);
+        RemoveUnusedOverlayLayouts(target);
+        DropDanglingPlanReferences(target);
+        ThrowIfInvalid(target);
+        return new TempLayerApplyResult(Serialize(target), pending.Count, schedule.Count - pending.Count);
+    }
+
+    /// <summary>
+    /// 规范化从设备收集的档案：按宿主 RefreshClassesList 的规则对齐课程数与上课时段数，
+    /// 并清除宿主清理过期临时层后残留的悬空指针，使收集结果可以直接编辑保存。
+    /// </summary>
+    public static string NormalizeCollected(string json)
+    {
+        var profile = Parse(json);
+        var layouts = Dictionary(profile, "TimeLayouts");
+        foreach (var plan in Dictionary(profile, "ClassPlans").Select(entry => entry.Value).OfType<JsonObject>())
+            if (Get(plan, "Classes") is JsonArray) AlignClasses(plan, layouts);
+        DropDanglingPlanReferences(profile);
+        return Serialize(profile);
+    }
+
+    /// <summary>日期条目指向的临时层课表（IsOverlay），按日期排序。</summary>
+    private static List<(DateOnly Date, Guid PlanId)> TempLayerSchedule(JsonObject profile)
+    {
+        var plans = Dictionary(profile, "ClassPlans");
+        var result = new List<(DateOnly, Guid)>();
+        if (Get(profile, "OrderedSchedules") is not JsonObject ordered) return result;
+        foreach (var (key, value) in ordered)
+            if (TryDateKey(key, out var date) && value is JsonObject schedule && ReferenceGuid(schedule, "ClassPlanId") is { } planId &&
+                FindByGuid(plans, planId.ToString()) is JsonObject plan && IsOverlay(plan))
+                result.Add((date, planId));
+        return result.OrderBy(item => item.Item1).ToList();
+    }
+
+    /// <summary>OrderedSchedules 的键是 DateTime；宿主可能带时区后缀，只取日期部分比较。</summary>
+    private static bool TryDateKey(string key, out DateOnly date)
+    {
+        date = default;
+        return key.Length >= 10 && DateOnly.TryParseExact(key[..10], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+    }
+
+    private static List<string> DateKeys(JsonObject ordered, DateOnly date) =>
+        ordered.Where(entry => TryDateKey(entry.Key, out var value) && value == date).Select(entry => entry.Key).ToList();
+
+    private static bool IsOverlay(JsonObject node) =>
+        Get(node, "IsOverlay") is JsonValue value && value.TryGetValue<bool>(out var overlay) && overlay;
+
+    /// <summary>只比较会影响课程对应关系的时段类型与起止时间，不受时间字段新旧格式影响。</summary>
+    private static bool SameTimePoints(JsonObject left, JsonObject right)
+    {
+        var a = Points(left).ToList();
+        var b = Points(right).ToList();
+        return a.Count == b.Count && a.Zip(b).All(pair =>
+            Integer(pair.First, "TimeType", 0) == Integer(pair.Second, "TimeType", 0) &&
+            TryReadTime(pair.First, true, out var startA) && TryReadTime(pair.Second, true, out var startB) && startA == startB &&
+            TryReadTime(pair.First, false, out var endA) && TryReadTime(pair.Second, false, out var endB) && endA == endB);
+    }
+
+    /// <summary>与宿主 RefreshIsChangedClass 一致：来源课表缺失或节数不同则全部视为未换课。</summary>
+    private static void MarkChangedClasses(JsonObject plan, JsonObject? origin)
+    {
+        if (Get(plan, "Classes") is not JsonArray classes) return;
+        var originClasses = origin is null ? null : Get(origin, "Classes") as JsonArray;
+        for (var index = 0; index < classes.Count; index++)
+        {
+            if (classes[index] is not JsonObject lesson) continue;
+            var changed = originClasses is not null && originClasses.Count == classes.Count &&
+                          ReferenceGuid(lesson, "SubjectId") != (originClasses[index] is JsonObject before ? ReferenceGuid(before, "SubjectId") : null);
+            Set(lesson, "IsChangedClass", changed);
+        }
+    }
+
+    /// <summary>
+    /// 按宿主规则修复依赖变化的临时层，而不是直接丢弃老师的换课：课程数随时间表补齐或截断，
+    /// 缺失的科目改为空课，缺失的课表群改为默认课表群，来源对象缺失只清空来源指针。
+    /// 只有所用时间表已不存在时，临时层才无法显示而被移除。
+    /// </summary>
+    private static void RepairOverlays(JsonObject profile)
+    {
+        var layouts = Dictionary(profile, "TimeLayouts");
+        var plans = Dictionary(profile, "ClassPlans");
+        var subjects = Dictionary(profile, "Subjects");
+        var groups = Dictionary(profile, "ClassPlanGroups");
+        void ClearMissingSubject(JsonObject node, string field)
+        {
+            if (ReferenceGuid(node, field) is { } id && FindByGuid(subjects, id.ToString()) is null) Set(node, field, Guid.Empty.ToString());
+        }
+        foreach (var layout in layouts.Select(entry => entry.Value).OfType<JsonObject>().Where(IsOverlay))
+        {
+            foreach (var point in Points(layout)) ClearMissingSubject(point, "DefaultClassId");
+            if (ReferenceGuid(layout, "OverlaySourceId") is { } source && FindByGuid(layouts, source.ToString()) is null)
+                Set(layout, "OverlaySourceId", null);
+        }
+        foreach (var key in plans.Where(entry => entry.Value is JsonObject plan && IsOverlay(plan)).Select(entry => entry.Key).ToList())
+        {
+            var plan = (JsonObject)plans[key]!;
+            if (!AlignClasses(plan, layouts))
+            {
+                plans.Remove(key);
+                continue;
+            }
+            foreach (var lesson in (Get(plan, "Classes") as JsonArray)!.OfType<JsonObject>()) ClearMissingSubject(lesson, "SubjectId");
+            if (ReferenceGuid(plan, "AssociatedGroup") is { } groupId && groupId != DefaultClassPlanGroupId && FindByGuid(groups, groupId.ToString()) is null)
+                Set(plan, "AssociatedGroup", DefaultClassPlanGroupId.ToString());
+            if (ReferenceGuid(plan, "OverlaySourceId") is { } source && FindByGuid(plans, source.ToString()) is null)
+                Set(plan, "OverlaySourceId", null);
+            MarkChangedClasses(plan, ReferenceGuid(plan, "OverlaySourceId") is { } origin ? FindByGuid(plans, origin.ToString()) as JsonObject : null);
+        }
+        RemoveUnusedOverlayLayouts(profile);
+    }
+
+    /// <summary>与宿主 RefreshClassesList 一致：课程数补齐或截断为关联时间表的上课时段数。时间表不存在时返回 false。</summary>
+    private static bool AlignClasses(JsonObject plan, JsonObject layouts)
+    {
+        if (ReferenceGuid(plan, "TimeLayoutId") is not { } layoutId || FindByGuid(layouts, layoutId.ToString()) is not JsonObject layout) return false;
+        if (Get(plan, "Classes") is not JsonArray classes) Set(plan, "Classes", classes = new JsonArray());
+        var lessons = Points(layout).Count(point => Integer(point, "TimeType", 0) == 0);
+        while (classes.Count > lessons) classes.RemoveAt(classes.Count - 1);
+        while (classes.Count < lessons) classes.Add(new JsonObject { ["SubjectId"] = Guid.Empty.ToString() });
+        return true;
+    }
+
+    private static IEnumerable<JsonObject> Points(JsonObject layout) => (Get(layout, "Layouts") as JsonArray ?? new JsonArray()).OfType<JsonObject>();
+
+    /// <summary>与宿主清理规则一致：没有任何课表使用的临时层时间表随之删除。</summary>
+    private static void RemoveUnusedOverlayLayouts(JsonObject profile)
+    {
+        var layouts = Dictionary(profile, "TimeLayouts");
+        var used = Dictionary(profile, "ClassPlans").Select(entry => entry.Value as JsonObject)
+            .Select(plan => plan is null ? null : ReferenceGuid(plan, "TimeLayoutId")).OfType<Guid>().ToHashSet();
+        foreach (var key in layouts.Where(entry => entry.Value is JsonObject layout && IsOverlay(layout) &&
+                     Guid.TryParse(entry.Key, out var id) && !used.Contains(id)).Select(entry => entry.Key).ToList())
+            layouts.Remove(key);
+    }
+
+    private static string? KeyOf(JsonObject dictionary, Guid id) =>
+        dictionary.Select(entry => entry.Key).FirstOrDefault(key => Guid.TryParse(key, out var value) && value == id);
 
     /// <summary>
     /// 清除指向不存在课表的预定课表与临时课表指针。指针置为空 GUID 而不是 null，
@@ -345,12 +629,16 @@ public static class ProfileDocument
         return text;
     }
 
-    private static HashSet<Guid> SelectIds(JsonObject dictionary, bool selected, IEnumerable<Guid>? ids)
+    private static HashSet<Guid> SelectIds(JsonObject dictionary, bool selected, IEnumerable<Guid>? ids, bool regularOnly = false)
     {
         if (!selected) return [];
-        var result = (ids ?? dictionary.Select(entry => Guid.Parse(entry.Key))).ToHashSet();
+        var result = (ids ?? dictionary.Where(entry => !regularOnly || entry.Value is not JsonObject item || !IsOverlay(item))
+            .Select(entry => Guid.Parse(entry.Key))).ToHashSet();
         foreach (var id in result)
-            if (FindByGuid(dictionary, id.ToString()) is null) throw new ArgumentException($"选中的档案对象“{id}”不存在");
+        {
+            if (FindByGuid(dictionary, id.ToString()) is not JsonObject item) throw new ArgumentException($"选中的档案对象“{id}”不存在");
+            if (regularOnly && IsOverlay(item)) throw new ArgumentException("临时层不属于常规类别，请改用“作为临时层下发”");
+        }
         return result;
     }
 
@@ -362,8 +650,8 @@ public static class ProfileDocument
         return filtered;
     }
 
-    private static JsonNode? FindByGuid(JsonObject dictionary, string id) => Guid.TryParse(id, out var guid)
-        ? dictionary.FirstOrDefault(entry => Guid.TryParse(entry.Key, out var entryGuid) && entryGuid == guid).Value : null;
+    private static JsonNode? FindByGuid(JsonObject dictionary, string id) =>
+        Guid.TryParse(id, out var guid) && KeyOf(dictionary, guid) is { } key ? dictionary[key] : null;
     private static Guid? ReferenceGuid(JsonObject node, string field) => Guid.TryParse(Text(node, field), out var id) && id != Guid.Empty ? id : null;
     private static JsonNode? Get(JsonObject node, string field) => node.FirstOrDefault(entry => entry.Key.Equals(field, StringComparison.OrdinalIgnoreCase)).Value;
     private static bool Has(JsonObject node, string field) => node.Any(entry => entry.Key.Equals(field, StringComparison.OrdinalIgnoreCase));

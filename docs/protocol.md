@@ -91,7 +91,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 ## 能力协商
 
-V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings` 和 `schedule.holiday-calendar` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
+V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings`、`schedule.holiday-calendar`、`profile.read` 和 `profile.temp-layer` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
 
 WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手机的有效能力是“本地 ∩ 服务端 ∩ 当前班级主插件”。服务端在 `capabilities_sync.classPlugins` 中按接收方可访问的班级逐个下发主插件能力，客户端切换班级时按新班级重算；没有对应条目表示该班插件离线。旧服务端没有该字段时客户端退回 `plugin`。多插件时，当前主插件仍是最早接入的健康插件；主插件切换、断开或能力更新后，服务端重新广播能力快照。界面应隐藏缺失能力的入口，服务端转发命令前仍需按统一映射复核主插件能力，缺少能力时返回 `CAPABILITY_UNSUPPORTED`。能力声明不能绕过账号权限或扩展策略检查。
 
@@ -193,23 +193,37 @@ WebUI 批量控制页把功能参数和目标设备分成两步：先填写参�
 
 ## 服务端档案库与档案应用
 
-WebUI 管理区的 `/Profiles` 提供全局档案库和批量编辑；每班菜单的 `/ClassProfiles` 只管理当前班级。时间表修改与档案分发从“控制”和“批量控制”页移入档案页，“加入集控”和远程插件管理策略仍保留在控制页。课表页继续展示七日课表、换课和科目教师设置；档案页编辑服务端保存的源档案，不读取或自动同步设备当前档案。
+WebUI 管理区的 `/Profiles` 提供全局档案库和批量编辑；每班菜单的 `/ClassProfiles` 只管理当前班级。时间表修改与档案分发从“控制”和“批量控制”页移入档案页，“加入集控”和远程插件管理策略仍保留在控制页。课表页继续展示七日课表、换课和科目教师设置；档案页编辑服务端保存的源档案。设备当前档案不会自动同步，需要时用“从设备收集”读取后作为草稿编辑。
 
 服务端通过 SQLite／EF Core 保存全局模板与每班一份独立工作副本，记录完整 JSON、修订号、来源模板和更新时间。分配模板时保留 ClassIsland 对象 ID 并复制 JSON，模板与班级副本的后续修改相互隔离。上传 JSON 上限为 5 MB，先解析预览档案名称、时间表、课表与科目数量及引用错误，确认后才保存。编辑只覆盖相关节点的字段，保留未知字段和附加配置；无效时间、缺失时间表或科目引用阻止保存和下发。调整上课时段时保留原时段对应课程、新时段留空，删除已有课程的时段需确认。
 
-档案读写通过带 Cookie 与防伪令牌的 Razor Page handlers 完成，不新增 REST 档案管理端点。系统管理员可管理全局及所有班级；班主任必须在目标班级的成员身份为班主任且拥有 `ManageSchedule`，只能管理本班副本。每次上传、保存、导出和下发均重新鉴权，普通老师即使拥有 `ManageSchedule` 也不能管理档案。批量保存先验证所有草稿和预期修订号，在一个事务内提交；任一修订冲突使整批不写入，浏览器保留草稿。保存与下发分开，离线时可保存；下发只使用已经保存并匹配预期修订号的版本。
+WebUI 的档案读写通过带 Cookie 与防伪令牌的 Razor Page handlers 完成；`/api/profiles` 下的 REST 接口（列表、读取、保存、复制、删除、预览、`collect` 收集、`apply` 下发）与页面共用同一服务层和权限校验。系统管理员可管理全局及所有班级；班主任必须在目标班级的成员身份为班主任且拥有 `ManageSchedule`，只能管理本班副本。每次上传、保存、导出和下发均重新鉴权，普通老师即使拥有 `ManageSchedule` 也不能管理档案。批量保存先验证所有草稿和预期修订号，在一个事务内提交；任一修订冲突使整批不写入，浏览器保留草稿。保存与下发分开，离线时可保存；下发只使用已经保存并匹配预期修订号的版本。
 
-命令值 25 为 `ApplyProfile`，能力标识 `profile.apply`，仅进入当前能力列表。`profileApply` 载荷为 `ProfileApplyRequest`，字段包含 `profileJson`、`sections`（位掩码：1 时间表、2 课表、4 科目）、`mode`（1 `MergeCurrent`、2 `ReplaceSections`、3 `CreateAndActivate`）、可选 `importProfileName` 和 `restartAfter`（默认 `false`）。应用方式每次必须明确选择，界面不预选：
+命令值 25 为 `ApplyProfile`，能力标识 `profile.apply`，仅进入当前能力列表。`profileApply` 载荷为 `ProfileApplyRequest`，字段包含 `profileJson`、`sections`（位掩码：1 时间表、2 课表、4 科目）、`mode`（1 `MergeCurrent`、2 `ReplaceSections`、3 `CreateAndActivate`、4 `TempLayers`）、可选 `importProfileName`、`restartAfter`（默认 `false`）和 `replaceExistingTempLayers`（默认 `false`）。应用方式每次必须明确选择，界面不预选：
 
 - **更新当前档案**：更新所选对象及其必要依赖，保留其他内容。
 - **整体替换所选类别**：清空明确列出的类别后写入新数据，操作前必须确认；合并后的档案存在悬空引用时拒绝执行。
 - **创建并启用新档案**：使用填写的设备档案名创建并启用，重名返回错误。
+- **作为临时层下发**（`TempLayers`，需要能力 `profile.temp-layer`）：只写入载荷中按日期安排的临时层，不改动设备的常规时间表与课表，`sections` 忽略。见下文“临时层”。
 
-`ApplyProfile` 为 `serverOnly` 命令，仅由服务端档案页面构造并定向发送；手机、手表的通用 WebSocket 命令通道、`POST /api/commands`、广播接口及插件局域网直连均拒绝。服务端校验管理员或本班班主任身份及 `ManageSchedule`，插件再次验证认证发送人的 `ManageSchedule` 权限。目标可选班级、分组或具体设备；班级级选择只发送到最早接入的在线设备，班主任目标固定本班。各班不同档案按目标设备所属班级组装，离线、缺少 `profile.apply` 或设备执行失败逐台返回结果，不排队；失败后可手动重试。旧插件仍可用于服务端档案编辑，但下发必须升级到支持 `profile.apply` 的插件，不能用旧命令模拟新应用方式。
+`ApplyProfile` 与 `ReadProfile` 为 `serverOnly` 命令，仅由服务端档案管理入口构造并定向发送；手机、手表的通用 WebSocket 命令通道、`POST /api/commands`、广播接口及插件局域网直连均拒绝。服务端校验管理员或本班班主任身份及 `ManageSchedule`，插件再次验证认证发送人的 `ManageSchedule` 权限。目标可选班级、分组或具体设备；班级级选择只发送到最早接入的在线设备，班主任目标固定本班。各班不同档案按目标设备所属班级组装，离线、缺少 `profile.apply` 或设备执行失败逐台返回结果，不排队；失败后可手动重试。旧插件仍可用于服务端档案编辑，但下发必须升级到支持 `profile.apply` 的插件，不能用旧命令模拟新应用方式。
 
-插件在 UI 线程验证、应用并保存档案，失败恢复原状态，成功后立即重新同步七日课表。旧命令 17 `DistributeProfile`、18 `UpdateTimeLayout` 的编号、载荷、管理员权限和既有语义继续保留，档案页面使用命令 25。
+插件在 UI 线程验证、应用并保存档案，失败恢复原状态，成功后立即重新同步七日课表。创建并启用新档案时插件按宿主实际签名调用 `SettingsService.SaveSettings(string)` 保存档案选择（ClassIsland 2.1 没有无参重载）。旧命令 17 `DistributeProfile`、18 `UpdateTimeLayout` 的编号、载荷、管理员权限和既有语义继续保留，档案页面使用命令 25。
 
-配置备份 schema 升为 5，包含全局档案库与班级工作副本；恢复旧备份时缺少档案数据按空库处理。设备本地修改不会回写服务端，首次使用档案管理需上传或新建档案。
+配置备份 schema 升为 5，包含全局档案库与班级工作副本；恢复旧备份时缺少档案数据按空库处理。设备本地修改不会自动回写服务端；首次使用档案管理可从设备收集、上传或新建档案。
+
+### 收集设备档案
+
+命令值 26 为 `ReadProfile`，能力标识 `profile.read`，需要 `ManageSchedule`，无载荷。插件在 UI 线程把当前内存档案序列化为 JSON，放在 `CommandResult.data` 中返回；超过 5 MB 返回失败。服务端逐班校验管理权限后，向每班在线插件并发发送（20 秒超时），离线、缺少 `profile.read` 或执行失败逐班报告。成功结果按宿主 `RefreshClassesList` 规则把课程数补齐或截断为上课时段数，并清除悬空的临时课表指针与预定课表，然后连同剩余校验错误返回给调用方。收集结果**只作草稿**：WebUI 载入班级草稿（保留服务端档案 ID 与修订号，保存时照常校验修订号）或新的全局模板草稿，保存前不写入档案库。入口为页面 handler `Collect` 和 `POST /api/profiles/collect`（请求体 `{ "classIds": [...] }`，班级页固定当前班级）。
+
+### 临时层
+
+ClassIsland 的临时层是 `ClassPlans` 中 `IsOverlay=true` 的课表：`OverlaySourceId` 指向来源课表，`OverlaySetupTime` 为生效日期，`OrderedSchedules[日期].ClassPlanId` 指向它；宿主每天只允许一个临时层，生效日为今天时还设置 `OverlayClassPlanId` 与 `IsOverlayClassPlanEnabled`。可选的临时层时间表是 `IsOverlay=true`、`OverlaySourceId` 指向原时间表的副本。宿主清理时删除早于今天的日期条目、不再被日期引用的临时层课表和不再被使用的临时层时间表。
+
+- 常规类别不包含临时层：`MergeCurrent`、`ReplaceSections`、`CreateAndActivate` 在“全部对象”时跳过临时层，显式选择临时层对象返回错误。设备原有临时层不属于所选类别，更新或整体替换后按宿主规则修复：课程数随时间表补齐或截断，缺失的科目改为空课，缺失的课表群改为默认课表群；只有所用时间表已不存在时才连同日期一并移除。
+- 服务端 `ProfileDispatchRequest` 在 `mode=4` 时不要求 `sections`，可带 `tempLayerIds`（省略表示全部；多份档案批量下发时忽略）和 `replaceExistingTempLayers`。载荷只包含所选临时层、它们的日期条目及依赖。某班档案没有临时层时只让该班失败。
+- 插件逐个写入：早于设备今天的跳过并计数，全部过期时失败；设备同日已有临时层或预定课表时，未设置 `replaceExistingTempLayers` 则整台设备拒绝并列出日期，设置后删除该日条目及不再被引用的旧临时层。科目和课表群只补缺，不覆盖设备现有对象；时间表在设备有同 ID 且时段一致时直接引用，否则以新 ID 写入临时层时间表副本，不改动设备的常规时间表。临时层课表以新 ID 写入，来源课表在设备上不存在时 `OverlaySourceId` 置空，并按来源课表重算 `IsChangedClass`。回执消息为“已下发 N 个临时层（，跳过 M 个已过期的临时层）”。
+- 校验同时拒绝 `OrderedSchedules` 中同一天出现多个条目（例如带与不带时区后缀的同一日期）。
 
 ## 远程终端与文件分发
 

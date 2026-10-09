@@ -111,3 +111,98 @@ test("GUID引用的大小写差异不影响验证或关联课程映射", () => {
     transform.insertSlot(doc, "layout", 0);
     assert.deepEqual(subjects(doc.ClassPlans.monday), ["", "MATH", "lang"]);
 });
+
+// 沙箱对象来自另一个 realm，比较前转成本 realm 的普通 JSON。
+const plain = value => JSON.parse(JSON.stringify(value));
+const withTempLayer = () => {
+    const doc = fixture();
+    const id = transform.createTempLayer(doc, "monday", "2026-10-12");
+    return { doc, id };
+};
+
+test("新建临时层复制来源课表并按日期安排，常规列表不包含临时层", () => {
+    const { doc, id } = withTempLayer();
+    const layer = doc.ClassPlans[id];
+    assert.equal(layer.IsOverlay, true);
+    assert.equal(layer.OverlaySourceId, "monday");
+    assert.equal(layer.OverlaySetupTime, "2026-10-12T00:00:00");
+    assert.equal(layer.Name, "周一（临时层）");
+    assert.deepEqual(subjects(layer), ["math", "lang"]);
+    assert.equal(doc.OrderedSchedules["2026-10-12T00:00:00"].ClassPlanId, id);
+    assert.deepEqual(plain(transform.tempLayers(doc).map(item => [item.id, item.date, item.sourceId])), [[id, "2026-10-12", "monday"]]);
+    assert.ok(!transform.regularEntries(doc, "ClassPlans").some(([key]) => key === id));
+    assert.ok(!transform.validateProfile(doc).some(error => /临时层|预定课表/.test(error)));
+    assert.throws(() => transform.createTempLayer(doc, "tuesday", "2026-10-12"), /已有临时层/);
+    assert.throws(() => transform.createTempLayer(doc, id, "2026-10-13"), /常规课表/);
+});
+
+test("单独调整当天时间生成临时层时间表，常规时间表保持不变", () => {
+    const doc = fixture();
+    const id = transform.createTempLayer(doc, "monday", "2026-10-12", true);
+    const layoutId = doc.ClassPlans[id].TimeLayoutId;
+    assert.notEqual(layoutId, "layout");
+    assert.equal(doc.TimeLayouts[layoutId].IsOverlay, true);
+    assert.equal(doc.TimeLayouts[layoutId].OverlaySourceId, "layout");
+    assert.equal(doc.TimeLayouts[layoutId].Name, "时间表（临时层）");
+    assert.ok(!transform.regularEntries(doc, "TimeLayouts").some(([key]) => key === layoutId));
+    transform.deleteTempLayer(doc, id);
+    assert.equal(doc.TimeLayouts[layoutId], undefined);
+    assert.deepEqual(plain(doc.OrderedSchedules), {});
+});
+
+test("修改临时层日期不允许与其他安排重叠，换课标记相对来源课表", () => {
+    const { doc, id } = withTempLayer();
+    transform.createTempLayer(doc, "tuesday", "2026-10-14");
+    assert.throws(() => transform.moveTempLayer(doc, id, "2026-10-14"), /已有临时层/);
+    transform.moveTempLayer(doc, id, "2026-10-13");
+    assert.deepEqual(plain(Object.keys(doc.OrderedSchedules).sort()), ["2026-10-13T00:00:00", "2026-10-14T00:00:00"]);
+    assert.equal(doc.ClassPlans[id].OverlaySetupTime, "2026-10-13T00:00:00");
+    doc.ClassPlans[id].Classes[1].SubjectId = "math";
+    transform.markChanged(doc, id);
+    assert.deepEqual(plain(doc.ClassPlans[id].Classes.map(course => course.IsChangedClass)), [false, true]);
+});
+
+test("清理过期临时层与宿主规则一致，并清除指向它们的指针", () => {
+    const doc = fixture();
+    const past = transform.createTempLayer(doc, "monday", "2026-10-08", true);
+    const future = transform.createTempLayer(doc, "tuesday", "2026-10-12");
+    doc.OverlayClassPlanId = past;
+    assert.equal(transform.cleanExpiredTempLayers(doc, "2026-10-10"), 1);
+    assert.equal(doc.ClassPlans[past], undefined);
+    assert.ok(doc.ClassPlans[future]);
+    assert.equal(doc.OverlayClassPlanId, "00000000-0000-0000-0000-000000000000");
+    assert.equal(Object.values(doc.TimeLayouts).filter(layout => layout.IsOverlay).length, 0);
+});
+
+test("删除常规课表同时移除其预定课表并清空临时层来源", () => {
+    const { doc, id } = withTempLayer();
+    doc.OrderedSchedules["2026-10-20T00:00:00"] = { ClassPlanId: "monday" };
+    transform.deletePlan(doc, "monday");
+    assert.equal(doc.ClassPlans.monday, undefined);
+    assert.equal(doc.OrderedSchedules["2026-10-20T00:00:00"], undefined);
+    assert.equal(doc.ClassPlans[id].OverlaySourceId, null);
+    assert.ok(!transform.validateProfile(doc).some(error => /临时层|预定课表/.test(error)));
+});
+
+test("预定课表引用缺失课表或同日重复时校验报错", () => {
+    const doc = fixture();
+    doc.OrderedSchedules = { "2026-10-12T00:00:00": { ClassPlanId: "missing" }, "2026-10-13T00:00:00": { ClassPlanId: "monday" }, "2026-10-13T00:00:00+08:00": { ClassPlanId: "tuesday" } };
+    const errors = transform.validateProfile(doc);
+    assert.ok(errors.some(error => error.includes("不存在的课表")));
+    assert.ok(errors.some(error => error.includes("多个")));
+});
+
+test("全零 GUID 表示无默认科目或空课，不算缺失引用", () => {
+    const doc = fixture();
+    delete doc.ClassPlans.other;
+    doc.TimeLayouts.layout.Layouts[0].DefaultClassId = "00000000-0000-0000-0000-000000000000";
+    doc.ClassPlans.monday.Classes[0].SubjectId = "00000000-0000-0000-0000-000000000000";
+    assert.deepEqual(plain(transform.validateProfile(doc)), []);
+    assert.equal(transform.affectedCourses(doc, "layout", 0).length, 1);
+});
+
+test("新建临时层校验失败时不改动档案", () => {
+    const doc = fixture();
+    assert.throws(() => transform.createTempLayer(doc, "monday", "不是日期"), /有效的日期/);
+    assert.equal(doc.OrderedSchedules, undefined);
+});

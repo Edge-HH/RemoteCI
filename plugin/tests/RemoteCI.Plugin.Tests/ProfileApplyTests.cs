@@ -167,9 +167,9 @@ public sealed class ProfileApplyTests
     private static readonly Guid OverlayId = Guid.Parse("ee111111-1111-1111-1111-111111111111");
 
     /// <summary>RemoteCI 换课或 ClassIsland 临时课表会留下的设备状态：临时层课表、预定课表与临时课表指针。</summary>
-    private static string ProfileWithTemporaryPlans()
+    private static string ProfileWithTemporaryPlans(bool withExtraSubject = false)
     {
-        var current = ProfileDocument.Parse(ProfileJson("原老师"));
+        var current = ProfileDocument.Parse(ProfileJson("原老师", withExtraSubject));
         var overlay = current["ClassPlans"]![PlanId.ToString()]!.DeepClone().AsObject();
         overlay["IsOverlay"] = true;
         overlay["OverlaySourceId"] = PlanId.ToString();
@@ -184,15 +184,73 @@ public sealed class ProfileApplyTests
     }
 
     [Fact]
-    public void ReplacingClassPlansDropsTemporaryReferencesToRemovedPlans()
+    public void ReplacingClassPlansKeepsTemporaryLayersWhoseDependenciesRemain()
     {
+        // 临时层不属于常规“课表”类别：整体替换常规课表后，依赖仍有效的设备临时层保留。
         var applied = ProfileDocument.Parse(ProfileDocument.Apply(ProfileWithTemporaryPlans(), Request(ProfileApplyMode.ReplaceSections)));
 
-        Assert.Null(applied["ClassPlans"]![OverlayId.ToString()]);
+        Assert.NotNull(applied["ClassPlans"]![OverlayId.ToString()]);
         var ordered = applied["OrderedSchedules"]!.AsObject();
-        Assert.False(ordered.ContainsKey("2026-10-10T00:00:00"));
+        Assert.True(ordered.ContainsKey("2026-10-10T00:00:00"));
         Assert.True(ordered.ContainsKey("2026-10-12T00:00:00"));
+        Assert.Equal(OverlayId.ToString(), applied["TempClassPlanId"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void ReplacingTimeLayoutsAlignsTemporaryLayersLikeTheHost()
+    {
+        // 新时间表多了一节课：与宿主 RefreshClassesList 一致，设备上的临时层补一节空课，老师的换课保留。
+        var source = ProfileDocument.Parse(ProfileJson());
+        source["TimeLayouts"]![LayoutId.ToString()]!["Layouts"]!.AsArray().Add(new JsonObject
+        {
+            ["StartTime"] = "09:00:00", ["EndTime"] = "09:45:00", ["TimeType"] = 0,
+        });
+        source["ClassPlans"]![PlanId.ToString()]!["Classes"]!.AsArray().Add(new JsonObject { ["SubjectId"] = SubjectId.ToString() });
+        var request = new ProfileApplyRequest
+        {
+            Mode = ProfileApplyMode.ReplaceSections, ProfileJson = source.ToJsonString(),
+            Sections = ProfileDistributionSection.TimeLayouts | ProfileDistributionSection.ClassPlans,
+        };
+
+        var applied = ProfileDocument.Parse(ProfileDocument.Apply(ProfileWithTemporaryPlans(), request));
+
+        var classes = applied["ClassPlans"]![OverlayId.ToString()]!["Classes"]!.AsArray();
+        Assert.Equal(2, classes.Count);
+        Assert.Equal(SubjectId.ToString(), classes[0]!["SubjectId"]!.GetValue<string>());
+        Assert.Equal(Guid.Empty.ToString(), classes[1]!["SubjectId"]!.GetValue<string>());
+        Assert.True(applied["OrderedSchedules"]!.AsObject().ContainsKey("2026-10-10T00:00:00"));
+        Assert.Empty(ProfileDocument.Validate(applied));
+    }
+
+    [Fact]
+    public void TemporaryLayerWhoseTimeLayoutDisappearsIsRemoved()
+    {
+        // 整体替换时间表后原时间表不复存在，临时层无法显示，连同日期与指针一起移除；缺失科目的临时层只清空该节。
+        var source = ProfileDocument.Parse(ProfileJson());
+        var newLayout = Guid.NewGuid().ToString();
+        source["TimeLayouts"] = new JsonObject { [newLayout] = source["TimeLayouts"]![LayoutId.ToString()]!.DeepClone() };
+        source["ClassPlans"]![PlanId.ToString()]!["TimeLayoutId"] = newLayout;
+        var request = new ProfileApplyRequest
+        {
+            Mode = ProfileApplyMode.ReplaceSections, ProfileJson = source.ToJsonString(),
+            Sections = ProfileDistributionSection.TimeLayouts | ProfileDistributionSection.ClassPlans,
+        };
+
+        var applied = ProfileDocument.Parse(ProfileDocument.Apply(ProfileWithTemporaryPlans(), request));
+
+        Assert.Null(applied["ClassPlans"]![OverlayId.ToString()]);
+        Assert.False(applied["OrderedSchedules"]!.AsObject().ContainsKey("2026-10-10T00:00:00"));
         Assert.Equal(Guid.Empty.ToString(), applied["TempClassPlanId"]!.GetValue<string>());
+        Assert.Empty(ProfileDocument.Validate(applied));
+
+        var device = ProfileDocument.Parse(ProfileWithTemporaryPlans(withExtraSubject: true));
+        device["ClassPlans"]![OverlayId.ToString()]!["Classes"]![0]!["SubjectId"] = OtherSubjectId.ToString();
+        var subjectsOnly = new ProfileApplyRequest
+        {
+            Mode = ProfileApplyMode.ReplaceSections, ProfileJson = ProfileJson(), Sections = ProfileDistributionSection.Subjects,
+        };
+        var repaired = ProfileDocument.Parse(ProfileDocument.Apply(ProfileDocument.Serialize(device), subjectsOnly));
+        Assert.Equal(Guid.Empty.ToString(), repaired["ClassPlans"]![OverlayId.ToString()]!["Classes"]![0]!["SubjectId"]!.GetValue<string>());
     }
 
     [Fact]
@@ -210,14 +268,15 @@ public sealed class ProfileApplyTests
     }
 
     [Fact]
-    public void HostAdapterReplaceAlsoPrunesHostTemporaryReferences()
+    public void HostAdapterReplaceKeepsValidHostTemporaryLayers()
     {
         using var host = new FakeHost(ProfileWithTemporaryPlans());
 
         var result = ProfileApplyExecutor.Apply(Request(ProfileApplyMode.ReplaceSections), new ClassIslandProfileApplicationBackend(host));
 
         Assert.True(result.Success, result.Message);
-        Assert.DoesNotContain(new DateTime(2026, 10, 10), host.Profile.OrderedSchedules.Keys);
+        Assert.Contains(new DateTime(2026, 10, 10), host.Profile.OrderedSchedules.Keys);
+        Assert.True(host.Profile.ClassPlans[OverlayId].IsOverlay);
         Assert.Contains(new DateTime(2026, 10, 12), host.Profile.OrderedSchedules.Keys);
         // 宿主保存后的档案必须仍能通过校验，否则之后的每次下发都会被拒绝。
         Assert.Empty(ProfileDocument.Validate(JsonSerializer.Serialize(host.Profile)));
@@ -401,6 +460,14 @@ public sealed class ProfileApplyTests
         Assert.Contains(RemoteCiCapabilities.ProfileApply, RemoteCiCapabilities.Current);
         Assert.Equal(UserPermissions.ManageSchedule, CommandPermissions.Required(CommandKind.ApplyProfile));
         Assert.True(LanSessionLogic.IsServerOnly(CommandKind.ApplyProfile));
+        foreach (var capability in new[] { RemoteCiCapabilities.ProfileRead, RemoteCiCapabilities.ProfileTempLayer })
+        {
+            Assert.DoesNotContain(capability, RemoteCiCapabilities.Baseline);
+            Assert.Contains(capability, RemoteCiCapabilities.Current);
+        }
+        Assert.Equal(RemoteCiCapabilities.ProfileRead, RemoteCiCapabilities.Required(CommandKind.ReadProfile));
+        Assert.Equal(UserPermissions.ManageSchedule, CommandPermissions.Required(CommandKind.ReadProfile));
+        Assert.True(LanSessionLogic.IsServerOnly(CommandKind.ReadProfile));
     }
 
     [Fact]
@@ -520,6 +587,245 @@ public sealed class ProfileApplyTests
         Assert.Equal("原档案.json", host.SettingsService.Settings.SelectedProfile);
         Assert.True(host.IsCurrentProfileTrusted);
         Assert.False(File.Exists(Path.Combine(FakeHost.ProfilePath, "新档案.json")));
+    }
+
+    private static readonly DateTime Today = new(2026, 10, 10);
+
+    /// <summary>服务端档案中的临时层：PlanId 的临时层副本，第一节换成体育，按日期安排（键带宿主可能写出的时区后缀）。</summary>
+    private static JsonObject ProfileWithTempLayers(params string[] dates)
+    {
+        var source = ProfileDocument.Parse(ProfileJson(withExtraSubject: true));
+        var ordered = new JsonObject();
+        foreach (var date in dates)
+        {
+            var id = Guid.NewGuid();
+            var overlay = source["ClassPlans"]![PlanId.ToString()]!.DeepClone().AsObject();
+            overlay["Name"] = $"周一（临时层）{date}";
+            overlay["IsOverlay"] = true;
+            overlay["OverlaySourceId"] = PlanId.ToString();
+            overlay["OverlaySetupTime"] = date + "T00:00:00";
+            overlay["Classes"] = new JsonArray(new JsonObject { ["SubjectId"] = OtherSubjectId.ToString() });
+            source["ClassPlans"]![id.ToString()] = overlay;
+            ordered[date + "T00:00:00+08:00"] = new JsonObject { ["ClassPlanId"] = id.ToString() };
+        }
+        source["OrderedSchedules"] = ordered;
+        return source;
+    }
+
+    private static ProfileApplyRequest TempLayerRequest(JsonObject source, bool replace = false) => new()
+    {
+        Mode = ProfileApplyMode.TempLayers, ReplaceExistingTempLayers = replace,
+        ProfileJson = ProfileDocument.BuildTempLayerSelection(ProfileDocument.Serialize(source)),
+    };
+
+    private static (Guid Id, JsonObject Plan) LayerOn(JsonObject profile, string date)
+    {
+        var entry = profile["OrderedSchedules"]!.AsObject().Single(item => item.Key.StartsWith(date, StringComparison.Ordinal));
+        var id = Guid.Parse(entry.Value!["ClassPlanId"]!.GetValue<string>());
+        return (id, profile["ClassPlans"]![id.ToString()]!.AsObject());
+    }
+
+    [Fact]
+    public void TempLayerSelectionCarriesOnlyScheduledOverlaysAndTheirDependencies()
+    {
+        var source = ProfileWithTempLayers("2026-10-12");
+        source["OrderedSchedules"]!["2026-10-13T00:00:00"] = new JsonObject { ["ClassPlanId"] = PlanId.ToString() };
+
+        var selected = ProfileDocument.Parse(ProfileDocument.BuildTempLayerSelection(ProfileDocument.Serialize(source)));
+
+        var ordered = Assert.Single(selected["OrderedSchedules"]!.AsObject());
+        Assert.StartsWith("2026-10-12", ordered.Key);
+        Assert.Equal(2, selected["ClassPlans"]!.AsObject().Count); // 临时层及其来源课表
+        Assert.NotNull(selected["Subjects"]![OtherSubjectId.ToString()]);
+        Assert.Throws<ArgumentException>(() => ProfileDocument.BuildTempLayerSelection(ProfileJson()));
+        Assert.Throws<ArgumentException>(() => ProfileDocument.BuildTempLayerSelection(ProfileDocument.Serialize(source), [PlanId]));
+    }
+
+    [Fact]
+    public void RegularSelectionExcludesTempLayersAndRejectsThemWhenNamed()
+    {
+        var source = ProfileWithTempLayers("2026-10-12");
+        var overlayId = LayerOn(source, "2026-10-12").Id;
+
+        var selected = ProfileDocument.Parse(ProfileDocument.BuildSelection(ProfileDocument.Serialize(source), ProfileDistributionSection.ClassPlans));
+
+        Assert.Equal(PlanId.ToString(), Assert.Single(selected["ClassPlans"]!.AsObject()).Key);
+        Assert.Empty(selected["OrderedSchedules"]!.AsObject());
+        var error = Assert.Throws<ArgumentException>(() => ProfileDocument.BuildSelection(ProfileDocument.Serialize(source),
+            ProfileDistributionSection.ClassPlans, classPlanIds: [overlayId]));
+        Assert.Contains("临时层", error.Message);
+    }
+
+    [Fact]
+    public void FutureTempLayerIsScheduledWithoutTouchingRegularObjects()
+    {
+        var result = ProfileDocument.ApplyTempLayers(ProfileJson("原老师"), TempLayerRequest(ProfileWithTempLayers("2026-10-12")), Today);
+        var applied = ProfileDocument.Parse(result.Json);
+
+        Assert.Equal((1, 0), (result.Applied, result.Skipped));
+        var (_, layer) = LayerOn(applied, "2026-10-12");
+        Assert.True(layer["IsOverlay"]!.GetValue<bool>());
+        Assert.Equal(PlanId.ToString(), layer["OverlaySourceId"]!.GetValue<string>());
+        Assert.Equal(LayoutId.ToString(), layer["TimeLayoutId"]!.GetValue<string>());
+        Assert.Equal("2026-10-12T00:00:00", layer["OverlaySetupTime"]!.GetValue<string>());
+        Assert.True(layer["Classes"]![0]!["IsChangedClass"]!.GetValue<bool>());
+        // 设备缺失的科目补上，已有科目与常规课表都不被改写。
+        Assert.NotNull(applied["Subjects"]![OtherSubjectId.ToString()]);
+        Assert.Equal("原老师", applied["Subjects"]![SubjectId.ToString()]!["TeacherName"]!.GetValue<string>());
+        Assert.Equal(SubjectId.ToString(), applied["ClassPlans"]![PlanId.ToString()]!["Classes"]![0]!["SubjectId"]!.GetValue<string>());
+        Assert.Null(applied["OverlayClassPlanId"]);
+        Assert.Single(applied["TimeLayouts"]!.AsObject());
+        Assert.Empty(ProfileDocument.Validate(applied));
+    }
+
+    [Fact]
+    public void TodayTempLayerBecomesTheCurrentOverlay()
+    {
+        var applied = ProfileDocument.Parse(ProfileDocument.ApplyTempLayers(ProfileJson("原老师"),
+            TempLayerRequest(ProfileWithTempLayers("2026-10-10")), Today).Json);
+
+        Assert.Equal(LayerOn(applied, "2026-10-10").Id.ToString(), applied["OverlayClassPlanId"]!.GetValue<string>());
+        Assert.True(applied["IsOverlayClassPlanEnabled"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void ExpiredTempLayersAreSkippedAndOnlyExpiredIsRejected()
+    {
+        var result = ProfileDocument.ApplyTempLayers(ProfileJson(), TempLayerRequest(ProfileWithTempLayers("2026-10-09", "2026-10-12")), Today);
+        Assert.Equal((1, 1), (result.Applied, result.Skipped));
+        Assert.DoesNotContain(ProfileDocument.Parse(result.Json)["OrderedSchedules"]!.AsObject(), item => item.Key.StartsWith("2026-10-09"));
+
+        var error = Assert.Throws<ArgumentException>(() =>
+            ProfileDocument.ApplyTempLayers(ProfileJson(), TempLayerRequest(ProfileWithTempLayers("2026-10-09")), Today));
+        Assert.Contains("已过去", error.Message);
+    }
+
+    [Fact]
+    public void SameDayArrangementIsReplacedOnlyWhenConfirmed()
+    {
+        var device = ProfileWithTemporaryPlans(); // 10-10 已有临时层，10-12 预定了常规课表
+        var source = ProfileWithTempLayers("2026-10-10", "2026-10-12");
+
+        var error = Assert.Throws<ArgumentException>(() => ProfileDocument.ApplyTempLayers(device, TempLayerRequest(source), Today));
+        Assert.Contains("2026-10-10", error.Message);
+        Assert.Contains("2026-10-12", error.Message);
+
+        var applied = ProfileDocument.Parse(ProfileDocument.ApplyTempLayers(device, TempLayerRequest(source, replace: true), Today).Json);
+        Assert.Null(applied["ClassPlans"]![OverlayId.ToString()]); // 被替换的旧临时层不再被引用，随之删除
+        Assert.NotNull(applied["ClassPlans"]![PlanId.ToString()]); // 被替换的预定常规课表仍保留
+        Assert.Equal(OtherSubjectId.ToString(), LayerOn(applied, "2026-10-10").Plan["Classes"]![0]!["SubjectId"]!.GetValue<string>());
+        Assert.True(LayerOn(applied, "2026-10-12").Plan["IsOverlay"]!.GetValue<bool>());
+        Assert.Equal(2, applied["OrderedSchedules"]!.AsObject().Count);
+        Assert.Empty(ProfileDocument.Validate(applied));
+    }
+
+    [Fact]
+    public void DanglingDeviceDateEntryIsNotTreatedAsAConflict()
+    {
+        var device = ProfileDocument.Parse(ProfileJson());
+        device["OrderedSchedules"] = new JsonObject { ["2026-10-12T00:00:00"] = new JsonObject { ["ClassPlanId"] = Guid.NewGuid().ToString() } };
+
+        var applied = ProfileDocument.Parse(ProfileDocument.ApplyTempLayers(ProfileDocument.Serialize(device),
+            TempLayerRequest(ProfileWithTempLayers("2026-10-12")), Today).Json);
+
+        Assert.True(LayerOn(applied, "2026-10-12").Plan["IsOverlay"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void DifferentTimePointsBecomeATemporaryTimeLayoutCopy()
+    {
+        var source = ProfileWithTempLayers("2026-10-12");
+        source["TimeLayouts"]![LayoutId.ToString()]!["Layouts"]![0]!["EndTime"] = "08:40:00";
+
+        var applied = ProfileDocument.Parse(ProfileDocument.ApplyTempLayers(ProfileJson(), TempLayerRequest(source), Today).Json);
+
+        var layoutId = LayerOn(applied, "2026-10-12").Plan["TimeLayoutId"]!.GetValue<string>();
+        Assert.NotEqual(LayoutId.ToString(), layoutId);
+        var copy = applied["TimeLayouts"]![layoutId]!;
+        Assert.True(copy["IsOverlay"]!.GetValue<bool>());
+        Assert.Equal(LayoutId.ToString(), copy["OverlaySourceId"]!.GetValue<string>());
+        Assert.Equal("工作日（临时层）", copy["Name"]!.GetValue<string>());
+        Assert.Equal("08:45:00", applied["TimeLayouts"]![LayoutId.ToString()]!["Layouts"]![0]!["EndTime"]!.GetValue<string>());
+        Assert.Empty(ProfileDocument.Validate(applied));
+    }
+
+    [Fact]
+    public void ExecutorReportsAppliedAndSkippedTempLayers()
+    {
+        var backend = new FakeBackend(ProfileJson());
+        var result = ProfileApplyExecutor.Apply(TempLayerRequest(ProfileWithTempLayers("2026-10-09", "2026-10-12")), backend, today: Today);
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("已下发 1 个临时层，跳过 1 个已过期的临时层", result.Message);
+
+        var conflict = ProfileApplyExecutor.Apply(TempLayerRequest(ProfileWithTempLayers("2026-10-12")), backend, today: Today);
+        Assert.False(conflict.Success);
+        Assert.Equal(CommandResultCodes.InvalidRequest, conflict.Code);
+    }
+
+    [Fact]
+    public void HostAdapterWritesTodayTempLayerAndEnablesOverlay()
+    {
+        using var host = new FakeHost(ProfileJson("原老师"));
+        var result = ProfileApplyExecutor.Apply(TempLayerRequest(ProfileWithTempLayers("2026-10-10")),
+            new ClassIslandProfileApplicationBackend(host), today: Today);
+
+        Assert.True(result.Success, result.Message);
+        Assert.True(host.Profile.IsOverlayClassPlanEnabled);
+        var overlayId = host.Profile.OverlayClassPlanId!.Value;
+        Assert.True(host.Profile.ClassPlans[overlayId].IsOverlay);
+        Assert.Equal(overlayId, host.Profile.OrderedSchedules[new DateTime(2026, 10, 10)].ClassPlanId);
+        Assert.Equal(OtherSubjectId, host.Profile.ClassPlans[overlayId].Classes[0].SubjectId);
+        var saved = JsonNode.Parse(File.ReadAllText(Path.Combine(FakeHost.ProfilePath, "原档案.json")))!;
+        Assert.True(saved["IsOverlayClassPlanEnabled"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void ReadReturnsCurrentProfileJsonAsData()
+    {
+        var json = ProfileJson();
+        var result = ProfileApplyExecutor.Read(new FakeBackend(json));
+        Assert.True(result.Success);
+        Assert.Equal(json, result.Data);
+
+        var oversized = ProfileApplyExecutor.Read(new FakeBackend("{\"Comment\":\"" + new string('汉', ProfileDocument.MaxUtf8Bytes / 3 + 1) + "\"}"));
+        Assert.False(oversized.Success);
+        Assert.Null(oversized.Data);
+    }
+
+    [Fact]
+    public void SameDateWrittenTwiceIsRejected()
+    {
+        var profile = ProfileDocument.Parse(ProfileJson());
+        profile["OrderedSchedules"] = new JsonObject
+        {
+            ["2026-10-12T00:00:00"] = new JsonObject { ["ClassPlanId"] = PlanId.ToString() },
+            ["2026-10-12T00:00:00+08:00"] = new JsonObject { ["ClassPlanId"] = PlanId.ToString() },
+        };
+        Assert.Contains(ProfileDocument.Validate(profile), error => error.Contains("多个"));
+    }
+
+    [Fact]
+    public void CollectedProfileIsNormalizedLikeTheHost()
+    {
+        var profile = ProfileDocument.Parse(ProfileJson());
+        var classes = profile["ClassPlans"]![PlanId.ToString()]!["Classes"]!.AsArray();
+        classes.Add(new JsonObject { ["SubjectId"] = SubjectId.ToString() });
+        classes.Add(new JsonObject { ["SubjectId"] = SubjectId.ToString() });
+        var emptyPlan = Guid.NewGuid();
+        profile["ClassPlans"]![emptyPlan.ToString()] = new JsonObject
+        {
+            ["Name"] = "空课表", ["TimeLayoutId"] = LayoutId.ToString(), ["Classes"] = new JsonArray(),
+        };
+        profile["OrderedSchedules"] = new JsonObject { ["2026-10-10T00:00:00"] = new JsonObject { ["ClassPlanId"] = Guid.NewGuid().ToString() } };
+        profile["OverlayClassPlanId"] = Guid.NewGuid().ToString();
+        Assert.NotEmpty(ProfileDocument.Validate(profile));
+
+        var normalized = ProfileDocument.Parse(ProfileDocument.NormalizeCollected(ProfileDocument.Serialize(profile)));
+
+        Assert.Single(normalized["ClassPlans"]![PlanId.ToString()]!["Classes"]!.AsArray());
+        Assert.Single(normalized["ClassPlans"]![emptyPlan.ToString()]!["Classes"]!.AsArray());
+        Assert.Empty(normalized["OrderedSchedules"]!.AsObject());
+        Assert.Empty(ProfileDocument.Validate(normalized));
     }
 
     private static ProfileApplyRequest Request(ProfileApplyMode mode) => new()

@@ -30,7 +30,8 @@ internal static class LanSessionLogic
     /// 只能经服务端下发的命令：扩展设置需要服务端按“系统管理员或获准的班主任”复核，
     /// 局域网授权镜像不包含班级自治策略，因此局域网直连一律拒绝。
     /// </summary>
-    public static bool IsServerOnly(CommandKind command) => command is CommandKind.ApplyExtensionSettings or CommandKind.ApplyProfile;
+    public static bool IsServerOnly(CommandKind command) =>
+        command is CommandKind.ApplyExtensionSettings or CommandKind.ApplyProfile or CommandKind.ReadProfile;
 
-    public const string ServerOnlyMessage = "扩展设置和档案只能在 RemoteCI 服务端 WebUI 中修改";
+    public const string ServerOnlyMessage = "扩展设置以及档案的收集、下发只能在 RemoteCI 服务端 WebUI 中进行";
 }

@@ -21,6 +21,7 @@
             <div class="profile-editor-toolbar">
                 <div class="profile-editor-identity"><h2 data-profile-editor-title>选择一个档案</h2><span class="muted" data-profile-revision></span></div>
                 <div class="profile-toolbar-actions">
+                    <button type="button" class="ghost" data-profile-action="collect" title="读取班级在线设备的当前档案（含临时层），载入为草稿"><i class="bi bi-cloud-download" aria-hidden="true"></i> 从设备收集</button>
                     <button type="button" class="ghost" data-profile-action="upload"><i class="bi bi-upload" aria-hidden="true"></i> 上传</button>
                     <button type="button" class="ghost" data-profile-action="export">导出</button>
                     <button type="button" class="ghost" data-profile-action="copy">复制</button>
@@ -35,6 +36,7 @@
                     <button type="button" class="ghost" data-profile-section="TimeLayouts" aria-pressed="true">时间表 <span data-profile-count="TimeLayouts">0</span></button>
                     <button type="button" class="ghost" data-profile-section="ClassPlans" aria-pressed="false">课表 <span data-profile-count="ClassPlans">0</span></button>
                     <button type="button" class="ghost" data-profile-section="Subjects" aria-pressed="false">科目 <span data-profile-count="Subjects">0</span></button>
+                    <button type="button" class="ghost" data-profile-section="TempLayers" aria-pressed="false">临时层 <span data-profile-count="TempLayers">0</span></button>
                 </nav>
                 <div data-profile-section-content></div>
                 <div class="profile-validation" role="status" data-profile-validation hidden></div>
@@ -42,11 +44,11 @@
                     <span class="muted" data-profile-draft-status>已保存</span>
                     <div class="profile-toolbar-actions"><button type="button" class="ghost" data-profile-action="reload">重新加载</button><button type="button" data-profile-action="save">保存档案</button><button type="button" class="ghost" data-profile-action="apply">下发已保存版本</button></div>
                 </div>
-                <div class="profile-batchbar" data-profile-batchbar hidden><span data-profile-selected-count>未选择班级</span><div class="profile-toolbar-actions"><button type="button" class="ghost" data-profile-action="copy-to-selected">复制当前内容到所选班</button><button type="button" data-profile-action="save-selected">统一保存</button><button type="button" class="ghost" data-profile-action="apply-selected">统一下发</button></div></div>
+                <div class="profile-batchbar" data-profile-batchbar hidden><span data-profile-selected-count>未选择班级</span><div class="profile-toolbar-actions"><button type="button" class="ghost" data-profile-action="collect-selected">收集所选班</button><button type="button" class="ghost" data-profile-action="copy-to-selected">复制当前内容到所选班</button><button type="button" data-profile-action="save-selected">统一保存</button><button type="button" class="ghost" data-profile-action="apply-selected">统一下发</button></div></div>
             </div>
         </section>
     </div>
-    <section class="panel" data-profile-results hidden><div class="panel-heading"><h2>下发结果</h2><button type="button" class="ghost" data-profile-action="retry">重试失败设备</button></div><ul class="broadcast-result" data-profile-result-list></ul></section>
+    <section class="panel" data-profile-results hidden><div class="panel-heading"><h2 data-profile-results-title>下发结果</h2><button type="button" class="ghost" data-profile-action="retry">重试失败设备</button></div><ul class="broadcast-result" data-profile-result-list></ul></section>
     <dialog class="batch-dialog batch-dialog-wide profile-dialog" data-profile-upload aria-labelledby="profile-upload-title">
         <div class="batch-dialog-shell"><header class="batch-dialog-header"><h2 id="profile-upload-title">上传档案</h2><button type="button" class="ghost dialog-close-button" data-profile-close aria-label="关闭">×</button></header>
             <div class="batch-dialog-body stack"><label>ClassIsland 档案 JSON（最大 5 MB）<input type="file" accept=".json,application/json" data-profile-file /></label><label>或粘贴 JSON<textarea rows="8" data-profile-upload-json spellcheck="false"></textarea></label><button type="button" class="ghost" data-profile-action="preview">解析预览</button><div data-profile-preview hidden></div><div class="flash error" role="alert" data-profile-upload-error hidden></div></div>
@@ -59,11 +61,13 @@
                     <label class="check"><input type="radio" name="applyMode" value="1" required /> <span><strong>更新当前档案</strong><small>更新所选对象及必要依赖，保留设备中的其他内容。</small></span></label>
                     <label class="check"><input type="radio" name="applyMode" value="2" /> <span><strong>整体替换所选类别</strong><small>清空所选类别后写入此次内容；存在悬空引用时设备将拒绝。</small></span></label>
                     <label class="check"><input type="radio" name="applyMode" value="3" /> <span><strong>创建并启用新档案</strong><small>在设备上创建独立档案；档案名重名时返回错误。</small></span></label>
+                    <label class="check"><input type="radio" name="applyMode" value="4" /> <span><strong>作为临时层下发</strong><small>把档案中按日期安排的临时层写入设备，只替换对应日期的课表，不改动设备的常规课表；已过期的临时层自动跳过。</small></span></label>
                 </fieldset>
                 <label data-profile-import-name-label hidden>设备档案名称<input data-profile-import-name maxlength="100" /></label>
-                <fieldset class="profile-apply-sections"><legend>下发内容</legend><label class="check"><input type="checkbox" value="1" data-profile-apply-section checked /> 时间表</label><label class="check"><input type="checkbox" value="2" data-profile-apply-section checked /> 课表</label><label class="check"><input type="checkbox" value="4" data-profile-apply-section checked /> 科目</label></fieldset>
+                <fieldset class="profile-apply-sections" data-profile-apply-sections-field><legend>下发内容</legend><label class="check"><input type="checkbox" value="1" data-profile-apply-section checked /> 时间表</label><label class="check"><input type="checkbox" value="2" data-profile-apply-section checked /> 课表</label><label class="check"><input type="checkbox" value="4" data-profile-apply-section checked /> 科目</label></fieldset>
                 <details data-profile-object-picker><summary>选择具体对象（默认所选类别的全部对象）</summary><div data-profile-apply-objects></div></details>
                 <div class="notice warning" data-profile-replace-warning hidden><div><strong data-profile-replace-summary></strong><label class="check"><input type="checkbox" data-profile-confirm-replace /> 我确认清空并替换上述类别</label></div></div>
+                <div class="stack" data-profile-temp-picker hidden><fieldset><legend>要下发的临时层</legend><div class="broadcast-targets" data-profile-temp-options></div></fieldset><label class="check"><input type="checkbox" data-profile-replace-temp /> 替换设备上同日已有的临时层或预定课表（未勾选时，这些设备返回失败并说明日期）</label></div>
                 <div data-profile-targets></div>
                 <label class="check"><input type="checkbox" data-profile-restart /> 应用成功后重启 ClassIsland</label>
                 <div class="flash error" data-profile-apply-error role="alert" hidden></div>
@@ -71,6 +75,8 @@
             <footer class="batch-dialog-actions"><button type="button" class="ghost" data-profile-close>取消</button><button type="submit">确认下发</button></footer></div></form>
     </dialog>
     <dialog class="batch-dialog profile-dialog" data-profile-assign aria-labelledby="profile-assign-title"><div class="batch-dialog-shell"><header class="batch-dialog-header"><h2 id="profile-assign-title">分配模板</h2><button type="button" class="ghost dialog-close-button" data-profile-close aria-label="关闭">×</button></header><div class="batch-dialog-body stack"><p class="muted">为各班保存独立副本。已有班级档案会被替换，模板后续更新不会自动覆盖副本。</p><div data-profile-assign-classes></div><div class="flash error" data-profile-assign-error role="alert" hidden></div></div><footer class="batch-dialog-actions"><button type="button" class="ghost" data-profile-close>取消</button><button type="button" data-profile-action="confirm-assign">确认分配</button></footer></div></dialog>
+    <dialog class="batch-dialog profile-dialog" data-profile-collect aria-labelledby="profile-collect-title"><div class="batch-dialog-shell"><header class="batch-dialog-header"><h2 id="profile-collect-title">从班级收集模板</h2><button type="button" class="ghost dialog-close-button" data-profile-close aria-label="关闭">×</button></header><div class="batch-dialog-body stack"><p class="muted">读取所选班级在线设备的当前档案（含临时层），作为新的全局模板草稿。保存前不会写入档案库。</p><div data-profile-collect-classes></div><div class="flash error" data-profile-collect-error role="alert" hidden></div></div><footer class="batch-dialog-actions"><button type="button" class="ghost" data-profile-close>取消</button><button type="button" data-profile-action="confirm-collect">收集</button></footer></div></dialog>
+    <dialog class="batch-dialog profile-dialog" data-profile-templayer aria-labelledby="profile-templayer-title"><div class="batch-dialog-shell"><header class="batch-dialog-header"><h2 id="profile-templayer-title">新建临时层</h2><button type="button" class="ghost dialog-close-button" data-profile-close aria-label="关闭">×</button></header><div class="batch-dialog-body stack"><p class="muted">复制一张常规课表作为指定日期的临时层，只替换当天课表。每天只能安排一个临时层。</p><label>来源课表<select data-profile-temp-source></select></label><label>生效日期<input type="date" data-profile-temp-new-date required /></label><label class="check"><input type="checkbox" data-profile-temp-separate /> 单独调整当天时间（复制一份时间表，不影响常规时间表）</label><div class="flash error" data-profile-templayer-error role="alert" hidden></div></div><footer class="batch-dialog-actions"><button type="button" class="ghost" data-profile-close>取消</button><button type="button" data-profile-action="confirm-temp-layer">新建</button></footer></div></dialog>
     @* 共用页面内确认框，兼容桌面应用内置浏览器，并支持键盘取消和输入名称。 *@
     <dialog class="batch-dialog profile-dialog" data-profile-question aria-labelledby="profile-question-title" aria-describedby="profile-question-message">
         <form data-profile-question-form><div class="batch-dialog-shell">

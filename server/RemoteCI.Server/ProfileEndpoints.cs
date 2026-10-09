@@ -67,6 +67,18 @@ public static class ProfileEndpoints
             return Results.Ok(new { success = true, message = "服务端档案已删除，设备档案不受影响。" });
         }));
 
+        // 从各班在线设备读取当前档案；结果只返回给调用方，不写入档案库，保存仍走 PUT /api/profiles。
+        profiles.MapPost("/collect", (ProfileCollectRequest body, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
+        {
+            var results = await services.GetRequiredService<ProfileDispatchService>().CollectAsync(actor, body, ct: ct);
+            return Results.Ok(new
+            {
+                success = results.Any(x => x.Success),
+                results,
+                message = $"已收集 {results.Count(x => x.Success)} 个班级，失败 {results.Count(x => !x.Success)} 个。",
+            });
+        }));
+
         // 只下发已保存的修订版本；应用方式、类别与目标都必须显式给出，与 WebUI 的确认步骤一致。
         profiles.MapPost("/apply", (ProfileDispatchRequest body, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
         {

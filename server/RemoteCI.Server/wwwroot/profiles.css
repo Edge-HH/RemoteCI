@@ -67,7 +67,12 @@
 .profile-dialog legend { padding: 0 6px; font-size: 13px; font-weight: 650; }
 .profile-dialog details summary { cursor: pointer; padding: 10px 0; font-size: 13px; font-weight: 650; }
 .profile-device-targets { display: grid; gap: 12px; padding: 10px 0; }
-[data-profile-assign-classes] { display: grid; gap: 12px; }
+[data-profile-assign-classes], [data-profile-collect-classes] { display: grid; gap: 12px; }
+[data-profile-collect-classes] small { margin-left: 6px; font-size: 12px; }
+.profile-subheading { margin: 22px 0 10px; font-size: 14px; }
+.profile-temp-meta { align-self: end; margin: 0; padding-bottom: 10px; font-size: 12px; }
+.profile-changed { display: inline-block; margin-top: 4px; color: var(--accent-strong); font-size: 11px; font-weight: 600; }
+.profile-inline-button { min-height: 0; margin: 0 2px; padding: 0 2px; border: 0; background: none; color: var(--accent-strong); font-size: inherit; text-decoration: underline; }
 .profile-dialog textarea { font-family: Consolas, monospace; font-size: 12px; }
 .profile-dialog .notice label { margin-top: 10px; }
 @media (max-width: 1200px) { .profile-workspace { grid-template-columns: 195px minmax(0, 1fr); } .profile-editor-toolbar, .profile-savebar { flex-wrap: wrap; } }

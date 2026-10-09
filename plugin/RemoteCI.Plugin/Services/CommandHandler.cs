@@ -112,6 +112,7 @@ public sealed class CommandHandler
                 CommandKind.UpdateTimeLayout => await _profileManagement.UpdateTimeLayoutAsync(command.TimeLayoutUpdate),
                 CommandKind.DistributeProfile => await _profileManagement.DistributeProfileAsync(command.ProfileDistribution),
                 CommandKind.ApplyProfile => await HandleApplyProfileAsync(command.ProfileApply),
+                CommandKind.ReadProfile => await _profileManagement.ReadProfileAsync(),
                 CommandKind.JoinManagement => await _managementJoin.JoinAsync(command.ManagementJoin),
                 CommandKind.RestartClassIsland => HandleClassIslandRestart(),
                 CommandKind.ExecuteTerminalCommand => await _terminal.ExecuteAsync(command.TerminalCommand),

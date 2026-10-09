@@ -608,8 +608,8 @@ public static class WebSocketHub
         Guid classId)
     {
         // 档案和扩展设置由独立 WebUI 入口复核班级身份，通用设备命令通道不提供这些操作。
-        if (command.Command is CommandKind.ApplyExtensionSettings or CommandKind.ApplyProfile)
-            return new CommandError(CommandResultCodes.Forbidden, "档案和扩展设置只能通过各自的服务端管理入口修改");
+        if (command.Command is CommandKind.ApplyExtensionSettings or CommandKind.ApplyProfile or CommandKind.ReadProfile)
+            return new CommandError(CommandResultCodes.Forbidden, "档案的收集、下发和扩展设置只能通过各自的服务端管理入口进行");
         if (command.Command == CommandKind.RunExtension)
             return GetExtensionValidationError(command, classPermissions, allowedExtensionIds, store, classId);
 

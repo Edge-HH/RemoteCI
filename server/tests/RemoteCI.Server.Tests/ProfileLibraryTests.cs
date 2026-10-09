@@ -384,6 +384,22 @@ internal static class ProfileTestData
         },
     }.ToJsonString();
 
+    public const string OverlayPlanId = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+
+    /// <summary>在档案中加入一个按日期安排的临时层（周一课表的临时层副本）。</summary>
+    public static string WithTempLayer(string json, string date)
+    {
+        var profile = ProfileDocument.Parse(json);
+        var overlay = profile["ClassPlans"]![PlanId]!.DeepClone().AsObject();
+        overlay["Name"] = "周一课表（临时层）";
+        overlay["IsOverlay"] = true;
+        overlay["OverlaySourceId"] = PlanId;
+        overlay["OverlaySetupTime"] = date + "T00:00:00";
+        profile["ClassPlans"]![OverlayPlanId] = overlay;
+        profile["OrderedSchedules"] = new JsonObject { [date + "T00:00:00"] = new JsonObject { ["ClassPlanId"] = OverlayPlanId } };
+        return ProfileDocument.Serialize(profile);
+    }
+
     public static ProfileSaveItem New(string name, Guid? classId = null, Guid? templateId = null, string? json = null) => new()
     {
         Name = name, ClassId = classId, SourceTemplateId = templateId, ProfileJson = json ?? Json(),
