@@ -174,10 +174,13 @@ internal sealed class ClassIslandProfileApplicationBackend(object service) : IPr
     private void SaveSettings()
     {
         var settings = SettingsService;
-        var method = settings.GetType().GetMethod("SaveSettings", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
-            binder: null, types: Type.EmptyTypes, modifiers: null)
-            ?? throw new InvalidOperationException("宿主未提供设置保存接口");
-        method.Invoke(settings, null);
+        const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        // ClassIsland 2.1 只有 SaveSettings(string note)，note 仅用于宿主日志；无参形式留给其他宿主版本。
+        if (settings.GetType().GetMethod("SaveSettings", flags, binder: null, types: [typeof(string)], modifiers: null) is { } withNote)
+            withNote.Invoke(settings, ["RemoteCI 切换档案"]);
+        else
+            (settings.GetType().GetMethod("SaveSettings", flags, binder: null, types: Type.EmptyTypes, modifiers: null)
+                ?? throw new InvalidOperationException("宿主未提供设置保存接口")).Invoke(settings, null);
     }
     private static object? GetProperty(object source, string name) => source.GetType().GetProperty(name,
         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(source);

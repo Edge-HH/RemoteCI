@@ -500,6 +500,7 @@ public sealed class ProfileApplyTests
         Assert.True(result.Success, result.Message);
         Assert.Equal("新档案.json", host.CurrentProfilePath);
         Assert.Equal("新档案.json", host.SettingsService.Settings.SelectedProfile);
+        Assert.NotEmpty(host.SettingsService.SavedNotes);
         Assert.NotEqual(oldId, host.Profile.Id);
         Assert.False(host.IsCurrentProfileTrusted);
         host.Profile.Name = "本地继续编辑";
@@ -571,10 +572,12 @@ public sealed class ProfileApplyTests
         }
         public void Dispose() => Directory.Delete(ProfilePath, recursive: true);
     }
+    // ClassIsland 2.1 只提供 SaveSettings(string note)，没有无参重载。
     private sealed class FakeSettingsService
     {
         public FakeSettings Settings { get; } = new();
-        public void SaveSettings() { }
+        public List<string> SavedNotes { get; } = [];
+        public void SaveSettings(string note) => SavedNotes.Add(note);
     }
     private sealed class FakeSettings
     {
