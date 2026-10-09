@@ -16,15 +16,11 @@ public sealed class ProfileDispatchService(ProfileLibraryService library, Device
         if (input.Items.Count is < 1 or > 100 || input.Items.Select(x => x.Id).Distinct().Count() != input.Items.Count)
             throw new ArgumentException("请选择 1 至 100 份已保存的档案，不能重复选择。");
         if (!Enum.IsDefined(input.Mode)) throw new ArgumentException("请明确选择档案应用方式。");
-        var tempLayers = input.Mode == ProfileApplyMode.TempLayers;
-        if (!tempLayers && (input.Sections == ProfileDistributionSection.None || ((int)input.Sections & ~7) != 0))
-            throw new ArgumentException("请至少选择时间表、课表或科目中的一项。");
+        var kind = DispatchKind.For(input);
         if (input.Mode == ProfileApplyMode.ReplaceSections && !input.ConfirmReplace)
             throw new ArgumentException("整体替换会清空所选类别，请先确认。");
         if (input.Mode == ProfileApplyMode.CreateAndActivate && string.IsNullOrWhiteSpace(input.ImportProfileName))
             throw new ArgumentException("请填写要新建并启用的设备档案名。");
-        if (tempLayers && input.TempLayerIds is { Count: 0 })
-            throw new ArgumentException("请至少选择一个临时层。");
         var importName = input.Mode == ProfileApplyMode.CreateAndActivate
             ? ProfileApplyRequest.NormalizeImportName(input.ImportProfileName) : null;
 
@@ -46,32 +42,25 @@ public sealed class ProfileDispatchService(ProfileLibraryService library, Device
             throw new ArgumentException("请先选择班级、分组或具体设备。");
 
         // 完整构建并验证所有载荷后才发送，避免后续一份源档案无效导致半批投递。
-        // 临时层按班级各不相同，某班档案没有临时层只让该班失败，不阻止其他班级。
         var payloads = new Dictionary<Guid, ProfileApplyRequest>();
         var payloadErrors = new Dictionary<Guid, string>();
         foreach (var source in sources)
         {
             string json;
-            if (!tempLayers)
-                json = ProfileDocument.BuildSelection(source.ProfileJson, input.Sections,
-                    input.TimeLayoutIds, input.ClassPlanIds, input.SubjectIds);
-            else
+            try { json = kind.BuildJson(source, sources.Count == 1); }
+            catch (ArgumentException ex) when (kind.PerClassPayloadErrors && sources.Count > 1)
             {
-                try { json = ProfileDocument.BuildTempLayerSelection(source.ProfileJson, sources.Count == 1 ? input.TempLayerIds : null); }
-                catch (ArgumentException ex) when (sources.Count > 1)
-                {
-                    payloadErrors[source.Id] = $"档案“{source.Name}”：{ex.Message}";
-                    continue;
-                }
+                payloadErrors[source.Id] = $"档案“{source.Name}”：{ex.Message}";
+                continue;
             }
             payloads[source.Id] = new ProfileApplyRequest
             {
                 ProfileJson = json,
-                Sections = tempLayers ? ProfileDistributionSection.None : input.Sections,
+                Sections = kind.Sections,
                 Mode = input.Mode,
                 ImportProfileName = importName,
                 RestartAfter = input.RestartAfter,
-                ReplaceExistingTempLayers = tempLayers && input.ReplaceExistingTempLayers,
+                ReplaceExistingTempLayers = kind.ReplaceTempLayers,
             };
         }
         var plan = await devices.ResolveAsync(classIds, groupIds, connectionIds, ct);
@@ -92,7 +81,6 @@ public sealed class ProfileDispatchService(ProfileLibraryService library, Device
             });
         var targets = new List<DeviceInventory>();
         var byClass = sources.Where(x => x.ClassId is not null).ToDictionary(x => x.ClassId!.Value);
-        var requiredCapability = tempLayers ? RemoteCiCapabilities.ProfileTempLayer : RemoteCiCapabilities.ProfileApply;
         foreach (var target in resolvedTargets)
         {
             if (!await library.CanManageClassAsync(actor, target.ClassId, ct)) throw new UnauthorizedAccessException("不能向其他班级下发档案。");
@@ -101,10 +89,8 @@ public sealed class ProfileDispatchService(ProfileLibraryService library, Device
                 results.Add(Failure(target, "所选班级没有对应的已保存档案。"));
             else if (payloadErrors.TryGetValue(source.Id, out var payloadError))
                 results.Add(Failure(target, payloadError));
-            else if (!target.Capabilities.Contains(requiredCapability))
-                results.Add(Failure(target, tempLayers
-                    ? "当前插件不支持下发临时层，请升级 RemoteCI 插件后重试。"
-                    : "当前插件不支持档案管理，请升级 RemoteCI 插件后重试。"));
+            else if (!target.Capabilities.Contains(kind.Capability))
+                results.Add(Failure(target, kind.UpgradeMessage));
             else targets.Add(target);
         }
 
@@ -174,6 +160,28 @@ public sealed class ProfileDispatchService(ProfileLibraryService library, Device
             }
         });
         return await Task.WhenAll(tasks);
+    }
+
+    /// <summary>按应用方式区分的校验、载荷构建与插件能力要求；下发流程本身不再按方式分支。</summary>
+    private sealed record DispatchKind(string Capability, string UpgradeMessage, ProfileDistributionSection Sections,
+        bool ReplaceTempLayers, bool PerClassPayloadErrors, Func<StoredProfileDto, bool, string> BuildJson)
+    {
+        public static DispatchKind For(ProfileDispatchRequest input)
+        {
+            if (input.Mode != ProfileApplyMode.TempLayers)
+            {
+                if (input.Sections == ProfileDistributionSection.None || ((int)input.Sections & ~7) != 0)
+                    throw new ArgumentException("请至少选择时间表、课表或科目中的一项。");
+                return new(RemoteCiCapabilities.ProfileApply, "当前插件不支持档案管理，请升级 RemoteCI 插件后重试。",
+                    input.Sections, false, false, (source, _) => ProfileDocument.BuildSelection(source.ProfileJson, input.Sections,
+                        input.TimeLayoutIds, input.ClassPlanIds, input.SubjectIds));
+            }
+            if (input.TempLayerIds is { Count: 0 }) throw new ArgumentException("请至少选择一个临时层。");
+            // 临时层按班级各不相同：多份档案批量下发时用各自全部临时层，某班档案没有临时层只让该班失败。
+            return new(RemoteCiCapabilities.ProfileTempLayer, "当前插件不支持下发临时层，请升级 RemoteCI 插件后重试。",
+                ProfileDistributionSection.None, input.ReplaceExistingTempLayers, true,
+                (source, single) => ProfileDocument.BuildTempLayerSelection(source.ProfileJson, single ? input.TempLayerIds : null));
+        }
     }
 
     /// <summary>每班只有一台在线插件；未分配班级的设备在快照中记为默认班级，不能被当成默认班的主设备。</summary>

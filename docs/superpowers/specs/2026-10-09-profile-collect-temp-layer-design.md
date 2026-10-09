@@ -22,7 +22,7 @@
 ## 2. ClassIsland 临时层模型（2.1，已核对宿主源码与程序集）
 
 - 临时层课表 = `ClassPlans` 中 `IsOverlay=true` 的课表，`OverlaySourceId` 指向来源课表，`OverlaySetupTime` 为生效日期。
-- 生效日期由 `OrderedSchedules[日期] = { ClassPlanId }` 决定；宿主 `CreateTempClassPlan` 每天只允许一个临时层，并同时设置 `OverlayClassPlanId` 与 `IsOverlayClassPlanEnabled`。
+- 生效日期由 `OrderedSchedules[日期] = { ClassPlanId }` 决定；宿主 `CreateTempClassPlan` 每天只允许一个临时层，并总是设置 `OverlayClassPlanId` 与 `IsOverlayClassPlanEnabled`。宿主 `GetClassPlanByDate` 只有在 `IsOverlayClassPlanEnabled` 为 true 时才使用日期条目指向的临时层（不论哪天）；`OverlayClassPlanId` 由 `LoadCurrentClassPlan` 每次按今天重算。
 - 可选的临时层时间表 = `TimeLayouts` 中 `IsOverlay=true`、`OverlaySourceId` 指向原时间表的副本，名称加"（临时层）"。
 - 宿主 `CleanExpiredTempClassPlan` 删除早于今天的 `OrderedSchedules`、没有被日期引用的临时层课表、没有被保留课表使用的临时层时间表。
 - 宿主 `ClassPlan.RefreshClassesList` 会把课程数补齐或截断为时间表上课时段数。
@@ -49,7 +49,7 @@
   3. 科目、课表群：设备缺失才补充，不覆盖设备现有对象。
   4. 时间表：设备有同 ID 且时段一致 → 直接引用；设备缺失或时段不同 → 以新 ID 写入临时层时间表副本（`IsOverlay=true`），不改动设备常规时间表。
   5. 临时层课表以新 ID 写入，`OverlaySetupTime` 为该日，来源课表在设备上不存在时 `OverlaySourceId` 置空；按来源课表重算 `IsChangedClass`。
-  6. `OrderedSchedules[日期]` 指向新课表；日期为今天时设置 `OverlayClassPlanId` 与 `IsOverlayClassPlanEnabled=true`。
+  6. `OrderedSchedules[日期]` 指向新课表；总是打开 `IsOverlayClassPlanEnabled`（否则只下发未来日期时不会生效），日期为今天时设置 `OverlayClassPlanId`。
 - **`NormalizeCollected`**：收集结果按宿主规则补齐/截断课程数，清除悬空的临时课表指针与预定课表，使收集档案能直接通过校验。
 
 ## 5. 插件
@@ -76,7 +76,7 @@
 - 插件：`ReadProfile` 回执、`TempLayers` 的跳过过期、同日冲突（拒绝/替换）、时间表一致时引用/不同时生成临时层时间表、今天设置当前临时层、替换常规课表保留临时层；宿主适配器写回 `IsOverlayClassPlanEnabled`。
 - 服务端：收集的权限、离线、旧插件、成功回执与规范化；临时层下发的能力校验与载荷；通用通道拒绝 `ReadProfile`；REST 收集。
 - 前端：临时层列表、新建、改日期、删除、清理过期的纯函数测试。
-- 真机（2026-10-09）：在用户 ClassIsland 2.1.0.1 的隔离副本（改名互斥锁、全新数据目录）中安装本次构建的插件，经本地服务端 REST 接口依次执行：收集（宿主真实序列化通过校验）→ 合并常规内容 → 作为临时层下发今天与 3 天后（今天设为当前临时层、未来使用临时层时间表且常规时间表不变、换课节次标记正确）→ 同日冲突未确认被拒并列出日期、确认后替换 → 重新收集带回临时层 → 整体替换课表后临时层保留 → 创建并启用新档案（新档案文件写入、`SelectedProfile` 切换）。14 项检查全部通过。注意：测试用插件版本须高于插件市场已发布版本，否则宿主启动时会被市场自动更新覆盖。
+- 真机（2026-10-09）：在用户 ClassIsland 2.1.0.1 的隔离副本（改名互斥锁、全新数据目录）中安装本次构建的插件，经本地服务端 REST 接口依次执行：收集（宿主真实序列化通过校验）→ 合并常规内容 → 作为临时层下发今天与 3 天后（今天设为当前临时层、未来使用临时层时间表且常规时间表不变、换课节次标记正确）→ 同日冲突未确认被拒并列出日期、确认后替换 → 重新收集带回临时层 → 整体替换课表后临时层保留 → 创建并启用新档案（新档案文件写入、`SelectedProfile` 切换）→ 在临时层开关为关的新档案上只下发未来日期的临时层（开关被打开、当前临时层指针不指向未来）。18 项检查全部通过。注意：测试用插件版本须高于插件市场已发布版本，否则宿主启动时会被市场自动更新覆盖。
 
 ## 9. 实现中追加的行为
 
@@ -84,7 +84,7 @@
 - 编辑器删除常规课表时，一并删除指向它的预定课表，并清空以它为来源的临时层的来源指针（确认框说明）。
 - 临时层标签可切换当天时间表、直接编辑临时层时间表的时段，并标注与来源课表不同的"已换课"节次。
 - 编辑器把全零 GUID 视为"无默认科目/空课"（宿主保存的档案大量使用），不再误报缺失引用。
-- 编辑器用浏览器本地日期判断"今天/已过期"，设备按自身日期判断；两者跨时区时可能相差一天，以设备为准。
+- 编辑器按各班最近状态快照上报的时区偏移（`ClassClock`，与换课共用）判断"今天/已过期"，模板退回浏览器日期；设备写入时仍按自身日期跳过过期项。
 
 ## 10. 不做
 

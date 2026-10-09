@@ -796,15 +796,8 @@ public sealed class ScheduleSwapService(
             ? value.ToString("MM-dd", CultureInfo.InvariantCulture)
             : date;
 
-    /// <summary>教室端本地“今天”：按该班最近状态快照的时区偏移；没有快照时用服务端本地时区。</summary>
-    private DateOnly ClassToday(Guid classId)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var offset = state.GetLatestSnapshot(classId)?.TimeZoneOffsetMinutes is { } minutes
-            ? TimeSpan.FromMinutes(minutes)
-            : TimeZoneInfo.Local.GetUtcOffset(now);
-        return DateOnly.FromDateTime(now.ToOffset(offset).DateTime);
-    }
+    /// <summary>教室端本地“今天”。</summary>
+    private DateOnly ClassToday(Guid classId) => ClassClock.Today(state, classId);
 
     /// <summary>插件只接受今天起 7 天内的换课。</summary>
     private static bool IsSelectableDate(string date, DateOnly today) =>

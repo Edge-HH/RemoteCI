@@ -6,8 +6,8 @@ namespace RemoteCI.Server.Pages;
 
 /// <summary>与档案库共用服务和编辑器，所有读写与下发目标都锁定当前班级。</summary>
 public sealed class ClassProfilesModel(UserManager<AppUser> users, ProfileLibraryService library,
-    ProfileDispatchService dispatch, DeviceInventoryService devices, ClassroomService classrooms)
-    : ProfilesModel(users, library, dispatch, devices, classrooms)
+    ProfileDispatchService dispatch, DeviceInventoryService devices, ClassroomService classrooms, IStateStore state)
+    : ProfilesModel(users, library, dispatch, devices, classrooms, state)
 {
     public override bool IsClassPage => true;
 }

@@ -42,6 +42,9 @@ public sealed class ProfilePagesTests
         var bootstrap = ReadBootstrap(html);
         Assert.True(bootstrap["isAdmin"]!.GetValue<bool>());
         Assert.Equal(maliciousName, bootstrap["profiles"]![0]!["name"]!.GetValue<string>());
+        // 临时层过期判断使用教室端日期：没有状态快照时按服务端本地时区。
+        Assert.Equal(ClassClock.Today(factory.Services.GetRequiredService<IStateStore>(), Classroom.DefaultId).ToString("yyyy-MM-dd"),
+            bootstrap["classToday"]![Classroom.DefaultId.ToString()]!.GetValue<string>());
 
         var classPage = ReadBootstrap(await browser.GetStringAsync("/ClassProfiles"));
         Assert.Single(classPage["classes"]!.AsArray());

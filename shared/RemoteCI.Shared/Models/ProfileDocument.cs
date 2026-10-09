@@ -215,7 +215,8 @@ public static partial class ProfileDocument
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!Enum.IsDefined(request.Mode)) throw new ArgumentException("请明确选择档案应用方式");
-        if (request.Mode == ProfileApplyMode.TempLayers) return ApplyTempLayers(currentJson, request, DateTime.Today).Json;
+        // 临时层按设备日期跳过过期项，必须由调用方经 ApplyTempLayers 显式传入“今天”。
+        if (request.Mode == ProfileApplyMode.TempLayers) throw new ArgumentException("临时层请按设备日期调用 ApplyTempLayers 写入");
         ValidateSections(request.Sections);
         var source = Parse(BuildSelection(request.ProfileJson, request.Sections));
         if (request.Mode == ProfileApplyMode.CreateAndActivate) return Serialize(source);

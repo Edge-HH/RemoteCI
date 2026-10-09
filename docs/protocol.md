@@ -218,12 +218,13 @@ WebUI 的档案读写通过带 Cookie 与防伪令牌的 Razor Page handlers 完
 
 ### 临时层
 
-ClassIsland 的临时层是 `ClassPlans` 中 `IsOverlay=true` 的课表：`OverlaySourceId` 指向来源课表，`OverlaySetupTime` 为生效日期，`OrderedSchedules[日期].ClassPlanId` 指向它；宿主每天只允许一个临时层，生效日为今天时还设置 `OverlayClassPlanId` 与 `IsOverlayClassPlanEnabled`。可选的临时层时间表是 `IsOverlay=true`、`OverlaySourceId` 指向原时间表的副本。宿主清理时删除早于今天的日期条目、不再被日期引用的临时层课表和不再被使用的临时层时间表。
+ClassIsland 的临时层是 `ClassPlans` 中 `IsOverlay=true` 的课表：`OverlaySourceId` 指向来源课表，`OverlaySetupTime` 为生效日期，`OrderedSchedules[日期].ClassPlanId` 指向它；宿主每天只允许一个临时层。宿主按日期取课表时，只有档案开关 `IsOverlayClassPlanEnabled` 为 true 才会使用日期条目指向的临时层（不论哪天）；`OverlayClassPlanId` 只是当天临时层的指针，宿主每次加载课表都会重算。可选的临时层时间表是 `IsOverlay=true`、`OverlaySourceId` 指向原时间表的副本。宿主清理时删除早于今天的日期条目、不再被日期引用的临时层课表和不再被使用的临时层时间表。
 
 - 常规类别不包含临时层：`MergeCurrent`、`ReplaceSections`、`CreateAndActivate` 在“全部对象”时跳过临时层，显式选择临时层对象返回错误。设备原有临时层不属于所选类别，更新或整体替换后按宿主规则修复：课程数随时间表补齐或截断，缺失的科目改为空课，缺失的课表群改为默认课表群；只有所用时间表已不存在时才连同日期一并移除。
 - 服务端 `ProfileDispatchRequest` 在 `mode=4` 时不要求 `sections`，可带 `tempLayerIds`（省略表示全部；多份档案批量下发时忽略）和 `replaceExistingTempLayers`。载荷只包含所选临时层、它们的日期条目及依赖。某班档案没有临时层时只让该班失败。
-- 插件逐个写入：早于设备今天的跳过并计数，全部过期时失败；设备同日已有临时层或预定课表时，未设置 `replaceExistingTempLayers` 则整台设备拒绝并列出日期，设置后删除该日条目及不再被引用的旧临时层。科目和课表群只补缺，不覆盖设备现有对象；时间表在设备有同 ID 且时段一致时直接引用，否则以新 ID 写入临时层时间表副本，不改动设备的常规时间表。临时层课表以新 ID 写入，来源课表在设备上不存在时 `OverlaySourceId` 置空，并按来源课表重算 `IsChangedClass`。回执消息为“已下发 N 个临时层（，跳过 M 个已过期的临时层）”。
+- 插件逐个写入：早于设备今天的跳过并计数，全部过期时失败；设备同日已有临时层或预定课表时，未设置 `replaceExistingTempLayers` 则整台设备拒绝并列出日期，设置后删除该日条目及不再被引用的旧临时层。科目和课表群只补缺，不覆盖设备现有对象；时间表在设备有同 ID 且时段一致时直接引用，否则以新 ID 写入临时层时间表副本，不改动设备的常规时间表。临时层课表以新 ID 写入，来源课表在设备上不存在时 `OverlaySourceId` 置空，并按来源课表重算 `IsChangedClass`。写入后总是打开 `IsOverlayClassPlanEnabled`（与宿主 `CreateTempClassPlan` 一致，否则未来日期的临时层不会生效），日期为今天时同时设置 `OverlayClassPlanId`。回执消息为“已下发 N 个临时层（，跳过 M 个已过期的临时层）”。
 - 校验同时拒绝 `OrderedSchedules` 中同一天出现多个条目（例如带与不带时区后缀的同一日期）。
+- WebUI 按各班最近状态快照上报的时区偏移计算教室端“今天”（无快照时用服务端本地时区），据此标注临时层“今天生效/已过期”；模板没有班级时用浏览器日期。设备写入时仍以设备自身日期跳过过期项。
 
 ## 远程终端与文件分发
 

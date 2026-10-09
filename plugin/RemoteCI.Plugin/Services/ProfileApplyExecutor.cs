@@ -18,21 +18,6 @@ internal interface IProfileApplicationBackend
 /// <summary>与 UI 和 ClassIsland 类型无关的事务编排：验证完整候选后才写入，失败回滚。</summary>
 internal static class ProfileApplyExecutor
 {
-    /// <summary>读取当前档案供服务端收集；超过档案大小上限时拒绝，避免服务端拿到无法保存的内容。</summary>
-    internal static CommandResult Read(IProfileApplicationBackend backend, Action<Exception>? logError = null)
-    {
-        string json;
-        try { json = backend.ReadCurrentJson(); }
-        catch (Exception ex)
-        {
-            logError?.Invoke(ex);
-            return CommandResult.Failure(CommandResultCodes.InternalError, $"无法读取当前档案：{ex.Message}");
-        }
-        if (System.Text.Encoding.UTF8.GetByteCount(json) > ProfileDocument.MaxUtf8Bytes)
-            return CommandResult.Failure(CommandResultCodes.InvalidRequest, "设备档案超过 5 MB，无法收集");
-        return new CommandResult { Success = true, Code = CommandResultCodes.Ok, Message = "已读取设备档案", Data = json };
-    }
-
     internal static CommandResult Apply(ProfileApplyRequest? request, IProfileApplicationBackend backend,
         Action<Exception>? logError = null, DateTime? today = null)
     {

@@ -206,3 +206,11 @@ test("新建临时层校验失败时不改动档案", () => {
     assert.throws(() => transform.createTempLayer(doc, "monday", "不是日期"), /有效的日期/);
     assert.equal(doc.OrderedSchedules, undefined);
 });
+
+test("清理过期使用传入的教室端日期", () => {
+    const doc = fixture();
+    const layer = transform.createTempLayer(doc, "monday", "2026-10-10");
+    assert.equal(transform.cleanExpiredTempLayers(doc, "2026-10-10"), 0);
+    assert.equal(transform.cleanExpiredTempLayers(doc, "2026-10-11"), 1);
+    assert.equal(doc.ClassPlans[layer], undefined);
+});

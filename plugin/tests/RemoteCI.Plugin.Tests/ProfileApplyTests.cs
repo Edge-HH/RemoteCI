@@ -674,6 +674,8 @@ public sealed class ProfileApplyTests
         Assert.Equal("原老师", applied["Subjects"]![SubjectId.ToString()]!["TeacherName"]!.GetValue<string>());
         Assert.Equal(SubjectId.ToString(), applied["ClassPlans"]![PlanId.ToString()]!["Classes"]![0]!["SubjectId"]!.GetValue<string>());
         Assert.Null(applied["OverlayClassPlanId"]);
+        // 宿主 GetClassPlanByDate 只有在临时层开关打开时才按日期使用任何临时层，未来日期也需要打开。
+        Assert.True(applied["IsOverlayClassPlanEnabled"]!.GetValue<bool>());
         Assert.Single(applied["TimeLayouts"]!.AsObject());
         Assert.Empty(ProfileDocument.Validate(applied));
     }
@@ -783,11 +785,11 @@ public sealed class ProfileApplyTests
     public void ReadReturnsCurrentProfileJsonAsData()
     {
         var json = ProfileJson();
-        var result = ProfileApplyExecutor.Read(new FakeBackend(json));
+        var result = ProfileCollectExecutor.Read(new FakeBackend(json));
         Assert.True(result.Success);
         Assert.Equal(json, result.Data);
 
-        var oversized = ProfileApplyExecutor.Read(new FakeBackend("{\"Comment\":\"" + new string('汉', ProfileDocument.MaxUtf8Bytes / 3 + 1) + "\"}"));
+        var oversized = ProfileCollectExecutor.Read(new FakeBackend("{\"Comment\":\"" + new string('汉', ProfileDocument.MaxUtf8Bytes / 3 + 1) + "\"}"));
         Assert.False(oversized.Success);
         Assert.Null(oversized.Data);
     }

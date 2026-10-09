@@ -96,16 +96,17 @@
     // 临时层（IsOverlay）只在 OrderedSchedules 指定的日期替换当天课表，不属于常规时间表/课表类别。
     const isOverlay = node => read(node, "IsOverlay", false) === true;
     const regularEntries = (doc, section) => entries(doc, section).filter(([, item]) => !isOverlay(item));
-    const ordered = doc => { const value = read(doc, "OrderedSchedules", null); if (value && typeof value === "object") return value; write(doc, "OrderedSchedules", {}); return read(doc, "OrderedSchedules"); };
+    // 取得（必要时新建）OrderedSchedules；只读场景请用 read(doc, "OrderedSchedules", {})。
+    const ensureOrdered = doc => { const value = read(doc, "OrderedSchedules", null); if (value && typeof value === "object") return value; write(doc, "OrderedSchedules", {}); return read(doc, "OrderedSchedules"); };
     const dateOfKey = key => String(key).slice(0, 10);
     const dateKey = date => `${date}T00:00:00`;
     const todayText = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     const isDateText = value => /^\d{4}-\d{2}-\d{2}$/.test(value || "") && !Number.isNaN(Date.parse(`${value}T00:00:00`));
     const keysOn = (doc, date) => Object.keys(read(doc, "OrderedSchedules", {}) || {}).filter(key => dateOfKey(key) === date);
-    const dropDatesOf = (doc, planId) => { const schedule = ordered(doc); Object.keys(schedule).filter(key => sameId(read(schedule[key], "ClassPlanId", ""), planId)).forEach(key => delete schedule[key]); };
+    const dropDatesOf = (doc, planId) => { const schedule = ensureOrdered(doc); Object.keys(schedule).filter(key => sameId(read(schedule[key], "ClassPlanId", ""), planId)).forEach(key => delete schedule[key]); };
     const requireFreeDate = (doc, date, planId = null) => {
         if (!isDateText(date)) throw new Error("请选择有效的日期。");
-        if (keysOn(doc, date).some(key => !planId || !sameId(read(ordered(doc)[key], "ClassPlanId", ""), planId))) throw new Error(`${date} 已有临时层或预定课表，每天只能安排一个。`);
+        if (keysOn(doc, date).some(key => !planId || !sameId(read(ensureOrdered(doc)[key], "ClassPlanId", ""), planId))) throw new Error(`${date} 已有临时层或预定课表，每天只能安排一个。`);
     };
     const tempLayers = doc => {
         const plans = dictionary(doc, "ClassPlans");
@@ -129,6 +130,8 @@
         const before = source ? courses(source) : null;
         courses(plan).forEach((course, i) => write(course, "IsChangedClass", !!before && before.length === courses(plan).length && !sameId(refOf(read(course, "SubjectId", "")), refOf(read(before[i], "SubjectId", "")))));
     };
+    // 时段增删改后，凡使用这张时间表的临时层都按来源课表重算“已换课”标记。
+    const remarkLayout = (doc, layoutId) => relatedPlans(doc, layoutId).forEach(([planId]) => markChanged(doc, planId));
     const createTempLayer = (doc, sourcePlanId, date, separateTime = false) => {
         const plans = dictionary(doc, "ClassPlans");
         const source = plans[sourcePlanId];
@@ -144,7 +147,7 @@
         plans[id] = plan;
         write(doc, "ClassPlans", plans);
         if (separateTime) separateTempTime(doc, id);
-        ordered(doc)[dateKey(date)] = { ClassPlanId: id };
+        ensureOrdered(doc)[dateKey(date)] = { ClassPlanId: id };
         return id;
     };
     // 与宿主 CreateTempClassPlan(createTempTimeLayout: true) 一致：复制时间表为临时层时间表，不改动常规时间表。
@@ -168,7 +171,7 @@
     const moveTempLayer = (doc, planId, date) => {
         requireFreeDate(doc, date, planId);
         dropDatesOf(doc, planId);
-        ordered(doc)[dateKey(date)] = { ClassPlanId: planId };
+        ensureOrdered(doc)[dateKey(date)] = { ClassPlanId: planId };
         write(dictionary(doc, "ClassPlans")[planId], "OverlaySetupTime", dateKey(date));
     };
     const deleteTempLayer = (doc, planId) => {
@@ -179,7 +182,7 @@
     };
     // 与宿主 CleanExpiredTempClassPlan 一致：去掉早于今天的日期，删除不再被日期引用的临时层及其时间表。
     const cleanExpiredTempLayers = (doc, today = todayText()) => {
-        const schedule = ordered(doc);
+        const schedule = ensureOrdered(doc);
         Object.keys(schedule).filter(key => dateOfKey(key) < today).forEach(key => delete schedule[key]);
         const referenced = new Set(Object.values(schedule).map(value => String(read(value, "ClassPlanId", "")).toLowerCase()));
         const plans = dictionary(doc, "ClassPlans");
@@ -266,6 +269,9 @@
         try { await action(); } catch (error) { feedback(error.message || "操作失败。", true); }
         finally { controls.forEach(({ node, disabled }) => { if (node.isConnected) node.disabled = disabled; }); state.busy = false; app.removeAttribute("aria-busy"); if (document.activeElement === document.body && returnFocus?.isConnected) returnFocus.focus(); }
     };
+    // 临时层是否过期以教室端日期为准；模板没有班级时退回浏览器日期。
+    const todayFor = classId => (classId && state.classToday?.[String(classId).toLowerCase()]) || todayText();
+    const draftToday = () => todayFor(activeDraft()?.classId);
     const recordKey = record => record.classId ? `class:${record.classId}` : `template:${record.id}`;
     const activeDraft = () => state.drafts.get(state.active);
     const draftFrom = record => ({ ...record, doc: JSON.parse(record.profileJson), dirty: false });
@@ -364,11 +370,11 @@
     };
     const timeTableHtml = (doc, layout) => `<div class="profile-table-scroll"><table class="profile-table profile-time-table"><thead><tr><th>开始</th><th>结束</th><th>类型</th><th>默认科目</th><th>名称（课间/行动）</th><th>显示</th><th>操作</th></tr></thead><tbody>${slots(layout).map((point, i) => `<tr data-profile-slot="${i}"><td><input type="time" step="1" data-profile-slot-field="${pointTimeField(point, true)}" value="${escape(timeText(pointTime(point, true)))}" aria-label="第${i + 1}个时段开始时间" /></td><td><input type="time" step="1" data-profile-slot-field="${pointTimeField(point, false)}" value="${escape(timeText(pointTime(point, false)))}" aria-label="第${i + 1}个时段结束时间" /></td><td><select data-profile-slot-field="TimeType" aria-label="第${i + 1}个时段类型">${["上课", "课间", "分割线", "行动"].map((label, type) => `<option value="${type}"${Number(read(point, "TimeType", 0)) === type ? " selected" : ""}>${label}</option>`).join("")}</select></td><td><select data-profile-slot-field="DefaultClassId" aria-label="第${i + 1}个时段默认科目">${options(entries(doc, "Subjects"), read(point, "DefaultClassId", ""), "无默认科目")}</select></td><td><input data-profile-slot-field="BreakName" value="${escape(read(point, "BreakName", ""))}" aria-label="第${i + 1}个时段显示名称" /></td><td><label class="check"><input type="checkbox" data-profile-slot-field="IsHideDefault"${read(point, "IsHideDefault", false) ? " checked" : ""} /> 默认隐藏</label></td><td><div class="profile-row-actions"><button type="button" class="ghost" data-profile-slot-action="insert" data-index="${i}" aria-label="在第${i + 1}个时段前插入">＋</button><button type="button" class="ghost" data-profile-slot-action="up" data-index="${i}" aria-label="上移第${i + 1}个时段"${i === 0 ? " disabled" : ""}>↑</button><button type="button" class="ghost" data-profile-slot-action="down" data-index="${i}" aria-label="下移第${i + 1}个时段"${i === slots(layout).length - 1 ? " disabled" : ""}>↓</button><button type="button" class="ghost danger" data-profile-slot-action="delete" data-index="${i}" aria-label="删除第${i + 1}个时段">删除</button></div></td></tr>`).join("")}</tbody></table></div><button type="button" class="ghost" data-profile-slot-action="insert" data-index="${slots(layout).length}">添加时间点</button><p class="muted profile-help">上课时段增删及移动会同步调整关联课表；新时段的课程留空。未编辑字段和附加配置会完整保留。</p>`;
     const lessonsHtml = (doc, plan, layout, overlay = false) => layout ? `<div class="profile-table-scroll"><table class="profile-table"><thead><tr><th>节次</th><th>时间</th><th>科目</th></tr></thead><tbody>${slots(layout).filter(isLesson).map((point, i) => `<tr><th scope="row">第 ${i + 1} 节</th><td>${escape(timeText(pointTime(point, true)))} – ${escape(timeText(pointTime(point, false)))}</td><td><select data-profile-course="${i}" aria-label="第${i + 1}节科目">${options(entries(doc, "Subjects"), read(courses(plan)[i], "SubjectId", ""), "留空")}</select>${overlay && read(courses(plan)[i], "IsChangedClass", false) ? '<small class="profile-changed">已换课</small>' : ""}</td></tr>`).join("")}</tbody></table></div>` : '<p class="muted profile-section-empty">请选择有效的时间表后安排课程。</p>';
-    const tempStatus = date => !date ? "未安排日期" : date < todayText() ? "已过期" : date === todayText() ? "今天生效" : "待生效";
+    const tempStatus = date => !date ? "未安排日期" : date < draftToday() ? "已过期" : date === draftToday() ? "今天生效" : "待生效";
     const renderTempLayers = (doc, container) => {
         const list = tempLayers(doc);
-        if (!list.some(item => item.id === state.objectId)) state.objectId = (list.find(item => item.date >= todayText()) || list[0])?.id || null;
-        const expired = list.filter(item => !item.date || item.date < todayText()).length;
+        if (!list.some(item => item.id === state.objectId)) state.objectId = (list.find(item => item.date >= draftToday()) || list[0])?.id || null;
+        const expired = list.filter(item => !item.date || item.date < draftToday()).length;
         container.innerHTML = `<div class="profile-section-heading"><label>临时层<select data-profile-object-select>${list.length ? list.map(item => `<option value="${escape(item.id)}"${item.id === state.objectId ? " selected" : ""}>${escape(item.date || "未安排日期")} · ${escape(read(item.plan, "Name", "临时层"))}（${tempStatus(item.date)}）</option>`).join("") : '<option value="">尚无临时层</option>'}</select></label><div class="profile-toolbar-actions"><button type="button" class="ghost" data-profile-action="new-temp-layer">新建临时层</button>${expired ? `<button type="button" class="ghost" data-profile-action="clean-temp-layers">清理已过期（${expired}）</button>` : ""}${state.objectId ? '<button type="button" class="ghost danger" data-profile-delete-object>删除</button>' : ""}</div></div><div data-profile-object-content></div>`;
         const body = $("[data-profile-object-content]");
         if (!state.objectId) { body.innerHTML = '<p class="muted profile-section-empty">尚无临时层。临时层只在指定日期替换当天的课表，可从常规课表新建，也可从设备收集后在此编辑。</p>'; return; }
@@ -485,7 +491,7 @@
             const doc = JSON.parse(records[0].profileJson);
             return `<fieldset data-profile-object-section="${1 << index}"><legend>${["时间表", "课表", "科目"][index]}</legend><div class="broadcast-targets">${regularEntries(doc, section).map(([id, item]) => `<label class="check"><input type="checkbox" data-profile-apply-object="${section}" value="${escape(id)}" checked /> ${escape(read(item, "Name", id))}</label>`).join("")}</div></fieldset>`;
         }).join("");
-        const upcoming = multiple ? [] : tempLayers(JSON.parse(records[0].profileJson)).filter(item => item.date && item.date >= todayText());
+        const upcoming = multiple ? [] : tempLayers(JSON.parse(records[0].profileJson)).filter(item => item.date && item.date >= todayFor(records[0].classId));
         $("[data-profile-temp-options]").innerHTML = multiple ? '<p class="muted">将下发各班档案中全部未过期的临时层；没有临时层的班级会单独返回失败。</p>' : upcoming.length ? upcoming.map(item => `<label class="check"><input type="checkbox" data-profile-apply-temp value="${escape(item.id)}" checked /> ${escape(item.date)} · ${escape(read(item.plan, "Name", "临时层"))}</label>`).join("") : '<p class="muted">此档案没有今天及以后的临时层。可在“临时层”标签中新建。</p>';
         renderTargets();
         updateApplyMode();
@@ -593,7 +599,7 @@
             const plans = regularEntries(draft.doc, "ClassPlans");
             if (!plans.length) throw new Error("请先添加常规课表，再从课表新建临时层。");
             $("[data-profile-temp-source]").innerHTML = options(plans, plans[0][0]);
-            $("[data-profile-temp-new-date]").value = todayText();
+            $("[data-profile-temp-new-date]").value = draftToday();
             $("[data-profile-temp-separate]").checked = false;
             dialogError("templayer", "");
             openDialog($("[data-profile-templayer]"));
@@ -611,7 +617,7 @@
         },
         "clean-temp-layers": async () => {
             if (!await ask("清理早于今天和没有安排日期的临时层？保存后生效，设备上的临时层不受影响。", { confirmText: "清理" })) return;
-            const removed = cleanExpiredTempLayers(activeDraft().doc);
+            const removed = cleanExpiredTempLayers(activeDraft().doc, draftToday());
             state.objectId = null;
             markDirty();
             render();
@@ -762,7 +768,7 @@
                     removeSlot(draft.doc, layoutId, index);
                 } else if (action === "insert") insertSlot(draft.doc, layoutId, index);
                 else moveSlot(draft.doc, layoutId, index, index + (action === "up" ? -1 : 1));
-                if (state.section === "TempLayers") markChanged(draft.doc, state.objectId);
+                remarkLayout(draft.doc, layoutId);
                 markDirty(); render();
             });
         }
@@ -803,7 +809,7 @@
                 void run(async () => {
                     const affected = affectedCourses(draft.doc, layoutId, index);
                     if (Number(node.value) !== 0 && affected.length && !await ask(`改为非上课时段会删除 ${affected.length} 张课表中的对应课程。继续？`, { confirmText: "变更类型并删除课程" })) { renderSection(); $(`[data-profile-slot="${index}"] [data-profile-slot-field="TimeType"]`)?.focus(); return; }
-                    changeSlotType(draft.doc, layoutId, index, Number(node.value)); if (state.section === "TempLayers") markChanged(draft.doc, state.objectId); renderSection();
+                    changeSlotType(draft.doc, layoutId, index, Number(node.value)); remarkLayout(draft.doc, layoutId); renderSection();
                     $(`[data-profile-slot="${index}"] [data-profile-slot-field="TimeType"]`)?.focus();
                     markDirty();
                 });

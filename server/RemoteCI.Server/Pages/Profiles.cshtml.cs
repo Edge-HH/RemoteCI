@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
@@ -17,7 +18,8 @@ public class ProfilesModel(
     ProfileLibraryService library,
     ProfileDispatchService dispatch,
     DeviceInventoryService devices,
-    ClassroomService classrooms) : WebPageModel(users)
+    ClassroomService classrooms,
+    IStateStore state) : WebPageModel(users)
 {
     public virtual bool IsClassPage => false;
     public string InitialJson { get; private set; } = "{}";
@@ -100,6 +102,8 @@ public class ProfilesModel(
             currentClassId = CurrentClassId,
             profiles,
             classes = classes.Select(x => new { x.Id, x.Name }),
+            // 临时层是否过期以教室端日期为准，浏览器与教室可能不在同一时区。
+            classToday = classes.ToDictionary(x => x.Id.ToString(), x => ClassClock.Today(state, x.Id).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
             groups = groups.Select(x => new { x.Id, x.Name }),
             devices = allDevices.Where(x => !IsClassPage || x.ClassId == CurrentClassId)
                 .Select(x => new { x.ConnectionId, x.CredentialId, x.ClassId, x.DeviceName, x.Online, x.Capabilities }),

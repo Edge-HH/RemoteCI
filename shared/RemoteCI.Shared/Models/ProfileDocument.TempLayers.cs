@@ -120,12 +120,11 @@ public static partial class ProfileDocument
             var planId = Guid.NewGuid();
             plans[planId.ToString()] = plan;
             ordered[dateText] = new JsonObject { ["ClassPlanId"] = planId.ToString() };
-            if (date == DateOnly.FromDateTime(today))
-            {
-                Set(target, "OverlayClassPlanId", planId.ToString());
-                Set(target, "IsOverlayClassPlanEnabled", true);
-            }
+            // 宿主每次加载课表都会按今天的日期条目重算当前临时层指针，这里只为立即生效预先设置。
+            if (date == DateOnly.FromDateTime(today)) Set(target, "OverlayClassPlanId", planId.ToString());
         }
+        // 宿主 GetClassPlanByDate 只有在此开关打开时才按日期使用临时层（不论哪天），与宿主 CreateTempClassPlan 一致总是打开。
+        Set(target, "IsOverlayClassPlanEnabled", true);
         Set(target, "Subjects", subjects);
         Set(target, "ClassPlanGroups", groups);
         Set(target, "TimeLayouts", layouts);

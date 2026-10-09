@@ -15,14 +15,14 @@ internal sealed class ClassIslandProfileApplicationBackend(object service) : IPr
 {
     // 预定课表与临时课表指针随课表一起写入，候选中已清除的悬空引用才会真正离开宿主档案；
     // 下发今天的临时层还需同时打开临时层开关。
-    private static readonly string[] DictionaryProperties = ["Subjects", "TimeLayouts", "ClassPlans", "ClassPlanGroups",
+    private static readonly string[] PersistedProfileProperties = ["Subjects", "TimeLayouts", "ClassPlans", "ClassPlanGroups",
         "OrderedSchedules", "TempClassPlanId", "OverlayClassPlanId", "IsOverlayClassPlanEnabled"];
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     private string? _createdPath;
     private object? _createdProfile;
     private System.ComponentModel.PropertyChangedEventHandler? _createdSaveHandler;
 
-    private sealed record Snapshot(Profile Profile, Dictionary<string, object?> Dictionaries,
+    private sealed record Snapshot(Profile Profile, Dictionary<string, object?> Properties,
         string CurrentPath, object? SelectedPath, bool? Trusted, string FilePath, byte[]? FileBytes);
 
     private Profile CurrentProfile => HostApiCompat.ReadProperty<Profile>(service, "Profile");
@@ -33,7 +33,7 @@ internal sealed class ClassIslandProfileApplicationBackend(object service) : IPr
     {
         var currentPath = ReadCurrentPath();
         var filePath = Path.Combine(ProfileDirectory, Path.GetFileName(currentPath));
-        return new Snapshot(CurrentProfile, DictionaryProperties.ToDictionary(name => name,
+        return new Snapshot(CurrentProfile, PersistedProfileProperties.ToDictionary(name => name,
                 name => GetProperty(CurrentProfile, name)), currentPath, ReadSelectedPath(),
             GetProperty(service, "IsCurrentProfileTrusted") is bool trusted ? trusted : null, filePath,
             File.Exists(filePath) ? File.ReadAllBytes(filePath) : null);
@@ -43,7 +43,7 @@ internal sealed class ClassIslandProfileApplicationBackend(object service) : IPr
     {
         var candidate = Deserialize(json);
         var target = CurrentProfile;
-        foreach (var name in DictionaryProperties)
+        foreach (var name in PersistedProfileProperties)
             HostApiCompat.WriteProperty(target, name, GetProperty(candidate, name));
     }
 
@@ -86,9 +86,9 @@ internal sealed class ClassIslandProfileApplicationBackend(object service) : IPr
         {
             HostApiCompat.WriteProperty(service, "Profile", state.Profile);
             HostApiCompat.WriteProperty(service, "CurrentProfilePath", state.CurrentPath);
-            foreach (var (name, value) in state.Dictionaries)
+            foreach (var (name, value) in state.Properties)
             {
-                // Root PropertyChanged can auto-save; keep restoring the remaining dictionaries
+                // Root PropertyChanged can auto-save; keep restoring the remaining properties
                 // even if the disk is unavailable during one of those notifications.
                 try { HostApiCompat.WriteProperty(state.Profile, name, value); }
                 catch (Exception ex) { restoreError ??= ex; }
