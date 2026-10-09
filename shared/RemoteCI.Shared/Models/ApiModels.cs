@@ -100,4 +100,6 @@ public static class ApiErrorCodes
     public const string SwapNotOwn = "SWAP_NOT_OWN";
     /// <summary>申请当前状态不允许该操作（409），例如已被处理。</summary>
     public const string SwapStateConflict = "SWAP_STATE_CONFLICT";
+    /// <summary>档案已被其他操作修改，提交的修订号已过期（409），需要重新读取后再保存或下发。</summary>
+    public const string ProfileStale = "PROFILE_STALE";
 }

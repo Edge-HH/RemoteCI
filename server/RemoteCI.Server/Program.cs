@@ -481,7 +481,7 @@ app.MapPost("/api/commands", async (
     if (principal?.User is null) return Unauthorized();
     // ApplyProfile 的班级身份与修订号仅由档案管理入口校验，不能通过通用命令 API 绕过。
     if (command.Command == CommandKind.ApplyProfile)
-        return Results.Json(Error(ApiErrorCodes.Forbidden, "请通过服务端档案管理页面下发档案"), statusCode: StatusCodes.Status403Forbidden);
+        return Results.Json(Error(ApiErrorCodes.Forbidden, "请通过档案管理页面或 POST /api/profiles/apply 下发档案"), statusCode: StatusCodes.Status403Forbidden);
     if (await ResolveClassAsync(principal, command.ClassId ?? classId, access, ct) is not { } target) return Forbidden();
     command.ClassId = target;
     var classPermissions = await access.GetEffectivePermissionsAsync(
@@ -1206,6 +1206,7 @@ app.MapPost("/api/admin/backups/{name}/restore", async (string name, HttpContext
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok", protocolVersion = Protocol.Version }));
 app.MapRazorPages();
 app.MapHolidayEndpoints();
+app.MapProfileEndpoints();
 app.Run();
 
 static async Task<AuthPrincipal?> AuthorizeAsync(HttpContext ctx, IdentityCoordinator identities, CancellationToken ct)

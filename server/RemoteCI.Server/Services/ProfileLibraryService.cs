@@ -27,6 +27,17 @@ public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService ac
         return rows.OrderBy(x => x.Name).Select(ToDto).ToList();
     }
 
+    /// <summary>不指定班级时的列表：管理员得到全部档案，班主任得到自己可管理班级的档案。</summary>
+    public async Task<IReadOnlyList<StoredProfileDto>> ListManageableAsync(AppUser actor, CancellationToken ct = default)
+    {
+        if (actor.Role == UserRole.Admin) return await ListAsync(actor, ct: ct);
+        var rows = await db.StoredProfiles.AsNoTracking().Where(x => x.ClassId != null).ToListAsync(ct);
+        var allowed = new HashSet<Guid>();
+        foreach (var classId in rows.Select(x => x.ClassId!.Value).Distinct())
+            if (await CanManageClassAsync(actor, classId, ct)) allowed.Add(classId);
+        return rows.Where(x => allowed.Contains(x.ClassId!.Value)).OrderBy(x => x.Name).Select(ToDto).ToList();
+    }
+
     public async Task<StoredProfileDto> GetAsync(AppUser actor, Guid id, Guid? onlyClass = null, CancellationToken ct = default)
     {
         var row = await FindAuthorizedAsync(actor, id, onlyClass, ct);
