@@ -532,6 +532,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     public async Task PluginPushesExtensions_AllWatchesReceiveThem()
     {
         using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
         using var watch = await ConnectWatchAsync();
         await SendAsync(plugin, Envelope.ExtensionsSync(new List<ExtensionDefinition>
         {
@@ -544,7 +545,8 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
             },
         }));
 
-        var received = await ReceivePayloadAsync<List<ExtensionDefinition>>(watch, Protocol.MessageTypeExtensionsSync);
+        var received = await ReceiveExtensionsAsync(watch,
+            list => list.Any(x => x.Id == "demo.lock" && x.RequiredPermission == UserPermissions.SystemControl));
         var extension = Assert.Single(received);
         Assert.Equal("demo.lock", extension.Id);
         Assert.Equal("锁屏", extension.DisplayName);
@@ -574,6 +576,8 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     public async Task ExtensionCommand_IsForwardedToPluginAndResultReturns()
     {
         using var plugin = await ConnectPluginAsync();
+        // 插件完成认证并在服务端注册后才会收到 schedule_pull；否则手表的命令会因“插件未在线”被拒。
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
         using var watch = await ConnectWatchAsync();
         await SendAsync(plugin, Envelope.ExtensionsSync(new List<ExtensionDefinition>
         {
@@ -584,7 +588,8 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
                 RequiredPermission = UserPermissions.PowerControl,
             },
         }));
-        await ReceivePayloadAsync<List<ExtensionDefinition>>(watch, Protocol.MessageTypeExtensionsSync);
+        await ReceiveExtensionsAsync(watch,
+            list => list.Any(x => x.Id == "demo.lock" && x.RequiredPermission == UserPermissions.PowerControl));
         var request = Envelope.Command(new CommandMessage
         {
             Command = CommandKind.RunExtension,
@@ -1046,6 +1051,20 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
             if (result.MessageType != WebSocketMessageType.Close) continue;
             Assert.Equal(WebSocketCloseStatus.PolicyViolation, result.CloseStatus);
             return;
+        }
+    }
+
+    /// <summary>
+    /// 共享的测试服务端可能缓存着前一个测试同步的扩展列表，手表连上会先收到那份旧列表；
+    /// 一直接收到本测试同步的内容为止，不能把任意一次扩展同步当作本测试的同步已经处理。
+    /// </summary>
+    private static async Task<List<ExtensionDefinition>> ReceiveExtensionsAsync(
+        WebSocket watch, Func<List<ExtensionDefinition>, bool> isExpected)
+    {
+        while (true)
+        {
+            var extensions = await ReceivePayloadAsync<List<ExtensionDefinition>>(watch, Protocol.MessageTypeExtensionsSync);
+            if (isExpected(extensions)) return extensions;
         }
     }
 
