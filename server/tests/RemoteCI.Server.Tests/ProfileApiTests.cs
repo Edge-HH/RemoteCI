@@ -117,6 +117,14 @@ public sealed class ProfileApiTests
             new CommandMessage { Command = CommandKind.ApplyProfile, ClassId = Classroom.DefaultId }));
         Assert.Equal(HttpStatusCode.Forbidden, command.StatusCode);
 
+        // 扩展设置同属仅服务端命令：有班级访问权时指出专用接口（400），与此前行为一致。
+        var extension = await client.SendAsync(Bearer(HttpMethod.Post, "/api/commands", admin,
+            new CommandMessage { Command = CommandKind.ApplyExtensionSettings, ClassId = Classroom.DefaultId }));
+        Assert.Equal(HttpStatusCode.BadRequest, extension.StatusCode);
+        var read = await client.SendAsync(Bearer(HttpMethod.Post, "/api/commands", admin,
+            new CommandMessage { Command = CommandKind.ReadProfile, ClassId = Classroom.DefaultId }));
+        Assert.Equal(HttpStatusCode.Forbidden, read.StatusCode);
+
         // 临时层下发不要求类别，但档案中必须有临时层。
         var noLayers = await client.SendAsync(Bearer(HttpMethod.Post, "/api/profiles/apply", admin, new
         {
