@@ -91,3 +91,28 @@
 - 不把收集结果自动保存到服务端。
 - 不提供"预定课表（日期指向常规课表）"的编辑界面，收集时原样保留。
 - 不处理临时课表群（`TempClassPlanGroup*`），原样保留。
+
+## 11. 审查记录
+
+Standards（编码约定与代码异味）与 Spec（需求符合度）两轴审查的每条发现及处理：
+
+| 轴 | 发现 | 处理 | 提交 |
+| --- | --- | --- | --- |
+| Standards | `docs/protocol.md` 的 ReadProfile/临时层章节须随功能提交 | 已提交（只暂存本功能的段落） | 7636b05 |
+| Standards | 仅服务端命令集合散落在 REST、WebSocket、局域网三处且不一致 | `CommandPermissions.IsServerOnly` 统一定义，三处共用；REST 先校验班级访问权，状态码与改动前一致 | cfda9b9、048198e |
+| Standards | 重复代码：JS 删除日期条目、同日检查；C# 节数统计、`Layouts` 读取、GUID 查找；收集汇总文案、失败结果构造 | `dropDatesOf`/`requireFreeDate`；`AlignClasses`/`Points`/`KeyOf`；`ProfileCollectResult.Summary`/`Failure` | 7636b05、cfda9b9 |
+| Standards | 重复分支：`ApplyAsync` 中多处 `tempLayers ?`；profiles.js 多处判断临时层标签 | `DispatchKind` 集中描述各方式；编辑器按时间表 `remarkLayout`，仅保留渲染分派与字典映射两处 | 7da384b |
+| Standards | 投机通用：`Apply` 的 TempLayers 分支隐含 `DateTime.Today` | 删除，须经 `ApplyTempLayers` 显式传入设备日期 | 7da384b |
+| Standards | 命名：`DictionaryProperties`、`ProfileApplyExecutor.Read`、带写入副作用的 `ordered()` | `PersistedProfileProperties`、`ProfileCollectExecutor`、`ensureOrdered()` 与只读 `keysOn` | 7da384b |
+| Standards | 发散修改：`ProfileDocument.cs` 一次增加约 280 行 | 拆出 `ProfileDocument.TempLayers.cs`（分部类） | cfda9b9 |
+| Standards | 拒绝 ReadProfile 的文案写成“修改” | 改为“收集、下发” | 7636b05 |
+| Standards | 编辑器用浏览器日期判断过期 | `ClassClock` 按班级快照时区，换课服务共用 | 7da384b |
+| Standards | 读取失败码 InternalError、超限 InvalidRequest | 保留：读取不是保存失败；超限为数据超出上限，代码注明理由 | — |
+| Spec | 收集时无权班级未逐班报告 | 混合批次逐班报告且不回显班级名，全部无权仍 403 | cfda9b9 |
+| Spec | “更新当前档案”会静默删除节数变化后的设备临时层 | 改为按宿主规则修复（对齐节数、缺失科目空课、缺失课表群默认），仅时间表不存在时移除 | 7636b05 |
+| Spec | 下发对话框重开时未复位方式相关区域 | 打开时调用 `updateApplyMode` | 7636b05 |
+| Spec | 设备列表未提示缺少 `profile.temp-layer` | 标注“下发临时层需升级插件” | 7636b05 |
+| Spec | 当前临时层指针清空后开关仍为 true | 与宿主一致：开关为全局使用临时层的开关；下发临时层总是打开，指针由宿主每次加载重算 | 7da384b |
+| Spec | 追加行为（同日重复校验、删除课表级联、临时层时间表编辑等） | 记入第 9 节 | — |
+
+另：CI 在 7da384b 上偶发失败（`ExtensionCommand_IsForwardedToPluginAndResultReturns`），根因是共享测试服务端缓存的旧扩展列表让测试在插件注册前发出命令；测试改为等待本测试插件注册与同步后修复（b1735c5），对抗场景 15/15、测试类连跑 4/4、CI 通过。发布：3.3.1.1 预发布版（tag 指向 048198e），Latest 仍为 3.3.0.2。
