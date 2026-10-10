@@ -238,6 +238,8 @@ fun RemoteCiApp(appContext: android.content.Context) {
                     )
                 }
             }
+            // 启动时自动检查 App 更新，发现新版本时弹窗（登录页同样适用）。
+            AutoUpdatePrompt(settings = settings, onPersist = ::persist)
             SnackbarHost(
                 hostState = snackbar,
                 modifier = Modifier.align(Alignment.BottomCenter)

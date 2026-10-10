@@ -403,16 +403,27 @@ fun PairingScreen(onBack: () -> Unit, snackbar: androidx.compose.material3.Snack
     val context = LocalContext.current
     var credentials by remember { mutableStateOf(listOf<com.remoteci.mobile.data.PluginCredentialInfo>()) }
     var code by remember { mutableStateOf<String?>(null) }
+    val classes by com.remoteci.mobile.data.ConnectionManager.classes.collectAsState()
+    val currentClassId by com.remoteci.mobile.data.ConnectionManager.currentClassId.collectAsState()
+    val currentClass = classes.firstOrNull { it.id == currentClassId }
     LaunchedEffect(Unit) { credentials = runCatching { AdminApi.pluginCredentials() }.getOrDefault(emptyList()) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         TopAppBar(title = { Text("插件配对码") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
+        // 服务端没有默认班级：配对码绑定当前班级，插件配对后归属该班。
+        Text(
+            currentClass?.let { "为当前班级「${it.name}」生成一次性配对码，可在左上角菜单切换班级。" }
+                ?: "当前账号还没有可用的班级，请先在 WebUI 新建班级。",
+            modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Button(onClick = {
+            val classId = currentClass?.id ?: return@Button
             scope.launch {
-                code = runCatching { AdminApi.pairingCode().pairCode }.getOrElse {
+                code = runCatching { AdminApi.pairingCode(classId).pairCode }.getOrElse {
                     snackbar.showSnackbar(it.message ?: "无法生成配对码"); null
                 }
             }
-        }, modifier = Modifier.padding(16.dp).fillMaxWidth().height(56.dp)) { Text("生成配对码") }
+        }, enabled = currentClass != null, modifier = Modifier.padding(16.dp).fillMaxWidth().height(56.dp)) { Text("生成配对码") }
         code?.let { value ->
             Row(
                 modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(),

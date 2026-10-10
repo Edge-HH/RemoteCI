@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Identity;
+using QRCoder;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using RemoteCI.Server.Data;
@@ -12,7 +13,9 @@ public sealed class LoginModel(
     UserManager<AppUser> users,
     SignInManager<AppUser> signIn,
     IdentityCoordinator identities,
-    VisitorAccessSettings visitorAccess) : PageModel
+    VisitorAccessSettings visitorAccess,
+    WebQrLoginService qrLogin,
+    MobileLoginSettings mobileLogin) : PageModel
 {
     [BindProperty]
     public LoginInput Input { get; set; } = new();
@@ -79,22 +82,61 @@ public sealed class LoginModel(
             ModelState.AddModelError(string.Empty, result.IsLockedOut ? "登录失败次数过多，请稍后再试" : "ID 或密码错误");
             return Page();
         }
-        var permissions = RolePermissions.Effective(user.Role, user.GrantedPermissions);
-        // 多班级账号登录后先选择进入的班级；单班级账号保持原有落地逻辑。
-        var access = HttpContext.RequestServices.GetRequiredService<ClassAccessService>();
-        var accessibleClasses = await access.GetAccessibleClassesAsync(user.Id, user.Role, user.GrantedPermissions, ct);
-        string landing;
-        if (accessibleClasses.Count > 1)
-        {
-            landing = "/ClassSelect";
-        }
-        else
-        {
-            landing = permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account";
-        }
         // 登录表单是 POST。使用 303 明确要求浏览器以 GET 打开落地页，避免
         // 用户返回时恢复 POST 历史并触发“重新提交表单”（ERR_CACHE_MISS）。
-        return RedirectAfterPost(landing);
+        return RedirectAfterPost(await LandingPageAsync(user, ct));
+    }
+
+    /// <summary>多班级账号登录后先选择进入的班级；单班级账号进入总览（没有“概览”权限时进入个人账号）。</summary>
+    private async Task<string> LandingPageAsync(AppUser user, CancellationToken ct)
+    {
+        var permissions = RolePermissions.Effective(user.Role, user.GrantedPermissions);
+        var access = HttpContext.RequestServices.GetRequiredService<ClassAccessService>();
+        var accessibleClasses = await access.GetAccessibleClassesAsync(user.Id, user.Role, user.GrantedPermissions, ct);
+        if (accessibleClasses.Count > 1) return "/ClassSelect";
+        return permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account";
+    }
+
+    // ---------- 手机扫码登录：浏览器显示二维码，已登录的手机 App 扫码确认后由本浏览器登录 ----------
+
+    public async Task<IActionResult> OnPostQrCreateAsync(CancellationToken ct)
+    {
+        try
+        {
+            var (code, pollToken, expiresAt) = qrLogin.Create(
+                Request.Headers.UserAgent.ToString(), HttpContext.Connection.RemoteIpAddress?.ToString());
+            var serverUrl = await mobileLogin.GetServerUrlAsync(ct) ?? $"{Request.Scheme}://{Request.Host}{Request.PathBase}".TrimEnd('/');
+            using var data = QRCodeGenerator.GenerateQrCode(MobileLoginSettings.BuildWebLoginQrPayload(serverUrl, code), QRCodeGenerator.ECCLevel.M);
+            using var renderer = new SvgQRCode(data);
+            return new JsonResult(new
+            {
+                code,
+                pollToken,
+                svg = renderer.GetGraphic(5),
+                expiresInSeconds = (int)Math.Max(1, (expiresAt - DateTimeOffset.UtcNow).TotalSeconds),
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new JsonResult(new { error = ex.Message }) { StatusCode = StatusCodes.Status429TooManyRequests };
+        }
+    }
+
+    public IActionResult OnPostQrStatus(string code, string pollToken)
+    {
+        var status = qrLogin.Poll(code, pollToken);
+        return new JsonResult(new { state = status.State.ToString().ToLowerInvariant(), scannedBy = status.ScannedBy });
+    }
+
+    public async Task<IActionResult> OnPostQrCompleteAsync(string code, string pollToken, bool rememberMe, CancellationToken ct)
+    {
+        if (qrLogin.Consume(code, pollToken) is not { } userId)
+            return new JsonResult(new { error = "二维码已过期，请刷新后重新扫码" }) { StatusCode = StatusCodes.Status409Conflict };
+        var user = await users.FindByIdAsync(userId.ToString());
+        if (user is null || !user.Enabled || user.PasswordPending)
+            return new JsonResult(new { error = "该账号当前不能登录" }) { StatusCode = StatusCodes.Status403Forbidden };
+        await signIn.SignInAsync(user, rememberMe);
+        return new JsonResult(new { redirectUrl = Url.Page(await LandingPageAsync(user, ct)) ?? "/" });
     }
 
     private IActionResult RedirectAfterPost(string page)

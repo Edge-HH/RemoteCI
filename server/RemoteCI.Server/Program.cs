@@ -113,6 +113,7 @@ builder.Services.AddScoped<UserNotificationService>();
 builder.Services.AddScoped<ScheduleSwapService>();
 builder.Services.AddSingleton<IScheduleCommandSender, PeerScheduleCommandSender>();
 builder.Services.AddSingleton<WebPushSender>();
+builder.Services.AddSingleton<WebQrLoginService>();
 builder.Services.AddHttpClient(WebPushSender.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddScoped(sp =>
 {
@@ -277,6 +278,33 @@ app.MapPost("/api/auth/mobile-login", async (
         return Results.Ok(response);
     }
     catch (IdentityOperationException ex) { return OperationError(ex); }
+}).RequireRateLimiting("auth");
+
+// 网页扫码登录：已登录的手机 App 扫描 WebUI 登录页二维码并确认，显示二维码的浏览器随即登录同一账号。
+// 只接受设备会话（API Key 不能代替本人确认），确认必须由扫码的同一账号完成。
+app.MapPost("/api/auth/web-qr/scan", async (
+    HttpContext ctx, WebQrLoginScanRequest request, IdentityCoordinator identities, WebQrLoginService qrLogin, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.IsApiKey) return Forbidden();
+    if (MissingFields(request.Code) is { } bad) return bad;
+    var displayName = string.IsNullOrWhiteSpace(principal.User.DisplayName) ? principal.User.Username : principal.User.DisplayName;
+    return qrLogin.Scan(request.Code.Trim(), principal.User.Id, displayName) is { } info
+        ? Results.Ok(new WebQrLoginScanResponse { Browser = info.Browser, IpAddress = info.IpAddress, ExpiresAt = info.ExpiresAt })
+        : Results.Json(Error(ApiErrorCodes.NotFound, "二维码已过期或已被使用，请在网页上刷新二维码"), statusCode: StatusCodes.Status404NotFound);
+}).RequireRateLimiting("auth");
+
+app.MapPost("/api/auth/web-qr/confirm", async (
+    HttpContext ctx, WebQrLoginConfirmRequest request, IdentityCoordinator identities, WebQrLoginService qrLogin, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.IsApiKey) return Forbidden();
+    if (MissingFields(request.Code) is { } bad) return bad;
+    return qrLogin.Decide(request.Code.Trim(), principal.User.Id, request.Approve)
+        ? Results.NoContent()
+        : Results.Json(Error(ApiErrorCodes.NotFound, "二维码已过期，或不是由当前账号扫描"), statusCode: StatusCodes.Status404NotFound);
 }).RequireRateLimiting("auth");
 
 // 客户端一键打开 WebUI：为当前设备会话的账号签发 1 分钟一次性票据，客户端用浏览器打开 /WebLogin?t=… 即自动登录。

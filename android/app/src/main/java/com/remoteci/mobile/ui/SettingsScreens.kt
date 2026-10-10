@@ -57,6 +57,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
@@ -546,6 +547,19 @@ fun UpdatesScreen(settings: WatchSettings, onBack: () -> Unit, onPersist: (Watch
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = settings.updateChannel == UpdateChannel.STABLE, onClick = { onPersist(settings.copy(updateChannel = UpdateChannel.STABLE)) }, label = { Text("正式版") })
             FilterChip(selected = settings.updateChannel == UpdateChannel.BETA, onClick = { onPersist(settings.copy(updateChannel = UpdateChannel.BETA)) }, label = { Text("Beta") })
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("自动检查更新")
+                Text("打开 App 时检查（至少间隔 6 小时），有新版本时弹窗提示", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(settings.autoUpdateCheck, { onPersist(settings.copy(autoUpdateCheck = it)) })
+        }
+        if (settings.skippedUpdateVersion.isNotBlank()) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("已跳过 ${settings.skippedUpdateVersion}", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton({ onPersist(settings.copy(skippedUpdateVersion = "", lastUpdateCheckAt = 0L)) }) { Text("恢复提示") }
+            }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("同版本强制覆盖")

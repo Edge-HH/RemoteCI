@@ -1,6 +1,25 @@
 package com.remoteci.mobile.ui
 
 import android.os.SystemClock
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.VisualTransformation
+import com.remoteci.mobile.data.parseWebLoginQrPayload
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -112,6 +131,7 @@ fun LoginScreen(
 ) {
     var username by remember { mutableStateOf(settings.username) }
     var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
     var server by remember { mutableStateOf(settings.cloudServerUrl) }
     val pendingSetup by ConnectionManager.pendingPasswordSetup.collectAsState()
     var newPassword by remember { mutableStateOf("") }
@@ -121,6 +141,7 @@ fun LoginScreen(
     val scanStatus by ConnectionManager.lanDiscoveryStatus.collectAsState()
     val scanning by ConnectionManager.lanDiscoveryScanning.collectAsState()
     val pending by ConnectionManager.lanBootstrapPending.collectAsState()
+    val connecting = connection is ConnectionManager.State.Connecting
     val scope = rememberCoroutineScope()
     val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
         val contents = result.contents?.trim().orEmpty()
@@ -133,6 +154,9 @@ fun LoginScreen(
             password = ""
             onSettings(next)
             ConnectionManager.connect(next, mobileLoginTicket = login.ticket)
+        } else if (parseWebLoginQrPayload(contents) != null) {
+            // 网页登录页的二维码是给已登录的 App 确认用的，不能用来登录 App 本身。
+            scope.launch { snackbar.showSnackbar("这是网页登录二维码：请先登录 App，再用首页右上角的扫码按钮扫描") }
         } else if (contents.isNotEmpty()) {
             // 旧版二维码/手动输入只包含服务器地址。
             server = contents
@@ -144,58 +168,180 @@ fun LoginScreen(
             if (ConnectionManager.currentUser.value != null) onLoggedIn()
         }
     }
-    Scaffold { padding ->
-        Column(
-            Modifier.fillMaxSize().padding(padding).padding(16.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+    fun submit() {
+        val next = settings.copy(username = username.trim(), cloudServerUrl = server.trim())
+        onSettings(next)
+        if (username.isBlank() || password.isBlank() || server.isBlank()) {
+            scope.launch { snackbar.showSnackbar("请填写服务器、ID 和密码") }
+        } else ConnectionManager.connect(next, password)
+    }
+    val colors = MaterialTheme.colorScheme
+    Scaffold(containerColor = colors.surface) { padding ->
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(
+                    0f to colors.primaryContainer.copy(alpha = 0.65f),
+                    0.45f to colors.surface,
+                    1f to colors.surface,
+                ),
+            ),
         ) {
-            Text("登录 RemoteCI", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("输入服务器地址并用账号登录，或扫描 WebUI 的登录二维码直接登录。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedTextField(server, { server = it }, label = { Text("服务器地址") }, modifier = Modifier.fillMaxWidth(), trailingIcon = {
-                IconButton({ scanner.launch(qrScanOptions("扫描登录二维码或服务器地址")) }) {
-                    Icon(Icons.Rounded.QrCodeScanner, contentDescription = "扫描")
+            Column(
+                Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Surface(
+                    modifier = Modifier.size(88.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    color = colors.surface,
+                    shadowElevation = 6.dp,
+                ) {
+                    Image(
+                        painter = painterResource(com.remoteci.mobile.R.mipmap.ic_launcher_foreground),
+                        contentDescription = null,
+                        modifier = Modifier.padding(12.dp),
+                    )
                 }
-            })
-            OutlinedTextField(username, { username = it }, label = { Text("ID") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(
-                password,
-                { password = it },
-                label = { Text("密码") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            )
-            if (server.trim().startsWith("http://")) {
-                Text("当前是明文 HTTP，请确认网络可信。", color = MaterialTheme.colorScheme.error)
-            }
-            if (pendingSetup != null) {
-                // 首登设置密码：批量导入的账号首次登录时在这里补设密码。
-                Card {
-                    Column(
-                        Modifier.fillMaxWidth().padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("RemoteCI", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Text("课堂控制中心 · 登录你的账号", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                }
+
+                // 扫码登录：扫描 WebUI 概览页的“手机登录”二维码，免输服务器地址和密码。
+                Card(
+                    onClick = { scanner.launch(qrScanOptions("扫描 WebUI 的手机登录二维码")) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = colors.primaryContainer),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(18.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("首次登录 · 设置密码", style = MaterialTheme.typography.titleMedium)
+                        Surface(shape = CircleShape, color = colors.primary, modifier = Modifier.size(48.dp)) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Rounded.QrCodeScanner, contentDescription = null, tint = colors.onPrimary)
+                            }
+                        }
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("扫码登录", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = colors.onPrimaryContainer)
+                            Text("扫描 WebUI 概览页的手机登录二维码，无需输入密码", style = MaterialTheme.typography.bodySmall, color = colors.onPrimaryContainer.copy(alpha = 0.8f))
+                        }
+                        Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = colors.onPrimaryContainer)
+                    }
+                }
+
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    HorizontalDivider(Modifier.weight(1f))
+                    Text("或使用账号密码", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+                    HorizontalDivider(Modifier.weight(1f))
+                }
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = colors.surfaceContainerLow),
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         OutlinedTextField(
-                            newPassword,
-                            { newPassword = it },
-                            label = { Text("新密码") },
-                            modifier = Modifier.fillMaxWidth(),
+                            server,
+                            { server = it },
+                            label = { Text("服务器地址") },
+                            placeholder = { Text("https://remoteci.example.com") },
+                            leadingIcon = { Icon(Icons.Rounded.Link, contentDescription = null) },
+                            trailingIcon = {
+                                IconButton({ scanner.launch(qrScanOptions("扫描登录二维码或服务器地址")) }) {
+                                    Icon(Icons.Rounded.QrCodeScanner, contentDescription = "扫描")
+                                }
+                            },
                             singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth(),
                         )
                         OutlinedTextField(
-                            confirmNewPassword,
-                            { confirmNewPassword = it },
-                            label = { Text("确认新密码") },
-                            modifier = Modifier.fillMaxWidth(),
+                            username,
+                            { username = it },
+                            label = { Text("ID") },
+                            leadingIcon = { Icon(Icons.Rounded.Person, contentDescription = null) },
                             singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth(),
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedTextField(
+                            password,
+                            { password = it },
+                            label = { Text("密码") },
+                            leadingIcon = { Icon(Icons.Rounded.Lock, contentDescription = null) },
+                            trailingIcon = {
+                                IconButton({ passwordVisible = !passwordVisible }) {
+                                    Icon(
+                                        if (passwordVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                        contentDescription = if (passwordVisible) "隐藏密码" else "显示密码",
+                                    )
+                                }
+                            },
+                            singleLine = true,
+                            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Go),
+                            keyboardActions = KeyboardActions(onGo = { if (!connecting) submit() }),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        if (server.trim().startsWith("http://")) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.WarningAmber, contentDescription = null, tint = colors.error, modifier = Modifier.size(18.dp))
+                                Text("当前是明文 HTTP，请确认网络可信。", style = MaterialTheme.typography.bodySmall, color = colors.error)
+                            }
+                        }
+                        Button(
+                            onClick = ::submit,
+                            modifier = Modifier.fillMaxWidth().height(56.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            enabled = !connecting,
+                        ) {
+                            if (connecting) {
+                                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = colors.onPrimary)
+                                Spacer(Modifier.size(10.dp))
+                                Text("正在连接…")
+                            } else {
+                                Text("登录", style = MaterialTheme.typography.titleMedium)
+                            }
+                        }
+                    }
+                }
+
+                if (pendingSetup != null) {
+                    // 首登设置密码：批量导入的账号首次登录时在这里补设密码。
+                    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp)) {
+                        Column(
+                            Modifier.fillMaxWidth().padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Text("首次登录 · 设置密码", style = MaterialTheme.typography.titleMedium)
+                            OutlinedTextField(
+                                newPassword,
+                                { newPassword = it },
+                                label = { Text("新密码") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                shape = RoundedCornerShape(16.dp),
+                            )
+                            OutlinedTextField(
+                                confirmNewPassword,
+                                { confirmNewPassword = it },
+                                label = { Text("确认新密码") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                shape = RoundedCornerShape(16.dp),
+                            )
                             Button(
                                 onClick = {
                                     if (newPassword.length < 8) {
@@ -222,47 +368,61 @@ fun LoginScreen(
                                     }
                                 },
                                 enabled = !settingUp,
+                                modifier = Modifier.fillMaxWidth().height(52.dp),
+                                shape = RoundedCornerShape(16.dp),
                             ) { Text(if (settingUp) "正在保存…" else "保存密码并登录") }
                         }
                     }
                 }
-            }
-            Button(
-                onClick = {
-                    val next = settings.copy(username = username.trim(), cloudServerUrl = server.trim())
-                    onSettings(next)
-                    if (username.isBlank() || password.isBlank() || server.isBlank()) {
-                        scope.launch { snackbar.showSnackbar("请填写服务器、ID 和密码") }
-                    } else ConnectionManager.connect(next, password)
-                },
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                enabled = connection !is ConnectionManager.State.Connecting,
-            ) { Text(if (connection is ConnectionManager.State.Connecting) "正在连接…" else "登录") }
-            OutlinedButton(onClick = { ConnectionManager.scanLanPlugins() }, modifier = Modifier.fillMaxWidth().height(56.dp), enabled = !scanning) {
-                Text(if (scanning) "正在扫描…" else "扫描局域网插件")
-            }
-            scanStatus?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            plugins.forEach { plugin ->
-                FilledTonalButton(onClick = {
-                    scope.launch {
-                        val updated = ConnectionManager.loadLanBootstrap(settings.copy(username = username.trim()), plugin)
-                        if (updated != null) {
-                            onSettings(updated)
-                            server = updated.cloudServerUrl
+
+                if (connection is ConnectionManager.State.Error) {
+                    Card(
+                        Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = colors.errorContainer),
+                    ) {
+                        Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.WarningAmber, contentDescription = null, tint = colors.onErrorContainer)
+                            Text(connection.message, color = colors.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
-                }, modifier = Modifier.fillMaxWidth()) { Text("${plugin.instanceName} · ${plugin.host}") }
-            }
-            pending?.let { (candidate, updated) ->
-                Button(onClick = {
-                    ConnectionManager.confirmLanBootstrap()?.let {
-                        onSettings(it)
-                        server = it.cloudServerUrl
+                }
+
+                // 局域网发现：从同一网络里的教室插件读取云服务器地址，适合第一次不知道服务器地址时使用。
+                OutlinedButton(
+                    onClick = { ConnectionManager.scanLanPlugins() },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    enabled = !scanning,
+                ) {
+                    Icon(Icons.Rounded.Wifi, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.size(8.dp))
+                    Text(if (scanning) "正在扫描…" else "从局域网插件获取服务器地址")
+                }
+                scanStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant) }
+                plugins.forEach { plugin ->
+                    FilledTonalButton(onClick = {
+                        scope.launch {
+                            val updated = ConnectionManager.loadLanBootstrap(settings.copy(username = username.trim()), plugin)
+                            if (updated != null) {
+                                onSettings(updated)
+                                server = updated.cloudServerUrl
+                            }
+                        }
+                    }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                        Icon(Icons.Rounded.Computer, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.size(8.dp))
+                        Text("${plugin.instanceName} · ${plugin.host}")
                     }
-                }, modifier = Modifier.fillMaxWidth()) { Text("确认使用 ${candidate.instanceName} 的云服务器") }
-            }
-            if (connection is ConnectionManager.State.Error) {
-                Text(connection.message, color = MaterialTheme.colorScheme.error)
+                }
+                pending?.let { (candidate, _) ->
+                    Button(onClick = {
+                        ConnectionManager.confirmLanBootstrap()?.let {
+                            onSettings(it)
+                            server = it.cloudServerUrl
+                        }
+                    }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Text("确认使用 ${candidate.instanceName} 的云服务器") }
+                }
             }
         }
     }
@@ -416,7 +576,11 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
         TopAppBar(
             title = { Text("RemoteCI", style = MaterialTheme.typography.titleLarge) },
             navigationIcon = { IconButton({ onOpen(Screen.Account) }) { Icon(Icons.Rounded.Menu, contentDescription = "菜单") } },
-            actions = { IconButton({ onOpen(Screen.Inbox) }) { Icon(Icons.Rounded.Notifications, contentDescription = "通知") } },
+            actions = {
+                // 扫描 WebUI 登录页的“手机扫码”二维码，确认后电脑浏览器以当前账号登录。
+                WebLoginScanAction(snackbar)
+                IconButton({ onOpen(Screen.Inbox) }) { Icon(Icons.Rounded.Notifications, contentDescription = "通知") }
+            },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
         )
         Card(

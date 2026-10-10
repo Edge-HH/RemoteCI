@@ -1227,6 +1227,23 @@ input[type="checkbox"][form] { accent-color: var(--accent); }
 
 .login-logo { width: 48px; height: 48px; margin-bottom: 18px; }
 
+/* 登录方式切换：账号密码 / 手机扫码。 */
+.login-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 18px 0; padding: 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-inset); }
+.login-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; padding: 6px 10px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-weight: 600; box-shadow: none; }
+.login-tabs button:hover { color: var(--text); background: transparent; }
+.login-tabs button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .18); }
+.qr-login { display: grid; justify-items: center; gap: 14px; }
+.qr-login-frame { position: relative; display: grid; width: 220px; height: 220px; place-items: center; padding: 10px; border-radius: 14px; background: #fff; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .08); }
+.qr-login-image { display: grid; width: 100%; height: 100%; place-items: center; }
+.qr-login-image svg { width: 100%; height: 100%; }
+.qr-login-image.loading { opacity: .35; }
+.qr-login-overlay { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 6px; padding: 16px; border-radius: 14px; background: color-mix(in srgb, var(--surface) 94%, transparent); color: var(--text); text-align: center; }
+.qr-login-overlay .bi { font-size: 30px; color: var(--accent-strong, var(--accent)); }
+.qr-login-overlay span { color: var(--muted); font-size: 13px; }
+.qr-login-steps { display: grid; gap: 4px; width: 100%; margin: 0; padding-left: 20px; color: var(--muted); font-size: 13px; }
+.qr-login .remember-me { justify-self: start; }
+.qr-login-status { min-height: 1.2em; margin: 0; color: var(--muted); font-size: 13px; }
+
 /* 初始化向导：第二步在已登录布局中显示，卡片居中限宽。 */
 .app-layout .setup-card { width: min(480px, 100%); margin: 24px auto; }
 .setup-card .muted { margin: 6px 0 16px; }

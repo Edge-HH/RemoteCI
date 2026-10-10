@@ -269,6 +269,8 @@ ClassIsland 的临时层是 `ClassPlans` 中 `IsOverlay=true` 的课表：`Overl
 
 - `POST /api/plugin/pair`
 - `POST /api/auth/login`、`/api/auth/refresh`、`/api/auth/logout`
+- `GET /api/setup`、`POST /api/setup/system-admin`：首次部署初始化，无需登录。还没有任何账号时 `POST` 创建系统管理员（`isSystemOwner`）并返回登录令牌，之后返回 403；系统管理员只能由本人维护。服务端不再自动创建默认班级，`/api/setup` 的 `needsFirstClass` 提示还需新建第一个班级。
+- `POST /api/auth/web-qr/scan`、`POST /api/auth/web-qr/confirm`：网页扫码登录。WebUI 登录页生成 `remoteci://weblogin?server=…&code=…` 二维码，浏览器自己持有轮询令牌并每 2 秒查询状态；已登录的手机 App 用设备会话扫码（返回浏览器系统/类型与 IP 供确认）并确认后，只有持有轮询令牌的浏览器能换取网页会话。挑战只保存在内存中 3 分钟、只能兑换一次，确认必须由扫码的同一账号完成，API Key 返回 403。
 - `POST /api/auth/web-ticket`：客户端一键打开 WebUI。需设备会话 Bearer 令牌（API Key 返回 403），返回 `{ticket, path, expiresAt}`；用浏览器打开 `服务器地址 + path` 即以该账号登录 WebUI，可追加 `&returnUrl=`（仅接受本站相对路径，外部地址被忽略）与 `&classId=`（仅接受该账号可访问的班级）。票据有效期 1 分钟、只能成功兑换一次；同一账号签发新票据会作废旧票据。服务端只保存票据的 SHA-256 摘要，持久化在数据库中，服务重启或多实例共享数据库时仍可兑换，兑换按行原子删除，并发或跨实例重复兑换都会失败。签发后账号被停用、锁定、改密或安全戳变化，票据即失效。落地页返回 `Cache-Control: no-store` 与 `Referrer-Policy: no-referrer`；兑换成功后返回本站页面并由页面跳转（不使用 302），因为链接由 App 交给浏览器打开属于跨站导航，`SameSite=Strict` 的登录 Cookie 不会随跨站重定向发送。票据会出现在浏览器地址栏，生产环境必须使用 HTTPS；与手机端连接策略一致，服务端不拒绝 HTTP 部署，但 HTTP 下票据可能被同一网络中的攻击者截获并抢先兑换。
 - `GET /api/me`、`POST /api/me/password`、`POST /api/me/display-name`
 - `GET /api/me/schedule`、`GET /api/me/schedule/next`

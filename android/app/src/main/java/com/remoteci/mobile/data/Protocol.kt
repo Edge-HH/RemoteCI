@@ -500,6 +500,19 @@ data class MobileLoginRequest(
     @SerialName("deviceName") val deviceName: String,
 )
 
+/** WebUI 登录页“手机扫码”二维码：服务器地址与挑战码；已登录的 App 扫码确认后由显示二维码的浏览器登录。 */
+data class WebLoginQrPayload(val serverUrl: String, val code: String)
+
+/** 解析 `remoteci://weblogin?server=…&code=…`；不是网页登录二维码时返回 null。 */
+internal fun parseWebLoginQrPayload(raw: String): WebLoginQrPayload? {
+    val uri = runCatching { java.net.URI(raw.trim()) }.getOrNull() ?: return null
+    if (!uri.scheme.equals("remoteci", ignoreCase = true) || !uri.host.equals("weblogin", ignoreCase = true)) return null
+    val params = parseQueryParameters(uri.rawQuery)
+    val serverUrl = params["server"]?.takeIf(String::isNotBlank) ?: return null
+    val code = params["code"]?.takeIf(String::isNotBlank) ?: return null
+    return WebLoginQrPayload(serverUrl, code)
+}
+
 /** WebUI 扫码登录二维码的解析结果：服务器地址、登录 ID 与一次性票据。 */
 data class LoginQrPayload(val serverUrl: String, val username: String, val ticket: String)
 

@@ -18,6 +18,12 @@ data class WatchSettings(
     val themeId: String = "lavender",
     val updateChannel: UpdateChannel = UpdateChannel.STABLE,
     val forceUpdateEnabled: Boolean = false,
+    /** 启动时自动检查 App 更新并弹窗提示；默认开启。 */
+    val autoUpdateCheck: Boolean = true,
+    /** 用户在更新弹窗中选择“跳过此版本”的版本号；更高的新版本仍会提示。 */
+    val skippedUpdateVersion: String = "",
+    /** 上次自动检查更新的时间（Unix 毫秒），用于限制检查频率。 */
+    val lastUpdateCheckAt: Long = 0L,
     val receiveOnClass: Boolean = true,
     val receiveOnBreaking: Boolean = true,
     val receiveAfterSchool: Boolean = true,
@@ -47,6 +53,9 @@ class SettingsStore(context: Context) {
             UpdateChannel.valueOf(prefs.getString(KEY_UPDATE_CHANNEL, UpdateChannel.STABLE.name)!!)
         }.getOrDefault(UpdateChannel.STABLE),
         forceUpdateEnabled = prefs.getBoolean(KEY_FORCE_UPDATE, false),
+        autoUpdateCheck = prefs.getBoolean(KEY_AUTO_UPDATE_CHECK, true),
+        skippedUpdateVersion = prefs.getString(KEY_SKIPPED_UPDATE, "") ?: "",
+        lastUpdateCheckAt = prefs.getLong(KEY_LAST_UPDATE_CHECK, 0L),
         receiveOnClass = prefs.getBoolean(KEY_ON_CLASS, true),
         receiveOnBreaking = prefs.getBoolean(KEY_ON_BREAKING, true),
         receiveAfterSchool = prefs.getBoolean(KEY_AFTER_SCHOOL, true),
@@ -71,6 +80,9 @@ class SettingsStore(context: Context) {
             .putString(KEY_THEME_ID, settings.themeId)
             .putString(KEY_UPDATE_CHANNEL, settings.updateChannel.name)
             .putBoolean(KEY_FORCE_UPDATE, settings.forceUpdateEnabled)
+            .putBoolean(KEY_AUTO_UPDATE_CHECK, settings.autoUpdateCheck)
+            .putString(KEY_SKIPPED_UPDATE, settings.skippedUpdateVersion)
+            .putLong(KEY_LAST_UPDATE_CHECK, settings.lastUpdateCheckAt)
             .putBoolean(KEY_ON_CLASS, settings.receiveOnClass)
             .putBoolean(KEY_ON_BREAKING, settings.receiveOnBreaking)
             .putBoolean(KEY_AFTER_SCHOOL, settings.receiveAfterSchool)
@@ -95,6 +107,9 @@ class SettingsStore(context: Context) {
         const val KEY_THEME_ID = "themeId"
         const val KEY_UPDATE_CHANNEL = "updateChannel"
         const val KEY_FORCE_UPDATE = "forceUpdateEnabled"
+        const val KEY_AUTO_UPDATE_CHECK = "autoUpdateCheck"
+        const val KEY_SKIPPED_UPDATE = "skippedUpdateVersion"
+        const val KEY_LAST_UPDATE_CHECK = "lastUpdateCheckAt"
         const val KEY_ON_CLASS = "receiveOnClass"
         const val KEY_ON_BREAKING = "receiveOnBreaking"
         const val KEY_AFTER_SCHOOL = "receiveAfterSchool"

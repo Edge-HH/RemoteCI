@@ -88,7 +88,16 @@ object AdminApi {
     /** 当前登录账号的最新档案（/api/me），修改显示名后用于刷新本地班级与权限。 */
     suspend fun me(): UserProfile = get("/api/me", UserProfile.serializer())
 
-    suspend fun pairingCode(): PairingCodeResponse = post("/api/plugin/pairing-code", EmptyBody(), EmptyBody.serializer(), PairingCodeResponse.serializer())
+    /** 为指定班级生成一次性插件配对码；服务端没有默认班级，必须带上班级 Id。 */
+    suspend fun pairingCode(classId: String): PairingCodeResponse =
+        post("/api/plugin/pairing-code", PairingCodeRequest(classId), PairingCodeRequest.serializer(), PairingCodeResponse.serializer())
+
+    /** 网页扫码登录：扫码后返回浏览器信息，供用户确认是不是自己正在操作的电脑。 */
+    suspend fun webQrScan(code: String): WebQrScanResponse =
+        post("/api/auth/web-qr/scan", WebQrCodeRequest(code), WebQrCodeRequest.serializer(), WebQrScanResponse.serializer())
+    suspend fun webQrConfirm(code: String, approve: Boolean) {
+        post("/api/auth/web-qr/confirm", WebQrConfirmRequest(code, approve), WebQrConfirmRequest.serializer(), UnitSerializer)
+    }
     suspend fun pluginCredentials(): List<PluginCredentialInfo> =
         get("/api/plugins/credentials", ListSerializer(PluginCredentialInfo.serializer()))
     suspend fun revokePluginCredential(id: String) { request("DELETE", "/api/plugins/credentials/$id") }
@@ -270,6 +279,14 @@ data class DeviceSessionSummary(
 )
 
 @Serializable data class PairingCodeResponse(@SerialName("pairCode") val pairCode: String = "")
+@Serializable data class PairingCodeRequest(@SerialName("classId") val classId: String)
+@Serializable data class WebQrCodeRequest(@SerialName("code") val code: String)
+@Serializable data class WebQrConfirmRequest(@SerialName("code") val code: String, @SerialName("approve") val approve: Boolean)
+@Serializable data class WebQrScanResponse(
+    @SerialName("browser") val browser: String = "",
+    @SerialName("ipAddress") val ipAddress: String? = null,
+    @SerialName("expiresAt") val expiresAt: String? = null,
+)
 
 @Serializable
 data class PluginCredentialInfo(

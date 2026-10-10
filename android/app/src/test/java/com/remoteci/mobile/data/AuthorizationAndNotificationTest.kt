@@ -325,6 +325,18 @@ class AuthorizationAndNotificationTest {
     }
 
     @Test
+    fun `web login qr payload parses server and code only for weblogin host`() {
+        val payload = parseWebLoginQrPayload("remoteci://weblogin?server=https%3A%2F%2Fci.example.com&code=abc-123_x")
+        assertNotNull(payload)
+        assertEquals("https://ci.example.com", payload.serverUrl)
+        assertEquals("abc-123_x", payload.code)
+        // App 登录二维码与缺少挑战码的二维码都不是网页登录二维码。
+        assertNull(parseWebLoginQrPayload("remoteci://login?server=https%3A%2F%2Fci.example.com&ticket=t"))
+        assertNull(parseWebLoginQrPayload("remoteci://weblogin?server=https%3A%2F%2Fci.example.com"))
+        assertNull(parseLoginQrPayload("remoteci://weblogin?server=https%3A%2F%2Fci.example.com&code=abc"))
+    }
+
+    @Test
     fun `web ui login qr payload parses server user and ticket`() {
         val payload = parseLoginQrPayload(
             "remoteci://login?server=https%3A%2F%2Fci.example.com%2Fbase&user=teacher%2B1&ticket=abc123",

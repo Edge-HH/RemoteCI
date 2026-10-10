@@ -40,6 +40,10 @@ public sealed class MobileLoginSettings(AppDbContext db)
         return trimmed.TrimEnd('/');
     }
 
+    /// <summary>网页扫码登录二维码内容：服务器地址与挑战码；手机 App 扫码确认后由显示二维码的浏览器登录。</summary>
+    public static string BuildWebLoginQrPayload(string serverUrl, string code) =>
+        $"{QrScheme}://weblogin?server={Uri.EscapeDataString(serverUrl)}&code={Uri.EscapeDataString(code)}";
+
     /// <summary>扫码登录二维码内容：服务器地址、登录 ID 与一次性票据。</summary>
     public static string BuildLoginQrPayload(string serverUrl, string username, string ticket) =>
         $"{QrScheme}://login?server={Uri.EscapeDataString(serverUrl)}&user={Uri.EscapeDataString(username)}&ticket={Uri.EscapeDataString(ticket)}";

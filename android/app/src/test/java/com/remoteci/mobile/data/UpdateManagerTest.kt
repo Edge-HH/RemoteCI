@@ -33,6 +33,35 @@ class UpdateManagerTest {
     }
 
     @Test
+    fun `auto check runs at most every six hours`() {
+        val now = 10L * 24 * 60 * 60 * 1000
+        assertTrue(UpdateManager.shouldAutoCheck(0L, now))
+        assertFalse(UpdateManager.shouldAutoCheck(now - 60_000, now))
+        assertTrue(UpdateManager.shouldAutoCheck(now - UpdateManager.AUTO_CHECK_INTERVAL_MS, now))
+        // 系统时间被调回过去时重新检查，避免永远不提示。
+        assertTrue(UpdateManager.shouldAutoCheck(now + 60_000, now))
+    }
+
+    @Test
+    fun `skipped version is not prompted but newer ones are`() {
+        val candidate = CompatibleUpdate(
+            GitHubRelease(tagName = "3.3.0.3"),
+            GitHubAsset(name = "RemoteCI.Mobile-3.3.0.3.apk"),
+        )
+        assertTrue(UpdateManager.shouldPrompt(candidate, ""))
+        assertFalse(UpdateManager.shouldPrompt(candidate, "3.3.0.3"))
+        assertTrue(UpdateManager.shouldPrompt(candidate, "3.3.0.2"))
+        assertFalse(UpdateManager.shouldPrompt(null, ""))
+    }
+
+    @Test
+    fun `release notes preview strips markdown and truncates`() {
+        val preview = UpdateManager.releaseNotesPreview("## 新功能\n\n\n\n- **扫码登录**网页版\n* 自动更新", maxLength = 200)
+        assertEquals("新功能\n\n• 扫码登录网页版\n• 自动更新", preview)
+        assertEquals("长".repeat(10) + "…", UpdateManager.releaseNotesPreview("长".repeat(30), maxLength = 10))
+    }
+
+    @Test
     fun `findApkAsset picks the mobile apk only`() {
         val release = GitHubRelease(
             tagName = "v0.2.0",

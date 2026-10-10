@@ -110,6 +110,31 @@ object UpdateManager {
             compareVersions(left.release.tagName, right.release.tagName)
         }
 
+    /** 自动检查的最短间隔：GitHub 未登录接口每小时只有 60 次额度，冷启动频繁时不重复请求。 */
+    const val AUTO_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
+
+    /** 是否到了下一次自动检查的时间；系统时钟被调回过去时也重新检查。 */
+    fun shouldAutoCheck(lastCheckAt: Long, now: Long): Boolean =
+        lastCheckAt <= 0L || now < lastCheckAt || now - lastCheckAt >= AUTO_CHECK_INTERVAL_MS
+
+    /** 自动检查时是否需要弹窗：用户跳过的版本不再提示，更高的新版本照常提示。 */
+    fun shouldPrompt(candidate: CompatibleUpdate?, skippedVersion: String): Boolean {
+        candidate ?: return false
+        if (skippedVersion.isBlank()) return true
+        return compareVersions(versionFromTag(candidate.release.tagName), skippedVersion) > 0
+    }
+
+    /** 弹窗里展示的更新说明：去掉 Markdown 标记和多余空行，限制长度。 */
+    fun releaseNotesPreview(body: String?, maxLength: Int = 1200): String {
+        val text = body.orEmpty()
+            .lineSequence()
+            .map { it.trimEnd().replace(Regex("""^#{1,6}\s*"""), "").replace("**", "").replace(Regex("""^\s*[-*]\s+"""), "• ") }
+            .joinToString("\n")
+            .replace(Regex("""\n{3,}"""), "\n\n")
+            .trim()
+        return if (text.length <= maxLength) text else text.take(maxLength).trimEnd() + "…"
+    }
+
     /** 去掉 tag 前缀 v，得到可比较的版本号。 */
     fun versionFromTag(tag: String): String = tag.removePrefix("v").trim()
 

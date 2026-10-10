@@ -1,22 +1,48 @@
 @page
 @model LoginModel
 @{ ViewData["Title"] = "登录"; }
-<section class="login-card">
+<section class="login-card" data-login-card-root>
     <img class="login-logo" src="~/logo-mark.svg" alt="RemoteCI" asp-append-version="true" />
     <p class="eyebrow">RemoteCI 管理中心</p>
     <h1>登录你的账号</h1>
-    <form method="post" class="stack">
-        <div asp-validation-summary="ModelOnly" class="validation"></div>
-        <label>ID<input asp-for="Input.Username" autocomplete="username" /></label>
-        <label>密码<input asp-for="Input.Password" type="password" autocomplete="current-password" /></label>
-        <label class="check remember-me">
-            <input asp-for="Input.RememberMe" />
-            <span>保持登录</span>
-        </label>
-        <button type="submit">登录</button>
-    </form>
+    <div class="login-tabs" role="tablist" aria-label="登录方式">
+        <button type="button" role="tab" id="login-tab-password" aria-controls="login-panel-password" aria-selected="true" data-login-tab="password"><i class="bi bi-key" aria-hidden="true"></i>账号密码</button>
+        <button type="button" role="tab" id="login-tab-qr" aria-controls="login-panel-qr" aria-selected="false" data-login-tab="qr"><i class="bi bi-qr-code-scan" aria-hidden="true"></i>手机扫码</button>
+    </div>
+    <div id="login-panel-password" role="tabpanel" aria-labelledby="login-tab-password" data-login-panel="password">
+        <form method="post" class="stack">
+            <div asp-validation-summary="ModelOnly" class="validation"></div>
+            <label>ID<input asp-for="Input.Username" autocomplete="username" /></label>
+            <label>密码<input asp-for="Input.Password" type="password" autocomplete="current-password" /></label>
+            <label class="check remember-me">
+                <input asp-for="Input.RememberMe" />
+                <span>保持登录</span>
+            </label>
+            <button type="submit">登录</button>
+        </form>
+    </div>
+    <div id="login-panel-qr" role="tabpanel" aria-labelledby="login-tab-qr" class="qr-login" data-login-panel="qr" hidden
+         data-qr-create="@Url.Page("/Login", "QrCreate")" data-qr-status="@Url.Page("/Login", "QrStatus")" data-qr-complete="@Url.Page("/Login", "QrComplete")">
+        <div class="qr-login-frame">
+            <div class="qr-login-image" data-qr-image aria-label="网页登录二维码"></div>
+            <div class="qr-login-overlay" data-qr-overlay hidden>
+                <i class="bi" data-qr-overlay-icon aria-hidden="true"></i>
+                <strong data-qr-overlay-title></strong>
+                <span data-qr-overlay-text></span>
+                <button type="button" class="ghost" data-qr-refresh hidden>刷新二维码</button>
+            </div>
+        </div>
+        <ol class="qr-login-steps">
+            <li>打开已登录的 RemoteCI 手机 App</li>
+            <li>点击首页右上角的 <i class="bi bi-qr-code-scan" aria-hidden="true"></i> 扫码</li>
+            <li>在手机上确认后，这里会自动登录</li>
+        </ol>
+        <label class="check remember-me"><input type="checkbox" data-qr-remember /><span>保持登录</span></label>
+        <p class="qr-login-status" data-qr-status-text role="status" aria-live="polite"></p>
+    </div>
     @if (Model.VisitorAccessEnabled)
     {
         <a class="login-guest" asp-page="/Visitor">仅查看</a>
     }
 </section>
+<script src="~/login-qr.js" asp-append-version="true" defer></script>

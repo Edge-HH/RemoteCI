@@ -455,6 +455,37 @@ public sealed class UserListItem
     public bool IsSystemOwner { get; set; }
 }
 
+/// <summary>手机 App 扫描 WebUI 登录页二维码：code 为二维码中的挑战码。</summary>
+public sealed class WebQrLoginScanRequest
+{
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = string.Empty;
+}
+
+/// <summary>扫码后手机上确认或拒绝网页登录。</summary>
+public sealed class WebQrLoginConfirmRequest
+{
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = string.Empty;
+
+    [JsonPropertyName("approve")]
+    public bool Approve { get; set; }
+}
+
+/// <summary>扫码后返回给手机的浏览器信息，帮助确认是本人正在操作的电脑。</summary>
+public sealed class WebQrLoginScanResponse
+{
+    [JsonPropertyName("browser")]
+    public string Browser { get; set; } = string.Empty;
+
+    [JsonPropertyName("ipAddress")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? IpAddress { get; set; }
+
+    [JsonPropertyName("expiresAt")]
+    public DateTimeOffset ExpiresAt { get; set; }
+}
+
 /// <summary>首次部署状态：尚未创建系统管理员时 WebUI 进入初始化向导，创建后还需新建第一个班级。</summary>
 public sealed class SetupStatus
 {
