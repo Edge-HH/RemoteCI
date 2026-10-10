@@ -57,7 +57,8 @@ public sealed class ProfilePagesTests
             Assert.DoesNotContain("batch-settings-time-layout", control);
             Assert.DoesNotContain("batch-settings-profile", control);
             Assert.Contains("data-batch-open=\"JoinManagement\"", control);
-            Assert.Contains("data-batch-open=\"SetPluginManagementPolicy\"", control);
+            // 远程插件管理策略的入口已移除，协议命令仅为旧客户端保留。
+            Assert.DoesNotContain("data-batch-open=\"SetPluginManagementPolicy\"", control);
         }
     }
 

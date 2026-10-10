@@ -20,6 +20,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ExtensionGroupPolicy> ExtensionGroupPolicies => Set<ExtensionGroupPolicy>();
     public DbSet<UserExtensionPreference> UserExtensionPreferences => Set<UserExtensionPreference>();
     public DbSet<PendingExtensionSetting> PendingExtensionSettings => Set<PendingExtensionSetting>();
+    public DbSet<ClassStateCache> ClassStateCaches => Set<ClassStateCache>();
     public DbSet<Classroom> Classrooms => Set<Classroom>();
     public DbSet<ClassMembership> ClassMemberships => Set<ClassMembership>();
     public DbSet<ClassGroup> ClassGroups => Set<ClassGroup>();
@@ -92,6 +93,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.HasKey(x => new { x.ClassroomId, x.GroupId });
             entity.Property(x => x.GroupId).HasMaxLength(ExtensionId.MaxLength);
             entity.Property(x => x.ValuesJson).HasMaxLength(65536);
+            entity.HasOne(x => x.Classroom).WithMany().HasForeignKey(x => x.ClassroomId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ClassStateCache>(entity =>
+        {
+            entity.HasKey(x => x.ClassroomId);
             entity.HasOne(x => x.Classroom).WithMany().HasForeignKey(x => x.ClassroomId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<UserExtensionPreference>(entity =>

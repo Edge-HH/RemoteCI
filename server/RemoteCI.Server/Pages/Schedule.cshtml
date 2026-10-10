@@ -25,6 +25,10 @@
 }
 else
 {
+    @if (!Model.PluginOnline)
+    {
+        <div class="notice">插件离线，显示的是 @Model.Bundle.GeneratedAt.ToLocalTime().ToString("M月d日 HH:mm") 最后一次同步的课表；日程、提醒与换课申请仍按此课表工作，插件重新连接后会自动同步最新课表。</div>
+    }
     var courseOptions = Model.Bundle.Days
         .Where(day => day.Enabled)
         .SelectMany(day => day.Courses

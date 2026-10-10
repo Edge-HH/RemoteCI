@@ -6,7 +6,7 @@ namespace RemoteCI.Server.Services;
 /// <summary>
 /// 扩展分组的服务端视图：把插件上报的分组、设置字段与扩展功能按“插件”归类，
 /// 供控制页、批量控制页与扩展设置页共用，并负责扩展设置的权限复核、校验与下发。
-/// 分组与当前设置值只缓存在内存中，以设备上报为准；插件重连后自动恢复。
+/// 分组与当前设置值以设备上报为准，并持久化最近一次上报的副本；服务端重启后插件重连前也能查看与排队修改。
 /// </summary>
 public sealed class ExtensionGroupService(
     IStateStore store,

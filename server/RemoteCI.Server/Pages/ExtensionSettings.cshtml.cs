@@ -10,9 +10,10 @@ using RemoteCI.Shared.Models;
 namespace RemoteCI.Server.Pages;
 
 /// <summary>
-/// 扩展插件设置页：插件通过扩展分组声明的设置字段在这里统一渲染。
-/// 班主任只能看到并修改系统管理员逐个开放给班级自行管理的插件，且只作用于当前班级；
-/// 系统管理员还可以按班级或分组批量下发、对比各班当前值，并决定每个插件是否开放给班主任。
+/// 管理区的“插件批量设置”页（仅系统管理员）：插件通过扩展分组声明的设置字段在这里统一渲染，
+/// 修改按所选范围下发——按班级/分组下发到班内每一台设备，或直接勾选具体设备——而不是当前选中的班级；
+/// 同时对比各班当前值，并决定每个插件是否开放给班主任自行管理。
+/// 只修改当前班级请使用班级区的“扩展插件”页（/ClassExtensions）。
 /// </summary>
 [Authorize]
 public sealed class ExtensionSettingsModel(
@@ -38,68 +39,47 @@ public sealed class ExtensionSettingsModel(
     [BindProperty]
     public List<Guid> SelectedGroupIds { get; set; } = [];
 
+    /// <summary>按具体设备下发时勾选的在线连接。</summary>
+    [BindProperty]
+    public List<Guid> SelectedConnectionIds { get; set; } = [];
+
     [BindProperty]
     public bool AllowClassAdmin { get; set; }
-
-    public bool IsAdmin => CurrentUser.Role == UserRole.Admin;
-
-    /// <summary>当前账号在当前班级可自行管理的插件；系统管理员为 null，表示不受限。</summary>
-    public IReadOnlySet<string>? EditableGroupIds { get; private set; }
 
     /// <summary>已开放给班主任自行管理的插件，供系统管理员查看与切换。</summary>
     public IReadOnlySet<string> ClassAdminAllowedGroupIds { get; private set; } = new HashSet<string>();
 
-    /// <summary>与 ExtensionGroupService.CanEditSettingsAsync 口径一致：系统管理员，或该插件已开放且有扩展功能权限的班主任。</summary>
-    public bool CanEditCurrentClass => GroupId is not null && (EditableGroupIds is null
-        ? ClassPermissions.HasFlag(UserPermissions.RunExtensions)
-        : EditableGroupIds.Contains(GroupId));
-
-    /// <summary>带设置页的扩展分组：管理员看全部班级的并集，班主任只看当前班级中已开放的插件。</summary>
+    /// <summary>全部班级设备上报的带设置页的扩展分组并集。</summary>
     public IReadOnlyList<ExtensionGroupView> Groups { get; private set; } = [];
 
     public ExtensionGroupView? Group { get; private set; }
 
-    /// <summary>当前班级设备上报的该分组（含当前值）；为 null 表示当前班级没有安装该插件或插件离线后未同步。</summary>
-    public ExtensionGroupDefinition? CurrentClassGroup { get; private set; }
-
     public IReadOnlyList<ExtensionGroupClassState> ClassStates { get; private set; } = [];
     public IReadOnlyList<ClassGroupInfo> ClassGroups { get; private set; } = [];
+
+    /// <summary>上报了该插件的班级中的设备，供“按具体设备”下发。</summary>
+    public IReadOnlyList<DeviceInventory> Devices { get; private set; } = [];
+
     public IReadOnlyList<SettingsDispatchResult> LastResults { get; private set; } = [];
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
-        if (await RequireEditorAsync() is { } denied) return denied;
+        if (await RequireAdminAsync() is { } denied) return denied;
         await LoadAsync(ct);
         RestoreResults();
         return Page();
     }
 
-    /// <summary>修改当前班级：提交表单中的全部字段，由插件逐项写入。</summary>
-    public async Task<IActionResult> OnPostApplyCurrentAsync(CancellationToken ct)
-    {
-        if (await RequireEditorAsync() is { } denied) return denied;
-        if (string.IsNullOrWhiteSpace(GroupId) || !CanEditCurrentClass) return RedirectToPage("/Denied");
-        var profile = await identities.GetProfileAsync(CurrentUser.Id, ct);
-        if (profile is null) return RedirectToPage("/Login");
-
-        var result = await extensionGroups.ApplyToClassAsync(
-            profile, CurrentClassId, GroupId, ExtensionFieldInput.ToValues(SettingInputs), ct);
-        TempData[result.Success ? "Message" : "Error"] = result.Success
-            ? $"已保存到 {CurrentClass?.Name ?? "当前班级"}：{result.Message}"
-            : result.Message;
-        return RedirectToPage(new { groupId = GroupId });
-    }
-
     /// <summary>
-    /// 系统管理员批量下发：只发送勾选了“修改此项”的字段，未勾选的字段保持各班原值；
-    /// 选中班级内的每一台在线设备都会收到，保证同班多设备设置一致。
+    /// 按所选范围下发：只发送勾选了“修改此项”的字段，未勾选的字段保持各设备原值。
+    /// 选中班级或分组时班内每一台在线设备都会收到，离线班级保存为待补发；勾选具体设备时只发给这些设备。
     /// </summary>
     public async Task<IActionResult> OnPostApplyBatchAsync(CancellationToken ct)
     {
-        if (await RequireEditorAsync() is { } denied) return denied;
-        if (!IsAdmin || string.IsNullOrWhiteSpace(GroupId)) return RedirectToPage("/Denied");
-        if (SelectedClassIds.Count == 0 && SelectedGroupIds.Count == 0)
-            return Back("请先选择要下发的班级或分组。");
+        if (await RequireAdminAsync() is { } denied) return denied;
+        if (string.IsNullOrWhiteSpace(GroupId)) return RedirectToPage("/Denied");
+        if (SelectedClassIds.Count == 0 && SelectedGroupIds.Count == 0 && SelectedConnectionIds.Count == 0)
+            return Back("请先选择要下发的班级、分组或设备。");
 
         var group = (await extensionGroups.BuildForAllClassesAsync(ct: ct))
             .FirstOrDefault(x => string.Equals(x.Id, GroupId, StringComparison.Ordinal) && x.HasSettings);
@@ -107,30 +87,37 @@ public sealed class ExtensionSettingsModel(
         var values = ExtensionGroupService.ValidateForBatch(
             group, ExtensionFieldInput.ToValues(SettingInputs, onlyApplied: true), out var error);
         if (error is not null) return Back(error);
+        if (values.Count == 0) return Back("请至少勾选一项要修改的设置。");
 
         var profile = await identities.GetProfileAsync(CurrentUser.Id, ct);
         if (profile is null) return RedirectToPage("/Login");
-        var classIds = await classrooms.ResolveTargetClassIdsAsync(SelectedClassIds, SelectedGroupIds, ct);
         var classNames = (await classrooms.ListAsync(ct)).ToDictionary(x => x.Id, x => x.Name);
         var allDevices = await devices.ListAsync(ct);
         var results = new List<SettingsDispatchResult>();
         var targets = new List<DeviceInventory>();
-        foreach (var classId in classIds)
+
+        var explicitIds = SelectedConnectionIds.ToHashSet();
+        targets.AddRange(allDevices.Where(x => x.ConnectionId is { } id && explicitIds.Contains(id)));
+
+        if (SelectedClassIds.Count > 0 || SelectedGroupIds.Count > 0)
         {
-            var online = allDevices
-                .Where(x => x.Assigned && x.ClassId == classId && x.Online && x.ConnectionId is not null)
-                .ToList();
-            if (online.Count == 0)
+            foreach (var classId in await classrooms.ResolveTargetClassIdsAsync(SelectedClassIds, SelectedGroupIds, ct))
             {
-                // 离线班级保存为待补发，插件上线同步扩展分组后由服务端自动写入。
-                var queued = await extensionGroups.QueueAsync(profile, classId, group.Id, values, ct);
-                results.Add(new SettingsDispatchResult(classNames.GetValueOrDefault(classId, "未知班级"), "-", true, queued.Message));
+                var online = allDevices
+                    .Where(x => x.Assigned && x.ClassId == classId && x.Online && x.ConnectionId is not null)
+                    .ToList();
+                if (online.Count == 0)
+                {
+                    // 离线班级保存为待补发，插件上线同步扩展分组后由服务端自动写入。
+                    var queued = await extensionGroups.QueueAsync(profile, classId, group.Id, values, ct);
+                    results.Add(new SettingsDispatchResult(classNames.GetValueOrDefault(classId, "未知班级"), "-", true, queued.Message));
+                }
+                targets.AddRange(online);
             }
-            targets.AddRange(online);
         }
 
         var dispatched = await devices.DispatchAsync(
-            targets,
+            targets.GroupBy(x => x.ConnectionId).Select(x => x.First()).ToList(),
             device => ExtensionGroupService.CreateCommand(profile, group.Id, values, device.ClassId),
             "扩展设置",
             BatchTimeout,
@@ -142,16 +129,16 @@ public sealed class ExtensionSettingsModel(
         TempData[ResultsKey] = JsonSerializer.Serialize(results, JsonDefaults.Options);
         var ok = results.Count(x => x.Success);
         TempData[ok > 0 ? "Message" : "Error"] = ok == results.Count
-            ? $"已下发到 {ok} 台设备。"
-            : $"下发完成 {ok} 台，失败 {results.Count - ok} 项，详见下方结果。";
+            ? $"已下发 {ok} 项。"
+            : $"下发完成 {ok} 项，失败 {results.Count - ok} 项，详见下方结果。";
         return RedirectToPage(new { groupId = GroupId });
     }
 
     /// <summary>系统管理员切换该插件是否允许各班班主任自行管理本班设置。</summary>
     public async Task<IActionResult> OnPostClassAdminAccessAsync(CancellationToken ct)
     {
-        if (await RequireEditorAsync() is { } denied) return denied;
-        if (!IsAdmin || !ExtensionGroupPolicyService.IsValidGroupId(GroupId)) return RedirectToPage("/Denied");
+        if (await RequireAdminAsync() is { } denied) return denied;
+        if (!ExtensionGroupPolicyService.IsValidGroupId(GroupId)) return RedirectToPage("/Denied");
         await groupPolicies.SetClassAdminAllowedAsync(GroupId!, AllowClassAdmin, ct);
         TempData["Message"] = AllowClassAdmin
             ? "已允许各班班主任自行管理此插件。"
@@ -182,30 +169,32 @@ public sealed class ExtensionSettingsModel(
         .Select(x => x.Key)
         .FirstOrDefault();
 
-    /// <summary>系统管理员，或至少有一个已开放插件可管理的本班班主任。</summary>
-    private async Task<IActionResult?> RequireEditorAsync()
+    /// <summary>批量设置只对系统管理员开放；班主任与其他账号转到班级区的本班插件页。</summary>
+    private async Task<IActionResult?> RequireAdminAsync()
     {
         if (await RequireAsync() is { } denied) return denied;
-        EditableGroupIds = await extensionGroups.ListClassAdminEditableAsync(
-            CurrentUser.Id, CurrentUser.Role, CurrentUser.GrantedPermissions, CurrentClassId, HttpContext.RequestAborted);
-        return EditableGroupIds is null || EditableGroupIds.Count > 0 ? null : RedirectToPage("/Denied");
+        return CurrentUser.Role == UserRole.Admin
+            ? null
+            : RedirectToPage("/ClassExtensions", new { groupId = GroupId });
     }
 
     private async Task LoadAsync(CancellationToken ct)
     {
-        Groups = (IsAdmin
-                ? await extensionGroups.BuildForAllClassesAsync(ct: ct)
-                : extensionGroups.BuildForClass(CurrentClassId).Where(x => EditableGroupIds!.Contains(x.Id)))
-            .Where(x => x.HasSettings)
-            .ToList();
-        if (IsAdmin) ClassAdminAllowedGroupIds = await groupPolicies.ListClassAdminAllowedAsync(ct);
+        Groups = (await extensionGroups.BuildForAllClassesAsync(ct: ct)).Where(x => x.HasSettings).ToList();
+        ClassAdminAllowedGroupIds = await groupPolicies.ListClassAdminAllowedAsync(ct);
         if (string.IsNullOrWhiteSpace(GroupId)) return;
 
         Group = Groups.FirstOrDefault(x => string.Equals(x.Id, GroupId, StringComparison.Ordinal));
-        CurrentClassGroup = extensionGroups.FindGroup(CurrentClassId, GroupId);
-        if (!IsAdmin || Group is null) return;
+        if (Group is null) return;
         ClassStates = await extensionGroups.ListClassStatesAsync(GroupId, ct);
         ClassGroups = await classrooms.ListGroupsAsync(ct);
+        var reportingClasses = ClassStates.Select(x => x.ClassId).ToHashSet();
+        Devices = (await devices.ListAsync(ct))
+            .Where(x => x.Assigned && reportingClasses.Contains(x.ClassId))
+            .OrderByDescending(x => x.Online)
+            .ThenBy(x => x.ClassName, StringComparer.CurrentCulture)
+            .ThenBy(x => x.DeviceName, StringComparer.CurrentCulture)
+            .ToList();
     }
 
     private IActionResult Back(string message)

@@ -41,7 +41,7 @@
 </section>
 }
 
-@if (Model.CanUseOperation(BatchOperationKind.JoinManagement) || Model.CanUseOperation(BatchOperationKind.SetPluginManagementPolicy))
+@if (Model.CanUseOperation(BatchOperationKind.JoinManagement))
 {
 <section class="panel batch-section">
     <div class="panel-heading">
@@ -55,13 +55,6 @@
             <button type="button" class="batch-action-card" data-batch-open="JoinManagement" data-batch-title="加入集控" data-batch-risk="true">
                 <span class="batch-action-icon danger"><i class="bi bi-diagram-3" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>加入集控</strong><small>让设备加入 ClassIsland 内置集控服务器。</small></span>
-            </button>
-        }
-        @if (Model.CanUseOperation(BatchOperationKind.SetPluginManagementPolicy))
-        {
-            <button type="button" class="batch-action-card" data-batch-open="SetPluginManagementPolicy" data-batch-title="插件管理策略" data-batch-risk="true">
-                <span class="batch-action-icon danger"><i class="bi bi-shield-lock" aria-hidden="true"></i></span>
-                <span class="batch-action-copy"><strong>插件管理策略</strong><small>限制 RemoteCI 发起的远程插件安装或卸载。</small></span>
             </button>
         }
     </div>
@@ -184,9 +177,9 @@
                 }
                 @if (group.HasSettings)
                 {
-                    <a class="batch-action-card" asp-page="/ExtensionSettings" asp-route-groupId="@group.Id">
+                    <a class="batch-action-card" asp-page="@(Model.IsSingleControl ? "/ClassExtensions" : "/ExtensionSettings")" asp-route-groupId="@group.Id">
                         <span class="batch-action-icon"><i class="bi bi-sliders" aria-hidden="true"></i></span>
-                        <span class="batch-action-copy"><strong>插件设置</strong><small>统一修改各班的 @group.Settings.Count 项设置。</small></span>
+                        <span class="batch-action-copy"><strong>插件设置</strong><small>@(Model.IsSingleControl ? $"修改本班的 {group.Settings.Count} 项设置。" : $"按范围统一修改 {group.Settings.Count} 项设置。")</small></span>
                     </a>
                 }
             </div>
@@ -472,27 +465,6 @@ foreach (var extension in Model.BatchExtensionGroups.SelectMany(group => group.E
             <label>选择集控配置文件<input type="file" accept=".json,application/json" data-management-preset-file /></label>
             <label>集控配置文件 JSON<textarea name="ManagementPresetJson" rows="8" placeholder="粘贴 ClassIsland 集控配置文件（ManagementPreset.json），或选择文件后自动填入"></textarea></label>
             <p class="muted">设备 ID 自动使用班级名。加入后会清空设备上已有的集控档案缓存，并重启 ClassIsland。</p>
-        </div>
-        <footer class="batch-dialog-actions">
-            <button type="button" class="ghost" data-batch-close>取消</button>
-            <button type="button" data-batch-next>下一步：选择设备</button>
-        </footer>
-    </div>
-</dialog>
-}
-
-@if (Model.CanUseOperation(BatchOperationKind.SetPluginManagementPolicy))
-{
-<dialog id="batch-settings-policy" class="batch-dialog" data-batch-settings="SetPluginManagementPolicy" data-batch-title="插件管理策略" data-batch-risk="true">
-    <div class="batch-dialog-shell">
-        <header class="batch-dialog-header">
-            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>插件管理策略</h2></div>
-            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
-        </header>
-        <div class="batch-dialog-body stack">
-            <label class="check"><input type="checkbox" name="AllowRemotePluginInstall" data-batch-bool checked /> 允许 RemoteCI 远程安装插件</label>
-            <label class="check"><input type="checkbox" name="AllowRemotePluginUninstall" data-batch-bool checked /> 允许 RemoteCI 远程卸载插件</label>
-            <p class="batch-warning">只限制 RemoteCI 发起的远程操作，不影响在 ClassIsland 本地安装或卸载插件。</p>
         </div>
         <footer class="batch-dialog-actions">
             <button type="button" class="ghost" data-batch-close>取消</button>

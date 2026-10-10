@@ -112,12 +112,6 @@ public class BatchControlModel(
     public string? ManagementPresetJson { get; set; }
 
     [BindProperty]
-    public bool AllowRemotePluginInstall { get; set; } = true;
-
-    [BindProperty]
-    public bool AllowRemotePluginUninstall { get; set; } = true;
-
-    [BindProperty]
     public bool Force { get; set; }
 
     /// <summary>批量执行扩展功能时的目标扩展 Id。</summary>
@@ -182,8 +176,7 @@ public class BatchControlModel(
     public bool HasProfileOperations =>
         CanUseOperation(BatchOperationKind.UpdateTimeLayout) ||
         CanUseOperation(BatchOperationKind.DistributeProfile) ||
-        CanUseOperation(BatchOperationKind.JoinManagement) ||
-        CanUseOperation(BatchOperationKind.SetPluginManagementPolicy);
+        CanUseOperation(BatchOperationKind.JoinManagement);
 
     public bool HasSoftwareOperations =>
         CanUseOperation(BatchOperationKind.InstallPlugins) ||
@@ -220,7 +213,6 @@ public class BatchControlModel(
         BatchOperationKind.InstallPlugins => CommandKind.InstallPlugins,
         BatchOperationKind.UninstallPlugins => CommandKind.UninstallPlugins,
         BatchOperationKind.SetPluginEnabled => CommandKind.SetPluginEnabled,
-        BatchOperationKind.SetPluginManagementPolicy => CommandKind.SetPluginManagementPolicy,
         BatchOperationKind.RefreshSoftwareInventory => CommandKind.RefreshSoftwareInventory,
         BatchOperationKind.UpgradePlugins => CommandKind.UpgradePlugins,
         BatchOperationKind.UpgradeClassIsland => CommandKind.UpgradeClassIsland,
@@ -616,16 +608,6 @@ public class BatchControlModel(
                 PluginManagement = BuildPluginToggleRequest(),
                 RequestedBy = profile,
             },
-            BatchOperationKind.SetPluginManagementPolicy => _ => new CommandMessage
-            {
-                Command = CommandKind.SetPluginManagementPolicy,
-                PluginManagementPolicy = new PluginManagementPolicyRequest
-                {
-                    AllowRemoteInstall = AllowRemotePluginInstall,
-                    AllowRemoteUninstall = AllowRemotePluginUninstall,
-                },
-                RequestedBy = profile,
-            },
             BatchOperationKind.RefreshSoftwareInventory => _ => new CommandMessage
             {
                 Command = CommandKind.RefreshSoftwareInventory,
@@ -862,7 +844,6 @@ public class BatchControlModel(
         BatchOperationKind.Power or
         BatchOperationKind.DistributeProfile or
         BatchOperationKind.UninstallPlugins or
-        BatchOperationKind.SetPluginManagementPolicy or
         BatchOperationKind.UpgradePlugins or
         BatchOperationKind.UpgradeClassIsland or
         BatchOperationKind.RestartClassIsland or
@@ -881,7 +862,6 @@ public class BatchControlModel(
         BatchOperationKind.InstallPlugins => "插件安装",
         BatchOperationKind.UninstallPlugins => "插件卸载",
         BatchOperationKind.SetPluginEnabled => "插件启停",
-        BatchOperationKind.SetPluginManagementPolicy => "插件管理策略",
         BatchOperationKind.RefreshSoftwareInventory => "版本刷新",
         BatchOperationKind.UpgradePlugins => "插件升级",
         BatchOperationKind.UpgradeClassIsland => "ClassIsland 升级",

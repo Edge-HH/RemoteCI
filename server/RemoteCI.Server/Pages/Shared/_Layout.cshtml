@@ -51,12 +51,12 @@
     var showClassProfiles = current is not null && accessibleClasses.Any(x => x.Id == currentClassId)
         && await classAccess.IsClassAdminAsync(current.Id, current.Role, currentClassId, Context.RequestAborted)
         && (accessibleClasses.First(x => x.Id == currentClassId).Permissions ?? UserPermissions.None).HasFlag(UserPermissions.ManageSchedule);
-    // 班主任的“扩展插件”入口：系统管理员逐个开放给班级自行管理的插件，至少开放一个且本班有扩展功能权限时显示；
-    // 系统管理员在“管理”分区有统一管理入口。
-    var showClassExtensionSettings = current is not null && current.Role != UserRole.Admin
+    // 班级区的“扩展插件”入口只管理当前班级：系统管理员始终可见；班主任需系统管理员至少开放一个插件且本班有扩展功能权限。
+    // 跨班级、按设备统一下发在“管理”分区的“插件批量设置”中进行。
+    var showClassExtensionSettings = current is not null
         && accessibleClasses.Any(x => x.Id == currentClassId)
-        && (await extensionGroups.ListClassAdminEditableAsync(
-            current.Id, current.Role, current.GrantedPermissions, currentClassId, Context.RequestAborted))?.Count > 0;
+        && (current.Role == UserRole.Admin || (await extensionGroups.ListClassAdminEditableAsync(
+            current.Id, current.Role, current.GrantedPermissions, currentClassId, Context.RequestAborted))?.Count > 0);
     // 侧边栏左上角是否显示当前班级头像：仅在当前用户已登录、当前班级存在且已上传头像时为 true；
     // 未登录或当前班级未设置头像时保持 false，渲染端会回退到 RemoteCI logo。
     var currentClassHasAvatar = current is not null
@@ -72,7 +72,7 @@
         RemoteCI.Server.Data.LoginTheme.Dark => "dark",
         _ => string.Empty,
     };
-    // 登录卡片位置交给 body 的 data-login-card，由样式按黄金分割摆放；未登录页面之外的布局不受影响。
+    // 登录卡片位置交给 body 的 data-login-card，由样式贴近左侧或右侧摆放；未登录页面之外的布局不受影响。
     var loginCardPosition = loginAppearance?.CardPosition switch
     {
         RemoteCI.Server.Data.LoginCardPosition.Left => "left",
@@ -146,7 +146,7 @@
                 }
                 @if (showClassExtensionSettings)
                 {
-                    <a class="@NavClass("/ExtensionSettings")" aria-current="@CurrentPage("/ExtensionSettings")" asp-page="/ExtensionSettings" data-search-label="扩展插件 插件设置 扩展设置 本班插件"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.39 4.39a1 1 0 0 0 1.68-.474a2.5 2.5 0 1 1 3.014 3.015a1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474a2.5 2.5 0 1 0-3.014 3.015a1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474a2.5 2.5 0 1 1-3.014-3.015a1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474a2.5 2.5 0 1 0 3.014-3.015a1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/></svg><span>扩展插件</span></a>
+                    <a class="@NavClass("/ClassExtensions")" aria-current="@CurrentPage("/ClassExtensions")" asp-page="/ClassExtensions" data-search-label="扩展插件 插件设置 扩展设置 本班插件"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.39 4.39a1 1 0 0 0 1.68-.474a2.5 2.5 0 1 1 3.014 3.015a1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474a2.5 2.5 0 1 0-3.014 3.015a1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474a2.5 2.5 0 1 1-3.014-3.015a1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474a2.5 2.5 0 1 0 3.014-3.015a1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/></svg><span>扩展插件</span></a>
                 }
                 @if (hasPersonalSchedule || canRequestSwap)
                 {
@@ -172,7 +172,7 @@
                     {
                         <a class="@NavClass("/Profiles")" aria-current="@CurrentPage("/Profiles")" asp-page="/Profiles" data-search-label="档案管理 档案库 批量时间表 批量课程表 上传解析"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12M13 13h4m-4 4h4"/></g></svg><span>档案管理</span></a>
                         <a class="@NavClass("/BatchControl")" aria-current="@CurrentPage("/BatchControl")" asp-page="/BatchControl" data-search-label="批量控制 广播 通知 开关机 电源 语音"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M4.9 16.1C1 12.2 1 5.8 4.9 1.9m2.9 2.8a6.14 6.14 0 0 0-.8 7.5"/><circle cx="12" cy="9" r="2"/><path d="M16.2 4.8c2 2 2.26 5.11.8 7.47M19.1 1.9a9.96 9.96 0 0 1 0 14.1m-9.6 2h5M8 22l4-11l4 11"/></g></svg><span>批量控制</span></a>
-                        <a class="@NavClass("/ExtensionSettings")" aria-current="@CurrentPage("/ExtensionSettings")" asp-page="/ExtensionSettings" data-search-label="扩展插件 插件设置 扩展设置 批量设置"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.39 4.39a1 1 0 0 0 1.68-.474a2.5 2.5 0 1 1 3.014 3.015a1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474a2.5 2.5 0 1 0-3.014 3.015a1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474a2.5 2.5 0 1 1-3.014-3.015a1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474a2.5 2.5 0 1 0 3.014-3.015a1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/></svg><span>扩展插件</span></a>
+                        <a class="@NavClass("/ExtensionSettings")" aria-current="@CurrentPage("/ExtensionSettings")" asp-page="/ExtensionSettings" data-search-label="插件批量设置 扩展插件 插件设置 批量下发 按设备"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.39 4.39a1 1 0 0 0 1.68-.474a2.5 2.5 0 1 1 3.014 3.015a1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474a2.5 2.5 0 1 0-3.014 3.015a1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474a2.5 2.5 0 1 1-3.014-3.015a1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474a2.5 2.5 0 1 0 3.014-3.015a1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/></svg><span>插件批量设置</span></a>
                         <a class="@NavClass("/Classes")" aria-current="@CurrentPage("/Classes")" asp-page="/Classes" data-search-label="班级管理 班级 分组 成员 访客"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m6.08 9.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/><path d="m6.08 14.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/></g></svg><span>班级管理</span></a>
                         <a class="@NavClass("/SystemConfig")" aria-current="@CurrentPage("/SystemConfig")" asp-page="/SystemConfig" data-search-label="系统配置 系统更新 服务端维护"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M14 17H5M19 7h-9"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></g></svg><span>系统配置</span></a>
                         <a class="@NavClass("/LoginSettings")" aria-current="@CurrentPage("/LoginSettings")" asp-page="/LoginSettings" data-search-label="登录页设置 登录页 主题 深色 浅色 背景 背景图 透明度 外观 卡片位置 左 右"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15l-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></g></svg><span>登录页设置</span></a>

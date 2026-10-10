@@ -1,13 +1,13 @@
 @page
 @model ExtensionSettingsModel
 @{
-    ViewData["Title"] = Model.Group is { } current ? $"{current.DisplayName} 设置" : "扩展插件";
+    ViewData["Title"] = Model.Group is { } current ? $"{current.DisplayName} 批量设置" : "插件批量设置";
     var group = Model.Group;
 }
 <div class="page-head">
     <div>
-        <p class="eyebrow">扩展插件</p>
-        <h1>@(group?.DisplayName ?? "扩展插件设置")</h1>
+        <p class="eyebrow">插件批量设置</p>
+        <h1>@(group?.DisplayName ?? "插件批量设置")</h1>
         @if (!string.IsNullOrWhiteSpace(group?.Description))
         {
             <p class="muted">@group.Description</p>
@@ -25,12 +25,12 @@
         <div class="panel-heading">
             <div>
                 <h2>已上报设置页的插件</h2>
-                <p class="muted">@(Model.IsAdmin ? "汇总全部班级设备上报的插件；安装支持 RemoteCI 扩展分组的插件后会自动出现在这里。打开插件可以设置是否允许各班班主任自行管理。" : $"系统管理员开放给班级自行管理、且 {Model.CurrentClass?.Name} 的设备已上报的插件。")</p>
+                <p class="muted">汇总全部班级设备上报的插件；修改会下发到你选择的班级、分组或具体设备，不受当前选中班级影响。只改当前班级请使用班级区的“扩展插件”。打开插件还可以设置是否允许各班班主任自行管理。</p>
             </div>
         </div>
         @if (Model.Groups.Count == 0)
         {
-            <div class="empty-state"><i class="bi bi-puzzle" aria-hidden="true"></i><strong>暂无可设置的扩展插件</strong><span>@(Model.IsAdmin ? "插件需要通过 RemoteCI 注册带设置字段的扩展分组，并保持设备在线同步。" : "已开放的插件需要在本班设备上安装并保持在线同步后才会出现在这里。")</span></div>
+            <div class="empty-state"><i class="bi bi-puzzle" aria-hidden="true"></i><strong>暂无可设置的扩展插件</strong><span>插件需要通过 RemoteCI 注册带设置字段的扩展分组，并让设备至少同步一次。</span></div>
         }
         else
         {
@@ -43,11 +43,8 @@
                             @if (!string.IsNullOrWhiteSpace(item.Description)) { <small>@item.Description</small> }
                             <small>ID：@item.Id · @item.Settings.Count 项设置 · @item.Extensions.Count 个扩展功能</small>
                         </div>
-                        @if (Model.IsAdmin)
-                        {
-                            var open = Model.ClassAdminAllowedGroupIds.Contains(item.Id);
-                            <span class="status-pill @(open ? "online" : null)">@(open ? "班级可自行管理" : "仅统一管理")</span>
-                        }
+                        @{ var itemOpen = Model.ClassAdminAllowedGroupIds.Contains(item.Id); }
+                        <span class="status-pill @(itemOpen ? "online" : null)">@(itemOpen ? "班级可自行管理" : "仅统一管理")</span>
                         <div class="extension-row-actions">
                             <a class="button" asp-page="/ExtensionSettings" asp-route-groupId="@item.Id">打开设置</a>
                         </div>
@@ -60,7 +57,7 @@
 else if (group is null)
 {
     <section class="panel">
-        <div class="empty-state"><i class="bi bi-question-circle" aria-hidden="true"></i><strong>没有找到该插件的设置</strong><span>插件可能已卸载、尚未同步，或当前班级没有安装它。</span></div>
+        <div class="empty-state"><i class="bi bi-question-circle" aria-hidden="true"></i><strong>没有找到该插件的设置</strong><span>插件可能已卸载或尚未同步。</span></div>
     </section>
 }
 else
@@ -84,14 +81,12 @@ else
         </section>
     }
 
-    @if (Model.IsAdmin)
-    {
-        var open = Model.ClassAdminAllowedGroupIds.Contains(group.Id);
+    var open = Model.ClassAdminAllowedGroupIds.Contains(group.Id);
         <section class="panel" id="class-admin-access">
             <div class="panel-heading">
                 <div>
                     <h2>班级自治</h2>
-                    <p class="muted">开放后，各班班主任可以在侧栏“扩展插件”中看到此插件并修改本班设置；不开放时只能由系统管理员统一下发。</p>
+                    <p class="muted">开放后，各班班主任可以在班级区的“扩展插件”中看到此插件并修改本班设置；不开放时只能由系统管理员修改。</p>
                 </div>
                 <span class="status-pill @(open ? "online" : null)">@(open ? "班级可自行管理" : "仅统一管理")</span>
             </div>
@@ -100,65 +95,79 @@ else
                 <div><button type="submit" class="@(open ? "ghost" : null)">@(open ? "收回班主任管理权限" : "允许班主任自行管理")</button></div>
             </form>
         </section>
-    }
 
-    @if (Model.CanEditCurrentClass)
-    {
-        <section class="panel" id="current-class-settings">
-            <div class="panel-heading">
-                <div>
-                    <h2>当前班级：@Model.CurrentClass?.Name</h2>
-                    <p class="muted">表单已按设备当前值预填，保存后由插件在本班设备上写入并生效。</p>
-                </div>
-            </div>
-            @if (Model.CurrentClassGroup is not { HasSettings: true } currentGroup)
-            {
-                <p class="muted">当前班级的设备没有上报这个插件，或插件尚未连接。</p>
-            }
-            else
-            {
-                <form method="post" asp-page-handler="ApplyCurrent" asp-route-groupId="@group.Id" class="stack extension-settings-form">
-                    @await Html.PartialAsync("_ExtensionFields", new ExtensionFieldsModel(currentGroup.Settings!, "SettingInputs", "current-setting", currentGroup.Values))
-                    <div><button type="submit">保存到当前班级</button></div>
-                </form>
-            }
-        </section>
-    }
-
-    @if (Model.IsAdmin)
-    {
         <section class="panel" id="batch-settings">
             <div class="panel-heading">
                 <div>
-                    <h2>批量下发</h2>
-                    <p class="muted">勾选要修改的设置项并填写新值，未勾选的设置项保持各班原值。所选班级中的每一台在线设备都会收到。</p>
+                    <h2>按范围下发</h2>
+                    <p class="muted">勾选要修改的设置项并填写新值，未勾选的设置项保持各设备原值。修改只下发到下方选择的范围，与当前选中的班级无关。</p>
                 </div>
             </div>
             <form method="post" asp-page-handler="ApplyBatch" asp-route-groupId="@group.Id" class="stack extension-settings-form">
-                @await Html.PartialAsync("_ExtensionFields", new ExtensionFieldsModel(group.Settings, "SettingInputs", "batch-setting", Model.CurrentClassGroup?.Values, Selectable: true))
-                @if (Model.ClassGroups.Count > 0)
-                {
-                    <h3>整组下发</h3>
-                    <div class="broadcast-targets">
-                        @foreach (var classGroup in Model.ClassGroups)
+                @await Html.PartialAsync("_ExtensionFields", new ExtensionFieldsModel(group.Settings, "SettingInputs", "batch-setting", group.Values, Selectable: true))
+                <div class="batch-target-tabs" role="tablist">
+                    <button type="button" class="ghost active" data-scope-tab="classes">按班级 / 分组</button>
+                    <button type="button" class="ghost" data-scope-tab="devices">按具体设备</button>
+                </div>
+                <section data-scope-panel="classes" class="stack">
+                    @if (Model.ClassGroups.Count > 0)
+                    {
+                        <h3>整组下发</h3>
+                        <div class="broadcast-targets">
+                            @foreach (var classGroup in Model.ClassGroups)
+                            {
+                                <label class="check"><input type="checkbox" name="SelectedGroupIds" value="@classGroup.Id" /> @classGroup.Name（@classGroup.ClassCount 个班级）</label>
+                            }
+                        </div>
+                    }
+                    <h3>逐班选择 <button type="button" class="ghost" data-check-all="#extension-target-classes">全选</button></h3>
+                    <div class="broadcast-targets" id="extension-target-classes">
+                        @foreach (var state in Model.ClassStates)
                         {
-                            <label class="check"><input type="checkbox" name="SelectedGroupIds" value="@classGroup.Id" /> @classGroup.Name（@classGroup.ClassCount 个班级）</label>
+                            <label class="check">
+                                <input type="checkbox" name="SelectedClassIds" value="@state.ClassId" />
+                                @state.ClassName
+                                <span class="muted">@(state.Online ? "在线" : "离线")</span>
+                            </label>
                         }
                     </div>
-                }
-                <h3>逐班选择 <button type="button" class="ghost" data-check-all="#extension-target-classes">全选</button></h3>
-                <div class="broadcast-targets" id="extension-target-classes">
-                    @foreach (var state in Model.ClassStates)
+                    <p class="muted">只列出设备上报了该插件或有待补发设置的班级。所选班级中的每一台在线设备都会收到；插件离线的班级保存为“待补发”，上线后自动写入。按分组下发时，未安装该插件的在线班级会在结果中显示失败。</p>
+                </section>
+                <section data-scope-panel="devices" class="stack" hidden>
+                    @if (Model.Devices.Count == 0)
                     {
-                        <label class="check">
-                            <input type="checkbox" name="SelectedClassIds" value="@state.ClassId" />
-                            @state.ClassName
-                            <span class="muted">@(state.Online ? "在线" : "离线")</span>
-                        </label>
+                        <p class="muted">上报了该插件的班级中暂无已分配的设备。</p>
                     }
-                </div>
-                <p class="muted">只列出设备上报了该插件或有待补发设置的班级。插件离线的班级会保存为“待补发”，插件上线后自动写入；按分组下发时，未安装该插件的在线班级会在结果中显示失败。</p>
-                <div><button type="submit">下发到所选班级</button></div>
+                    else
+                    {
+                        <div class="batch-target-toolbar">
+                            <span class="muted">@Model.Devices.Count(device => device.Online) 台在线设备</span>
+                            <button type="button" class="ghost" data-check-all="#extension-target-devices">全选在线设备</button>
+                        </div>
+                        <div class="device-upgrade-list batch-device-list" id="extension-target-devices">
+                            @foreach (var device in Model.Devices)
+                            {
+                                <article class="device-upgrade-card @(device.Online ? "" : "offline")">
+                                    <div class="device-card-head">
+                                        <label class="device-select">
+                                            <input type="checkbox" name="SelectedConnectionIds" value="@device.ConnectionId" disabled="@(!device.Online)" />
+                                            <span class="device-icon"><i class="bi bi-pc-display" aria-hidden="true"></i></span>
+                                            <span>
+                                                <strong>@device.DeviceName</strong>
+                                                <small>@device.ClassName · RemoteCI @device.RemoteCiVersion</small>
+                                            </span>
+                                        </label>
+                                        <div class="device-card-status">
+                                            <span class="status-pill @(device.Online ? "online" : "offline")">@(device.Online ? "在线" : "离线")</span>
+                                        </div>
+                                    </div>
+                                </article>
+                            }
+                        </div>
+                        <p class="muted">只下发到勾选的在线设备；离线设备不能选择，可改用“按班级 / 分组”保存为待补发。</p>
+                    }
+                </section>
+                <div><button type="submit">下发到所选范围</button></div>
             </form>
         </section>
 
@@ -215,7 +224,6 @@ else
                 </div>
             }
         </section>
-    }
 }
 
 <script src="~/extension-fields.js" asp-append-version="true" defer></script>

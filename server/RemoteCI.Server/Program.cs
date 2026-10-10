@@ -122,7 +122,11 @@ builder.Services.AddScoped(sp =>
     return service;
 });
 builder.Services.AddSingleton<LessonOverrideTable>();
-builder.Services.AddSingleton<IStateStore>(sp => new StateStore(sp.GetRequiredService<LessonOverrideTable>()));
+builder.Services.AddSingleton(sp => new StateStore(sp.GetRequiredService<LessonOverrideTable>()));
+// 课表与扩展声明落库：服务端重启后插件尚未重连时，换课、日程与扩展设置仍有最近一次同步的数据。
+builder.Services.AddSingleton<ClassStateCacheService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ClassStateCacheService>());
+builder.Services.AddSingleton<IStateStore, PersistentStateStore>();
 builder.Services.AddSingleton<PeerRegistry>();
 builder.Services.AddSingleton<ScheduleSyncTaskTracker>();
 builder.Services.AddSingleton<ScheduleSyncService>();
@@ -194,6 +198,8 @@ using (var scope = app.Services.CreateScope())
     await scope.ServiceProvider.GetRequiredService<IdentityCoordinator>().BootstrapAsync();
     // 换课产生的单节临时任课老师覆盖需要在接受连接前载入内存，首个课表推送即可正确叠加。
     await scope.ServiceProvider.GetRequiredService<ScheduleSwapService>().LoadOverridesAsync();
+    // 插件重连前先用上次同步的课表与扩展声明；插件上线后会立即重新拉取并覆盖。
+    await scope.ServiceProvider.GetRequiredService<ClassStateCacheService>().LoadAsync();
 }
 
 app.Map("/ws", async context =>

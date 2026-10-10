@@ -1,0 +1,85 @@
+@page
+@model ClassExtensionsModel
+@{
+    ViewData["Title"] = Model.Group is { } current ? $"{current.DisplayName} 设置" : "扩展插件";
+    var group = Model.Group;
+}
+<div class="page-head">
+    <div>
+        <p class="eyebrow">扩展插件 · @Model.CurrentClass?.Name</p>
+        <h1>@(group?.DisplayName ?? "本班扩展插件")</h1>
+        @if (!string.IsNullOrWhiteSpace(group?.Description))
+        {
+            <p class="muted">@group.Description</p>
+        }
+    </div>
+    @if (group is not null)
+    {
+        <a class="button ghost" asp-page="/ClassExtensions"><i class="bi bi-arrow-left" aria-hidden="true"></i> 全部插件</a>
+    }
+</div>
+
+@if (string.IsNullOrWhiteSpace(Model.GroupId))
+{
+    <section class="panel">
+        <div class="panel-heading">
+            <div>
+                <h2>本班插件</h2>
+                <p class="muted">@(Model.IsAdmin ? $"{Model.CurrentClass?.Name} 的设备上报了设置页的插件，修改只作用于本班。跨班级统一下发请使用管理区的“插件批量设置”。" : $"系统管理员开放给班级自行管理、且 {Model.CurrentClass?.Name} 的设备已上报的插件，修改只作用于本班。")</p>
+            </div>
+            <span class="status-pill @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "插件在线" : "插件离线")</span>
+        </div>
+        @if (Model.Groups.Count == 0)
+        {
+            <div class="empty-state"><i class="bi bi-puzzle" aria-hidden="true"></i><strong>本班暂无可设置的扩展插件</strong><span>安装支持 RemoteCI 扩展分组的插件，并让本班设备至少连接一次后会出现在这里。</span></div>
+        }
+        else
+        {
+            <div class="extension-list">
+                @foreach (var item in Model.Groups)
+                {
+                    <article class="extension-control-row">
+                        <div class="extension-identity">
+                            <strong>@item.DisplayName</strong>
+                            @if (!string.IsNullOrWhiteSpace(item.Description)) { <small>@item.Description</small> }
+                            <small>@item.Settings.Count 项设置 · @item.Extensions.Count 个扩展功能</small>
+                        </div>
+                        <div class="extension-row-actions">
+                            <a class="button" asp-page="/ClassExtensions" asp-route-groupId="@item.Id">打开设置</a>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+}
+else if (group is null)
+{
+    <section class="panel">
+        <div class="empty-state"><i class="bi bi-question-circle" aria-hidden="true"></i><strong>没有找到该插件的设置</strong><span>本班设备没有上报这个插件，或你没有管理它的权限。</span></div>
+    </section>
+}
+else
+{
+    <section class="panel" id="class-settings">
+        <div class="panel-heading">
+            <div>
+                <h2>@Model.CurrentClass?.Name 的设置</h2>
+                <p class="muted">@(Model.PluginOnline ? "表单已按设备当前值预填，保存后由插件在本班设备上写入并生效。" : "插件离线，表单按最后一次同步的值预填；保存后会在插件重新上线时自动写入。")</p>
+            </div>
+            <span class="status-pill @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "插件在线" : "插件离线")</span>
+        </div>
+        @if (Model.PendingValues is { Count: > 0 } queued)
+        {
+            <div class="notice">
+                <span>待补发：@string.Join("、", group.Settings.Where(field => queued.ContainsKey(field.Key)).Select(field => $"{(string.IsNullOrWhiteSpace(field.Label) ? field.Key : field.Label)}={ExtensionSettingsModel.FormatValue(field, queued[field.Key])}"))</span>
+            </div>
+        }
+        <form method="post" asp-page-handler="Apply" asp-route-groupId="@group.Id" class="stack extension-settings-form">
+            @await Html.PartialAsync("_ExtensionFields", new ExtensionFieldsModel(group.Settings, "SettingInputs", "class-setting", group.Values))
+            <div><button type="submit">保存到本班</button></div>
+        </form>
+    </section>
+}
+
+<script src="~/extension-fields.js" asp-append-version="true" defer></script>

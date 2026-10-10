@@ -75,7 +75,8 @@ public sealed class ExtensionGroupPagesTests
         Assert.Contains("data-extension-group=\"demo.reminder\"", control);
         Assert.Contains("提醒插件", control);
         Assert.Contains("其他扩展", control);
-        Assert.Contains("/ExtensionSettings?groupId=demo.reminder", control);
+        // 控制页属于班级区，插件设置链接到只作用于当前班级的本班插件页。
+        Assert.Contains("/ClassExtensions?groupId=demo.reminder", control);
         Assert.Contains("在教室端显示一条提醒", control);
         Assert.Matches("<textarea name=\"ExtensionInputs\\[0\\]\\.Value\"", control);
 
@@ -84,7 +85,8 @@ public sealed class ExtensionGroupPagesTests
         Assert.Contains("data-batch-open=\"RunExtension\"", batch);
         Assert.Contains("data-batch-dialog=\"batch-settings-extension-0\"", batch);
         Assert.Contains("name=\"BatchExtensionId\" value=\"demo.reminder.now\"", batch);
-        Assert.Contains("统一修改各班的 2 项设置", batch);
+        Assert.Contains("按范围统一修改 2 项设置", batch);
+        Assert.Contains("/ExtensionSettings?groupId=demo.reminder", batch);
 
         var list = WebUtility.HtmlDecode(await browser.GetStringAsync("/ExtensionSettings"));
         Assert.Contains("提醒插件", list);
@@ -92,14 +94,25 @@ public sealed class ExtensionGroupPagesTests
         Assert.Contains("仅统一管理", list);
 
         var settings = WebUtility.HtmlDecode(await browser.GetStringAsync("/ExtensionSettings?groupId=demo.reminder"));
-        Assert.Contains("当前班级", settings);
-        Assert.Contains("批量下发", settings);
+        // 管理区按所选范围下发，不再提供“保存到当前班级”。
+        Assert.DoesNotContain("保存到当前班级", settings);
+        Assert.Contains("按范围下发", settings);
+        Assert.Contains("data-scope-tab=\"devices\"", settings);
+        Assert.Contains("name=\"SelectedClassIds\"", settings);
         Assert.Contains("各班级当前值", settings);
         Assert.Contains("允许班主任自行管理", settings);
         Assert.Contains("两次提醒之间的分钟数", settings);
         Assert.Contains(">柔和</option>", settings);
         Assert.Contains("data-extension-field-apply", settings);
         Assert.Matches("name=\"SettingInputs\\[0\\]\\.Value\"[^>]*value=\"15\"", settings);
+
+        // 班级区的本班插件页：系统管理员也能看到，只作用于当前班级，没有范围选择。
+        var classPage = WebUtility.HtmlDecode(await browser.GetStringAsync("/ClassExtensions?groupId=demo.reminder"));
+        Assert.Contains("保存到本班", classPage);
+        Assert.DoesNotContain("SelectedClassIds", classPage);
+        Assert.DoesNotContain("SelectedConnectionIds", classPage);
+        Assert.Matches("name=\"SettingInputs\\[0\\]\\.Value\"[^>]*value=\"15\"", classPage);
+        Assert.Contains("href=\"/ClassExtensions\"", control);
     }
 
     private static async Task LoginWebUiAsync(HttpClient browser)

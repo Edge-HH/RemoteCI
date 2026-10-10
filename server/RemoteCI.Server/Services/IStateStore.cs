@@ -4,6 +4,7 @@ namespace RemoteCI.Server.Services;
 
 /// <summary>
 /// 内存状态缓存：按班级分桶保存各插件推送的最新快照与最近事件，供新连接/HTTP 查询获取。
+/// 课表与扩展声明另由 <see cref="ClassStateCacheService"/> 持久化，服务端重启后即可恢复。
 /// </summary>
 public interface IStateStore
 {

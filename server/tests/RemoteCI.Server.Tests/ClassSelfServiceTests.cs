@@ -134,20 +134,28 @@ public sealed class ClassSelfServiceTests
         await SelectClassAsync(browser, classId);
 
         // 默认不开放任何插件：侧栏没有入口，直接访问也被拒绝。
-        Assert.DoesNotContain("href=\"/ExtensionSettings\"", await browser.GetStringAsync("/Schedule"));
-        Assert.Equal(HttpStatusCode.Redirect, (await browser.GetAsync("/ExtensionSettings")).StatusCode);
+        Assert.DoesNotContain("href=\"/ClassExtensions\"", await browser.GetStringAsync("/Schedule"));
+        Assert.Equal(HttpStatusCode.Redirect, (await browser.GetAsync("/ClassExtensions")).StatusCode);
 
         using (var api = factory.CreateClient())
             Assert.Equal(HttpStatusCode.OK, (await api.SendAsync(Bearer(HttpMethod.Put,
                 "/api/extension-groups/demo.open/class-admin-access", adminToken, new { allowClassAdmin = true }))).StatusCode);
 
-        Assert.Contains("href=\"/ExtensionSettings\"", await browser.GetStringAsync("/Schedule"));
-        var list = WebUtility.HtmlDecode(await browser.GetStringAsync("/ExtensionSettings"));
+        var sidebar = await browser.GetStringAsync("/Schedule");
+        Assert.Contains("href=\"/ClassExtensions\"", sidebar);
+        // 管理区的批量设置只对系统管理员开放，班主任访问会转到本班插件页。
+        Assert.DoesNotContain("href=\"/ExtensionSettings\"", sidebar);
+        var batch = await browser.GetAsync("/ExtensionSettings?groupId=demo.open");
+        Assert.Equal(HttpStatusCode.Redirect, batch.StatusCode);
+        Assert.StartsWith("/ClassExtensions", batch.Headers.Location!.OriginalString);
+        var list = WebUtility.HtmlDecode(await browser.GetStringAsync("/ClassExtensions"));
         Assert.Contains("开放插件", list);
         Assert.DoesNotContain("统一管理插件", list);
-        Assert.Contains("保存到当前班级", await browser.GetStringAsync("/ExtensionSettings?groupId=demo.open"));
+        var page = WebUtility.HtmlDecode(await browser.GetStringAsync("/ClassExtensions?groupId=demo.open"));
+        Assert.Contains("保存到本班", page);
+        Assert.DoesNotContain("SelectedClassIds", page);
         Assert.Contains("没有找到该插件的设置", WebUtility.HtmlDecode(
-            await browser.GetStringAsync("/ExtensionSettings?groupId=demo.closed")));
+            await browser.GetStringAsync("/ClassExtensions?groupId=demo.closed")));
     }
 
     private static async Task SelectClassAsync(HttpClient browser, Guid classId)
