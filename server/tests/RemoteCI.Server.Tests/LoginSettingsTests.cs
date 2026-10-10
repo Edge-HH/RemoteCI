@@ -21,7 +21,7 @@ public sealed class LoginSettingsTests
         using (var anonymous = CreateBrowser(factory))
         {
             var defaultLogin = WebUtility.HtmlDecode(await anonymous.GetStringAsync("/Login"));
-            Assert.Contains("--login-card-align:center", defaultLogin);
+            Assert.Contains("data-login-card=\"center\"", defaultLogin);
         }
 
         await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
@@ -53,7 +53,7 @@ public sealed class LoginSettingsTests
         using (var anonymous = CreateBrowser(factory))
         {
             var loginHtml = WebUtility.HtmlDecode(await anonymous.GetStringAsync("/Login"));
-            Assert.Contains("--login-card-align:end", loginHtml);
+            Assert.Contains("data-login-card=\"right\"", loginHtml);
             Assert.Contains("data-login-theme-forced=\"dark\"", loginHtml);
         }
     }

@@ -278,8 +278,13 @@ textarea { resize: vertical; }
 .task-link small { display: block; color: var(--muted); }
 .workspace-section { margin-bottom: 18px; }
 .section-title { margin-bottom: 12px; }
-/* 登录卡片位置由登录页设置决定：--login-card-align 取 start/center/end，默认居中。 */
-.auth-layout { display: grid; min-height: 100vh; align-items: center; justify-items: var(--login-card-align, center); padding: 24px; background: var(--sidebar); }
+/* 登录卡片位置由 data-login-card 决定，默认居中。
+   左/右时卡片中心落在宽度的 38.2% / 61.8%（黄金分割点）：卡片在占 76.4% 的那一列里居中；
+   窄屏时该列按内容撑开，另一列自然收缩到 0。 */
+.auth-layout { display: grid; min-height: 100vh; align-items: center; justify-items: center; padding: 24px; background: var(--sidebar); }
+.auth-layout[data-login-card="left"] { grid-template-columns: 76.4fr 23.6fr; }
+.auth-layout[data-login-card="right"] { grid-template-columns: 23.6fr 76.4fr; }
+.auth-layout[data-login-card="right"] .auth-shell { grid-column: 2; }
 .auth-shell { width: min(430px,100%); padding: 0; }
 .login-card { width: 100%; padding: 34px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); }
 .login-logo { display: block; width: 54px; height: 54px; margin-bottom: 22px; }

@@ -67,11 +67,11 @@
         RemoteCI.Server.Data.LoginTheme.Dark => "dark",
         _ => string.Empty,
     };
-    // 登录卡片位置映射到 grid 的水平对齐；未登录页面之外的布局不受影响。
-    var loginCardAlign = loginAppearance?.CardPosition switch
+    // 登录卡片位置交给 body 的 data-login-card，由样式按黄金分割摆放；未登录页面之外的布局不受影响。
+    var loginCardPosition = loginAppearance?.CardPosition switch
     {
-        RemoteCI.Server.Data.LoginCardPosition.Left => "start",
-        RemoteCI.Server.Data.LoginCardPosition.Right => "end",
+        RemoteCI.Server.Data.LoginCardPosition.Left => "left",
+        RemoteCI.Server.Data.LoginCardPosition.Right => "right",
         _ => "center",
     };
     var loginStyleParts = new List<string>();
@@ -80,7 +80,6 @@
         loginStyleParts.Add($"--login-bg-image:url('{Url.Content("~/api/settings/login-background")}?v={loginAppearance.BackgroundUpdatedAt?.Ticks ?? 0}')");
         loginStyleParts.Add($"--login-bg-opacity:{Math.Clamp(loginAppearance.Opacity, 0, 100) / 100d:0.##}");
     }
-    if (loginAppearance is not null) loginStyleParts.Add($"--login-card-align:{loginCardAlign}");
     var hasLoginBackground = loginAppearance?.HasBackground == true;
     var loginBackgroundStyle = loginStyleParts.Count == 0 ? null : string.Join(';', loginStyleParts);
 }
@@ -98,7 +97,7 @@
     <link rel="stylesheet" href="~/app.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/premium.css" asp-append-version="true" />
 </head>
-<body class="@(currentPage == "/Visitor" ? "visitor-layout" : current is null ? "auth-layout" : "app-layout")@(hasLoginBackground ? " has-login-background" : "")" style="@loginBackgroundStyle">
+<body class="@(currentPage == "/Visitor" ? "visitor-layout" : current is null ? "auth-layout" : "app-layout")@(hasLoginBackground ? " has-login-background" : "")" style="@loginBackgroundStyle" data-login-card="@(current is null ? loginCardPosition : null)">
     @if (currentPage == "/Visitor")
     {
         <main class="shell visitor-shell">
