@@ -132,7 +132,10 @@ public sealed class UpdateService
 
     public string CurrentVersion => AppVersion.Version;
 
-    /// <summary>正式渠道排除预发布版；Beta 渠道同时接收正式版与预发布版，但都不得跨协议主版本。</summary>
+    /// <summary>
+    /// 正式渠道排除预发布版；Beta 渠道同时接收正式版与预发布版（包括在 GitHub 上标为预发布的四段标签），
+    /// 但都不得跨协议主版本。
+    /// </summary>
     public static ReleaseInfo? SelectReleaseForChannel(
         IEnumerable<ReleaseInfo> releases,
         UpdateChannel channel) =>
@@ -141,7 +144,7 @@ public sealed class UpdateService
                 !release.Draft &&
                 (channel == UpdateChannel.Stable
                     ? IsCanonicalStableRelease(release.Tag) && !release.Prerelease
-                    : (IsCanonicalStableRelease(release.Tag) && !release.Prerelease)
+                    : IsCanonicalStableRelease(release.Tag)
                         || (IsBetaRelease(release.Tag) && release.Prerelease)))
             .MaxBy(
                 release => release.Tag,

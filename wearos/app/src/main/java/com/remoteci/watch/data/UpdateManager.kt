@@ -93,9 +93,11 @@ object UpdateManager {
     ): CompatibleUpdate? = releases
         .filterNot { it.draft }
         .filter { release ->
-            val stable = STABLE_RELEASE_TAG.matches(release.tagName) && !release.prerelease
-            val beta = BETA_RELEASE_TAG.matches(release.tagName) && release.prerelease
-            if (channel == UpdateChannel.STABLE) stable else stable || beta
+            val canonical = STABLE_RELEASE_TAG.matches(release.tagName)
+            // 四段标签在 GitHub 上标为预发布时只进入 Beta 渠道。
+            val stable = canonical && !release.prerelease
+            val beta = canonical || BETA_RELEASE_TAG.matches(release.tagName) && release.prerelease
+            if (channel == UpdateChannel.STABLE) stable else beta
         }
         .mapNotNull { release -> findApkAsset(release)?.let { CompatibleUpdate(release, it) } }
         .filter { candidate ->

@@ -101,7 +101,7 @@ docker compose start remoteci
 ### 7.1 WebUI（服务端）更新
 
 管理员登录后在“系统配置 → 系统更新”中点击“检查更新”，页面会从 GitHub 仓库
-`Edge-HH/RemoteCI` 读取版本和更新说明。默认“正式版”渠道只检查非预发布 release；
+`Edge-HH/RemoteCI` 读取版本和更新说明（按 GitHub Markdown 渲染）。默认“正式版”渠道只检查非预发布 release；
 选择“Beta 版”后会同时检查正式版和预发布 release。发现新版本后点击
 “下载并更新”，服务端会下载当前平台（linux-x64 / win-x64）的更新包并就地覆盖，
 然后自动退出进程。Docker 的 `restart: unless-stopped` 策略会以新文件重新启动容器；
@@ -146,7 +146,7 @@ fpk 工程的构建与发布流程见 [fnos/README.md](../fnos/README.md)。
 Beta 版同时包含正式版和预发布。发现可用版本后下载
 `RemoteCI.Watch-<版本>.apk` 并通过系统安装器覆盖安装。更新要求发布包与当前
 安装包签名一致：首次安装正式签名版后，后续更新才能在同一签名下自动覆盖。
-手表必须先连接 WebUI，正式渠道只选择协议主版本相同的四段纯数字 Release，Beta 渠道额外选择 `v3.x.x-beta.y`；旧的 `v3.x.x` 稳定标签和 V4 Release 不会进入自动更新候选。APK 可以高于所连接 WebUI 的软件版本；启用“强制更新”时
+手表必须先连接 WebUI，正式渠道只选择协议主版本相同的四段纯数字 Release，Beta 渠道额外选择 `v3.x.x-beta.y`及在 GitHub 标为预发布的四段 Release；旧的 `v3.x.x` 稳定标签和 V4 Release 不会进入自动更新候选。APK 可以高于所连接 WebUI 的软件版本；启用“强制更新”时
 可重新下载并覆盖安装当前版本，但仍不允许降级，也不能绕过 APK 签名校验。
 
 ### 7.4 `v3.2.0` 一次性硬切迁移

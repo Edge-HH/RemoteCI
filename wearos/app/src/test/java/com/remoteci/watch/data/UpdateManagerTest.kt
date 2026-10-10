@@ -126,6 +126,17 @@ class UpdateManagerTest {
     }
 
     @Test
+    fun `four-part prerelease only reaches beta channel`() {
+        val releases = listOf(release("3.3.1.0", prerelease = true), release("3.3.0.2"))
+
+        val stable = UpdateManager.selectCompatibleUpdate(releases, "3.3.0.0", UpdateChannel.STABLE, force = false)
+        val beta = UpdateManager.selectCompatibleUpdate(releases, "3.3.0.0", UpdateChannel.BETA, force = false)
+
+        assertEquals("3.3.0.2", stable?.release?.tagName)
+        assertEquals("3.3.1.0", beta?.release?.tagName)
+    }
+
+    @Test
     fun `beta channel includes prereleases`() {
         val selected = UpdateManager.selectCompatibleUpdate(
             releases = listOf(

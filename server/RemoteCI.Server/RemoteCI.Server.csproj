@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <PackageReference Include="ClosedXML" Version="0.105.1" />
+    <PackageReference Include="Markdig" Version="1.4.0" />
     <!-- Identity、SQLite provider 和 Design 保持同一 EF Core 补丁版本，避免测试依赖图出现 CS1705。 -->
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.12" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />

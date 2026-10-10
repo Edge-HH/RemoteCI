@@ -48,7 +48,7 @@
             <p class="muted">所选渠道最新版本 @(latestVersion)@(Model.LatestRelease.Prerelease ? "（Beta）" : "")</p>
             @if (!string.IsNullOrEmpty(Model.LatestRelease.Body))
             {
-                <details class="release-notes"><summary>查看更新说明</summary><pre>@Model.LatestRelease.Body</pre></details>
+                <details class="release-notes"><summary>查看更新说明</summary><div class="markdown-body">@Html.Raw(ReleaseNotesRenderer.ToHtml(Model.LatestRelease.Body))</div></details>
             }
             @if (canInstall && Model.ServerAsset is not null)
             {

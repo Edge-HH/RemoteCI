@@ -42,6 +42,16 @@ public sealed class UpdateServiceTests
     }
 
     [Fact]
+    public void SelectReleaseForChannel_FourPartPrereleaseOnlyInBeta()
+    {
+        var stable = new ReleaseInfo("3.3.0.2", "stable", "", []);
+        var preview = new ReleaseInfo("3.3.1.0", "preview", "", [], Prerelease: true);
+
+        Assert.Same(stable, UpdateService.SelectReleaseForChannel([preview, stable], UpdateChannel.Stable));
+        Assert.Same(preview, UpdateService.SelectReleaseForChannel([preview, stable], UpdateChannel.Beta));
+    }
+
+    [Fact]
     public void SelectReleaseForChannel_ExcludesOtherProtocolMajors()
     {
         var v3 = new ReleaseInfo("3.9.0.0", "v3", "", []);

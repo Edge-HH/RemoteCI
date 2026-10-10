@@ -87,7 +87,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 插件通过云端 WebSocket 认证后，服务端必须立即发送一次 `schedule_pull`，避免插件启动时的首次 `schedule_sync` 早于云端连接建立而丢失。任何已认证手表都可以发送该只读消息：云端连接由服务端立即转发给在线插件，局域网连接直接交给插件。插件端是最终任务锁，服务端同时维护云端入口的前置锁；插件推送、WebUI 拉取、手表拉取、自动拉取和连接初始化任一正在运行时，新请求返回 `schedule_sync_status.state=Busy`，其中 `activeTaskId` 指向占用任务。Running、Completed、Failed 和 Busy 状态会广播到在线手表并供插件设置页、WebUI 展示；任务成功、失败、插件断开或 15 秒超时后释放。WebUI 收到新 `schedule_sync` 后用完整 `ScheduleBundle` 整体替换旧缓存，不做字段合并。该请求不授予换课能力，也不绕过 `ChangeSchedule` 的权限检查。插件离线期间不排队。
 
-云端服务端直接在认证成功的 `auth_state.serverVersion` 中下发自身软件版本；插件通过 `account_sync.serverVersion` 保存同一版本，并在局域网认证成功时转发给手表。服务端与手表正式渠道只选择协议主版本相同的四段纯数字 Release，Beta 渠道额外选择 `v3.x.x-beta.y`，旧三段 `v3.x.x` 稳定标签和 V4 不会进入自动更新候选。手表不再以 WebUI 软件版本为上限，仍保留渠道筛选、禁止降级、同版本强制覆盖和 APK 签名校验。
+云端服务端直接在认证成功的 `auth_state.serverVersion` 中下发自身软件版本；插件通过 `account_sync.serverVersion` 保存同一版本，并在局域网认证成功时转发给手表。服务端与手表正式渠道只选择协议主版本相同的四段纯数字 Release，Beta 渠道额外选择 `v3.x.x-beta.y`及在 GitHub 标为预发布的四段 Release，旧三段 `v3.x.x` 稳定标签和 V4 不会进入自动更新候选。手表不再以 WebUI 软件版本为上限，仍保留渠道筛选、禁止降级、同版本强制覆盖和 APK 签名校验。
 
 ## 能力协商
 

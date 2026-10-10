@@ -1053,10 +1053,19 @@ private fun UpdateChannelSelector(channel: UpdateChannel, onChange: (UpdateChann
     }
 }
 
-/** 截取 release 说明供手表小屏展示。 */
+/** 去掉 Markdown 标记并截取 release 说明供手表小屏展示。 */
 private fun releaseNotesPreview(body: String?, maxLength: Int = 180): String {
     if (body.isNullOrBlank()) return "暂无更新说明"
-    val plain = body.replace("\r", "").trim()
+    val plain = body.replace("\r", "")
+        .replace(Regex("""<!--.*?-->""", RegexOption.DOT_MATCHES_ALL), "")
+        .replace(Regex("""!?\[([^\]]*)]\([^)]*\)"""), "$1")
+        .replace(Regex("""(?m)^\s*([-*_]\s*){3,}$|^```.*$"""), "")
+        .replace(Regex("""(?m)^\s{0,3}(#{1,6}\s+|>\s?)"""), "")
+        .replace(Regex("""(?m)^\s*[-*+]\s+(\[[ xX]]\s+)?"""), "• ")
+        .replace(Regex("""(\*\*|__|~~|`)"""), "")
+        .replace(Regex("""\n{3,}"""), "\n\n")
+        .trim()
+    if (plain.isEmpty()) return "暂无更新说明"
     return if (plain.length <= maxLength) plain else plain.take(maxLength) + "…"
 }
 
