@@ -62,6 +62,7 @@ public sealed class MemberExcelTests
 
         var userA = await identities.CreateUserAsync(new CreateUserRequest
         {
+            ClassId = TestWebApplicationFactory.DefaultClassId,
             Username = "excel.a",
             DisplayName = "导出甲",
             Password = "Excel-A-Password-2026",
@@ -70,6 +71,7 @@ public sealed class MemberExcelTests
         await classrooms.AddMemberAsync(classA.Id, userA.Id, AccountRole.StudentId);
         var userB = await identities.CreateUserAsync(new CreateUserRequest
         {
+            ClassId = TestWebApplicationFactory.DefaultClassId,
             Username = "excel.b",
             DisplayName = "导出乙",
             Password = "Excel-B-Password-2026",
@@ -148,6 +150,7 @@ public sealed class MemberExcelTests
         var classroom = await classrooms.CreateAsync("Excel 覆盖校验班");
         var user = await identities.CreateUserAsync(new CreateUserRequest
         {
+            ClassId = TestWebApplicationFactory.DefaultClassId,
             Username = "excel.keep",
             DisplayName = "保持原名",
             Password = "Excel-Keep-Password-2026",

@@ -13,7 +13,7 @@ public sealed class ScheduleSyncRequest
     [JsonPropertyName("requestedAt")]
     public DateTimeOffset RequestedAt { get; set; } = DateTimeOffset.UtcNow;
 
-    /// <summary>任务目标班级；缺省表示单班级部署的默认班级。</summary>
+    /// <summary>任务目标班级；由服务端在发起任务时填写。</summary>
     [JsonPropertyName("classId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? ClassId { get; set; }

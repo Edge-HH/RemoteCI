@@ -55,8 +55,9 @@ public sealed class PluginCredential
     public string Name { get; set; } = string.Empty;
     public string TokenHash { get; set; } = string.Empty;
     public bool Enabled { get; set; } = true;
-    public Guid ClassroomId { get; set; } = Classroom.DefaultId;
-    public Classroom Classroom { get; set; } = null!;
+    /// <summary>归属班级；未分配的设备（统一连接码或尚未建班时的引导配对码接入）为 null。</summary>
+    public Guid? ClassroomId { get; set; }
+    public Classroom? Classroom { get; set; }
     /// <summary>统一连接码创建的凭据先保持未分配；分配后才可参与班级数据和命令路由。</summary>
     public bool Assigned { get; set; } = true;
     public string? ClassNameRemark { get; set; }
@@ -74,8 +75,8 @@ public sealed class PluginPairingCode
     public Guid Id { get; set; }
     public string CodeHash { get; set; } = string.Empty;
 
-    /// <summary>配对成功后插件凭据归属的班级；旧数据回填为默认班级。</summary>
-    public Guid ClassroomId { get; set; } = Classroom.DefaultId;
+    /// <summary>配对成功后插件凭据归属的班级；统一连接码与引导配对码为 null，接入的设备进入未分配列表。</summary>
+    public Guid? ClassroomId { get; set; }
     /// <summary>共享连接码可被无限次消费；班级配对码仍由 UsedAt 控制为一次性。</summary>
     public bool IsShared { get; set; }
     /// <summary>班级固定配对码：可重复使用，绑定到特定班级，班级创建/导入时由管理员指定。</summary>
@@ -134,6 +135,12 @@ public sealed class SystemMetadata
     public string? VapidPublicKey { get; set; }
     public string? VapidPrivateKey { get; set; }
 
+    /// <summary>
+    /// 旧版遗留“默认班级”的一次性升级是否已处理：未改名且已有其他班级时，其设备转入未分配并删除该班级；
+    /// 否则保留为普通班级。全新部署直接视为已处理。
+    /// </summary>
+    public bool LegacyDefaultClassMigrated { get; set; }
+
     /// <summary>调休自动适配总开关：放假日关闭教室课表、调休上学日建立临时课表；默认开启。</summary>
     public bool HolidayCalendarEnabled { get; set; } = true;
 
@@ -160,8 +167,11 @@ public enum LoginCardPosition
 /// <summary>班级：一个班级对应一台教室端 ClassIsland 插件与其课表/状态流。</summary>
 public sealed class Classroom
 {
-    /// <summary>升级自单班级版本的部署统一落到默认班级；不可删除。</summary>
-    public static readonly Guid DefaultId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+    /// <summary>
+    /// 旧版本自动创建的“默认班级”的固定 Id。新部署不再有默认班级，首次进入 WebUI 时由系统管理员手动新建；
+    /// 该 Id 只用于升级识别遗留班级与导入不含班级数据的旧配置包。
+    /// </summary>
+    public static readonly Guid LegacyDefaultId = Guid.Parse("33333333-3333-3333-3333-333333333333");
 
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;

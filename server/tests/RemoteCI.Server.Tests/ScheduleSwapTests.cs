@@ -336,7 +336,7 @@ public sealed class ScheduleSwapTests : IDisposable
         var admin = await _root.LoginAsync();
         var response = await _factory.CreateClient().SendAsync(TestWebApplicationFactory.Bearer(
             HttpMethod.Post, "/api/users", admin.AccessToken,
-            new CreateUserRequest { Username = $"{username}.swap", DisplayName = displayName, Password = Password, RoleId = roleId }));
+            new CreateUserRequest { ClassId = TestWebApplicationFactory.DefaultClassId, Username = $"{username}.swap", DisplayName = displayName, Password = Password, RoleId = roleId }));
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<UserListItem>())!.Id;
     }

@@ -15,13 +15,13 @@
       {
         "type": "password",
         "field": "remoteci_admin_password",
-        "label": "管理员初始密码（至少 8 位，留空则首次启动随机生成并写入应用日志）",
+        "label": "系统管理员初始密码（可选，至少 8 位；留空则首次打开 WebUI 时在初始化向导中设置）",
         "rules": []
       },
       {
         "type": "password",
         "field": "remoteci_plugin_pair_code",
-        "label": "插件一次性配对码（留空则首次启动随机生成并写入应用日志）",
+        "label": "插件引导配对码（可选；留空则在 WebUI 中为班级生成配对码）",
         "rules": []
       }
     ]

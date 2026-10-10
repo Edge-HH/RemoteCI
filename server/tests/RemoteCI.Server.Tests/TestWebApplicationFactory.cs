@@ -1,8 +1,12 @@
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using RemoteCI.Server.Data;
 using RemoteCI.Shared.Models;
 
 namespace RemoteCI.Server.Tests;
@@ -12,6 +16,13 @@ public sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
     public const string AdminUsername = "admin";
     public const string AdminPassword = "Test-Admin-Password-2026";
     public const string TestPairCode = "test-plugin-pair";
+
+    /// <summary>
+    /// 测试夹具预先建好的班级：新部署不再自动创建默认班级，夹具模拟“管理员已新建第一个班级”，
+    /// 并把引导配对码绑定到它，插件配对后直接归属该班。Id 与旧版默认班级不同，避免与升级测试混淆。
+    /// </summary>
+    public static readonly Guid DefaultClassId = Guid.Parse("7e57c1a5-0000-4000-8000-000000000001");
+    public const string DefaultClassName = "测试班级";
     private readonly SemaphoreSlim _pluginGate = new(1, 1);
     private string? _pluginToken;
 
@@ -20,13 +31,20 @@ public sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
     private TestWebApplicationFactory(
         string? databasePath,
         IReadOnlyDictionary<string, string?>? extraConfiguration,
-        ILoggerProvider? loggerProvider)
+        ILoggerProvider? loggerProvider,
+        bool freshInstall = false)
     {
         DatabasePath = databasePath ?? Path.Combine(
             Path.GetTempPath(), "RemoteCI.Tests", Guid.NewGuid().ToString("N"), "remoteci.db");
         ExtraConfiguration = extraConfiguration;
         LoggerProvider = loggerProvider;
+        FreshInstall = freshInstall;
     }
+
+    /// <summary>全新部署：不预置管理员密码与班级，用于测试初始化向导。</summary>
+    public bool FreshInstall { get; }
+
+    public static TestWebApplicationFactory ForFreshInstall() => new(null, null, null, freshInstall: true);
 
     public string DatabasePath { get; }
     private IReadOnlyDictionary<string, string?>? ExtraConfiguration { get; }
@@ -54,7 +72,7 @@ public sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
             {
                 ["Server:DatabasePath"] = DatabasePath,
                 ["Server:BootstrapAdminUsername"] = AdminUsername,
-                ["Server:BootstrapAdminPassword"] = AdminPassword,
+                ["Server:BootstrapAdminPassword"] = FreshInstall ? null : AdminPassword,
                 ["Server:BootstrapPluginPairCode"] = TestPairCode,
                 ["Server:AccessTokenTtl"] = "01:00:00",
                 ["Server:DeviceSessionTtl"] = "30.00:00:00",
@@ -69,6 +87,23 @@ public sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
                     values[key] = value;
             config.AddInMemoryCollection(values);
         });
+    }
+
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        var host = base.CreateHost(builder);
+        if (FreshInstall) return host;
+        using var scope = host.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        if (!db.Classrooms.Any(x => x.Id == DefaultClassId))
+        {
+            var now = DateTimeOffset.UtcNow;
+            db.Classrooms.Add(new Classroom { Id = DefaultClassId, Name = DefaultClassName, CreatedAt = now.AddYears(-1), UpdatedAt = now });
+            db.SaveChanges();
+        }
+        db.PluginPairingCodes.Where(x => x.ClassroomId == null && !x.IsShared)
+            .ExecuteUpdate(setters => setters.SetProperty(x => x.ClassroomId, (Guid?)DefaultClassId));
+        return host;
     }
 
     public async Task<AuthResponse> LoginAsync(string username = AdminUsername, string password = AdminPassword)

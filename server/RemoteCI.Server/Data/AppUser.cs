@@ -14,6 +14,12 @@ public sealed class AppUser : IdentityUser<Guid>, UserProfileLike
     public long Version { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    /// <summary>
+    /// 首次进入 WebUI 时创建的系统管理员（部署所有者）。全站只有一个，始终是启用的管理员；
+    /// 其他管理员不能编辑、停用、重置密码、删除它或替它管理 API Key，只能由本人维护。
+    /// </summary>
+    public bool IsSystemOwner { get; set; }
+
     /// <summary>批量导入时未设置密码：首次登录强制设置密码，设置完成后清除。</summary>
     public bool PasswordPending { get; set; }
 

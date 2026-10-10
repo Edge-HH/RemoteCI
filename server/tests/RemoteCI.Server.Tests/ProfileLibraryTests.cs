@@ -216,17 +216,17 @@ public sealed class ProfileLibraryTests
         var admin = await ProfileTestData.AdminAsync(scope.ServiceProvider);
         var templates = await library.SaveAsync(admin, [ProfileTestData.New("来源一"), ProfileTestData.New("来源二")]);
         var own = (await library.SaveAsync(admin,
-            [ProfileTestData.New("唯一班级副本", Classroom.DefaultId, templates[0].Id)]))[0];
+            [ProfileTestData.New("唯一班级副本", TestWebApplicationFactory.DefaultClassId, templates[0].Id)]))[0];
         await Assert.ThrowsAsync<ProfileRevisionException>(() => library.SaveAsync(admin,
-            [ProfileTestData.New("不允许第二份", Classroom.DefaultId)]));
+            [ProfileTestData.New("不允许第二份", TestWebApplicationFactory.DefaultClassId)]));
         var classAdmin = await ProfileTestData.CreateMemberAsync(scope.ServiceProvider, "profile.source.classadmin",
-            Classroom.DefaultId, AccountRole.ClassAdministratorId);
+            TestWebApplicationFactory.DefaultClassId, AccountRole.ClassAdministratorId);
         var forged = ProfileTestData.Edit(own, "伪造来源");
         forged.SourceTemplateId = templates[1].Id;
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => library.SaveAsync(classAdmin, [forged], Classroom.DefaultId));
-        Assert.Equal(templates[0].Id, (await library.GetAsync(classAdmin, own.Id, Classroom.DefaultId)).SourceTemplateId);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => library.SaveAsync(classAdmin, [forged], TestWebApplicationFactory.DefaultClassId));
+        Assert.Equal(templates[0].Id, (await library.GetAsync(classAdmin, own.Id, TestWebApplicationFactory.DefaultClassId)).SourceTemplateId);
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        Assert.Single(await db.StoredProfiles.AsNoTracking().Where(x => x.ClassId == Classroom.DefaultId).ToListAsync());
+        Assert.Single(await db.StoredProfiles.AsNoTracking().Where(x => x.ClassId == TestWebApplicationFactory.DefaultClassId).ToListAsync());
     }
 
     [Fact]
@@ -239,20 +239,20 @@ public sealed class ProfileLibraryTests
             var library = setup.ServiceProvider.GetRequiredService<ProfileLibraryService>();
             var admin = await ProfileTestData.AdminAsync(setup.ServiceProvider);
             var template = (await library.SaveAsync(admin, [ProfileTestData.New("可删除模板")]))[0];
-            copy = (await library.SaveAsync(admin, [ProfileTestData.New("保留班级副本", Classroom.DefaultId, template.Id)]))[0];
+            copy = (await library.SaveAsync(admin, [ProfileTestData.New("保留班级副本", TestWebApplicationFactory.DefaultClassId, template.Id)]))[0];
             await library.DeleteAsync(admin, new ProfileIdRequest { Id = template.Id, Revision = template.Revision });
         }
         using var verification = factory.Services.CreateScope();
         var service = verification.ServiceProvider.GetRequiredService<ProfileLibraryService>();
         var classAdmin = await ProfileTestData.CreateMemberAsync(verification.ServiceProvider, "profile.delete.classadmin",
-            Classroom.DefaultId, AccountRole.ClassAdministratorId);
-        var kept = await service.GetAsync(classAdmin, copy.Id, Classroom.DefaultId);
+            TestWebApplicationFactory.DefaultClassId, AccountRole.ClassAdministratorId);
+        var kept = await service.GetAsync(classAdmin, copy.Id, TestWebApplicationFactory.DefaultClassId);
         Assert.Equal(copy.ProfileJson, kept.ProfileJson);
         Assert.Equal(copy.Name, kept.Name);
         Assert.Null(kept.SourceTemplateId);
         Assert.Equal(copy.Revision + 1, kept.Revision);
         await Assert.ThrowsAsync<ProfileRevisionException>(() => service.SaveAsync(classAdmin,
-            [ProfileTestData.Edit(copy, "旧页面覆盖")], Classroom.DefaultId));
+            [ProfileTestData.Edit(copy, "旧页面覆盖")], TestWebApplicationFactory.DefaultClassId));
     }
 
     [Fact]
@@ -268,7 +268,7 @@ public sealed class ProfileLibraryTests
             var library = scope.ServiceProvider.GetRequiredService<ProfileLibraryService>();
             var admin = await ProfileTestData.AdminAsync(scope.ServiceProvider);
             template = (await library.SaveAsync(admin, [ProfileTestData.New("持久模板")]))[0];
-            own = (await library.SaveAsync(admin, [ProfileTestData.New("持久副本", Classroom.DefaultId, template.Id)]))[0];
+            own = (await library.SaveAsync(admin, [ProfileTestData.New("持久副本", TestWebApplicationFactory.DefaultClassId, template.Id)]))[0];
             own = (await library.SaveAsync(admin, [ProfileTestData.Edit(own, "持久副本修订")]))[0];
         }
         await using var restarted = TestWebApplicationFactory.ForDatabase(path);
@@ -290,7 +290,7 @@ public sealed class ProfileLibraryTests
             var library = source.ServiceProvider.GetRequiredService<ProfileLibraryService>();
             var actor = await ProfileTestData.AdminAsync(source.ServiceProvider);
             var template = (await library.SaveAsync(actor, [ProfileTestData.New("备份模板")]))[0];
-            var own = (await library.SaveAsync(actor, [ProfileTestData.New("备份班级", Classroom.DefaultId, template.Id)]))[0];
+            var own = (await library.SaveAsync(actor, [ProfileTestData.New("备份班级", TestWebApplicationFactory.DefaultClassId, template.Id)]))[0];
             expected = [template, own];
             snapshot = await source.ServiceProvider.GetRequiredService<ConfigurationArchiveService>().CaptureAsync();
             Assert.Equal(5, snapshot.Version);
@@ -321,7 +321,7 @@ public sealed class ProfileLibraryTests
         using var scope = factory.Services.CreateScope();
         var admin = await ProfileTestData.AdminAsync(scope.ServiceProvider);
         var profile = (await scope.ServiceProvider.GetRequiredService<ProfileLibraryService>().SaveAsync(admin,
-            [ProfileTestData.New("下发档案", Classroom.DefaultId)]))[0];
+            [ProfileTestData.New("下发档案", TestWebApplicationFactory.DefaultClassId)]))[0];
         var dispatch = scope.ServiceProvider.GetRequiredService<ProfileDispatchService>();
         var request = ProfileTestData.Dispatch(profile);
         request.Mode = 0;
@@ -336,7 +336,7 @@ public sealed class ProfileLibraryTests
         request.Items[0].Revision = profile.Revision;
         var failed = Assert.Single(await dispatch.ApplyAsync(admin, request));
         Assert.False(failed.Success);
-        Assert.Equal(Classroom.DefaultId, failed.ClassId);
+        Assert.Equal(TestWebApplicationFactory.DefaultClassId, failed.ClassId);
         Assert.Contains("未在线", failed.Message);
         Assert.Equal(profile, await scope.ServiceProvider.GetRequiredService<ProfileLibraryService>().GetAsync(admin, profile.Id));
     }
@@ -441,7 +441,7 @@ internal static class ProfileTestData
     public static ProfileDispatchRequest Dispatch(StoredProfileDto source) => new()
     {
         Items = [new ProfileIdRequest { Id = source.Id, Revision = source.Revision }],
-        ClassIds = [source.ClassId ?? Classroom.DefaultId], Mode = ProfileApplyMode.MergeCurrent,
+        ClassIds = [source.ClassId ?? TestWebApplicationFactory.DefaultClassId], Mode = ProfileApplyMode.MergeCurrent,
         Sections = ProfileDistributionSection.TimeLayouts | ProfileDistributionSection.ClassPlans | ProfileDistributionSection.Subjects,
     };
 
@@ -453,6 +453,7 @@ internal static class ProfileTestData
     {
         var user = await services.GetRequiredService<IdentityCoordinator>().CreateUserAsync(new CreateUserRequest
         {
+            ClassId = TestWebApplicationFactory.DefaultClassId,
             Username = name, DisplayName = name, Password = Password, RoleId = globalRoleId ?? roleId, GrantedPermissions = granted,
         });
         await services.GetRequiredService<ClassroomService>().AddMemberAsync(classId, user.Id, roleId);

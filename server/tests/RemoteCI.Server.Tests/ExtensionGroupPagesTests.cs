@@ -21,7 +21,7 @@ public sealed class ExtensionGroupPagesTests
         using (var scope = factory.Services.CreateScope())
         {
             var store = scope.ServiceProvider.GetRequiredService<IStateStore>();
-            store.SaveExtensionGroups(Classroom.DefaultId, new[]
+            store.SaveExtensionGroups(TestWebApplicationFactory.DefaultClassId, new[]
             {
                 new ExtensionGroupDefinition
                 {
@@ -44,7 +44,7 @@ public sealed class ExtensionGroupPagesTests
                     Values = new Dictionary<string, string?> { ["interval"] = "15", ["voice"] = "soft" },
                 },
             });
-            store.SaveExtensions(Classroom.DefaultId, new[]
+            store.SaveExtensions(TestWebApplicationFactory.DefaultClassId, new[]
             {
                 new ExtensionDefinition
                 {

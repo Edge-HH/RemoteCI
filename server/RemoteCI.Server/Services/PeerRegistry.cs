@@ -177,7 +177,7 @@ public sealed class PeerRegistry(
             .Select(peer => new PluginDeviceSnapshot(
                 peer.Id,
                 peer.Principal.PluginCredentialId,
-                peer.Principal.ClassId ?? Classroom.DefaultId,
+                peer.Principal.ClassId ?? Guid.Empty,
                 peer.SoftwareInventory?.DeviceName ?? "ClassIsland 插件",
                 peer.SoftwareVersion,
                 peer.SoftwareInventoryAt,
@@ -340,7 +340,7 @@ public sealed class PeerRegistry(
     /// <summary>缓存插件最近一次网卡发现结果（按班级），并同步给覆盖该班级的在线手表。</summary>
     public Task PublishPluginNetworkInfoAsync(PluginNetworkInfo value, CancellationToken ct = default)
     {
-        var classId = value.ClassId ?? Classroom.DefaultId;
+        var classId = value.ClassId ?? Guid.Empty;
         _latestPluginNetworkInfo[classId] = value;
         return BroadcastClassWatchesAsync(Envelope.PluginNetworkInfo(value), classId, ct);
     }
@@ -352,7 +352,7 @@ public sealed class PeerRegistry(
         if (principal is null) return;
         foreach (var value in _latestPluginNetworkInfo.Values)
         {
-            if (!principal.CoversClass(value.ClassId ?? Classroom.DefaultId)) continue;
+            if (!principal.CoversClass(value.ClassId ?? Guid.Empty)) continue;
             await SendToWatchAsync(connectionId, Envelope.PluginNetworkInfo(value), ct);
         }
     }
@@ -436,7 +436,7 @@ public sealed class PeerRegistry(
     /// <summary>请求指定班级最早接入的在线插件立即重新生成课表；返回是否成功发送。</summary>
     public Task<bool> RequestSchedulePullAsync(ScheduleSyncRequest request, CancellationToken ct = default)
     {
-        var classId = request.ClassId ?? Classroom.DefaultId;
+        var classId = request.ClassId ?? Guid.Empty;
         return PrimaryPluginSupports(classId, RemoteCiCapabilities.SchedulePull)
             ? SendToPluginAsync(classId, Envelope.SchedulePull(request), ct)
             : Task.FromResult(false);

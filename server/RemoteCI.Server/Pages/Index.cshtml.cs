@@ -33,6 +33,8 @@ public sealed class IndexModel(
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
+        // 系统管理员首次进入、还没有任何班级时，先到初始化向导新建第一个班级。
+        if (IsAdmin && AccessibleClasses.Count == 0) return RedirectToPage("/Setup");
         await LoadAsync(ct);
         return Page();
     }
@@ -71,6 +73,11 @@ public sealed class IndexModel(
     {
         if (await RequireAsync(UserPermissions.AccessWebUi | UserPermissions.ManageUsers) is { } denied) return denied;
         // 配对码绑定当前班级；插件配对后归属该班，只能收发该班的命令与数据。
+        if (CurrentClass is null)
+        {
+            TempData["Error"] = "请先新建班级，再生成配对码。";
+            return RedirectToPage();
+        }
         PairCode = await identities.CreatePluginPairingCodeAsync(CurrentClassId, ct);
         await LoadAsync(ct);
         return Page();

@@ -90,7 +90,7 @@ public sealed class ScheduleSyncService(
             "插件课表任务状态：{TaskId} {Source} {State} - {Message}",
             status.TaskId, status.Source, status.State, status.Message);
         tracker.Observe(status);
-        var classId = status.ClassId ?? Classroom.DefaultId;
+        var classId = status.ClassId ?? Guid.Empty;
         if (status.State == ScheduleSyncTaskState.Running) ArmTimeout(status, classId);
         else if (status.State == ScheduleSyncTaskState.Busy && tracker.Current(classId) is { } active) ArmTimeout(active, classId);
         else if (status.State is ScheduleSyncTaskState.Completed or ScheduleSyncTaskState.Failed) CancelTimeout(classId);
@@ -100,7 +100,7 @@ public sealed class ScheduleSyncService(
     private async Task<ScheduleSyncStatus> StartCoreAsync(
         ScheduleSyncRequest request, Guid? pluginConnectionId, CancellationToken ct)
     {
-        var classId = request.ClassId ?? Classroom.DefaultId;
+        var classId = request.ClassId ?? Guid.Empty;
         var initial = tracker.TryBegin(request, classId);
         if (initial.State == ScheduleSyncTaskState.Busy)
         {
@@ -127,7 +127,7 @@ public sealed class ScheduleSyncService(
     {
         tracker.Observe(status);
         if (status.State is ScheduleSyncTaskState.Completed or ScheduleSyncTaskState.Failed)
-            CancelTimeout(status.ClassId ?? Classroom.DefaultId);
+            CancelTimeout(status.ClassId ?? Guid.Empty);
         await peers.SendScheduleSyncStatusToWatchesAsync(status, ct);
     }
 

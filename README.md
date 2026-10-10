@@ -70,14 +70,7 @@ ASP.NET Core 服务端 ─── WebUI
 
 ### 2. 启动服务端
 
-生产环境必须通过 HTTPS/WSS 访问，并在 RemoteCI 前配置反向代理。首次启动前创建 `.env`：
-
-```dotenv
-REMOTECI_ADMIN_PASSWORD=请替换为至少8位的强密码
-REMOTECI_PLUGIN_PAIR_CODE=请替换为一次性随机配对码
-```
-
-随后启动容器：
+生产环境必须通过 HTTPS/WSS 访问，并在 RemoteCI 前配置反向代理。直接启动容器即可，首次打开 WebUI 时会进入初始化向导，在页面上创建系统管理员并新建第一个班级（无人值守部署可选用 `REMOTECI_ADMIN_PASSWORD` 预先创建，见[部署文档](docs/deployment.md)）：
 
 ```powershell
 docker compose up -d --build
@@ -88,7 +81,7 @@ Compose 默认只将服务暴露到宿主机的 `127.0.0.1:8080`，数据库保�
 
 ### 3. 完成三端配对
 
-1. 使用管理员账号登录 WebUI，在“概览”页面生成一次性插件配对码。
+1. 打开 WebUI 完成初始化向导（创建系统管理员、新建第一个班级），在“概览”页面为当前班级生成一次性插件配对码。
 2. 在 ClassIsland 的 RemoteCI 设置中填写云端 HTTPS 地址与配对码，然后重启 ClassIsland。
 3. 在手表端填写个人账号、密码和云端 HTTPS 地址；登录成功后，密码不会保存在设备上。
 4. 在 WebUI、插件设置页和手表端确认连接状态与课程数据均已同步。

@@ -96,7 +96,7 @@ public sealed class CommandMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public FileDistributionRequest? FileDistribution { get; set; }
 
-    /// <summary>命令目标班级；缺省时由服务端路由到默认班级或用户唯一成员班级。</summary>
+    /// <summary>命令目标班级；缺省时由服务端路由到该用户的第一个可访问班级。</summary>
     [JsonPropertyName("classId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? ClassId { get; set; }

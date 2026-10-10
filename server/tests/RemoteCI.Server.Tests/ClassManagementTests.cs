@@ -26,7 +26,7 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
     public void StateStore_BucketsAreIsolatedPerClass()
     {
         IStateStore store = new StateStore();
-        var classA = Classroom.DefaultId;
+        var classA = TestWebApplicationFactory.DefaultClassId;
         var classB = Guid.NewGuid();
         var snapshotA = new ClassStateSnapshot { CurrentSubject = "A班数学" };
         var snapshotB = new ClassStateSnapshot { CurrentSubject = "B班语文" };
@@ -50,7 +50,7 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
     // ---------- 班级 CRUD 与权限 ----------
 
     [Fact]
-    public async Task ClassCrud_OnlyAdminCanManageAndDefaultClassIsProtected()
+    public async Task ClassCrud_OnlyAdminCanManage()
     {
         var admin = await _factory.LoginAsync();
         using var client = _factory.CreateClient();
@@ -80,12 +80,12 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
             new UpdateClassRequest { Name = "高二（2）班" }));
         Assert.Equal(HttpStatusCode.NoContent, renamed.StatusCode);
 
-        // 空名拒绝；默认班级不可删除。
+        // 空名拒绝；不存在的班级删除返回 404（不再有受保护的默认班级）。
         Assert.Equal(HttpStatusCode.BadRequest,
             (await client.SendAsync(Bearer(HttpMethod.Post, "/api/classes", admin.AccessToken,
                 new CreateClassRequest { Name = " " }))).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest,
-            (await client.SendAsync(Bearer(HttpMethod.Delete, $"/api/classes/{Classroom.DefaultId}", admin.AccessToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await client.SendAsync(Bearer(HttpMethod.Delete, $"/api/classes/{Guid.NewGuid()}", admin.AccessToken))).StatusCode);
 
         // 每班访客开关。
         var toggle = await client.SendAsync(Bearer(HttpMethod.Put, $"/api/classes/{detail.Id}/visitor", admin.AccessToken,
@@ -112,7 +112,7 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
         var enable = await client.SendAsync(Bearer(HttpMethod.Post, "/api/classes/batch", admin.AccessToken,
             new BatchClassOperationRequest
             {
-                ClassIds = [classA.Id, classB.Id, Classroom.DefaultId],
+                ClassIds = [classA.Id, classB.Id, TestWebApplicationFactory.DefaultClassId],
                 Operation = "enableVisitor",
             }));
         enable.EnsureSuccessStatusCode();
@@ -121,7 +121,7 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
         var listed = (await (await client.SendAsync(Bearer(HttpMethod.Get, "/api/classes", admin.AccessToken)))
             .Content.ReadFromJsonAsync<List<ClassDetail>>())!;
         // 只断言本测试创建的班级与默认班级；类夹具中其他测试创建的班级不参与断言。
-        Assert.All(new[] { classA.Id, classB.Id, Classroom.DefaultId },
+        Assert.All(new[] { classA.Id, classB.Id, TestWebApplicationFactory.DefaultClassId },
             id => Assert.True(listed.Single(x => x.Id == id).VisitorEnabled));
 
         var disable = await client.SendAsync(Bearer(HttpMethod.Post, "/api/classes/batch", admin.AccessToken,
@@ -136,22 +136,23 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
         Assert.All(new[] { classA.Id, classB.Id },
             id => Assert.False(afterDisable.Single(x => x.Id == id).VisitorEnabled));
 
-        // 默认班级删除失败但不影响其他班级；未知操作被拒绝。
+        // 不存在的班级删除失败但不影响其他班级；未知操作被拒绝。
+        var missing = Guid.NewGuid();
         var batchDelete = await client.SendAsync(Bearer(HttpMethod.Post, "/api/classes/batch", admin.AccessToken,
             new BatchClassOperationRequest
             {
-                ClassIds = [classA.Id, Classroom.DefaultId],
+                ClassIds = [classA.Id, missing],
                 Operation = "delete",
             }));
         batchDelete.EnsureSuccessStatusCode();
         var deleteResult = (await batchDelete.Content.ReadFromJsonAsync<BatchClassOperationResult>())!;
         Assert.Equal(2, deleteResult.Results.Count);
         Assert.Contains(deleteResult.Results, x => x.ClassId == classA.Id && x.Success);
-        Assert.Contains(deleteResult.Results, x => x.ClassId == Classroom.DefaultId && !x.Success);
+        Assert.Contains(deleteResult.Results, x => x.ClassId == missing && !x.Success);
         var afterDelete = (await (await client.SendAsync(Bearer(HttpMethod.Get, "/api/classes", admin.AccessToken)))
             .Content.ReadFromJsonAsync<List<ClassDetail>>())!;
         Assert.DoesNotContain(afterDelete, x => x.Id == classA.Id);
-        Assert.Contains(afterDelete, x => x.Id == Classroom.DefaultId);
+        Assert.Contains(afterDelete, x => x.Id == TestWebApplicationFactory.DefaultClassId);
     }
 
     // ---------- 成员管理与按班级权限隔离 ----------
@@ -165,7 +166,7 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
 
         var userId = await CreateUserAsync("iso.student", "Iso-Student-Password-2026");
 
-        // 新用户自动进入默认班级；把 TA 加进 B 班。
+        // 测试账号创建时加入了夹具班级；再把 TA 加进 B 班。
         var update = await client.SendAsync(Bearer(HttpMethod.Put, $"/api/classes/{classB.Id}/members", admin.AccessToken,
             new UpdateClassMembersRequest { Members = [new ClassMemberInput { UserId = userId, RoleId = AccountRole.StudentId }] }));
         Assert.Equal(HttpStatusCode.NoContent, update.StatusCode);
@@ -177,7 +178,7 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
         var myClasses = (await client.SendAsync(Bearer(HttpMethod.Get, "/api/me/classes", student.AccessToken))).Content;
         var summaries = (await myClasses.ReadFromJsonAsync<List<ClassSummary>>())!;
         Assert.Equal(2, summaries.Count);
-        Assert.Contains(summaries, x => x.Id == Classroom.DefaultId);
+        Assert.Contains(summaries, x => x.Id == TestWebApplicationFactory.DefaultClassId);
         Assert.Contains(summaries, x => x.Id == classB.Id && x.RoleName == "学生");
 
         // 是 B 班成员：可以访问（无数据 404）；不是 C 班成员：403。
@@ -203,7 +204,7 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
         var classB = (await CreateClassAsync(admin.AccessToken, "班管一班"))!;
         var userId = await CreateUserAsync("cls.admin", "Cls-Admin-Password-2026", AccountRole.ClassAdministratorId);
 
-        // 班主任默认就是默认班级的成员；同时成为 B 班班主任。
+        // 班主任创建时加入了夹具班级；同时成为 B 班班主任。
         var put = await client.SendAsync(Bearer(HttpMethod.Put, $"/api/classes/{classB.Id}/members", admin.AccessToken,
             new UpdateClassMembersRequest { Members = [new ClassMemberInput { UserId = userId, RoleId = AccountRole.ClassAdministratorId }] }));
         Assert.Equal(HttpStatusCode.NoContent, put.StatusCode);
@@ -230,11 +231,11 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
         var userId = await CreateUserAsync("b.only", "B-Only-Password-2026");
         var classB = (await CreateClassAsync(admin.AccessToken, "推送一班"))!;
 
-        // 先把 B 班成员设为该用户，再把默认班级成员清空，使该用户只属于 B 班。
+        // 先把 B 班成员设为该用户，再把夹具班级成员清空，使该用户只属于 B 班。
         var putB = await client.SendAsync(Bearer(HttpMethod.Put, $"/api/classes/{classB.Id}/members", admin.AccessToken,
             new UpdateClassMembersRequest { Members = [new ClassMemberInput { UserId = userId, RoleId = AccountRole.StudentId }] }));
         Assert.Equal(HttpStatusCode.NoContent, putB.StatusCode);
-        var clearDefault = await client.SendAsync(Bearer(HttpMethod.Put, $"/api/classes/{Classroom.DefaultId}/members", admin.AccessToken,
+        var clearDefault = await client.SendAsync(Bearer(HttpMethod.Put, $"/api/classes/{TestWebApplicationFactory.DefaultClassId}/members", admin.AccessToken,
             new UpdateClassMembersRequest { Members = [] }));
         Assert.Equal(HttpStatusCode.NoContent, clearDefault.StatusCode);
 
@@ -344,7 +345,7 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
             {
                 Command = CommandKind.SendNotification,
                 Notification = new NotificationRequest { Title = "全体注意", Message = "广播测试" },
-                ClassIds = [Classroom.DefaultId, classB.Id],
+                ClassIds = [TestWebApplicationFactory.DefaultClassId, classB.Id],
             }));
 
         // 默认班级插件收到命令后立即回执成功。
@@ -360,7 +361,7 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
         var result = (await response.Content.ReadFromJsonAsync<BatchClassOperationResult>())!;
 
         Assert.Equal(2, result.Results.Count);
-        var defaultResult = result.Results.Single(x => x.ClassId == Classroom.DefaultId);
+        var defaultResult = result.Results.Single(x => x.ClassId == TestWebApplicationFactory.DefaultClassId);
         var classBResult = result.Results.Single(x => x.ClassId == classB.Id);
         Assert.True(defaultResult.Success);
         Assert.False(classBResult.Success);
@@ -381,7 +382,7 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
             {
                 Command = CommandKind.SendNotification,
                 Notification = new NotificationRequest { Title = "越权广播" },
-                ClassIds = [Classroom.DefaultId],
+                ClassIds = [TestWebApplicationFactory.DefaultClassId],
             }));
         denied.EnsureSuccessStatusCode();
         var result = (await denied.Content.ReadFromJsonAsync<BatchClassOperationResult>())!;
@@ -815,6 +816,7 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
             HttpMethod.Post, "/api/users", admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = username,
                 DisplayName = username,
                 Password = password,

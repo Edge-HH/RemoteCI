@@ -29,7 +29,7 @@ public sealed class ConfigurationArchiveService(
         var roles = await db.AccountRoles.AsNoTracking().Select(x => new RoleSnapshot(x.Id, x.Name, x.Kind, x.DefaultPermissions, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
         var users = await db.Users.AsNoTracking().Select(x => new UserSnapshot(
             x.Id, x.UserName!, x.NormalizedUserName!, x.DisplayName, x.PasswordHash!, x.SecurityStamp!, x.ConcurrencyStamp!,
-            x.Role, x.RoleDefinitionId, x.GrantedPermissions, x.Enabled, x.Version, x.UpdatedAt)).ToListAsync(ct);
+            x.Role, x.RoleDefinitionId, x.GrantedPermissions, x.Enabled, x.Version, x.UpdatedAt, x.IsSystemOwner)).ToListAsync(ct);
         var groups = await db.ClassGroups.AsNoTracking().Select(x => new GroupSnapshot(x.Id, x.Name, x.ParentId, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
         var classrooms = await db.Classrooms.AsNoTracking().Select(x => new ClassroomSnapshot(x.Id, x.Name, x.VisitorAccessEnabled, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
         var memberships = await db.ClassMemberships.AsNoTracking().Select(x => new MembershipSnapshot(x.UserId, x.ClassroomId, x.RoleDefinitionId)).ToListAsync(ct);
@@ -67,7 +67,8 @@ public sealed class ConfigurationArchiveService(
                     metadata.ClassAdminCanChangeAvatar,
                     metadata.ClassAdminCanPullSchedule)),
             new BackupSettingsSnapshot(backup.Enabled, backup.Cadence, backup.TimeOfDay, backup.DayOfWeek, backup.MaxBackups),
-            state.GetLatestSchedule(Classroom.DefaultId), extensionPolicies, extensionPreferences,
+            // 课表按班级缓存在 ClassStateCaches，插件重连后自动同步，不再写入配置包。
+            null, extensionPolicies, extensionPreferences,
             classrooms, memberships, groups, apiKeys, profiles,
             new HolidaySettingsSnapshot(metadata.HolidayCalendarEnabled, metadata.HolidaySourceUrlTemplate, holidayOverrides),
             extensionGroupPolicies);
@@ -141,14 +142,15 @@ public sealed class ConfigurationArchiveService(
         db.ChangeTracker.Clear();
         db.AccountRoles.AddRange(snapshot.Roles.Select(x => new AccountRole { Id=x.Id, Name=x.Name, NormalizedName=x.Name.Trim().ToUpperInvariant(), Kind=x.Kind, DefaultPermissions=UpgradeImportedPermissions(snapshot.Version, x.DefaultPermissions), CreatedAt=x.CreatedAt, UpdatedAt=x.UpdatedAt }));
         await db.SaveChangesAsync(ct);
-        db.Users.AddRange(snapshot.Users.Select(x => new AppUser { Id=x.Id, UserName=x.Username, NormalizedUserName=x.NormalizedUsername, DisplayName=x.DisplayName, PasswordHash=x.PasswordHash, SecurityStamp=x.SecurityStamp, ConcurrencyStamp=x.ConcurrencyStamp, Role=x.Role, RoleDefinitionId=x.RoleId, GrantedPermissions=UpgradeImportedPermissions(snapshot.Version, x.GrantedPermissions), Enabled=x.Enabled, Version=x.Version, UpdatedAt=x.UpdatedAt, EmailConfirmed=false, PhoneNumberConfirmed=false, TwoFactorEnabled=false, LockoutEnabled=true }));
+        db.Users.AddRange(snapshot.Users.Select(x => new AppUser { Id=x.Id, UserName=x.Username, NormalizedUserName=x.NormalizedUsername, DisplayName=x.DisplayName, PasswordHash=x.PasswordHash, SecurityStamp=x.SecurityStamp, ConcurrencyStamp=x.ConcurrencyStamp, Role=x.Role, RoleDefinitionId=x.RoleId, GrantedPermissions=UpgradeImportedPermissions(snapshot.Version, x.GrantedPermissions), Enabled=x.Enabled, Version=x.Version, UpdatedAt=x.UpdatedAt, EmailConfirmed=false, PhoneNumberConfirmed=false, TwoFactorEnabled=false, LockoutEnabled=true, IsSystemOwner=x.IsSystemOwner == true }));
         db.UserApiKeys.AddRange((snapshot.ApiKeys ?? []).Select(x => new UserApiKey { Id=x.Id, UserId=x.UserId, Name=x.Name, KeyHash=x.KeyHash, Prefix=x.Prefix, CreatedAt=x.CreatedAt, LastUsedAt=x.LastUsedAt, ExpiresAt=x.ExpiresAt, RevokedAt=x.RevokedAt }));
-        // v1/v2 旧包没有班级数据：落到默认班级，访客开关沿用包内全局设置。
+        // v1/v2 旧包没有班级数据：建一个承载旧数据的班级（沿用旧版默认班级 Id），访客开关沿用包内全局设置。
+        var legacyPackage = snapshot.Classrooms is null;
         var classrooms = (snapshot.Classrooms ?? []).ToList();
-        if (classrooms.All(x => x.Id != Classroom.DefaultId))
+        if (legacyPackage)
         {
             classrooms.Add(new ClassroomSnapshot(
-                Classroom.DefaultId, "默认班级",
+                Classroom.LegacyDefaultId, "默认班级",
                 snapshot.Metadata.VisitorAccessEnabled, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
         }
         var groups = (snapshot.ClassGroups ?? []).ToList();
@@ -171,15 +173,17 @@ public sealed class ConfigurationArchiveService(
         if (snapshot.Memberships is null)
         {
             // 旧包：为每个用户按其全局角色在默认班级补建成员关系，保持升级前权限不变。
-            memberships = snapshot.Users.Select(x => new MembershipSnapshot(x.Id, Classroom.DefaultId, x.RoleId)).ToList();
+            memberships = snapshot.Users.Select(x => new MembershipSnapshot(x.Id, Classroom.LegacyDefaultId, x.RoleId)).ToList();
         }
         db.ClassMemberships.AddRange(memberships.Select(x => new ClassMembership { UserId=x.UserId, ClassroomId=x.ClassroomId, RoleDefinitionId=x.RoleDefinitionId }));
         // 旧配置包没有 Assigned 字段：缺省视为已分配，避免导入后设备全部掉进“未分配”。
         db.PluginCredentials.AddRange(snapshot.Plugins.Select(x => new PluginCredential
         {
             Id=x.Id, Name=x.Name, TokenHash=x.TokenHash, Enabled=x.Enabled,
-            ClassroomId=x.ClassroomId ?? Classroom.DefaultId, CreatedAt=x.CreatedAt, LastSeenAt=x.LastSeenAt,
-            Assigned=x.Assigned ?? true, ClassNameRemark=x.ClassNameRemark,
+            // 旧包没有班级字段：设备归到承载旧数据的班级；新包中未分配设备的班级为 null。
+            ClassroomId=legacyPackage ? x.ClassroomId ?? Classroom.LegacyDefaultId : (x.Assigned ?? true) ? x.ClassroomId : null,
+            CreatedAt=x.CreatedAt, LastSeenAt=x.LastSeenAt,
+            Assigned=(x.Assigned ?? true) && (legacyPackage || x.ClassroomId is not null), ClassNameRemark=x.ClassNameRemark,
         }));
         db.ExtensionPolicies.AddRange((snapshot.ExtensionPolicies ?? []).Select(x => new ExtensionPolicy { ExtensionId=x.ExtensionId, Enabled=x.Enabled, AllowNonAdmin=x.AllowNonAdmin, UpdatedAt=x.UpdatedAt }));
         // 旧配置包没有逐插件的班级自治开关，恢复后全部插件回到默认的“仅系统管理员管理”。
@@ -227,7 +231,7 @@ public sealed class ConfigurationArchiveService(
         db.StoredProfiles.AddRange(profiles.Where(x => x.ClassId is not null).Select(RestoreProfile));
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
-        if (snapshot.Schedule is not null) state.SaveSchedule(Classroom.DefaultId, snapshot.Schedule);
+        if (snapshot.Schedule is not null && snapshot.Classrooms is null) state.SaveSchedule(Classroom.LegacyDefaultId, snapshot.Schedule);
     }
 
     public IReadOnlyList<BackupFileInfo> ListBackups() { Directory.CreateDirectory(_backupDirectory); return Directory.EnumerateFiles(_backupDirectory,"*.rcibak").Select(x=>ToInfo(new FileInfo(x))).OrderByDescending(x=>x.CreatedAt).ToList(); }
@@ -292,7 +296,7 @@ public sealed record HolidaySettingsSnapshot(bool Enabled, string? SourceUrlTemp
 public sealed record HolidayOverrideSnapshot(DateOnly Date, int? FollowWeekday);
 public sealed record StoredProfileSnapshot(Guid Id, string Name, string ProfileJson, long Revision, Guid? ClassId, Guid? SourceTemplateId, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 public sealed record RoleSnapshot(Guid Id,string Name,AccountRoleKind Kind,UserPermissions DefaultPermissions,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);
-public sealed record UserSnapshot(Guid Id,string Username,string NormalizedUsername,string DisplayName,string PasswordHash,string SecurityStamp,string ConcurrencyStamp,UserRole Role,Guid RoleId,UserPermissions GrantedPermissions,bool Enabled,long Version,DateTimeOffset UpdatedAt);
+public sealed record UserSnapshot(Guid Id,string Username,string NormalizedUsername,string DisplayName,string PasswordHash,string SecurityStamp,string ConcurrencyStamp,UserRole Role,Guid RoleId,UserPermissions GrantedPermissions,bool Enabled,long Version,DateTimeOffset UpdatedAt,bool? IsSystemOwner = null);
 public sealed record ClassroomSnapshot(Guid Id,string Name,bool VisitorAccessEnabled,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);
 public sealed record GroupSnapshot(Guid Id,string Name,Guid? ParentId,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);
 public sealed record MembershipSnapshot(Guid UserId,Guid ClassroomId,Guid RoleDefinitionId);

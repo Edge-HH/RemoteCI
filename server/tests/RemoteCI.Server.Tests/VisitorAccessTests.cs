@@ -46,7 +46,7 @@ public sealed class VisitorAccessTests
         var classesHtml = await browser.GetStringAsync("/Classes");
         var saved = await PostRazorFormAsync(browser, "/Classes?handler=ToggleVisitor", classesHtml, new Dictionary<string, string>
         {
-            ["id"] = Classroom.DefaultId.ToString(),
+            ["id"] = TestWebApplicationFactory.DefaultClassId.ToString(),
             ["enabled"] = "true",
         });
         Assert.Equal(HttpStatusCode.Redirect, saved.StatusCode);
@@ -58,7 +58,7 @@ public sealed class VisitorAccessTests
 
         using (var scope = factory.Services.CreateScope())
         {
-            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(Classroom.DefaultId, new ScheduleBundle
+            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(TestWebApplicationFactory.DefaultClassId, new ScheduleBundle
             {
                 FromDate = "2026-09-13",
                 Days =
@@ -110,10 +110,10 @@ public sealed class VisitorAccessTests
         {
             var classrooms = scope.ServiceProvider.GetRequiredService<ClassroomService>();
             otherClassId = (await classrooms.CreateAsync("高二（2）班")).Id;
-            await classrooms.SetVisitorAccessAsync(Classroom.DefaultId, true);
+            await classrooms.SetVisitorAccessAsync(TestWebApplicationFactory.DefaultClassId, true);
             await classrooms.SetVisitorAccessAsync(otherClassId, true);
             // 只给默认班级和“高二（2）班”注入可区分的课表。
-            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(Classroom.DefaultId, new ScheduleBundle
+            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(TestWebApplicationFactory.DefaultClassId, new ScheduleBundle
             {
                 FromDate = "2026-09-13",
                 Days = [new ScheduleDay { Date = "2026-09-14", Revision = "v-a", Enabled = true, Courses = [new CourseEntry { Index = 0, Subject = "语文", StartTime = "08:00", EndTime = "08:45", Enabled = true }] }],
@@ -245,7 +245,7 @@ public sealed class VisitorAccessTests
         var classesHtml = await admin.GetStringAsync("/Classes");
         var enabled = await PostRazorFormAsync(admin, "/Classes?handler=ToggleVisitor", classesHtml, new Dictionary<string, string>
         {
-            ["id"] = Classroom.DefaultId.ToString(),
+            ["id"] = TestWebApplicationFactory.DefaultClassId.ToString(),
             ["enabled"] = "true",
         });
         Assert.Equal(HttpStatusCode.Redirect, enabled.StatusCode);
@@ -274,16 +274,16 @@ public sealed class VisitorAccessTests
         using (var scope = factory.Services.CreateScope())
         {
             await scope.ServiceProvider.GetRequiredService<ClassroomService>()
-                .SetVisitorAccessAsync(Classroom.DefaultId, true);
+                .SetVisitorAccessAsync(TestWebApplicationFactory.DefaultClassId, true);
             await scope.ServiceProvider.GetRequiredService<VisitorAccessSettings>()
                 .SetAutoEnterAsync(true);
             var snapshot = await scope.ServiceProvider.GetRequiredService<ConfigurationArchiveService>().CaptureAsync();
             Assert.Equal(5, snapshot.Version);
             Assert.NotNull(snapshot.Classrooms);
-            Assert.Contains(snapshot.Classrooms!, x => x.Id == Classroom.DefaultId && x.VisitorAccessEnabled);
+            Assert.Contains(snapshot.Classrooms!, x => x.Id == TestWebApplicationFactory.DefaultClassId && x.VisitorAccessEnabled);
             Assert.True(snapshot.Metadata.AutoEnterVisitorPage);
             await scope.ServiceProvider.GetRequiredService<ClassroomService>()
-                .SetVisitorAccessAsync(Classroom.DefaultId, false);
+                .SetVisitorAccessAsync(TestWebApplicationFactory.DefaultClassId, false);
             await scope.ServiceProvider.GetRequiredService<VisitorAccessSettings>()
                 .SetAutoEnterAsync(false);
             await scope.ServiceProvider.GetRequiredService<ConfigurationArchiveService>().ApplyAsync(snapshot);

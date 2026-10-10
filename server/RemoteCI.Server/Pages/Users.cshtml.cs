@@ -66,7 +66,7 @@ public sealed class UsersModel(
                 RoleId = Create.RoleId,
                 GrantedPermissions = Create.Grants,
             }, ct);
-            // 与批量导入、Excel 导入一致：账号保留默认班级成员关系，显式选择的班级另建一条成员关系。
+            // 账号不会自动加入任何班级：只为显式选择的班级建立成员关系（老师按课表姓名绑定，不分配班级）。
             if (Create.Role != UserRole.Admin &&
                 Create.RoleId != AccountRole.TeacherId &&
                 Create.ClassId is { } classId)
@@ -133,6 +133,7 @@ public sealed class UsersModel(
         }
         try
         {
+            await identities.EnsureCanManageAsync(CurrentUser.Id, Edit.Id, ct);
             // 隐藏功能的旧权限位不随可见权限表单被意外清除，恢复入口时仍可兼容原有账号。
             var existing = (await identities.ListUsersAsync(ct)).FirstOrDefault(item => item.Id == Edit.Id);
             await identities.UpdateUserAsync(Edit.Id, new UpdateUserRequest
@@ -171,6 +172,7 @@ public sealed class UsersModel(
         }
         try
         {
+            await identities.EnsureCanManageAsync(CurrentUser.Id, id, ct);
             await identities.ResetPasswordAsync(id, password, ct);
             await authorizationSync.SyncAsync(ct);
             TempData["Message"] = "密码已重置，该用户的设备会话已全部撤销。";
@@ -191,6 +193,7 @@ public sealed class UsersModel(
         }
         try
         {
+            await identities.EnsureCanManageAsync(CurrentUser.Id, id, ct);
             await identities.DeleteUserAsync(id, ct);
             await authorizationSync.SyncAsync(ct);
             TempData["Message"] = "账号已删除。";
@@ -301,6 +304,7 @@ public sealed class UsersModel(
             return RedirectToPage("/Denied");
         try
         {
+            await identities.EnsureCanManageAsync(CurrentUser.Id, id, ct);
             var created = await identities.CreateApiKeyAsync(id, name, ct);
             StoreCreatedApiKey(created);
             TempData["Message"] = "API Key 已生成，请立即复制；离开页面后无法再次查看。";
@@ -316,6 +320,7 @@ public sealed class UsersModel(
             return RedirectToPage("/Denied");
         try
         {
+            await identities.EnsureCanManageAsync(CurrentUser.Id, id, ct);
             await identities.RevokeApiKeyAsync(id, keyId, ct);
             TempData["Message"] = "API Key 已吊销。";
         }

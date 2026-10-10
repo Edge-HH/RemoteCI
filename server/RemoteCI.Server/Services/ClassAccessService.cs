@@ -184,10 +184,9 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
     {
         if (role == UserRole.Admin)
         {
-            // 管理员优先落默认班级，保持单班级部署的管理体验。
+            // 管理员落到最早创建的班级；还没有任何班级时返回 null。
             var classes = await db.Classrooms.AsNoTracking().ToListAsync(ct);
-            return classes.OrderBy(x => x.Id == Classroom.DefaultId ? 0 : 1).ThenBy(x => x.CreatedAt)
-                .Select(x => (Guid?)x.Id).FirstOrDefault();
+            return classes.OrderBy(x => x.CreatedAt).Select(x => (Guid?)x.Id).FirstOrDefault();
         }
         var membershipClassId = await db.ClassMemberships.AsNoTracking().Where(x => x.UserId == userId)
             .OrderBy(x => x.ClassroomId)

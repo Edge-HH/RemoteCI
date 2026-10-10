@@ -1,0 +1,37 @@
+@page
+@model SetupModel
+@{
+    ViewData["Title"] = Model.Step == SetupModel.SetupStep.SystemAdmin ? "初始化：创建系统管理员" : "初始化：新建第一个班级";
+    var adminStep = Model.Step == SetupModel.SetupStep.SystemAdmin;
+}
+<section class="login-card setup-card">
+    <img class="login-logo" src="~/logo-mark.svg" alt="RemoteCI" asp-append-version="true" />
+    <p class="eyebrow">RemoteCI 初始化</p>
+    <ol class="setup-steps" aria-label="初始化步骤">
+        <li class="@(adminStep ? "active" : "done")"><span>1</span>创建系统管理员</li>
+        <li class="@(adminStep ? null : "active")"><span>2</span>新建第一个班级</li>
+    </ol>
+    @if (adminStep)
+    {
+        <h1>创建系统管理员</h1>
+        <p class="muted">这是部署后的第一个账号，拥有全部权限。系统管理员只能由本人修改，其他管理员不能编辑、停用或删除它。</p>
+        <form method="post" asp-page-handler="Admin" class="stack">
+            <div asp-validation-summary="All" class="validation"></div>
+            <label>登录 ID<input asp-for="Admin.Username" autocomplete="username" required /></label>
+            <label>显示名称<input asp-for="Admin.DisplayName" autocomplete="name" placeholder="系统管理员" /></label>
+            <label>密码<input asp-for="Admin.Password" type="password" autocomplete="new-password" minlength="8" required /></label>
+            <label>确认密码<input asp-for="Admin.ConfirmPassword" type="password" autocomplete="new-password" minlength="8" required /></label>
+            <button type="submit">创建并登录</button>
+        </form>
+    }
+    else
+    {
+        <h1>新建第一个班级</h1>
+        <p class="muted">RemoteCI 不再自动创建默认班级。先建一个班级，再用它的配对码连接教室端插件；以后可以在“班级管理”中继续添加。</p>
+        <form method="post" asp-page-handler="Class" class="stack">
+            <div asp-validation-summary="All" class="validation"></div>
+            <label>班级名称<input asp-for="ClassName" maxlength="40" placeholder="例如：高一（1）班" required autofocus /></label>
+            <button type="submit">创建班级</button>
+        </form>
+    }
+</section>

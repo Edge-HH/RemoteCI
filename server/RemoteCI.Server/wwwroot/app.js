@@ -426,16 +426,6 @@ if (classBatchForm) {
         }
     };
 
-    const syncDefaultClassState = () => {
-        const deleting = (operation?.value || "").toLowerCase() === "delete";
-        classChecks()
-            .filter(input => input.dataset.defaultClass === "true")
-            .forEach(input => {
-                input.disabled = deleting;
-                if (deleting) input.checked = false;
-            });
-    };
-
     selectAll?.addEventListener("change", () => {
         classChecks().forEach(input => {
             if (!input.disabled) input.checked = selectAll.checked;
@@ -445,7 +435,6 @@ if (classBatchForm) {
 
     classChecks().forEach(input => input.addEventListener("change", syncSelection));
     operation?.addEventListener("change", () => {
-        syncDefaultClassState();
         syncGroupField();
         syncSelection();
     });
@@ -469,7 +458,6 @@ if (classBatchForm) {
         }
     });
 
-    syncDefaultClassState();
     syncGroupField();
     syncSelection();
 }

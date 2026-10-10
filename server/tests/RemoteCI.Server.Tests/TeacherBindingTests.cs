@@ -399,6 +399,7 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
             HttpMethod.Post, "/api/users", admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = username,
                 DisplayName = displayName ?? username,
                 Password = password,

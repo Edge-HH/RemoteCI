@@ -35,7 +35,7 @@
         permissions.HasFlag(UserPermissions.RunExtensions);
     // 班级切换器：可访问班级与 Cookie 选中的当前班级；没有可访问班级时不渲染。
     IReadOnlyList<RemoteCI.Shared.Models.ClassSummary> accessibleClasses = Array.Empty<RemoteCI.Shared.Models.ClassSummary>();
-    Guid currentClassId = RemoteCI.Server.Data.Classroom.DefaultId;
+    Guid currentClassId = Guid.Empty;
     if (current is not null)
     {
         // 与页面/API 共用班级访问服务，教师按课表姓名绑定的任教班级也必须进入上下文。
@@ -44,9 +44,9 @@
         currentClassId = Guid.TryParse(Context.Request.Cookies[RemoteCI.Server.Pages.WebPageModel.CurrentClassCookie], out var cookieClass)
             && accessibleClasses.Any(x => x.Id == cookieClass)
             ? cookieClass
-            : accessibleClasses.FirstOrDefault()?.Id ?? RemoteCI.Server.Data.Classroom.DefaultId;
+            : accessibleClasses.FirstOrDefault()?.Id ?? Guid.Empty;
     }
-    var currentClassName = accessibleClasses.FirstOrDefault(x => x.Id == currentClassId)?.Name ?? "默认班级";
+    var currentClassName = accessibleClasses.FirstOrDefault(x => x.Id == currentClassId)?.Name ?? "暂无班级";
     // 档案管理属于班级自治：仅管理员或本班班主任，并且具有本班课表管理权限。
     var showClassProfiles = current is not null && accessibleClasses.Any(x => x.Id == currentClassId)
         && await classAccess.IsClassAdminAsync(current.Id, current.Role, currentClassId, Context.RequestAborted)
@@ -57,10 +57,10 @@
         && accessibleClasses.Any(x => x.Id == currentClassId)
         && (current.Role == UserRole.Admin || (await extensionGroups.ListClassAdminEditableAsync(
             current.Id, current.Role, current.GrantedPermissions, currentClassId, Context.RequestAborted))?.Count > 0);
-    // 侧边栏左上角是否显示当前班级头像：仅在当前用户已登录、当前班级存在且已上传头像时为 true；
-    // 未登录或当前班级未设置头像时保持 false，渲染端会回退到 RemoteCI logo。
-    var currentClassHasAvatar = current is not null
-        && accessibleClasses.FirstOrDefault(x => x.Id == currentClassId)?.HasAvatar == true;
+    // 侧边栏左上角展示当前班级：已上传头像显示头像，未上传显示班级图标；还没有任何可访问班级时显示 RemoteCI logo。
+    var hasCurrentClass = current is not null && accessibleClasses.Any(x => x.Id == currentClassId);
+    var currentClassHasAvatar = hasCurrentClass
+        && accessibleClasses.First(x => x.Id == currentClassId).HasAvatar == true;
     // 登录页外观由系统管理员配置：未登录页面（登录/设置密码等）按此渲染主题与背景，
     // 访客页与已登录页面继续沿用浏览器本地主题，互不影响。
     var loginAppearance = current is null && currentPage != "/Visitor"
@@ -116,11 +116,11 @@
         <aside class="sidebar" aria-label="主导航" data-sidebar>
             <div class="brand">
                 <a class="brand-link" href="@(permissions.HasFlag(UserPermissions.AccessWebUi) ? Url.Page("/Index") : Url.Page("/Account"))">
-                    @* 左上角优先展示当前班级头像；未设置头像时保持原有 RemoteCI logo。
+                    @* 左上角展示当前班级：有头像显示头像，没有头像显示班级图标；没有班级时显示 RemoteCI logo。
                        头像走 .brand-badge-avatar（铺满圆形、保留 alpha），不受 .brand-logo 的灰度提亮滤镜影响。 *@
-                    @if (currentClassHasAvatar)
+                    @if (hasCurrentClass)
                     {
-                        <span class="brand-badge brand-badge-avatar"><img class="brand-avatar" src="/api/classes/@currentClassId/avatar" alt="" /></span>
+                        <span class="brand-badge brand-badge-avatar" title="@currentClassName">@await Html.PartialAsync("_ClassAvatar", new RemoteCI.Server.Pages.ClassAvatarModel(currentClassId, currentClassHasAvatar, "brand-avatar", currentClassName))</span>
                     }
                     else
                     {

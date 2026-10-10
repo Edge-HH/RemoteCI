@@ -87,8 +87,11 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var auth = await factory.LoginAsync();
         using var client = factory.CreateClient();
 
+        // 一次性配对码必须指定绑定的班级：服务端不再有可兜底的默认班级。
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Post, "/api/plugin/pairing-code", auth.AccessToken))).StatusCode);
         var response = await client.SendAsync(TestWebApplicationFactory.Bearer(
-            HttpMethod.Post, "/api/plugin/pairing-code", auth.AccessToken));
+            HttpMethod.Post, "/api/plugin/pairing-code", auth.AccessToken, new { classId = TestWebApplicationFactory.DefaultClassId }));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         await using var scope = factory.Services.CreateAsyncScope();
@@ -144,6 +147,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "login.id",
                 DisplayName = "登录用户名",
                 Password = "Login-Password-2026",
@@ -174,6 +178,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "password.user",
                 DisplayName = "改密测试",
                 Password = "Original-Password-2026",
@@ -231,7 +236,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
     }
 
     [Fact]
-    public async Task LastAdministrator_CannotBeDeletedDisabledOrDemoted()
+    public async Task SystemOwner_CannotBeDeletedDisabledOrDemoted()
     {
         var admin = await _factory.LoginAsync();
         var demote = await _client.SendAsync(TestWebApplicationFactory.Bearer(
@@ -244,7 +249,8 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
                 Role = UserRole.User,
                 Enabled = true,
             }));
-        Assert.Equal(HttpStatusCode.Conflict, demote.StatusCode);
+        // 引导配置创建的管理员即系统管理员：必须保持启用的管理员身份，任何人都不能降级、停用或删除它。
+        Assert.Equal(HttpStatusCode.Forbidden, demote.StatusCode);
 
         var disable = await _client.SendAsync(TestWebApplicationFactory.Bearer(
             HttpMethod.Put,
@@ -256,11 +262,11 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
                 Role = UserRole.Admin,
                 Enabled = false,
             }));
-        Assert.Equal(HttpStatusCode.Conflict, disable.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, disable.StatusCode);
 
         var delete = await _client.SendAsync(TestWebApplicationFactory.Bearer(
             HttpMethod.Delete, $"/api/users/{admin.User.Id}", admin.AccessToken));
-        Assert.Equal(HttpStatusCode.Conflict, delete.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, delete.StatusCode);
     }
 
     [Fact]
@@ -273,6 +279,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "student.permissions",
                 DisplayName = "权限测试学生",
                 Password = "Student-Password-2026",
@@ -340,6 +347,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
                 admin.AccessToken,
                 new CreateUserRequest
                 {
+                    ClassId = TestWebApplicationFactory.DefaultClassId,
                     Username = "restart.user",
                     DisplayName = "重启用户",
                     Password = "Restart-Password-2026",
@@ -472,7 +480,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         using (var scope = _factory.Services.CreateScope())
         {
             var store = scope.ServiceProvider.GetRequiredService<IStateStore>();
-            store.SaveSnapshot(Classroom.DefaultId, new ClassStateSnapshot
+            store.SaveSnapshot(TestWebApplicationFactory.DefaultClassId, new ClassStateSnapshot
             {
                 IsNotificationPlaying = true,
                 IsMainMenuVisible = false,
@@ -482,7 +490,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
                 VolumePercent = 42,
                 IsMuted = false,
             });
-            store.SaveExtensions(Classroom.DefaultId, new[]
+            store.SaveExtensions(TestWebApplicationFactory.DefaultClassId, new[]
             {
                 new ExtensionDefinition
                 {
@@ -572,7 +580,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var subjectId = Guid.NewGuid();
         using (var setupScope = _factory.Services.CreateScope())
         {
-            setupScope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(Classroom.DefaultId, new ScheduleBundle
+            setupScope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(TestWebApplicationFactory.DefaultClassId, new ScheduleBundle
             {
                 FromDate = "2026-08-17",
                 Days =
@@ -731,7 +739,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
     {
         using var scope = _factory.Services.CreateScope();
         var tracker = scope.ServiceProvider.GetRequiredService<ScheduleSyncTaskTracker>();
-        var running = tracker.TryBegin(ScheduleSyncRequest.Create(ScheduleSyncSource.Automatic), Classroom.DefaultId);
+        var running = tracker.TryBegin(ScheduleSyncRequest.Create(ScheduleSyncSource.Automatic), TestWebApplicationFactory.DefaultClassId);
         try
         {
             using var browser = CreateBrowserClient();
@@ -849,6 +857,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "name.student",
                 DisplayName = "学生初始用户名",
                 Password = "Name-Student-Password-2026",
@@ -885,6 +894,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "name.granted",
                 DisplayName = "旧用户名",
                 Password = "Name-Granted-Password-2026",
@@ -974,6 +984,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "api.key.user",
                 DisplayName = "API 用户",
                 Password = "Api-Key-Password-2026",
@@ -1038,6 +1049,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "api.no.access",
                 DisplayName = "无 API 权限",
                 Password = "Api-No-Access-2026",
@@ -1075,6 +1087,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "api.web.user",
                 DisplayName = "网页 API 用户",
                 Password = "Api-Web-Password-2026",
@@ -1227,6 +1240,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "dialog.student",
                 DisplayName = "弹窗学生账号",
                 Password = "Dialog-Student-Password-2026",
@@ -1299,6 +1313,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "reset.confirmation",
                 DisplayName = "重置确认测试账号",
                 Password = originalPassword,
@@ -1449,6 +1464,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "teacher.alert",
                 DisplayName = "快捷提醒权限测试",
                 Password = "Teacher-Alert-Password-2026",
@@ -1498,12 +1514,13 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         {
             var identities = scope.ServiceProvider.GetRequiredService<IdentityCoordinator>();
             var policies = scope.ServiceProvider.GetRequiredService<ExtensionPolicyService>();
-            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveExtensions(Classroom.DefaultId, [definition]);
+            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveExtensions(TestWebApplicationFactory.DefaultClassId, [definition]);
             await policies.EnsureRegisteredAsync([definition]);
             var admin = (await identities.ListUsersAsync()).Single(x => x.Role == UserRole.Admin);
             await policies.UpdateAdminAsync(admin.Id, definition.Id, enabled: true, allowNonAdmin: true, showOnWatch: true);
             userId = (await identities.CreateUserAsync(new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "extension.personal.web",
                 DisplayName = "扩展个人设置",
                 Password = "Extension-Personal-Web-2026",
@@ -1570,6 +1587,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var role = await scope.ServiceProvider.GetRequiredService<AccountRoleService>().CreateAsync(roleName, defaults);
         await scope.ServiceProvider.GetRequiredService<IdentityCoordinator>().CreateUserAsync(new CreateUserRequest
         {
+            ClassId = TestWebApplicationFactory.DefaultClassId,
             Username = username,
             DisplayName = username,
             Password = "Role-Navigation-Password-2026",
@@ -1587,6 +1605,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "web.student",
                 DisplayName = "WebUI 普通用户",
                 Password = "Web-Student-Password-2026",
@@ -1630,6 +1649,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "lockout.user",
                 DisplayName = "锁定测试",
                 Password = "Lockout-Password-2026",
@@ -1689,6 +1709,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "manager.user",
                 DisplayName = "普通管理者",
                 Password = "Manager-Password-2026",
@@ -1704,6 +1725,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             manager.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "sneaky.admin",
                 DisplayName = "伪装管理员",
                 Password = "Sneaky-Password-2026",
@@ -1778,6 +1800,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "second.admin",
                 DisplayName = "被禁用的管理员",
                 Password = "Second-Admin-Password-2026",
@@ -1803,6 +1826,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "manager.user",
                 DisplayName = "普通管理者",
                 Password = "Manager-Password-2026",
@@ -1865,6 +1889,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "credential.manager",
                 DisplayName = "凭证管理者",
                 Password = "Manager-Password-2026",
@@ -1982,6 +2007,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "view.only",
                 DisplayName = "只读用户",
                 Password = "View-Only-Password-2026",
@@ -2025,6 +2051,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var create = await _client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post, "/api/users", admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = username, DisplayName = "语音权限测试", Password = "Voice-Password-2026",
                 GrantedPermissions = UserPermissions.AccessWebUi |
                     (voiceGranted ? UserPermissions.SendVoiceMessages : UserPermissions.SendNotifications),

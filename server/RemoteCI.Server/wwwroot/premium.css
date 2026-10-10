@@ -1226,6 +1226,16 @@ input[type="checkbox"][form] { accent-color: var(--accent); }
 }
 
 .login-logo { width: 48px; height: 48px; margin-bottom: 18px; }
+
+/* 初始化向导：第二步在已登录布局中显示，卡片居中限宽。 */
+.app-layout .setup-card { width: min(480px, 100%); margin: 24px auto; }
+.setup-card .muted { margin: 6px 0 16px; }
+.setup-steps { display: flex; gap: 8px; margin: 0 0 18px; padding: 0; list-style: none; flex-wrap: wrap; }
+.setup-steps li { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 4px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 13px; }
+.setup-steps li span { display: inline-grid; width: 20px; height: 20px; place-items: center; border-radius: 50%; background: var(--surface-inset); font-size: 12px; font-weight: 600; }
+.setup-steps li.active { border-color: var(--accent); color: var(--text); }
+.setup-steps li.active span { background: var(--accent); color: var(--on-accent, #fff); }
+.setup-steps li.done span { background: var(--accent-faint); color: var(--accent-strong); }
 .login-card h1 { font-size: 30px; }
 .login-guest { margin-top: 15px; color: var(--muted); font-size: 13px; }
 .login-guest:hover { color: var(--accent-strong); }

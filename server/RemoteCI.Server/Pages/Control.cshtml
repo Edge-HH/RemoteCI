@@ -47,10 +47,7 @@
         <div class="user-edit-dialog-shell">
             <header class="user-edit-dialog-header"><div><p class="eyebrow">当前班级</p><h2 id="class-info-dialog-title">班级设置</h2><p class="muted">头像会显示在选班页、访客页与客户端班级列表。</p></div><button type="button" class="ghost dialog-close-button" data-user-edit-close aria-label="关闭班级设置"><i class="bi bi-x-lg" aria-hidden="true"></i></button></header>
             <div class="class-info-body user-edit-form">
-                @if (Model.HasAvatar)
-                {
-                    <img class="class-avatar" src="/api/classes/@Model.CurrentClassId/avatar" alt="班头像" />
-                }
+                @await Html.PartialAsync("_ClassAvatar", new ClassAvatarModel(Model.CurrentClassId, Model.HasAvatar, Alt: "班头像"))
                 @* 班名与头像分别受班级自治策略控制；系统管理员两项都可用。 *@
                 @if (Model.ClassSelfService.CanRename)
                 {

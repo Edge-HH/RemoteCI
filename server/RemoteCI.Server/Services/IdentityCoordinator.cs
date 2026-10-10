@@ -60,24 +60,34 @@ public sealed partial class IdentityCoordinator(
         UserPermissions.ViewCurrentCourse | UserPermissions.SendNotifications |
         UserPermissions.SendVoiceMessages | UserPermissions.ApiAccess | UserPermissions.RequestScheduleSwap;
 
-    /// <summary>确保默认班级存在；迁移或首次启动都依赖它承接升级前的全部数据。</summary>
-    private async Task SeedDefaultClassroomAsync(CancellationToken ct)
+    /// <summary>
+    /// 旧版本会自动创建“默认班级”，并把每个新账号都加入其中，导致所有老师和班主任都能看到它。
+    /// 新版本不再有默认班级：首次升级时，若该班级从未改名且已经有其他班级，就把它的在用设备转入
+    /// “未分配”（保留凭据，由管理员重新分配）并删除该班级；否则把它保留为普通班级（可改名、可删除）。
+    /// 只执行一次，结果记录在 SystemMetadata，之后不会再自动处理。
+    /// </summary>
+    private async Task MigrateLegacyDefaultClassAsync(CancellationToken ct)
     {
-        var now = DateTimeOffset.UtcNow;
-        if (await db.Classrooms.AnyAsync(x => x.Id == Classroom.DefaultId, ct))
+        var metadata = await db.SystemMetadata.SingleAsync(x => x.Id == 1, ct);
+        if (metadata.LegacyDefaultClassMigrated) return;
+        var legacy = await db.Classrooms.SingleOrDefaultAsync(x => x.Id == Classroom.LegacyDefaultId, ct);
+        if (legacy is not null && legacy.Name == "默认班级" &&
+            await db.Classrooms.AnyAsync(x => x.Id != Classroom.LegacyDefaultId, ct))
         {
-            // 默认班级是迁移前数据的承载对象。它已经存在时只需保留现有记录，
-            // 否则管理员自定义的班级名称会在每次服务端启动时被覆盖。
-            return;
+            await db.PluginCredentials
+                .Where(x => x.ClassroomId == Classroom.LegacyDefaultId && x.Enabled)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(x => x.ClassroomId, (Guid?)null)
+                    .SetProperty(x => x.Assigned, false)
+                    .SetProperty(x => x.ClassNameRemark, "原默认班级"), ct);
+            await db.PluginPairingCodes
+                .Where(x => x.ClassroomId == Classroom.LegacyDefaultId && !x.IsShared)
+                .ExecuteDeleteAsync(ct);
+            await db.LessonTeacherOverrides.Where(x => x.ClassId == Classroom.LegacyDefaultId).ExecuteDeleteAsync(ct);
+            db.Classrooms.Remove(legacy);
+            logger.LogWarning("已移除旧版自动创建的“默认班级”，其在用设备已转入未分配列表，请在班级管理中重新分配。");
         }
-        db.Classrooms.Add(new Classroom
-        {
-            Id = Classroom.DefaultId,
-            Name = "默认班级",
-            VisitorAccessEnabled = false,
-            CreatedAt = now,
-            UpdatedAt = now,
-        });
+        metadata.LegacyDefaultClassMigrated = true;
         await db.SaveChangesAsync(ct);
     }
 
@@ -127,7 +137,7 @@ public sealed partial class IdentityCoordinator(
             .SetProperty(x => x.Name, "老师")
             .SetProperty(x => x.NormalizedName, "老师")
             .SetProperty(x => x.Kind, AccountRoleKind.Teacher), ct);
-        await SeedDefaultClassroomAsync(ct);
+        await MigrateLegacyDefaultClassAsync(ct);
 
         // 启动时清理过期超过 30 天的会话行，避免 DeviceSessions 表长期无界增长。
         // SQLite 不支持 DateTimeOffset 比较的 SQL 翻译，先投影再在内存过滤。
@@ -141,39 +151,24 @@ public sealed partial class IdentityCoordinator(
 
         if (!await users.Users.AnyAsync(ct))
         {
+            // 不再生成随机初始密码写入日志：首次进入 WebUI 时由初始化向导创建系统管理员。
+            // 无人值守部署仍可用 REMOTECI_ADMIN_PASSWORD 预先创建（同样标记为系统管理员）。
             var configuredPassword = FirstNonEmpty(
                 Environment.GetEnvironmentVariable("REMOTECI_ADMIN_PASSWORD"),
                 _options.BootstrapAdminPassword);
-            var generatedPassword = configuredPassword is null;
-            var password = configuredPassword ?? CreateReadableSecret(18);
-            ValidatePassword(password);
-            var admin = new AppUser
+            if (configuredPassword is not null)
             {
-                Id = Guid.NewGuid(),
-                UserName = _options.BootstrapAdminUsername,
-                DisplayName = "系统管理员",
-                Role = UserRole.Admin,
-                RoleDefinitionId = AccountRole.AdministratorId,
-                GrantedPermissions = UserPermissions.None,
-                Enabled = true,
-                UpdatedAt = DateTimeOffset.UtcNow,
-            };
-            admin.Version = await NextVersionAsync(ct);
-            EnsureIdentitySucceeded(await users.CreateAsync(admin, password));
-            if (generatedPassword && _options.LogBootstrapSecrets)
-            {
-                logger.LogWarning("首次启动已创建管理员 {Username}，一次性初始密码：{Password}。请立即登录并修改密码。",
-                    admin.UserName, password);
-            }
-            else if (generatedPassword)
-            {
-                logger.LogWarning("首次启动已创建管理员 {Username}，一次性初始密码按配置不写入日志。",
-                    admin.UserName);
+                await CreateSystemOwnerCoreAsync(_options.BootstrapAdminUsername, "系统管理员", configuredPassword, ct);
+                logger.LogInformation("首次启动已使用外部配置创建系统管理员 {Username}。", _options.BootstrapAdminUsername);
             }
             else
             {
-                logger.LogInformation("首次启动已使用外部配置创建管理员 {Username}。", admin.UserName);
+                logger.LogWarning("尚未创建系统管理员：请在浏览器中打开 WebUI，按初始化向导设置系统管理员账号与密码。");
             }
+        }
+        else
+        {
+            await EnsureSystemOwnerAsync(ct);
         }
 
         if (!await db.PluginCredentials.AnyAsync(ct) && !await db.PluginPairingCodes.AnyAsync(ct))
@@ -404,6 +399,8 @@ public sealed partial class IdentityCoordinator(
         var candidate = candidates.FirstOrDefault(x =>
                 x.ExpiresAt > now && (x.IsShared || x.IsPersistent || x.UsedAt is null))
             ?? throw new IdentityOperationException(ApiErrorCodes.PairCodeInvalid, "插件配对码无效、已使用或已过期");
+        if (candidate.ClassroomId is { } boundClass && !await db.Classrooms.AnyAsync(x => x.Id == boundClass, ct))
+            throw new IdentityOperationException(ApiErrorCodes.PairCodeInvalid, "插件配对码绑定的班级已被删除");
         if (!candidate.IsShared && !candidate.IsPersistent)
         {
             // 原子消费一次性配对码：并发请求中只有一个能把 UsedAt 从未置位更新为当前时间。
@@ -416,17 +413,18 @@ public sealed partial class IdentityCoordinator(
 
         var remark = NormalizeClassNameRemark(request.ClassNameRemark);
 
-        // 班级配对码（一次性或固定）直接归属班级；统一连接码创建的设备先进入未分配，
-        // 由管理员在班级管理页确认后再绑定班级。
+        // 班级配对码（一次性或固定）直接归属班级；统一连接码与尚未建班时的引导配对码创建的设备
+        // 先进入未分配，由管理员在班级管理页确认后再绑定班级。
         var token = CreateSecret(32);
+        var assigned = !candidate.IsShared && candidate.ClassroomId is not null;
         db.PluginCredentials.Add(new PluginCredential
         {
             Id = Guid.NewGuid(),
             Name = "ClassIsland 插件",
             TokenHash = Hash(token),
-            ClassroomId = candidate.ClassroomId,
-            Assigned = !candidate.IsShared,
-            ClassNameRemark = candidate.IsShared ? remark : null,
+            ClassroomId = assigned ? candidate.ClassroomId : null,
+            Assigned = assigned,
+            ClassNameRemark = assigned ? null : remark,
             CreatedAt = now,
             LastSeenAt = now,
             Enabled = true,
@@ -466,7 +464,7 @@ public sealed partial class IdentityCoordinator(
     {
         var code = NormalizePairingCode(requestedCode) ?? CreateReadableSecret(12);
         await db.PluginPairingCodes.Where(x => x.IsShared).ExecuteDeleteAsync(ct);
-        await AddPairingCodeAsync(code, ct, classroomId: Classroom.DefaultId, timeLimited: false, isShared: true);
+        await AddPairingCodeAsync(code, ct, timeLimited: false, isShared: true);
         return code;
     }
 
@@ -609,6 +607,85 @@ public sealed partial class IdentityCoordinator(
     }
 
     /// <summary>
+    /// 系统管理员账号只能由本人维护：其他账号（包括其他管理员）编辑、停用、重置密码、删除它
+    /// 或替它创建/吊销 API Key 时抛出 Forbidden。目标不是系统管理员时不做限制。
+    /// </summary>
+    public async Task EnsureCanManageAsync(Guid actorId, Guid targetId, CancellationToken ct = default)
+    {
+        if (actorId == targetId) return;
+        if (await db.Users.AsNoTracking().AnyAsync(x => x.Id == targetId && x.IsSystemOwner, ct))
+            throw new IdentityOperationException(ApiErrorCodes.Forbidden, "系统管理员账号只能由其本人管理");
+    }
+
+    /// <summary>首次部署状态：没有任何账号时需要创建系统管理员，没有任何班级时需要新建第一个班级。</summary>
+    public async Task<SetupStatus> GetSetupStatusAsync(CancellationToken ct = default) => new()
+    {
+        NeedsSystemAdmin = !await users.Users.AnyAsync(ct),
+        NeedsFirstClass = !await db.Classrooms.AnyAsync(ct),
+    };
+
+    /// <summary>
+    /// WebUI 初始化向导创建系统管理员：只在服务端还没有任何账号时成功，之后再调用返回 Forbidden。
+    /// 与引导配置共用 AdminMutationGate，并发提交时只有第一个生效。
+    /// </summary>
+    public async Task<UserListItem> CreateSystemOwnerAsync(SetupSystemAdminRequest request, CancellationToken ct = default)
+    {
+        var displayName = string.IsNullOrWhiteSpace(request.DisplayName) ? "系统管理员" : request.DisplayName.Trim();
+        ValidateUserInput(request.Username, displayName, request.Password, UserRole.Admin);
+        if (string.IsNullOrWhiteSpace(request.Password))
+            throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "请设置系统管理员密码");
+        await AdminMutationGate.WaitAsync(ct);
+        try
+        {
+            if (await users.Users.AnyAsync(ct))
+                throw new IdentityOperationException(ApiErrorCodes.Forbidden, "系统管理员已创建，请直接登录");
+            var owner = await CreateSystemOwnerCoreAsync(request.Username.Trim(), displayName, request.Password, ct);
+            logger.LogInformation("已通过 WebUI 初始化向导创建系统管理员 {Username}。", owner.UserName);
+            return await ToListItemAsync(owner, ct);
+        }
+        finally
+        {
+            AdminMutationGate.Release();
+        }
+    }
+
+    private async Task<AppUser> CreateSystemOwnerCoreAsync(string username, string displayName, string password, CancellationToken ct)
+    {
+        ValidatePassword(password);
+        var owner = new AppUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = username,
+            DisplayName = string.IsNullOrWhiteSpace(displayName) ? "系统管理员" : displayName,
+            Role = UserRole.Admin,
+            RoleDefinitionId = AccountRole.AdministratorId,
+            GrantedPermissions = UserPermissions.None,
+            Enabled = true,
+            IsSystemOwner = true,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        owner.Version = await NextVersionAsync(ct);
+        EnsureIdentitySucceeded(await users.CreateAsync(owner, password));
+        return owner;
+    }
+
+    /// <summary>
+    /// 升级前的部署没有系统管理员标记：优先标记引导配置的管理员账号（默认 admin），
+    /// 否则标记最早创建（账号版本最小）的管理员。已有标记时不做任何改动。
+    /// </summary>
+    private async Task EnsureSystemOwnerAsync(CancellationToken ct)
+    {
+        if (await users.Users.AnyAsync(x => x.IsSystemOwner, ct)) return;
+        var admins = await users.Users.Where(x => x.Role == UserRole.Admin).ToListAsync(ct);
+        var owner = admins.FirstOrDefault(x => x.Enabled && string.Equals(x.UserName, _options.BootstrapAdminUsername, StringComparison.OrdinalIgnoreCase))
+            ?? admins.Where(x => x.Enabled).OrderBy(x => x.Version).FirstOrDefault();
+        if (owner is null) return;
+        owner.IsSystemOwner = true;
+        EnsureIdentitySucceeded(await users.UpdateAsync(owner));
+        logger.LogInformation("已将管理员 {Username} 标记为系统管理员。", owner.UserName);
+    }
+
+    /// <summary>
     /// 读取目标账号角色（不区分启用状态）。管理守卫必须用它而非 GetProfileAsync：
     /// 后者对禁用账号返回 null，会让普通用户绕过“仅管理员可管理管理员”检查接管被禁用的管理员。
     /// </summary>
@@ -634,6 +711,7 @@ public sealed partial class IdentityCoordinator(
                     : UserPermissions.ViewCurrentCourse | x.RoleDefinition.DefaultPermissions | x.GrantedPermissions,
                 Enabled = x.Enabled,
                 UpdatedAt = x.UpdatedAt,
+                IsSystemOwner = x.IsSystemOwner,
             }).ToListAsync(ct);
 
     public async Task<UserListItem> CreateUserAsync(CreateUserRequest request, CancellationToken ct = default)
@@ -641,6 +719,8 @@ public sealed partial class IdentityCoordinator(
         ValidateUserInput(request.Username, request.DisplayName, request.Password, request.Role);
         var role = await ResolveRoleAsync(request.RoleId, request.Role, ct);
         var protocolRole = role.Kind == AccountRoleKind.Administrator ? UserRole.Admin : UserRole.User;
+        if (request.ClassId is { } requestedClass && !await db.Classrooms.AnyAsync(x => x.Id == requestedClass, ct))
+            throw new IdentityOperationException(ApiErrorCodes.NotFound, "班级不存在");
         // 密码留空 = 批量导入待激活账号：首次登录时强制设置密码。
         var hasPassword = !string.IsNullOrWhiteSpace(request.Password);
         var user = new AppUser
@@ -656,16 +736,15 @@ public sealed partial class IdentityCoordinator(
             UpdatedAt = DateTimeOffset.UtcNow,
         };
         user.Version = await NextVersionAsync(ct);
+        // 账号不再自动加入任何班级：只有显式指定 ClassId 时才建立成员关系（班内角色与账号角色相同）。
         EnsureIdentitySucceeded(hasPassword
             ? await users.CreateAsync(user, request.Password)
             : await users.CreateAsync(user));
-        db.ClassMemberships.Add(new ClassMembership
+        if (request.ClassId is { } classId && protocolRole != UserRole.Admin)
         {
-            UserId = user.Id,
-            ClassroomId = Classroom.DefaultId,
-            RoleDefinitionId = role.Id,
-        });
-        await db.SaveChangesAsync(ct);
+            db.ClassMemberships.Add(new ClassMembership { UserId = user.Id, ClassroomId = classId, RoleDefinitionId = role.Id });
+            await db.SaveChangesAsync(ct);
+        }
         return await ToListItemAsync(user, ct);
     }
 
@@ -679,6 +758,8 @@ public sealed partial class IdentityCoordinator(
             var user = await RequireUserAsync(id);
             var targetRole = await ResolveRoleAsync(request.RoleId, request.Role, ct);
             var targetProtocolRole = targetRole.Kind == AccountRoleKind.Administrator ? UserRole.Admin : UserRole.User;
+            if (user.IsSystemOwner && (targetProtocolRole != UserRole.Admin || !request.Enabled))
+                throw new IdentityOperationException(ApiErrorCodes.Forbidden, "系统管理员账号必须保持启用的管理员身份");
             if (user.Role == UserRole.Admin && user.Enabled && (targetProtocolRole != UserRole.Admin || !request.Enabled))
                 await GuardLastAdminAsync(user.Id, ct);
 
@@ -691,11 +772,6 @@ public sealed partial class IdentityCoordinator(
             user.UpdatedAt = DateTimeOffset.UtcNow;
             user.Version = await NextVersionAsync(ct);
             EnsureIdentitySucceeded(await users.UpdateAsync(user));
-            // Users 页编辑的是账号的全局默认角色；默认班级成员关系跟随它，其他班级成员角色独立管理。
-            var defaultMembership = await db.ClassMemberships.SingleOrDefaultAsync(
-                x => x.UserId == user.Id && x.ClassroomId == Classroom.DefaultId, ct);
-            if (defaultMembership is not null) defaultMembership.RoleDefinitionId = targetRole.Id;
-            await db.SaveChangesAsync(ct);
             if (mustRevoke) await RevokeAllSessionsAsync(user.Id, ct);
             return await ToListItemAsync(user, ct);
         }
@@ -711,6 +787,8 @@ public sealed partial class IdentityCoordinator(
         try
         {
             var user = await RequireUserAsync(id);
+            if (user.IsSystemOwner)
+                throw new IdentityOperationException(ApiErrorCodes.Forbidden, "系统管理员账号不能删除");
             if (user.Role == UserRole.Admin && user.Enabled) await GuardLastAdminAsync(user.Id, ct);
             EnsureIdentitySucceeded(await users.DeleteAsync(user));
             await NextVersionAsync(ct);
@@ -950,7 +1028,7 @@ public sealed partial class IdentityCoordinator(
         {
             Id = Guid.NewGuid(),
             CodeHash = codeHash,
-            ClassroomId = classroomId ?? Classroom.DefaultId,
+            ClassroomId = classroomId,
             IsShared = isShared,
             IsPersistent = isPersistent,
             CreatedAt = now,
@@ -1067,6 +1145,7 @@ public sealed partial class IdentityCoordinator(
             EffectivePermissions = user.Role == UserRole.Admin ? UserPermissions.All : UserPermissions.ViewCurrentCourse | role.DefaultPermissions | user.GrantedPermissions,
             Enabled = user.Enabled,
             UpdatedAt = user.UpdatedAt,
+            IsSystemOwner = user.IsSystemOwner,
         };
     }
 

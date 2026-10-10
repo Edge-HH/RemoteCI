@@ -184,7 +184,7 @@ public sealed class ProfileDispatchService(ProfileLibraryService library, Device
         }
     }
 
-    /// <summary>每班只有一台在线插件；未分配班级的设备在快照中记为默认班级，不能被当成默认班的主设备。</summary>
+    /// <summary>每班只有一台在线插件；未分配班级的设备在快照中班级为空，不能被当成任何班级的主设备。</summary>
     private static DeviceInventory? PrimaryDevice(Guid classId, IReadOnlyList<PluginDeviceSnapshot> snapshots,
         IReadOnlyList<DeviceInventory> inventory)
     {

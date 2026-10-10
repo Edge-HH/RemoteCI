@@ -249,7 +249,7 @@
                     <tr>
                         <td data-label="账号名"><strong>@user.DisplayName</strong></td>
                         <td data-label="ID"><code>@user.Username</code></td>
-                        <td data-label="角色"><span class="role-badge">@(user.Role == UserRole.Admin ? "管理员" : "学生")</span></td>
+                        <td data-label="角色"><span class="role-badge">@(user.IsSystemOwner ? "系统管理员" : user.Role == UserRole.Admin ? "管理员" : "学生")</span></td>
                         <td class="user-account-action">
                             <div class="account-row-actions">
                                 @if (user.Role != UserRole.Admin)
@@ -259,7 +259,8 @@
                                         <button class="danger ghost user-delete-button" type="submit">删除</button>
                                     </form>
                                 }
-                                <button type="button" class="ghost user-edit-button" disabled="@(user.Role == UserRole.Admin && Model.CurrentUser.Role != UserRole.Admin)" data-user-edit-open="@dialogId" aria-controls="@dialogId">编辑</button>
+                                @* 系统管理员只能由本人维护；其他账号（含其他管理员）看不到可用的编辑入口。 *@
+                                <button type="button" class="ghost user-edit-button" disabled="@((user.Role == UserRole.Admin && Model.CurrentUser.Role != UserRole.Admin) || (user.IsSystemOwner && user.Id != Model.CurrentUser.Id))" title="@(user.IsSystemOwner && user.Id != Model.CurrentUser.Id ? "系统管理员只能由本人管理" : null)" data-user-edit-open="@dialogId" aria-controls="@dialogId">编辑</button>
                             </div>
                         </td>
                     </tr>

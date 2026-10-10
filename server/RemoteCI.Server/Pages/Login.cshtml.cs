@@ -20,6 +20,9 @@ public sealed class LoginModel(
 
     public async Task<IActionResult> OnGetAsync(string? from, string? returnUrl, CancellationToken ct)
     {
+        // 还没有任何账号：进入初始化向导创建系统管理员。
+        if ((await identities.GetSetupStatusAsync(ct)).NeedsSystemAdmin)
+            return RedirectToPage("/Setup");
         if (User.Identity?.IsAuthenticated == true && await users.GetUserAsync(User) is { } user)
         {
             var permissions = RolePermissions.Effective(user.Role, user.GrantedPermissions);

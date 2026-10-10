@@ -79,12 +79,12 @@ public sealed class ClassroomService(AppDbContext db)
         await db.SaveChangesAsync(ct);
     }
 
-    /// <summary>删除班级并级联清理成员关系、分组归属与插件凭据（凭据需重新配对）；默认班级不可删除。</summary>
+    /// <summary>删除班级并级联清理成员关系、分组归属与插件凭据（凭据需重新配对）。</summary>
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        if (id == Classroom.DefaultId)
-            throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "默认班级不能删除");
         var classroom = await RequireAsync(id, ct);
+        // 配对码表不建外键：班级删除后它的一次性与固定配对码一并作废。
+        await db.PluginPairingCodes.Where(x => x.ClassroomId == id).ExecuteDeleteAsync(ct);
         db.Classrooms.Remove(classroom);
         await db.SaveChangesAsync(ct);
     }

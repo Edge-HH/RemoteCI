@@ -448,6 +448,8 @@ public sealed partial class MemberExcelService(
         }
 
         var existing = await db.Users.SingleAsync(x => x.Id == plan.UserId, ct);
+        // 系统管理员账号只能由本人维护，覆盖导入不改动它的登录 ID 与用户名。
+        if (existing.IsSystemOwner) return;
         existing.UpdatedAt = now;
         existing.Version = version;
         if (!string.Equals(existing.UserName, plan.Username, StringComparison.OrdinalIgnoreCase))

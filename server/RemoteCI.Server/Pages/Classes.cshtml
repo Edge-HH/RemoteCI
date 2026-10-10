@@ -165,16 +165,11 @@
                                 <td data-label="选择">
                                     <input type="checkbox" name="SelectedClassIds" value="@classroom.Id" form="batch-form"
                                            data-class-select
-                                           data-default-class="@(classroom.Id == Classroom.DefaultId ? "true" : "false")"
                                            aria-label="选择 @classroom.Name" />
                                 </td>
                                 <td data-label="班级">
                                     <div class="class-name-cell">
                                         <strong>@classroom.Name</strong>
-                                        @if (classroom.Id == Classroom.DefaultId)
-                                        {
-                                            <span class="muted">默认班级</span>
-                                        }
                                     </div>
                                 </td>
                                 <td data-label="分组">
@@ -210,15 +205,12 @@
                                     <details class="row-menu">
                                         <summary aria-label="管理 @classroom.Name"><i class="bi bi-three-dots" aria-hidden="true"></i></summary>
                                         <div class="row-menu-panel">
-                                            @if (classroom.Id != Classroom.DefaultId)
-                                            {
-                                                <form method="post" asp-page="/Classes" asp-page-handler="Rename" class="row-menu-form">
-                                                    <input type="hidden" name="id" value="@classroom.Id" />
-                                                    <input type="hidden" name="groupId" value="@Model.SelectedGroupId" />
-                                                    <label>班级名称<input type="text" name="name" value="@classroom.Name" required maxlength="40" /></label>
-                                                    <button type="submit" class="ghost">保存名称</button>
-                                                </form>
-                                            }
+                                            <form method="post" asp-page="/Classes" asp-page-handler="Rename" class="row-menu-form">
+                                                <input type="hidden" name="id" value="@classroom.Id" />
+                                                <input type="hidden" name="groupId" value="@Model.SelectedGroupId" />
+                                                <label>班级名称<input type="text" name="name" value="@classroom.Name" required maxlength="40" /></label>
+                                                <button type="submit" class="ghost">保存名称</button>
+                                            </form>
                                             <form method="post" asp-page="/Classes" asp-page-handler="ToggleVisitor" class="row-menu-form">
                                                 <input type="hidden" name="id" value="@classroom.Id" />
                                                 <input type="hidden" name="groupId" value="@Model.SelectedGroupId" />
@@ -235,18 +227,11 @@
                                             {
                                                 <p class="notice ok row-menu-note">新配对码：<code>@generatedCode</code>（仅本次显示，请立即记录）</p>
                                             }
-                                            @if (classroom.Id == Classroom.DefaultId)
-                                            {
-                                                <p class="muted row-menu-note">默认班级不可删除。</p>
-                                            }
-                                            else
-                                            {
-                                                <form method="post" asp-page="/Classes" asp-page-handler="Delete" class="row-menu-form" onsubmit="return confirm('删除班级会同时移除成员关系与插件凭据，需重新配对。确定继续？')">
-                                                    <input type="hidden" name="id" value="@classroom.Id" />
-                                                    <input type="hidden" name="groupId" value="@Model.SelectedGroupId" />
-                                                    <button type="submit" class="danger ghost">删除班级</button>
-                                                </form>
-                                            }
+                                            <form method="post" asp-page="/Classes" asp-page-handler="Delete" class="row-menu-form" onsubmit="return confirm('删除班级会同时移除成员关系与插件凭据，需重新配对。确定继续？')">
+                                                <input type="hidden" name="id" value="@classroom.Id" />
+                                                <input type="hidden" name="groupId" value="@Model.SelectedGroupId" />
+                                                <button type="submit" class="danger ghost">删除班级</button>
+                                            </form>
                                         </div>
                                     </details>
                                 </td>

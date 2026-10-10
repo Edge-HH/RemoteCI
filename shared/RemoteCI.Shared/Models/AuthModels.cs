@@ -361,6 +361,14 @@ public sealed class CreateUserRequest
 
     [JsonPropertyName("grantedPermissions")]
     public UserPermissions GrantedPermissions { get; set; }
+
+    /// <summary>
+    /// 新账号加入的班级（班内角色与账号角色相同）；省略时不加入任何班级。
+    /// 服务端不再有默认班级，老师按课表姓名绑定任教班级，管理员可访问全部班级。
+    /// </summary>
+    [JsonPropertyName("classId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? ClassId { get; set; }
 }
 
 public sealed class UpdateUserRequest
@@ -441,6 +449,36 @@ public sealed class UserListItem
 
     [JsonPropertyName("updatedAt")]
     public DateTimeOffset UpdatedAt { get; set; }
+
+    /// <summary>首次进入 WebUI 时创建的系统管理员；只能由本人维护，其他管理员不能修改或删除。</summary>
+    [JsonPropertyName("isSystemOwner")]
+    public bool IsSystemOwner { get; set; }
+}
+
+/// <summary>首次部署状态：尚未创建系统管理员时 WebUI 进入初始化向导，创建后还需新建第一个班级。</summary>
+public sealed class SetupStatus
+{
+    [JsonPropertyName("needsSystemAdmin")]
+    public bool NeedsSystemAdmin { get; set; }
+
+    [JsonPropertyName("needsFirstClass")]
+    public bool NeedsFirstClass { get; set; }
+}
+
+/// <summary>首次部署时创建系统管理员；只在服务端还没有任何账号时可用。</summary>
+public sealed class SetupSystemAdminRequest
+{
+    [JsonPropertyName("username")]
+    public string Username { get; set; } = string.Empty;
+
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = string.Empty;
+
+    [JsonPropertyName("password")]
+    public string Password { get; set; } = string.Empty;
+
+    [JsonPropertyName("deviceName")]
+    public string DeviceName { get; set; } = string.Empty;
 }
 
 public sealed class AccountRoleInfo

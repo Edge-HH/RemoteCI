@@ -17,10 +17,7 @@
             <input type="hidden" name="classId" value="@classroom.Id" />
             <input type="hidden" name="returnUrl" value="/Index" />
             <button type="submit">
-                @if (classroom.HasAvatar == true)
-                {
-                    <img class="class-avatar" src="/api/classes/@classroom.Id/avatar" alt="" />
-                }
+                @await Html.PartialAsync("_ClassAvatar", new ClassAvatarModel(classroom.Id, classroom.HasAvatar == true))
                 <strong>@classroom.Name</strong>
                 <span>
                     @if (classroom.GroupNames is { Count: > 0 })

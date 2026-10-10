@@ -44,7 +44,7 @@ public sealed class HolidayPageTests
         await using var factory = new TestWebApplicationFactory();
         _ = await factory.LoginAsync();
         using (var scope = factory.Services.CreateScope())
-            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(Classroom.DefaultId, new ScheduleBundle
+            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(TestWebApplicationFactory.DefaultClassId, new ScheduleBundle
             {
                 FromDate = "2026-10-01",
                 Days =
@@ -67,9 +67,9 @@ public sealed class HolidayPageTests
     {
         await using var factory = new TestWebApplicationFactory();
         _ = await factory.LoginAsync();
-        var today = ClassClock.Today(factory.Services.GetRequiredService<IStateStore>(), Classroom.DefaultId);
+        var today = ClassClock.Today(factory.Services.GetRequiredService<IStateStore>(), TestWebApplicationFactory.DefaultClassId);
         using (var scope = factory.Services.CreateScope())
-            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(Classroom.DefaultId, new ScheduleBundle
+            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(TestWebApplicationFactory.DefaultClassId, new ScheduleBundle
             {
                 FromDate = today.ToString("yyyy-MM-dd"),
                 Days = Enumerable.Range(0, 7)

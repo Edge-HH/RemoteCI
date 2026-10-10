@@ -48,7 +48,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     }
 
     private Task WaitForNoPluginAsync() => WaitUntilAsync(() =>
-        !_factory.Services.GetRequiredService<PeerRegistry>().HasPluginFor(Classroom.DefaultId));
+        !_factory.Services.GetRequiredService<PeerRegistry>().HasPluginFor(TestWebApplicationFactory.DefaultClassId));
 
     [Fact]
     public async Task VoiceMessage_RelaysFullMinuteWithAuthenticatedSenderAndCorrelatedReply()
@@ -56,7 +56,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         using var plugin = await ConnectPluginAsync();
         await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
         await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
-        await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>().PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.VoiceMessageSend));
+        await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>().PrimaryPluginSupports(TestWebApplicationFactory.DefaultClassId, RemoteCiCapabilities.VoiceMessageSend));
         using var watch = await ConnectWatchAsync();
         var audio = new byte[VoiceMessageRequest.MaxBytes];
         new Random(42).NextBytes(audio);
@@ -359,6 +359,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "schedule.reader",
                 DisplayName = "班级管理员",
                 Password = "Schedule-Reader-Password-2026",
@@ -477,6 +478,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "ws.student",
                 DisplayName = "WebSocket 学生",
                 Password = "Student-Password-2026",
@@ -507,6 +509,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "sync.student",
                 DisplayName = "同步学生",
                 Password = "Sync-Student-Password-2026",
@@ -622,7 +625,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         using var plugin = await ConnectPluginAsync();
         await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
         await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>()
-            .PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.ExtensionsSettings));
+            .PrimaryPluginSupports(TestWebApplicationFactory.DefaultClassId, RemoteCiCapabilities.ExtensionsSettings));
         await SendAsync(plugin, Envelope.ExtensionGroupsSync(new List<ExtensionGroupDefinition>
         {
             new()
@@ -642,7 +645,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
             },
         }));
         await WaitUntilAsync(() => _factory.Services.GetRequiredService<IStateStore>()
-            .GetLatestExtensionGroups(Classroom.DefaultId)?.Any(x => x.Id == "demo.settings") == true);
+            .GetLatestExtensionGroups(TestWebApplicationFactory.DefaultClassId)?.Any(x => x.Id == "demo.settings") == true);
 
         var admin = await _factory.LoginAsync();
         using var client = _factory.CreateClient();
@@ -654,12 +657,12 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
 
         // 服务端按插件声明预校验，非法值不会下发到设备。
         var invalid = await client.SendAsync(TestWebApplicationFactory.Bearer(
-            HttpMethod.Put, $"/api/classes/{Classroom.DefaultId}/extension-groups/demo.settings/settings", admin.AccessToken,
+            HttpMethod.Put, $"/api/classes/{TestWebApplicationFactory.DefaultClassId}/extension-groups/demo.settings/settings", admin.AccessToken,
             new { values = new Dictionary<string, string?> { ["volume"] = "120" } }));
         Assert.Equal(System.Net.HttpStatusCode.BadRequest, invalid.StatusCode);
 
         var apply = client.SendAsync(TestWebApplicationFactory.Bearer(
-            HttpMethod.Put, $"/api/classes/{Classroom.DefaultId}/extension-groups/demo.settings/settings", admin.AccessToken,
+            HttpMethod.Put, $"/api/classes/{TestWebApplicationFactory.DefaultClassId}/extension-groups/demo.settings/settings", admin.AccessToken,
             new { values = new Dictionary<string, string?> { ["volume"] = "30" } }));
         var forwarded = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
         var command = ConvertPayload<CommandMessage>(forwarded.Payload);
@@ -691,12 +694,12 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
             Values = new Dictionary<string, string?> { ["volume"] = "50" },
         };
         // 插件曾经上报过分组，但现在离线：下发应保存为待补发并返回 202。
-        _factory.Services.GetRequiredService<IStateStore>().SaveExtensionGroups(Classroom.DefaultId, [group]);
-        await WaitUntilAsync(() => !_factory.Services.GetRequiredService<PeerRegistry>().HasPluginFor(Classroom.DefaultId));
+        _factory.Services.GetRequiredService<IStateStore>().SaveExtensionGroups(TestWebApplicationFactory.DefaultClassId, [group]);
+        await WaitUntilAsync(() => !_factory.Services.GetRequiredService<PeerRegistry>().HasPluginFor(TestWebApplicationFactory.DefaultClassId));
         var admin = await _factory.LoginAsync();
         using var client = _factory.CreateClient();
         var queued = await client.SendAsync(TestWebApplicationFactory.Bearer(
-            HttpMethod.Put, $"/api/classes/{Classroom.DefaultId}/extension-groups/demo.queued/settings", admin.AccessToken,
+            HttpMethod.Put, $"/api/classes/{TestWebApplicationFactory.DefaultClassId}/extension-groups/demo.queued/settings", admin.AccessToken,
             new { values = new Dictionary<string, string?> { ["volume"] = "20" } }));
         Assert.Equal(System.Net.HttpStatusCode.Accepted, queued.StatusCode);
         Assert.Equal(CommandResultCodes.Queued, (await queued.Content.ReadFromJsonAsync<CommandResult>())!.Code);
@@ -705,7 +708,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         using var plugin = await ConnectPluginAsync();
         await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
         await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>()
-            .PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.ExtensionsSettings));
+            .PrimaryPluginSupports(TestWebApplicationFactory.DefaultClassId, RemoteCiCapabilities.ExtensionsSettings));
         await SendAsync(plugin, Envelope.ExtensionGroupsSync(new List<ExtensionGroupDefinition> { group }));
 
         var forwarded = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
@@ -728,12 +731,12 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         using var plugin = await ConnectPluginAsync();
         await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
         await WaitUntilAsync(() => _factory.Services.GetRequiredService<PeerRegistry>()
-            .PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.ExtensionsSettings));
+            .PrimaryPluginSupports(TestWebApplicationFactory.DefaultClassId, RemoteCiCapabilities.ExtensionsSettings));
 
         using (var adminWatch = await ConnectWatchAsync())
         {
             var sync = await ReceivePayloadAsync<CapabilitiesSync>(adminWatch, Protocol.MessageTypeCapabilitiesSync);
-            var entry = Assert.Single(sync.ClassPlugins!, x => x.ClassId == Classroom.DefaultId);
+            var entry = Assert.Single(sync.ClassPlugins!, x => x.ClassId == TestWebApplicationFactory.DefaultClassId);
             Assert.Contains(RemoteCiCapabilities.ExtensionsSettings, entry.Plugin.Capabilities);
         }
 
@@ -747,6 +750,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         var user = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post, "/api/users", admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "caps.isolated", DisplayName = "能力隔离", Password = "Caps-Isolated-Password-2026",
                 RoleId = AccountRole.StudentId,
             }));
@@ -759,7 +763,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         {
             // 新账号可能被默认放入默认班级；移除后它只属于“能力隔离班”。
             await scope.ServiceProvider.GetRequiredService<AppDbContext>().ClassMemberships
-                .Where(x => x.UserId == userId && x.ClassroomId == Classroom.DefaultId).ExecuteDeleteAsync();
+                .Where(x => x.UserId == userId && x.ClassroomId == TestWebApplicationFactory.DefaultClassId).ExecuteDeleteAsync();
         }
 
         using var isolatedWatch = await ConnectWatchAsync("caps.isolated", "Caps-Isolated-Password-2026");
@@ -845,7 +849,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
 
         var store = factory.Services.GetRequiredService<IStateStore>();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (store.GetLatestSnapshot(Classroom.DefaultId)?.CurrentSubject != "性能回归-2")
+        while (store.GetLatestSnapshot(TestWebApplicationFactory.DefaultClassId)?.CurrentSubject != "性能回归-2")
             await Task.Delay(10, timeout.Token);
 
         Assert.Equal(0, commands.Count);
@@ -953,6 +957,7 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
             admin.AccessToken,
             new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "ws.permission.user",
                 DisplayName = "权限刷新用户",
                 Password = "Permission-Refresh-Password-2026",

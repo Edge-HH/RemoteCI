@@ -22,6 +22,7 @@ public sealed class RoleAndBackupTests : IClassFixture<TestWebApplicationFactory
         var role = await roles.CreateAsync("Voice Sender", UserPermissions.SendVoiceMessages);
         var user = await identities.CreateUserAsync(new CreateUserRequest
         {
+            ClassId = TestWebApplicationFactory.DefaultClassId,
             Username = "role.voice", DisplayName = "Voice Sender", Password = "Voice-Role-2026", RoleId = role.Id,
         });
         Assert.True(user.EffectivePermissions.HasFlag(UserPermissions.SendVoiceMessages));
@@ -40,6 +41,7 @@ public sealed class RoleAndBackupTests : IClassFixture<TestWebApplicationFactory
         var role = await roles.CreateAsync("Class Leader", UserPermissions.AccessWebUi | UserPermissions.ManageSchedule);
         var user = await identities.CreateUserAsync(new CreateUserRequest
         {
+            ClassId = TestWebApplicationFactory.DefaultClassId,
             Username = "role.combine", DisplayName = "Role Combine", Password = "Role-Combine-2026",
             RoleId = role.Id, GrantedPermissions = UserPermissions.TeacherComing,
         });
@@ -110,6 +112,7 @@ public sealed class RoleAndBackupTests : IClassFixture<TestWebApplicationFactory
             var identities = scope.ServiceProvider.GetRequiredService<IdentityCoordinator>();
             var user = await identities.CreateUserAsync(new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "backup.api.key",
                 DisplayName = "备份 API 账号",
                 Password = "Backup-Api-Key-2026",
@@ -141,6 +144,7 @@ public sealed class RoleAndBackupTests : IClassFixture<TestWebApplicationFactory
             var identities = scope.ServiceProvider.GetRequiredService<IdentityCoordinator>();
             var user = await identities.CreateUserAsync(new CreateUserRequest
             {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
                 Username = "backup.v1.control",
                 DisplayName = "旧备份控制账号",
                 Password = "Backup-V1-Control-2026",

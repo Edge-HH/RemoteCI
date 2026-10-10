@@ -47,7 +47,7 @@ public sealed class ScheduleSyncTaskTracker
 
     public void Observe(ScheduleSyncStatus status)
     {
-        var classId = status.ClassId ?? Classroom.DefaultId;
+        var classId = status.ClassId ?? Guid.Empty;
         if (status.State == ScheduleSyncTaskState.Running)
         {
             _current[classId] = status;

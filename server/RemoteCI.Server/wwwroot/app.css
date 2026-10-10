@@ -588,6 +588,11 @@ input[type="checkbox"][form] { width: 18px; height: 18px; min-height: 0; padding
 
 .class-avatar { width: 64px; height: 64px; border-radius: 12px; object-fit: cover; border: 1px solid var(--line); }
 .class-avatar.small { width: 22px; height: 22px; border-radius: 50%; border: 0; vertical-align: -6px; margin-right: 4px; }
+/* 未上传头像时的班级图标占位：与头像同尺寸，主题色浅底。 */
+.class-avatar-fallback { display: inline-grid; place-items: center; background: var(--accent-faint); color: var(--accent-strong, var(--accent)); }
+.class-avatar-fallback svg { width: 55%; height: 55%; }
+.class-avatar.small.class-avatar-fallback { vertical-align: middle; }
+.brand-avatar.class-avatar-fallback { width: 100%; height: 100%; border-radius: 50%; }
 .class-chip { display: inline-flex; align-items: center; }
 .class-info-body { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
 .class-info-body form.stack { min-width: min(320px, 100%); }

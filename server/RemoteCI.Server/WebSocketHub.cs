@@ -160,7 +160,7 @@ public static class WebSocketHub
         }
         finally
         {
-            // 未分配设备没有班级，也不会启动课表任务，断开时不应误伤默认班级的进行中任务。
+            // 未分配设备没有班级，也不会启动课表任务，断开时不应误伤其他班级的进行中任务。
             if (session.Principal.IsPlugin && session.Principal.ClassId is { } activeClassId)
                 await session.ScheduleSync.FailActiveAsync(
                     "插件连接已断开，课表任务未完成",
@@ -432,7 +432,7 @@ public static class WebSocketHub
     {
         if (NormalizePluginNetworkInfo(ConvertPayload<PluginNetworkInfo>(envelope.Payload)) is { } info)
         {
-            info.ClassId = session.Principal.ClassId ?? Classroom.DefaultId;
+            info.ClassId = session.Principal.ClassId ?? Guid.Empty;
             await session.Registry.PublishPluginNetworkInfoAsync(info, session.CancellationToken);
         }
         else session.Logger.LogWarning("插件上报了无效的局域网地址或端口");

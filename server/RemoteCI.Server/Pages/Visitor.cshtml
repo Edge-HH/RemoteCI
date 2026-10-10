@@ -34,10 +34,7 @@
         {
             <a class="class-chip@(classroom.Id == Model.CurrentClassId ? " active" : string.Empty)"
                asp-page="/Visitor" asp-route-class="@classroom.Id" asp-route-group="@Model.SelectedGroupId">
-                @if (classroom.Avatar is not null)
-                {
-                    <img class="class-avatar small" src="/api/classes/@classroom.Id/avatar" alt="" />
-                }
+                @await Html.PartialAsync("_ClassAvatar", new ClassAvatarModel(classroom.Id, classroom.Avatar is not null, "class-avatar small"))
                 @classroom.Name
             </a>
         }

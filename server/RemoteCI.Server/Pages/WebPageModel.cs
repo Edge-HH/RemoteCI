@@ -34,7 +34,8 @@ public abstract class WebPageModel(UserManager<AppUser> users) : PageModel
     /// <summary>当前用户是否可以修改当前班级的班名或班头像（任一项被允许即显示“班级设置”入口）。</summary>
     public bool CanManageClassInfo => ClassSelfService.CanRename || ClassSelfService.CanChangeAvatar;
 
-    public Guid CurrentClassId => CurrentClass?.Id ?? Classroom.DefaultId;
+    /// <summary>当前班级 Id；账号没有任何可访问班级时为 Guid.Empty，不会命中任何班级数据。</summary>
+    public Guid CurrentClassId => CurrentClass?.Id ?? Guid.Empty;
 
     /// <summary>
     /// 加载当前用户并解析班级上下文。permission 针对账号全局权限（如 AccessWebUi/ManageUsers）；
@@ -58,7 +59,7 @@ public abstract class WebPageModel(UserManager<AppUser> users) : PageModel
             user.Id, user.Role, user.GrantedPermissions, HttpContext.RequestAborted);
         var cookieClass = Guid.TryParse(Request.Cookies[CurrentClassCookie], out var parsed) ? parsed : (Guid?)null;
         CurrentClass = AccessibleClasses.FirstOrDefault(x => x.Id == cookieClass) ?? AccessibleClasses.FirstOrDefault();
-        // 没有任何可访问班级时退回默认班级占位，权限为 None，页面自然呈现无权限状态。
+        // 没有任何可访问班级时班级 Id 为空、权限为 None，页面自然呈现无权限状态。
         ClassPermissions = CurrentClass?.Permissions ?? UserPermissions.None;
         ClassSelfService = await access.GetClassSelfServiceAsync(user.Id, user.Role, CurrentClassId, HttpContext.RequestAborted);
         return permission is not null && !Permissions.HasFlag(permission.Value)

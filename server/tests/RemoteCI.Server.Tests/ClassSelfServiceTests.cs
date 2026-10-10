@@ -227,6 +227,7 @@ public sealed class ClassSelfServiceTests
         var classroom = (await created.Content.ReadFromJsonAsync<ClassDetail>())!;
         var user = await client.SendAsync(Bearer(HttpMethod.Post, "/api/users", admin, new CreateUserRequest
         {
+            ClassId = TestWebApplicationFactory.DefaultClassId,
             Username = username,
             DisplayName = username,
             Password = password,

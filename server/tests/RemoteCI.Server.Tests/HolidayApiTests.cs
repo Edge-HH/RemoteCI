@@ -15,7 +15,7 @@ public sealed class HolidayApiTests
 
         var admin = await host.LoginAsync();
         var created = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post, "/api/users", admin.AccessToken,
-            new CreateUserRequest { Username = "holiday.reader", DisplayName = "普通用户", Password = "Holiday-Reader-2026" }));
+            new CreateUserRequest { ClassId = TestWebApplicationFactory.DefaultClassId, Username = "holiday.reader", DisplayName = "普通用户", Password = "Holiday-Reader-2026" }));
         created.EnsureSuccessStatusCode();
         var reader = await host.LoginAsync("holiday.reader", "Holiday-Reader-2026");
 

@@ -43,8 +43,8 @@ public sealed class ProfilePagesTests
         Assert.True(bootstrap["isAdmin"]!.GetValue<bool>());
         Assert.Equal(maliciousName, bootstrap["profiles"]![0]!["name"]!.GetValue<string>());
         // 临时层过期判断使用教室端日期：没有状态快照时按服务端本地时区。
-        Assert.Equal(ClassClock.Today(factory.Services.GetRequiredService<IStateStore>(), Classroom.DefaultId).ToString("yyyy-MM-dd"),
-            bootstrap["classToday"]![Classroom.DefaultId.ToString()]!.GetValue<string>());
+        Assert.Equal(ClassClock.Today(factory.Services.GetRequiredService<IStateStore>(), TestWebApplicationFactory.DefaultClassId).ToString("yyyy-MM-dd"),
+            bootstrap["classToday"]![TestWebApplicationFactory.DefaultClassId.ToString()]!.GetValue<string>());
 
         var classPage = ReadBootstrap(await browser.GetStringAsync("/ClassProfiles"));
         Assert.Single(classPage["classes"]!.AsArray());
@@ -239,7 +239,7 @@ public sealed class ProfilePagesTests
     {
         await using var factory = new TestWebApplicationFactory();
         using (var scope = factory.Services.CreateScope())
-            await ProfileTestData.CreateMemberAsync(scope.ServiceProvider, "profile.page.teacher", Classroom.DefaultId,
+            await ProfileTestData.CreateMemberAsync(scope.ServiceProvider, "profile.page.teacher", TestWebApplicationFactory.DefaultClassId,
                 AccountRole.TeacherId, UserPermissions.AccessWebUi | UserPermissions.ManageSchedule);
         using var browser = CreateBrowser(factory);
         await LoginWebUiAsync(browser, "profile.page.teacher", ProfileTestData.Password);
@@ -252,7 +252,7 @@ public sealed class ProfilePagesTests
             Assert.Contains("/Denied", page.Headers.Location!.OriginalString);
             Assert.Equal(HttpStatusCode.Forbidden, (await browser.GetAsync(path + "?handler=Data")).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await PostJsonAsync(browser, path + "?handler=Save", scheduleHtml,
-                new { items = new[] { ProfileTestData.New("非法", Classroom.DefaultId) } })).StatusCode);
+                new { items = new[] { ProfileTestData.New("非法", TestWebApplicationFactory.DefaultClassId) } })).StatusCode);
         }
     }
 
@@ -306,7 +306,7 @@ public sealed class ProfilePagesTests
 
         var broadcast = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post,
             "/api/commands/broadcast", admin.AccessToken,
-            new { command = CommandKind.ApplyProfile, profileApply = command.ProfileApply, classIds = new[] { Classroom.DefaultId } }));
+            new { command = CommandKind.ApplyProfile, profileApply = command.ProfileApply, classIds = new[] { TestWebApplicationFactory.DefaultClassId } }));
         Assert.True(broadcast.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Forbidden);
 
         using var watch = await ConnectAsync(factory, admin.AccessToken, clientKind);
@@ -333,7 +333,7 @@ public sealed class ProfilePagesTests
         StoredProfileDto profile;
         using (var setup = factory.Services.CreateScope())
             profile = (await setup.ServiceProvider.GetRequiredService<ProfileLibraryService>().SaveAsync(
-                await ProfileTestData.AdminAsync(setup.ServiceProvider), [ProfileTestData.New("已保存版本", Classroom.DefaultId)]))[0];
+                await ProfileTestData.AdminAsync(setup.ServiceProvider), [ProfileTestData.New("已保存版本", TestWebApplicationFactory.DefaultClassId)]))[0];
         using var plugin = await ConnectAsync(factory, await factory.GetPluginTokenAsync());
         await ReceiveAsync(plugin, Protocol.MessageTypeSchedulePull);
         await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities
@@ -341,7 +341,7 @@ public sealed class ProfilePagesTests
             Capabilities = RemoteCiCapabilities.Current.Where(x => x != RemoteCiCapabilities.ProfileApply).ToList(),
         }));
         var peers = factory.Services.GetRequiredService<PeerRegistry>();
-        await WaitUntilAsync(() => peers.HasPluginFor(Classroom.DefaultId));
+        await WaitUntilAsync(() => peers.HasPluginFor(TestWebApplicationFactory.DefaultClassId));
         using var browser = CreateBrowser(factory);
         await LoginWebUiAsync(browser);
         var html = await browser.GetStringAsync("/Profiles");
@@ -353,12 +353,12 @@ public sealed class ProfilePagesTests
         Assert.Contains("升级", denied["message"]!.GetValue<string>());
 
         await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
-        await WaitUntilAsync(() => peers.PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.ProfileApply));
+        await WaitUntilAsync(() => peers.PrimaryPluginSupports(TestWebApplicationFactory.DefaultClassId, RemoteCiCapabilities.ProfileApply));
         var pending = PostJsonAsync(browser, "/Profiles?handler=Apply", html, request);
         var envelope = await ReceiveAsync(plugin, Protocol.MessageTypeCommand);
         var forwarded = DeserializePayload<CommandMessage>(envelope);
         Assert.Equal(CommandKind.ApplyProfile, forwarded.Command);
-        Assert.Equal(Classroom.DefaultId, forwarded.ClassId);
+        Assert.Equal(TestWebApplicationFactory.DefaultClassId, forwarded.ClassId);
         Assert.Equal(TestWebApplicationFactory.AdminUsername, forwarded.RequestedBy!.Username);
         Assert.Equal("已保存版本", ProfileDocument.Parse(forwarded.ProfileApply!.ProfileJson)["Name"]!.GetValue<string>());
         ProfileTestData.AssertNativeIdsAndAttachments(ProfileDocument.Parse(forwarded.ProfileApply.ProfileJson));
@@ -447,11 +447,11 @@ public sealed class ProfilePagesTests
             Capabilities = RemoteCiCapabilities.Current.Where(x => x != RemoteCiCapabilities.ProfileRead).ToList(),
         }));
         var peers = factory.Services.GetRequiredService<PeerRegistry>();
-        await WaitUntilAsync(() => peers.HasPluginFor(Classroom.DefaultId));
+        await WaitUntilAsync(() => peers.HasPluginFor(TestWebApplicationFactory.DefaultClassId));
         using var browser = CreateBrowser(factory);
         await LoginWebUiAsync(browser);
         var html = await browser.GetStringAsync("/Profiles");
-        var request = new { classIds = new[] { Classroom.DefaultId } };
+        var request = new { classIds = new[] { TestWebApplicationFactory.DefaultClassId } };
 
         var old = (await (await PostJsonAsync(browser, "/Profiles?handler=Collect", html, request)).Content.ReadFromJsonAsync<JsonObject>())!;
         var denied = Assert.Single(old["results"]!.AsArray())!;
@@ -459,12 +459,12 @@ public sealed class ProfilePagesTests
         Assert.Contains("升级", denied["message"]!.GetValue<string>());
 
         await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
-        await WaitUntilAsync(() => peers.PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.ProfileRead));
+        await WaitUntilAsync(() => peers.PrimaryPluginSupports(TestWebApplicationFactory.DefaultClassId, RemoteCiCapabilities.ProfileRead));
         var pending = PostJsonAsync(browser, "/Profiles?handler=Collect", html, request);
         var envelope = await ReceiveAsync(plugin, Protocol.MessageTypeCommand);
         var forwarded = DeserializePayload<CommandMessage>(envelope);
         Assert.Equal(CommandKind.ReadProfile, forwarded.Command);
-        Assert.Equal(Classroom.DefaultId, forwarded.ClassId);
+        Assert.Equal(TestWebApplicationFactory.DefaultClassId, forwarded.ClassId);
         Assert.Equal(TestWebApplicationFactory.AdminUsername, forwarded.RequestedBy!.Username);
         // 设备课表的课程数多于上课时段：收集时按宿主规则截断，结果可以直接保存。
         var device = ProfileDocument.Parse(ProfileTestData.Json("设备档案"));
@@ -497,7 +497,7 @@ public sealed class ProfilePagesTests
         using (var setup = factory.Services.CreateScope())
             profile = (await setup.ServiceProvider.GetRequiredService<ProfileLibraryService>().SaveAsync(
                 await ProfileTestData.AdminAsync(setup.ServiceProvider),
-                [ProfileTestData.New("带临时层", Classroom.DefaultId, json: ProfileTestData.WithTempLayer(ProfileTestData.Json(), "2099-01-05"))]))[0];
+                [ProfileTestData.New("带临时层", TestWebApplicationFactory.DefaultClassId, json: ProfileTestData.WithTempLayer(ProfileTestData.Json(), "2099-01-05"))]))[0];
         using var plugin = await ConnectAsync(factory, await factory.GetPluginTokenAsync());
         await ReceiveAsync(plugin, Protocol.MessageTypeSchedulePull);
         await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities
@@ -505,21 +505,21 @@ public sealed class ProfilePagesTests
             Capabilities = RemoteCiCapabilities.Current.Where(x => x != RemoteCiCapabilities.ProfileTempLayer).ToList(),
         }));
         var peers = factory.Services.GetRequiredService<PeerRegistry>();
-        await WaitUntilAsync(() => peers.PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.ProfileApply));
+        await WaitUntilAsync(() => peers.PrimaryPluginSupports(TestWebApplicationFactory.DefaultClassId, RemoteCiCapabilities.ProfileApply));
         using var browser = CreateBrowser(factory);
         await LoginWebUiAsync(browser);
         var html = await browser.GetStringAsync("/Profiles");
         var request = new ProfileDispatchRequest
         {
             Items = [new ProfileIdRequest { Id = profile.Id, Revision = profile.Revision }],
-            ClassIds = [Classroom.DefaultId], Mode = ProfileApplyMode.TempLayers, ReplaceExistingTempLayers = true,
+            ClassIds = [TestWebApplicationFactory.DefaultClassId], Mode = ProfileApplyMode.TempLayers, ReplaceExistingTempLayers = true,
         };
 
         var old = (await (await PostJsonAsync(browser, "/Profiles?handler=Apply", html, request)).Content.ReadFromJsonAsync<JsonObject>())!;
         Assert.Contains("临时层", Assert.Single(old["results"]!.AsArray())!["message"]!.GetValue<string>());
 
         await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
-        await WaitUntilAsync(() => peers.PrimaryPluginSupports(Classroom.DefaultId, RemoteCiCapabilities.ProfileTempLayer));
+        await WaitUntilAsync(() => peers.PrimaryPluginSupports(TestWebApplicationFactory.DefaultClassId, RemoteCiCapabilities.ProfileTempLayer));
         var pending = PostJsonAsync(browser, "/Profiles?handler=Apply", html, request);
         var envelope = await ReceiveAsync(plugin, Protocol.MessageTypeCommand);
         var forwarded = DeserializePayload<CommandMessage>(envelope).ProfileApply!;

@@ -42,6 +42,7 @@ public sealed class ExtensionPolicyServiceTests
 
         var withoutExtensionPermission = await identities.CreateUserAsync(new CreateUserRequest
         {
+            ClassId = TestWebApplicationFactory.DefaultClassId,
             Username = "extension.notification.only",
             DisplayName = "只有通知权限",
             Password = "Extension-Policy-Password-2026",
@@ -49,6 +50,7 @@ public sealed class ExtensionPolicyServiceTests
         });
         var extensionUser = await identities.CreateUserAsync(new CreateUserRequest
         {
+            ClassId = TestWebApplicationFactory.DefaultClassId,
             Username = "extension.allowed",
             DisplayName = "扩展账号",
             Password = "Extension-Allowed-Password-2026",
@@ -73,7 +75,7 @@ public sealed class ExtensionPolicyServiceTests
         Assert.Contains(definition.Id, profile!.AllowedExtensionIds!);
         Assert.DoesNotContain(definition.Id, profile.VisibleExtensionIds!);
 
-        var mirrored = (await identities.CreateSyncAsync(Classroom.DefaultId)).Accounts.Single(x => x.Id == extensionUser.Id);
+        var mirrored = (await identities.CreateSyncAsync(TestWebApplicationFactory.DefaultClassId)).Accounts.Single(x => x.Id == extensionUser.Id);
         Assert.Contains(definition.Id, mirrored.AllowedExtensionIds!);
         Assert.DoesNotContain(definition.Id, mirrored.VisibleExtensionIds!);
     }

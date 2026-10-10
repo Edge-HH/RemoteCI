@@ -16,6 +16,7 @@ public sealed class ClassSelectModel(UserManager<AppUser> users) : WebPageModel(
     public async Task<IActionResult> OnGetAsync()
     {
         if (await RequireAsync() is { } denied) return denied;
+        if (CurrentUser.Role == UserRole.Admin && AccessibleClasses.Count == 0) return RedirectToPage("/Setup");
         // 单班级（或无班级）账号没有选择的意义，直接走默认落地。
         if (AccessibleClasses.Count <= 1)
             return RedirectToPage(Permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account");

@@ -72,6 +72,7 @@ public sealed class ProfileApiTests
         var admin = (await factory.LoginAsync()).AccessToken;
         (await client.SendAsync(Bearer(HttpMethod.Post, "/api/users", admin, new CreateUserRequest
         {
+            ClassId = TestWebApplicationFactory.DefaultClassId,
             Username = "profile.reader", DisplayName = "普通用户", Password = ProfileTestData.Password,
         }))).EnsureSuccessStatusCode();
         var reader = (await factory.LoginAsync("profile.reader", ProfileTestData.Password)).AccessToken;
@@ -82,7 +83,7 @@ public sealed class ProfileApiTests
         Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(Bearer(HttpMethod.Put, "/api/profiles", reader,
             new { items = new[] { new { name = "模板", profileJson = ProfileTestData.Json() } } }))).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(Bearer(HttpMethod.Get,
-            $"/api/profiles?classId={Classroom.DefaultId}", reader))).StatusCode);
+            $"/api/profiles?classId={TestWebApplicationFactory.DefaultClassId}", reader))).StatusCode);
     }
 
     [Fact]
@@ -92,20 +93,20 @@ public sealed class ProfileApiTests
         var client = factory.CreateClient();
         var admin = (await factory.LoginAsync()).AccessToken;
         var saved = await client.SendAsync(Bearer(HttpMethod.Put, "/api/profiles", admin,
-            new { items = new[] { new { name = "本班档案", classId = Classroom.DefaultId, profileJson = ProfileTestData.Json() } } }));
+            new { items = new[] { new { name = "本班档案", classId = TestWebApplicationFactory.DefaultClassId, profileJson = ProfileTestData.Json() } } }));
         saved.EnsureSuccessStatusCode();
         var id = (await saved.Content.ReadFromJsonAsync<JsonElement>())[0].GetProperty("id").GetGuid();
 
         var noMode = await client.SendAsync(Bearer(HttpMethod.Post, "/api/profiles/apply", admin, new
         {
-            items = new[] { new { id, revision = 1 } }, sections = 7, classIds = new[] { Classroom.DefaultId },
+            items = new[] { new { id, revision = 1 } }, sections = 7, classIds = new[] { TestWebApplicationFactory.DefaultClassId },
         }));
         Assert.Equal(HttpStatusCode.BadRequest, noMode.StatusCode);
 
         var applied = await client.SendAsync(Bearer(HttpMethod.Post, "/api/profiles/apply", admin, new
         {
             items = new[] { new { id, revision = 1 } }, mode = (int)ProfileApplyMode.MergeCurrent, sections = 7,
-            classIds = new[] { Classroom.DefaultId },
+            classIds = new[] { TestWebApplicationFactory.DefaultClassId },
         }));
         applied.EnsureSuccessStatusCode();
         var result = await applied.Content.ReadFromJsonAsync<JsonElement>();
@@ -114,21 +115,21 @@ public sealed class ProfileApiTests
 
         // 通用命令接口仍然不能绕过档案库直接下发。
         var command = await client.SendAsync(Bearer(HttpMethod.Post, "/api/commands", admin,
-            new CommandMessage { Command = CommandKind.ApplyProfile, ClassId = Classroom.DefaultId }));
+            new CommandMessage { Command = CommandKind.ApplyProfile, ClassId = TestWebApplicationFactory.DefaultClassId }));
         Assert.Equal(HttpStatusCode.Forbidden, command.StatusCode);
 
         // 扩展设置同属仅服务端命令：有班级访问权时指出专用接口（400），与此前行为一致。
         var extension = await client.SendAsync(Bearer(HttpMethod.Post, "/api/commands", admin,
-            new CommandMessage { Command = CommandKind.ApplyExtensionSettings, ClassId = Classroom.DefaultId }));
+            new CommandMessage { Command = CommandKind.ApplyExtensionSettings, ClassId = TestWebApplicationFactory.DefaultClassId }));
         Assert.Equal(HttpStatusCode.BadRequest, extension.StatusCode);
         var read = await client.SendAsync(Bearer(HttpMethod.Post, "/api/commands", admin,
-            new CommandMessage { Command = CommandKind.ReadProfile, ClassId = Classroom.DefaultId }));
+            new CommandMessage { Command = CommandKind.ReadProfile, ClassId = TestWebApplicationFactory.DefaultClassId }));
         Assert.Equal(HttpStatusCode.Forbidden, read.StatusCode);
 
         // 临时层下发不要求类别，但档案中必须有临时层。
         var noLayers = await client.SendAsync(Bearer(HttpMethod.Post, "/api/profiles/apply", admin, new
         {
-            items = new[] { new { id, revision = 1 } }, mode = (int)ProfileApplyMode.TempLayers, classIds = new[] { Classroom.DefaultId },
+            items = new[] { new { id, revision = 1 } }, mode = (int)ProfileApplyMode.TempLayers, classIds = new[] { TestWebApplicationFactory.DefaultClassId },
         }));
         Assert.Equal(HttpStatusCode.BadRequest, noLayers.StatusCode);
     }
@@ -141,12 +142,12 @@ public sealed class ProfileApiTests
         var admin = (await factory.LoginAsync()).AccessToken;
 
         var collected = await client.SendAsync(Bearer(HttpMethod.Post, "/api/profiles/collect", admin,
-            new { classIds = new[] { Classroom.DefaultId } }));
+            new { classIds = new[] { TestWebApplicationFactory.DefaultClassId } }));
         collected.EnsureSuccessStatusCode();
         var body = await collected.Content.ReadFromJsonAsync<JsonElement>();
         Assert.False(body.GetProperty("success").GetBoolean());
         var result = body.GetProperty("results")[0];
-        Assert.Equal(Classroom.DefaultId, result.GetProperty("classId").GetGuid());
+        Assert.Equal(TestWebApplicationFactory.DefaultClassId, result.GetProperty("classId").GetGuid());
         Assert.Contains("未在线", result.GetProperty("message").GetString());
         Assert.Equal(JsonValueKind.Null, result.GetProperty("profileJson").ValueKind);
 
@@ -155,10 +156,11 @@ public sealed class ProfileApiTests
 
         (await client.SendAsync(Bearer(HttpMethod.Post, "/api/users", admin, new CreateUserRequest
         {
+            ClassId = TestWebApplicationFactory.DefaultClassId,
             Username = "profile.collector", DisplayName = "普通用户", Password = ProfileTestData.Password,
         }))).EnsureSuccessStatusCode();
         var reader = (await factory.LoginAsync("profile.collector", ProfileTestData.Password)).AccessToken;
         Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(Bearer(HttpMethod.Post, "/api/profiles/collect", reader,
-            new { classIds = new[] { Classroom.DefaultId } }))).StatusCode);
+            new { classIds = new[] { TestWebApplicationFactory.DefaultClassId } }))).StatusCode);
     }
 }

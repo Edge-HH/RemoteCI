@@ -80,6 +80,7 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AllowAnonymousToPage("/Login");
     options.Conventions.AllowAnonymousToPage("/Visitor");
     options.Conventions.AllowAnonymousToPage("/SetupPassword");
+    options.Conventions.AllowAnonymousToPage("/Setup");
     options.Conventions.AllowAnonymousToPage("/WebLogin");
     options.Conventions.AllowAnonymousToPage("/StatusCode");
 });
@@ -217,6 +218,30 @@ app.Map("/ws", async context =>
         context.RequestServices.GetRequiredService<TeacherBindingService>(),
         logger);
 });
+
+// 首次部署：还没有任何账号时由 WebUI 初始化向导（或此接口）创建系统管理员，随后手动新建第一个班级。
+app.MapGet("/api/setup", async (IdentityCoordinator identities, CancellationToken ct) =>
+    Results.Ok(await identities.GetSetupStatusAsync(ct)));
+
+app.MapPost("/api/setup/system-admin", async (
+    SetupSystemAdminRequest request, IdentityCoordinator identities, AuthorizationSyncService authorizationSync, CancellationToken ct) =>
+{
+    if (MissingFields(request.Username, request.Password) is { } bad) return bad;
+    try
+    {
+        await identities.CreateSystemOwnerAsync(request, ct);
+        // 创建后直接签发设备会话，脚本可以接着调用 POST /api/classes 新建第一个班级。
+        var response = await identities.LoginAsync(new LoginRequest
+        {
+            Username = request.Username.Trim(),
+            Password = request.Password,
+            DeviceName = string.IsNullOrWhiteSpace(request.DeviceName) ? "初始化向导" : request.DeviceName,
+        }, ct);
+        await authorizationSync.SyncAsync(ct);
+        return Results.Ok(response);
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+}).RequireRateLimiting("auth");
 
 app.MapPost("/api/plugin/pair", async (PairRequest request, IdentityCoordinator identities, CancellationToken ct) =>
 {
@@ -561,6 +586,7 @@ usersApi.MapPut("/{id:guid}", async (
         return Forbidden();
     try
     {
+        await identities.EnsureCanManageAsync(principal.User.Id, id, ct);
         var updated = await identities.UpdateUserAsync(id, request, ct);
         await authorizationSync.SyncAsync(ct);
         return Results.Ok(updated);
@@ -580,6 +606,7 @@ usersApi.MapPost("/{id:guid}/password", async (
         return Forbidden();
     try
     {
+        await identities.EnsureCanManageAsync(principal.User.Id, id, ct);
         await identities.ResetPasswordAsync(id, request.Password, ct);
         await authorizationSync.SyncAsync(ct);
         return Results.NoContent();
@@ -614,6 +641,7 @@ usersApi.MapDelete("/{id:guid}", async (
         return Forbidden();
     try
     {
+        await identities.EnsureCanManageAsync(principal.User.Id, id, ct);
         await identities.DeleteUserAsync(id, ct);
         await authorizationSync.SyncAsync(ct);
         return Results.NoContent();
@@ -627,14 +655,19 @@ app.MapPost("/api/plugin/pairing-code", async (
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
     if (!HasPermission(principal, UserPermissions.ManageUsers)) return Forbidden();
-    var classId = body?.ClassId ?? Classroom.DefaultId;
-    // unified=统一连接码；persistent=班级固定码；否则为绑定班级的一次性码。
-    var pairCode = body?.Unified == true
-        ? await identities.CreateSharedPluginPairingCodeAsync(body?.RequestedCode, ct)
-        : body?.Persistent == true
-            ? await identities.SetClassPairingCodeAsync(classId, body?.RequestedCode, ct)
-            : await identities.CreatePluginPairingCodeAsync(classId, ct);
-    return Results.Ok(new { pairCode });
+    // unified=统一连接码（设备进入未分配列表）；persistent=班级固定码；否则为绑定班级的一次性码。
+    if (body?.Unified != true && body?.ClassId is null)
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "请指定配对码要绑定的班级 classId，或使用 unified 统一连接码"));
+    try
+    {
+        var pairCode = body?.Unified == true
+            ? await identities.CreateSharedPluginPairingCodeAsync(body?.RequestedCode, ct)
+            : body!.Persistent
+                ? await identities.SetClassPairingCodeAsync(body.ClassId!.Value, body.RequestedCode, ct)
+                : await identities.CreatePluginPairingCodeAsync(body.ClassId!.Value, ct);
+        return Results.Ok(new { pairCode });
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
 });
 
 // 班级分组：管理员组织班级（如按年级），批量操作与广播通知可按组展开。
@@ -1275,7 +1308,7 @@ static bool HasPersonalSchedule(AuthPrincipal principal) =>
     principal.User?.RoleKind is { } kind && AccountRole.HasPersonalSchedule((AccountRoleKind)kind);
 
 /// <summary>
-/// 解析请求的目标班级：显式 classId 必须可访问（否则 null→403），缺省落到默认班级或第一个成员班级。
+/// 解析请求的目标班级：显式 classId 必须可访问（否则 null→403），缺省落到第一个可访问班级。
 /// </summary>
 static async Task<Guid?> ResolveClassAsync(
     AuthPrincipal principal, Guid? requested, ClassAccessService access, CancellationToken ct)
