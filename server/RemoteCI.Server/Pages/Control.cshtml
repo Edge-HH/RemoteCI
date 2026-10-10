@@ -108,52 +108,6 @@
 }
 
 <div class="control-grid">
-    @if (Model.CanSendNotifications && Model.ShowBroadcast)
-    {
-        <section class="panel control-card control-card-full" id="broadcast-notification">
-            <div class="panel-heading">
-                <div><h2>广播通知（集控）</h2><p class="muted">向多个班级同时发送通知。</p></div>
-            </div>
-            <form method="post" asp-page-handler="Broadcast" class="stack" data-rolling-scope>
-                <label>标题<input asp-for="BroadcastInput.Title" maxlength="60" placeholder="RemoteCI 通知" /></label>
-                <label>正文<textarea asp-for="BroadcastInput.Message" maxlength="500" rows="3" data-rolling-message></textarea></label>
-                <div class="two-column">
-                    <label>持续时间（秒）<input asp-for="BroadcastInput.DurationSeconds" type="number" min="1" max="3600" value="5" /></label>
-                    <label>重复次数<input asp-for="BroadcastInput.RepeatCounts" type="number" min="1" max="10" value="1" /></label>
-                </div>
-                <fieldset class="batch-check-group">
-                    <legend>提醒选项</legend>
-                    <label class="check"><input type="checkbox" asp-for="BroadcastInput.IsSpeechEnabled" /> 启用语音</label>
-                    <label class="check"><input type="checkbox" asp-for="BroadcastInput.IsNotificationSoundEnabled" /> 启用提醒音效</label>
-                    <label class="check"><input type="checkbox" asp-for="BroadcastInput.IsNotificationEffectEnabled" /> 启用提醒特效</label>
-                    <label class="check"><input type="checkbox" asp-for="BroadcastInput.IsNotificationTopmostEnabled" /> 提醒时置顶主界面</label>
-                    <label class="check"><input type="checkbox" asp-for="BroadcastInput.IsRollingEnabled" data-rolling-toggle /> 正文滚动显示</label>
-                </fieldset>
-                <p class="muted" data-rolling-hint="@NotificationRequest.RollingSuggestionThreshold" hidden>正文超过 @NotificationRequest.RollingSuggestionThreshold 字，建议开启“正文滚动显示”，否则可能显示不全。</p>
-                <p class="muted">开启滚动时正文横向滚动指定遍数，总显示时长为“持续时间 × 重复次数”；关闭滚动时整条提醒依次显示指定次数。</p>
-                <div class="broadcast-targets" aria-label="选择要通知的班级">
-                    @foreach (var target in Model.BroadcastTargets)
-                    {
-                        <label class="check">
-                            <input type="checkbox" name="BroadcastClassIds" value="@target.Id" />
-                            @target.Name
-                            @if (target.GroupNames is { Count: > 0 })
-                            {
-                                foreach (var groupName in target.GroupNames)
-                                {
-                                    <span class="group-name">@groupName</span>
-                                }
-                            }
-                        </label>
-                    }
-                </div>
-                <div>
-                    <button type="submit">广播到勾选的 @Model.BroadcastTargets.Count 个班级</button>
-                </div>
-            </form>
-        </section>
-    }
-
     @if (Model.CanUseExtensions)
     {
         <section class="panel control-card control-card-full" id="extensions">
