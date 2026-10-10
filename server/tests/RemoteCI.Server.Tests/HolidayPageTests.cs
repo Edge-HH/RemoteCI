@@ -62,6 +62,30 @@ public sealed class HolidayPageTests
         Assert.Contains("调休 · 国庆节", html);
     }
 
+    [Fact]
+    public async Task ScheduleTableOrdersMondayFirstAndMarksToday()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        _ = await factory.LoginAsync();
+        var today = ClassClock.Today(factory.Services.GetRequiredService<IStateStore>(), Classroom.DefaultId);
+        using (var scope = factory.Services.CreateScope())
+            scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(Classroom.DefaultId, new ScheduleBundle
+            {
+                FromDate = today.ToString("yyyy-MM-dd"),
+                Days = Enumerable.Range(0, 7)
+                    .Select(offset => new ScheduleDay { Date = today.AddDays(offset).ToString("yyyy-MM-dd"), Enabled = true })
+                    .ToList(),
+            });
+        using var browser = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = true });
+        await LoginAsync(browser);
+
+        var html = WebUtility.HtmlDecode(await browser.GetStringAsync("/Schedule"));
+
+        var headings = Regex.Matches(html, "<th scope=\"col\"[^>]*><strong>(周.)").Select(x => x.Groups[1].Value).ToList();
+        Assert.Equal(["周一", "周二", "周三", "周四", "周五", "周六", "周日"], headings);
+        Assert.Matches($"<th scope=\"col\" class=\"schedule-today\"[^>]*><strong>周.（今天）</strong><small>{today:yyyy-MM-dd}</small>", html);
+    }
+
     private static async Task LoginAsync(HttpClient browser)
     {
         var html = await browser.GetStringAsync("/Login");

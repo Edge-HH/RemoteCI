@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -44,6 +45,7 @@ public sealed class ScheduleModel(
     {
         if (await RequireAsync() is { } denied) return denied;
         Bundle = state.GetLatestSchedule(CurrentClassId);
+        ViewData["ScheduleToday"] = ClassClock.Today(state, CurrentClassId).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         PullInterval = await pullSettings.GetIntervalAsync();
         return Page();
     }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -50,6 +51,7 @@ public sealed class VisitorModel(
             ? id
             : VisitorClasses[0].Id;
         Bundle = state.GetLatestSchedule(CurrentClassId);
+        ViewData["ScheduleToday"] = ClassClock.Today(state, CurrentClassId).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         return Page();
     }
 

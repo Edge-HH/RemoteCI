@@ -447,6 +447,7 @@ textarea { resize: vertical; }
 .schedule-table thead small { color: var(--muted); font-size: 11px; font-weight: 500; }
 .schedule-period-heading, .schedule-period-cell { width: 90px; white-space: nowrap; }
 .schedule-period-cell { background: var(--accent-faint); color: var(--accent-strong); text-align: center !important; }
+.schedule-table .schedule-today { background: var(--success-soft); }
 .schedule-course-name, .schedule-course-time { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .schedule-course-name { color: var(--text); font-weight: 750; }
 .schedule-course-teacher { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
