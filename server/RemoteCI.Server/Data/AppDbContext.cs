@@ -17,6 +17,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<AccountRole> AccountRoles => Set<AccountRole>();
     public DbSet<BackupConfiguration> BackupConfigurations => Set<BackupConfiguration>();
     public DbSet<ExtensionPolicy> ExtensionPolicies => Set<ExtensionPolicy>();
+    public DbSet<ExtensionGroupPolicy> ExtensionGroupPolicies => Set<ExtensionGroupPolicy>();
     public DbSet<UserExtensionPreference> UserExtensionPreferences => Set<UserExtensionPreference>();
     public DbSet<PendingExtensionSetting> PendingExtensionSettings => Set<PendingExtensionSetting>();
     public DbSet<Classroom> Classrooms => Set<Classroom>();
@@ -80,6 +81,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             entity.HasKey(x => x.ExtensionId);
             entity.Property(x => x.ExtensionId).HasMaxLength(ExtensionId.MaxLength);
+        });
+        builder.Entity<ExtensionGroupPolicy>(entity =>
+        {
+            entity.HasKey(x => x.GroupId);
+            entity.Property(x => x.GroupId).HasMaxLength(ExtensionId.MaxLength);
         });
         builder.Entity<PendingExtensionSetting>(entity =>
         {

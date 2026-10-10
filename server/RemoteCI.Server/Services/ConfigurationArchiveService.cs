@@ -42,6 +42,8 @@ public sealed class ConfigurationArchiveService(
             x.Id, x.UserId, x.Name, x.KeyHash, x.Prefix, x.CreatedAt, x.LastUsedAt, x.ExpiresAt, x.RevokedAt)).ToListAsync(ct);
         var extensionPolicies = await db.ExtensionPolicies.AsNoTracking()
             .Select(x => new ExtensionPolicySnapshot(x.ExtensionId, x.Enabled, x.AllowNonAdmin, x.UpdatedAt)).ToListAsync(ct);
+        var extensionGroupPolicies = await db.ExtensionGroupPolicies.AsNoTracking()
+            .Select(x => new ExtensionGroupPolicySnapshot(x.GroupId, x.AllowClassAdmin, x.UpdatedAt)).ToListAsync(ct);
         var extensionPreferences = await db.UserExtensionPreferences.AsNoTracking()
             .Select(x => new ExtensionPreferenceSnapshot(x.UserId, x.ExtensionId, x.ShowOnWatch, x.UpdatedAt)).ToListAsync(ct);
         var metadata = await db.SystemMetadata.AsNoTracking().SingleAsync(x => x.Id == 1, ct);
@@ -63,12 +65,12 @@ public sealed class ConfigurationArchiveService(
                 ClassSelfService: new ClassSelfServicePolicy(
                     metadata.ClassAdminCanRename,
                     metadata.ClassAdminCanChangeAvatar,
-                    metadata.ClassAdminCanPullSchedule,
-                    metadata.ClassAdminCanEditExtensionSettings)),
+                    metadata.ClassAdminCanPullSchedule)),
             new BackupSettingsSnapshot(backup.Enabled, backup.Cadence, backup.TimeOfDay, backup.DayOfWeek, backup.MaxBackups),
             state.GetLatestSchedule(Classroom.DefaultId), extensionPolicies, extensionPreferences,
             classrooms, memberships, groups, apiKeys, profiles,
-            new HolidaySettingsSnapshot(metadata.HolidayCalendarEnabled, metadata.HolidaySourceUrlTemplate, holidayOverrides));
+            new HolidaySettingsSnapshot(metadata.HolidayCalendarEnabled, metadata.HolidaySourceUrlTemplate, holidayOverrides),
+            extensionGroupPolicies);
     }
 
     public async Task<BackupFileInfo> CreateLocalBackupAsync(string source, CancellationToken ct = default)
@@ -129,6 +131,7 @@ public sealed class ConfigurationArchiveService(
         await db.PluginPairingCodes.ExecuteDeleteAsync(ct);
         await db.UserExtensionPreferences.ExecuteDeleteAsync(ct);
         await db.ExtensionPolicies.ExecuteDeleteAsync(ct);
+        await db.ExtensionGroupPolicies.ExecuteDeleteAsync(ct);
         await db.Users.ExecuteDeleteAsync(ct);
         await db.AccountRoles.ExecuteDeleteAsync(ct);
         await db.PluginCredentials.ExecuteDeleteAsync(ct);
@@ -179,6 +182,11 @@ public sealed class ConfigurationArchiveService(
             Assigned=x.Assigned ?? true, ClassNameRemark=x.ClassNameRemark,
         }));
         db.ExtensionPolicies.AddRange((snapshot.ExtensionPolicies ?? []).Select(x => new ExtensionPolicy { ExtensionId=x.ExtensionId, Enabled=x.Enabled, AllowNonAdmin=x.AllowNonAdmin, UpdatedAt=x.UpdatedAt }));
+        // 旧配置包没有逐插件的班级自治开关，恢复后全部插件回到默认的“仅系统管理员管理”。
+        db.ExtensionGroupPolicies.AddRange((snapshot.ExtensionGroupPolicies ?? [])
+            .Where(x => ExtensionGroupPolicyService.IsValidGroupId(x.GroupId))
+            .DistinctBy(x => x.GroupId, StringComparer.Ordinal)
+            .Select(x => new ExtensionGroupPolicy { GroupId = x.GroupId, AllowClassAdmin = x.AllowClassAdmin, UpdatedAt = x.UpdatedAt }));
         db.UserExtensionPreferences.AddRange((snapshot.ExtensionPreferences ?? []).Select(x => new UserExtensionPreference { UserId=x.UserId, ExtensionId=x.ExtensionId, ShowOnWatch=x.ShowOnWatch, UpdatedAt=x.UpdatedAt }));
         var metadata = await db.SystemMetadata.SingleAsync(x => x.Id == 1, ct);
         metadata.AccountVersion = snapshot.Metadata.AccountVersion + 1;
@@ -198,7 +206,6 @@ public sealed class ConfigurationArchiveService(
         metadata.ClassAdminCanRename = selfService.CanRename;
         metadata.ClassAdminCanChangeAvatar = selfService.CanChangeAvatar;
         metadata.ClassAdminCanPullSchedule = selfService.CanPullSchedule;
-        metadata.ClassAdminCanEditExtensionSettings = selfService.CanEditExtensionSettings;
         // 旧配置包没有调休字段时保留当前调休设置，节假日数据快照不随配置包迁移，恢复后会重新拉取。
         if (snapshot.Holidays is { } holidays)
         {
@@ -280,7 +287,7 @@ public sealed class ConfigurationArchiveService(
 }
 
 public sealed record BackupFileInfo(string Name, DateTimeOffset CreatedAt, long Size, string Source);
-public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null, List<ClassroomSnapshot>? Classrooms = null, List<MembershipSnapshot>? Memberships = null, List<GroupSnapshot>? ClassGroups = null, List<ApiKeySnapshot>? ApiKeys = null, List<StoredProfileSnapshot>? Profiles = null, HolidaySettingsSnapshot? Holidays = null);
+public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null, List<ClassroomSnapshot>? Classrooms = null, List<MembershipSnapshot>? Memberships = null, List<GroupSnapshot>? ClassGroups = null, List<ApiKeySnapshot>? ApiKeys = null, List<StoredProfileSnapshot>? Profiles = null, HolidaySettingsSnapshot? Holidays = null, List<ExtensionGroupPolicySnapshot>? ExtensionGroupPolicies = null);
 public sealed record HolidaySettingsSnapshot(bool Enabled, string? SourceUrlTemplate, List<HolidayOverrideSnapshot> Overrides);
 public sealed record HolidayOverrideSnapshot(DateOnly Date, int? FollowWeekday);
 public sealed record StoredProfileSnapshot(Guid Id, string Name, string ProfileJson, long Revision, Guid? ClassId, Guid? SourceTemplateId, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
@@ -294,6 +301,7 @@ public sealed record PluginSnapshot(
     Guid? ClassroomId = null, bool? Assigned = null, string? ClassNameRemark = null);
 public sealed record ApiKeySnapshot(Guid Id,Guid UserId,string Name,string KeyHash,string Prefix,DateTimeOffset CreatedAt,DateTimeOffset? LastUsedAt,DateTimeOffset? ExpiresAt,DateTimeOffset? RevokedAt);
 public sealed record ExtensionPolicySnapshot(string ExtensionId,bool Enabled,bool AllowNonAdmin,DateTimeOffset UpdatedAt);
+public sealed record ExtensionGroupPolicySnapshot(string GroupId, bool AllowClassAdmin, DateTimeOffset UpdatedAt);
 public sealed record ExtensionPreferenceSnapshot(Guid UserId,string ExtensionId,bool ShowOnWatch,DateTimeOffset UpdatedAt);
 public sealed record MetadataSnapshot(
     long AccountVersion,

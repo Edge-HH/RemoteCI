@@ -128,7 +128,7 @@ public sealed class ExtensionSettingsReplayService(
         var groups = services.GetRequiredService<ExtensionGroupService>();
         var profile = await identities.GetProfileAsync(row.RequestedByUserId);
         // 下发者已被删除、禁用，或此后失去了修改该班扩展设置的权限：放弃补发。
-        if (profile is null || !await groups.CanEditSettingsAsync(profile, row.ClassroomId))
+        if (profile is null || !await groups.CanEditSettingsAsync(profile, row.ClassroomId, row.GroupId))
         {
             logger.LogInformation("放弃补发扩展设置 {GroupId}（班级 {ClassId}）：下发者已无权限", row.GroupId, row.ClassroomId);
             await pending.RemoveAsync(row);

@@ -104,7 +104,6 @@ public sealed class ClassesModel(
         public bool CanRename { get; set; }
         public bool CanChangeAvatar { get; set; }
         public bool CanPullSchedule { get; set; }
-        public bool CanEditExtensionSettings { get; set; }
     }
 
     /// <summary>是否已设置统一连接码；不展示明文。</summary>
@@ -264,8 +263,7 @@ public sealed class ClassesModel(
         await selfService.SetAsync(new ClassSelfServicePolicy(
             SelfServiceOptions.CanRename,
             SelfServiceOptions.CanChangeAvatar,
-            SelfServiceOptions.CanPullSchedule,
-            SelfServiceOptions.CanEditExtensionSettings), ct);
+            SelfServiceOptions.CanPullSchedule), ct);
         TempData["Message"] = "班主任权限已保存，对全部班级生效。";
         return RedirectToClasses();
     }

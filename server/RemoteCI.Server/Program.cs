@@ -104,6 +104,7 @@ builder.Services.AddScoped<UserImportService>();
 builder.Services.AddScoped<MemberExcelService>();
 builder.Services.AddScoped<ClassExcelService>();
 builder.Services.AddScoped<ClassSelfServiceSettings>();
+builder.Services.AddScoped<ExtensionGroupPolicyService>();
 builder.Services.AddScoped<ExtensionGroupService>();
 builder.Services.AddScoped<PendingExtensionSettingsService>();
 builder.Services.AddSingleton<ExtensionSettingsReplayService>();
@@ -1031,7 +1032,8 @@ app.MapPut("/api/settings/notifications", async (SettingsSync body, HttpContext 
     await peers.SendSettingsToWatchesAsync(updated, ct);
     return Results.Ok(updated);
 });
-// 班级自治策略：系统管理员统一决定班主任能否自行改班名、改头像、拉取课表与修改扩展设置；任何登录账号都可读取。
+// 班级自治策略：系统管理员统一决定班主任能否自行改班名、改头像与拉取课表；任何登录账号都可读取。
+// 扩展插件设置按插件逐个开放，见 PUT /api/extension-groups/{groupId}/class-admin-access。
 app.MapGet("/api/settings/class-self-service", async (HttpContext ctx, IdentityCoordinator identities, ClassSelfServiceSettings selfService, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
@@ -1109,10 +1111,10 @@ app.MapPut("/api/extensions/{id}", async (string id, ExtensionPolicyBody body, H
     }
     catch (Exception ex) { return Results.Json(Error(ApiErrorCodes.InvalidRequest, ex.Message), statusCode: 400); }
 });
-// 扩展分组与设置：分组定义与当前值来自插件上报；只有可修改设置的账号才能看到当前值。
+// 扩展分组与设置：分组定义与当前值来自插件上报；只有可修改该插件设置的账号才能看到当前值。
 app.MapGet("/api/extension-groups", async (
     HttpContext ctx, Guid? classId, IdentityCoordinator identities, ClassAccessService access,
-    ExtensionGroupService groups, CancellationToken ct) =>
+    ExtensionGroupService groups, ExtensionGroupPolicyService groupPolicies, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
@@ -1120,20 +1122,40 @@ app.MapGet("/api/extension-groups", async (
     var classPermissions = await access.GetEffectivePermissionsAsync(
         principal.User.Id, principal.User.Role, target, principal.User.GrantedPermissions, ct);
     if (!classPermissions.HasFlag(UserPermissions.RunExtensions)) return Forbidden();
-    var canEdit = await groups.CanEditSettingsAsync(principal.User, target, ct);
+    var editable = await groups.ListClassAdminEditableAsync(
+        principal.User.Id, principal.User.Role, principal.User.GrantedPermissions, target, ct);
+    var allowed = await groupPolicies.ListClassAdminAllowedAsync(ct);
     return Results.Ok(groups.BuildForClass(target)
         .Where(group => !group.IsUngrouped)
-        .Select(group => new
+        .Select(group =>
         {
-            id = group.Id,
-            displayName = group.DisplayName,
-            description = group.Description,
-            icon = group.Icon,
-            settings = group.Settings,
-            values = canEdit ? group.Values : null,
-            canEditSettings = canEdit && group.HasSettings,
-            classId = target,
+            var canEdit = editable is null || editable.Contains(group.Id);
+            return new
+            {
+                id = group.Id,
+                displayName = group.DisplayName,
+                description = group.Description,
+                icon = group.Icon,
+                settings = group.Settings,
+                values = canEdit ? group.Values : null,
+                canEditSettings = canEdit && group.HasSettings,
+                allowClassAdmin = allowed.Contains(group.Id),
+                classId = target,
+            };
         }));
+});
+// 逐插件的班级自治开关：仅系统管理员可改；开放后本班班主任可在侧栏“扩展插件”中自行修改本班设置。
+app.MapPut("/api/extension-groups/{groupId}/class-admin-access", async (
+    string groupId, ExtensionGroupAccessBody body, HttpContext ctx, IdentityCoordinator identities,
+    ExtensionGroupPolicyService groupPolicies, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!ExtensionGroupPolicyService.IsValidGroupId(groupId))
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "扩展插件 Id 无效"));
+    await groupPolicies.SetClassAdminAllowedAsync(groupId, body.AllowClassAdmin, ct);
+    return Results.Ok(new { groupId, allowClassAdmin = body.AllowClassAdmin });
 });
 app.MapPut("/api/classes/{classId:guid}/extension-groups/{groupId}/settings", async (
     Guid classId, string groupId, ExtensionSettingsBody body, HttpContext ctx, IdentityCoordinator identities,
@@ -1142,7 +1164,7 @@ app.MapPut("/api/classes/{classId:guid}/extension-groups/{groupId}/settings", as
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
     if (await ResolveClassAsync(principal, classId, access, ct) is not { } target) return Forbidden();
-    if (!await groups.CanEditSettingsAsync(principal.User, target, ct)) return Forbidden();
+    if (!await groups.CanEditSettingsAsync(principal.User, target, groupId, ct)) return Forbidden();
     var result = await groups.ApplyToClassAsync(
         principal.User, target, groupId, body.Values ?? new Dictionary<string, string?>(), ct);
     return Results.Json(result, statusCode: CommandStatus(result));
@@ -1294,6 +1316,7 @@ static ApiError Error(string code, string message) => new() { Code = code, Messa
 public sealed record SchedulePullIntervalBody(int IntervalMinutes);
 public sealed record ExtensionPolicyBody(bool? Enabled, bool? AllowNonAdmin, bool? ShowOnWatch);
 public sealed record ExtensionSettingsBody(Dictionary<string, string?>? Values);
+public sealed record ExtensionGroupAccessBody(bool AllowClassAdmin);
 public sealed record UpdateCheckBody(string Channel, bool Force = false);
 public sealed record PairingCodeBody(Guid? ClassId, bool Unified = false, bool Persistent = false, string? RequestedCode = null);
 public sealed record VisitorAutoEnterBody(bool AutoEnter);

@@ -124,9 +124,6 @@ public sealed class SystemMetadata
     /// <summary>班主任可以手动从插件拉取本班课表；默认允许，保持升级前行为。</summary>
     public bool ClassAdminCanPullSchedule { get; set; } = true;
 
-    /// <summary>班主任可以修改本班设备上的扩展设置；默认关闭，扩展设置由系统管理员统一下发。</summary>
-    public bool ClassAdminCanEditExtensionSettings { get; set; }
-
     /// <summary>
     /// 手机扫码登录二维码中写入的服务器地址；null 表示使用当前 WebUI 访问地址。
     /// 只影响二维码内容，不改变服务端监听地址或反向代理配置。
@@ -272,6 +269,17 @@ public sealed class ExtensionPolicy
     public string ExtensionId { get; set; } = string.Empty;
     public bool Enabled { get; set; } = true;
     public bool AllowNonAdmin { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// 扩展插件（扩展分组）的班级自治开关：开放后，本班班主任可以在侧栏“扩展插件”中自行修改本班设置。
+/// 没有记录即不开放，新插件默认只由系统管理员统一管理。
+/// </summary>
+public sealed class ExtensionGroupPolicy
+{
+    public string GroupId { get; set; } = string.Empty;
+    public bool AllowClassAdmin { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 

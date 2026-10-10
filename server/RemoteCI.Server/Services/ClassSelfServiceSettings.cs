@@ -6,19 +6,19 @@ namespace RemoteCI.Server.Services;
 /// <summary>
 /// 班级自治策略：班主任可以在本班自行完成的班级管理操作。
 /// 同一结构也表示“某用户在某班级的实际可用操作”，系统管理员恒为 <see cref="All"/>。
+/// 扩展插件设置按插件逐个开放，见 <see cref="ExtensionGroupPolicyService"/>。
 /// </summary>
 public sealed record ClassSelfServicePolicy(
     bool CanRename,
     bool CanChangeAvatar,
-    bool CanPullSchedule,
-    bool CanEditExtensionSettings)
+    bool CanPullSchedule)
 {
-    public static ClassSelfServicePolicy All { get; } = new(true, true, true, true);
+    public static ClassSelfServicePolicy All { get; } = new(true, true, true);
 
-    public static ClassSelfServicePolicy None { get; } = new(false, false, false, false);
+    public static ClassSelfServicePolicy None { get; } = new(false, false, false);
 
-    /// <summary>升级前的行为：班主任可改名、改头像与拉取课表；扩展设置是新能力，默认不下放。</summary>
-    public static ClassSelfServicePolicy Default { get; } = new(true, true, true, false);
+    /// <summary>升级前的行为：班主任可改名、改头像与拉取课表。</summary>
+    public static ClassSelfServicePolicy Default { get; } = new(true, true, true);
 }
 
 /// <summary>系统管理员统一维护的班级自治策略，持久化在 SystemMetadata 上，对全部班级生效。</summary>
@@ -32,7 +32,6 @@ public sealed class ClassSelfServiceSettings(AppDbContext db)
         metadata.ClassAdminCanRename = policy.CanRename;
         metadata.ClassAdminCanChangeAvatar = policy.CanChangeAvatar;
         metadata.ClassAdminCanPullSchedule = policy.CanPullSchedule;
-        metadata.ClassAdminCanEditExtensionSettings = policy.CanEditExtensionSettings;
         await db.SaveChangesAsync(ct);
     }
 
@@ -42,7 +41,6 @@ public sealed class ClassSelfServiceSettings(AppDbContext db)
             .Select(metadata => new ClassSelfServicePolicy(
                 metadata.ClassAdminCanRename,
                 metadata.ClassAdminCanChangeAvatar,
-                metadata.ClassAdminCanPullSchedule,
-                metadata.ClassAdminCanEditExtensionSettings))
+                metadata.ClassAdminCanPullSchedule))
             .SingleAsync(ct);
 }

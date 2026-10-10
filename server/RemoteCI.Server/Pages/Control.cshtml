@@ -128,7 +128,7 @@
                         <strong>@group.DisplayName</strong>
                         @if (!string.IsNullOrWhiteSpace(group.Description)) { <small>@group.Description</small> }
                     </div>
-                    @if (group.HasSettings && Model.CanEditExtensionSettings)
+                    @if (Model.CanEditExtensionSettings(group))
                     {
                         <a class="button ghost" asp-page="/ExtensionSettings" asp-route-groupId="@group.Id"><i class="bi bi-sliders" aria-hidden="true"></i> 插件设置</a>
                     }

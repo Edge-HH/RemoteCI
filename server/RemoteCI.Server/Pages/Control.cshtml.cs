@@ -48,16 +48,21 @@ public sealed class ControlModel(
     /// <summary>当前班级扩展按插件分组后的视图；分组内的扩展只包含当前账号可见的项。</summary>
     public IReadOnlyList<ExtensionGroupView> ExtensionGroups { get; private set; } = [];
 
+    /// <summary>当前账号在本班可自行管理的插件；系统管理员为 null，表示不受限。</summary>
+    public IReadOnlySet<string>? EditableExtensionGroupIds { get; private set; }
+
     /// <summary>
-    /// 当前账号能否修改本班扩展设置：系统管理员；或班级自治策略允许、且在本班拥有扩展功能权限的班主任。
+    /// 当前账号能否修改本班该插件的设置：系统管理员；或该插件已开放班级自治、且在本班拥有扩展功能权限的班主任。
     /// 与 ExtensionGroupService.CanEditSettingsAsync 的口径一致。
     /// </summary>
-    public bool CanEditExtensionSettings =>
-        ClassSelfService.CanEditExtensionSettings && ClassPermissions.HasFlag(UserPermissions.RunExtensions);
+    public bool CanEditExtensionSettings(ExtensionGroupView group) =>
+        group.HasSettings && (EditableExtensionGroupIds is null
+            ? ClassPermissions.HasFlag(UserPermissions.RunExtensions)
+            : EditableExtensionGroupIds.Contains(group.Id));
 
     /// <summary>分组是否在控制页展示：有可见扩展，或当前账号可以打开它的设置页。</summary>
     public bool ShowExtensionGroup(ExtensionGroupView group) =>
-        group.Extensions.Count > 0 || (group.HasSettings && CanEditExtensionSettings);
+        group.Extensions.Count > 0 || CanEditExtensionSettings(group);
 
     public ExtensionControlItem ExtensionItem(ExtensionDefinition definition) =>
         Extensions.First(item => string.Equals(item.Definition.Id, definition.Id, StringComparison.Ordinal));
@@ -371,6 +376,8 @@ public sealed class ControlModel(
             ct);
         ExtensionGroups = extensionGroups.BuildForClass(
             CurrentClassId, Extensions.Select(item => item.Definition).ToList());
+        EditableExtensionGroupIds = await extensionGroups.ListClassAdminEditableAsync(
+            CurrentUser.Id, CurrentUser.Role, CurrentUser.GrantedPermissions, CurrentClassId, ct);
         return !CanTeacherComing && !CanSendNotifications && !CanSendVoiceMessages && !CanClearNotifications && !CanControlMainMenu &&
             !CanControlPower && !CanControlVolume && !CanUseExtensions && !HasMaintenanceOperations
             ? RedirectToPage("/Denied")

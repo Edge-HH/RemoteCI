@@ -240,7 +240,7 @@ ClassIsland 的临时层是 `ClassPlans` 中 `IsOverlay=true` 的课表：`Overl
 
 命令值 24 为 `ApplyExtensionSettings`，能力标识 `extensions.settings`（只进入当前版本能力列表）。载荷 `extensionSettings` 为 `{groupId, values}`，`values` 只包含本次要修改的字段（部分更新），未出现的字段保持设备当前值；字段必须已在分组中声明，必填字段不能清空。权限口径：
 
-- 服务端只在 WebUI 扩展设置页与 `PUT /api/classes/{classId}/extension-groups/{groupId}/settings` 中接受该操作：系统管理员可修改任意班级；班主任需要系统管理员在“班级管理 → 班主任权限”中开启“修改本班的扩展插件设置”，且在本班拥有 `RunExtensions` 权限。手表、手机的通用命令通道和 `POST /api/commands` 一律拒绝。
+- 服务端只在 WebUI 扩展设置页与 `PUT /api/classes/{classId}/extension-groups/{groupId}/settings` 中接受该操作：系统管理员可修改任意班级；班主任只能修改系统管理员逐个开放给班级自行管理的插件（扩展插件详情页“班级自治”或 `PUT /api/extension-groups/{groupId}/class-admin-access`，默认都不开放），且在本班拥有 `RunExtensions` 权限。手表、手机的通用命令通道和 `POST /api/commands` 一律拒绝。
 - 插件端要求 `requestedBy` 携带 `RunExtensions` 权限位作为纵深防御；局域网直连无法复核班级自治策略，因此直接返回 `FORBIDDEN`。
 - 下发时该班插件离线：服务端把字段合并保存为待补发并返回 `QUEUED`（REST 为 202）；插件下次发送 `extension_groups_sync` 时，服务端在后台复核下发者权限后定向补发，插件返回明确结果后删除记录，连接再次中断时保留。
 - 写入成功或失败后，插件都会重新发送 `extension_groups_sync`，让 WebUI 预填值反映设备真实状态。批量下发时服务端向所选班级的每一台在线设备逐台发送并逐台返回结果。

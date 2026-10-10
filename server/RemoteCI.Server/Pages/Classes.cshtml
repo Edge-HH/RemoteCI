@@ -323,9 +323,8 @@
             <label class="check"><input type="checkbox" name="SelfServiceOptions.CanRename" value="true" checked="@Model.SelfServicePolicy.CanRename" /> 修改本班班名</label>
             <label class="check"><input type="checkbox" name="SelfServiceOptions.CanChangeAvatar" value="true" checked="@Model.SelfServicePolicy.CanChangeAvatar" /> 上传或清除本班头像</label>
             <label class="check"><input type="checkbox" name="SelfServiceOptions.CanPullSchedule" value="true" checked="@Model.SelfServicePolicy.CanPullSchedule" /> 手动从插件拉取本班课表</label>
-            <label class="check"><input type="checkbox" name="SelfServiceOptions.CanEditExtensionSettings" value="true" checked="@Model.SelfServicePolicy.CanEditExtensionSettings" /> 修改本班的扩展插件设置</label>
         </fieldset>
-        <p class="muted">关闭“修改本班的扩展插件设置”后，扩展设置只能由系统管理员在“扩展插件”页统一下发。课表定时拉取间隔属于全局设置，始终只有系统管理员可以修改。</p>
+        <p class="muted">扩展插件按插件逐个开放：在“扩展插件”页打开某个插件并允许班主任自行管理后，班主任才能在侧栏看到并修改本班设置，默认都不开放。课表定时拉取间隔属于全局设置，始终只有系统管理员可以修改。</p>
         <div><button type="submit">保存班主任权限</button></div>
     </form>
 </section>

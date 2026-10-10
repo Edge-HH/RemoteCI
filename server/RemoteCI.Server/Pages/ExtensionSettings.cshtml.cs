@@ -11,7 +11,8 @@ namespace RemoteCI.Server.Pages;
 
 /// <summary>
 /// 扩展插件设置页：插件通过扩展分组声明的设置字段在这里统一渲染。
-/// 获准的班主任只能修改当前班级；系统管理员还可以按班级或分组批量下发，并对比各班当前值。
+/// 班主任只能看到并修改系统管理员逐个开放给班级自行管理的插件，且只作用于当前班级；
+/// 系统管理员还可以按班级或分组批量下发、对比各班当前值，并决定每个插件是否开放给班主任。
 /// </summary>
 [Authorize]
 public sealed class ExtensionSettingsModel(
@@ -19,7 +20,8 @@ public sealed class ExtensionSettingsModel(
     ExtensionGroupService extensionGroups,
     ClassroomService classrooms,
     DeviceInventoryService devices,
-    IdentityCoordinator identities) : WebPageModel(users)
+    IdentityCoordinator identities,
+    ExtensionGroupPolicyService groupPolicies) : WebPageModel(users)
 {
     private const string ResultsKey = "ExtensionSettingsResults";
     private static readonly TimeSpan BatchTimeout = TimeSpan.FromSeconds(20);
@@ -36,13 +38,23 @@ public sealed class ExtensionSettingsModel(
     [BindProperty]
     public List<Guid> SelectedGroupIds { get; set; } = [];
 
+    [BindProperty]
+    public bool AllowClassAdmin { get; set; }
+
     public bool IsAdmin => CurrentUser.Role == UserRole.Admin;
 
-    /// <summary>与 ExtensionGroupService.CanEditSettingsAsync 口径一致：系统管理员，或获准且有扩展功能权限的班主任。</summary>
-    public bool CanEditCurrentClass =>
-        ClassSelfService.CanEditExtensionSettings && ClassPermissions.HasFlag(UserPermissions.RunExtensions);
+    /// <summary>当前账号在当前班级可自行管理的插件；系统管理员为 null，表示不受限。</summary>
+    public IReadOnlySet<string>? EditableGroupIds { get; private set; }
 
-    /// <summary>带设置页的扩展分组：管理员看全部班级的并集，班主任只看当前班级。</summary>
+    /// <summary>已开放给班主任自行管理的插件，供系统管理员查看与切换。</summary>
+    public IReadOnlySet<string> ClassAdminAllowedGroupIds { get; private set; } = new HashSet<string>();
+
+    /// <summary>与 ExtensionGroupService.CanEditSettingsAsync 口径一致：系统管理员，或该插件已开放且有扩展功能权限的班主任。</summary>
+    public bool CanEditCurrentClass => GroupId is not null && (EditableGroupIds is null
+        ? ClassPermissions.HasFlag(UserPermissions.RunExtensions)
+        : EditableGroupIds.Contains(GroupId));
+
+    /// <summary>带设置页的扩展分组：管理员看全部班级的并集，班主任只看当前班级中已开放的插件。</summary>
     public IReadOnlyList<ExtensionGroupView> Groups { get; private set; } = [];
 
     public ExtensionGroupView? Group { get; private set; }
@@ -66,7 +78,7 @@ public sealed class ExtensionSettingsModel(
     public async Task<IActionResult> OnPostApplyCurrentAsync(CancellationToken ct)
     {
         if (await RequireEditorAsync() is { } denied) return denied;
-        if (!CanEditCurrentClass || string.IsNullOrWhiteSpace(GroupId)) return RedirectToPage("/Denied");
+        if (string.IsNullOrWhiteSpace(GroupId) || !CanEditCurrentClass) return RedirectToPage("/Denied");
         var profile = await identities.GetProfileAsync(CurrentUser.Id, ct);
         if (profile is null) return RedirectToPage("/Login");
 
@@ -135,6 +147,18 @@ public sealed class ExtensionSettingsModel(
         return RedirectToPage(new { groupId = GroupId });
     }
 
+    /// <summary>系统管理员切换该插件是否允许各班班主任自行管理本班设置。</summary>
+    public async Task<IActionResult> OnPostClassAdminAccessAsync(CancellationToken ct)
+    {
+        if (await RequireEditorAsync() is { } denied) return denied;
+        if (!IsAdmin || !ExtensionGroupPolicyService.IsValidGroupId(GroupId)) return RedirectToPage("/Denied");
+        await groupPolicies.SetClassAdminAllowedAsync(GroupId!, AllowClassAdmin, ct);
+        TempData["Message"] = AllowClassAdmin
+            ? "已允许各班班主任自行管理此插件。"
+            : "已收回班主任的管理权限，此插件只由系统管理员统一管理。";
+        return RedirectToPage(new { groupId = GroupId });
+    }
+
     /// <summary>列表与表格中的友好显示：开关显示开启/关闭，候选项显示其显示名称。</summary>
     public static string FormatValue(ExtensionParameter field, string? value)
     {
@@ -158,19 +182,23 @@ public sealed class ExtensionSettingsModel(
         .Select(x => x.Key)
         .FirstOrDefault();
 
+    /// <summary>系统管理员，或至少有一个已开放插件可管理的本班班主任。</summary>
     private async Task<IActionResult?> RequireEditorAsync()
     {
         if (await RequireAsync() is { } denied) return denied;
-        return IsAdmin || CanEditCurrentClass ? null : RedirectToPage("/Denied");
+        EditableGroupIds = await extensionGroups.ListClassAdminEditableAsync(
+            CurrentUser.Id, CurrentUser.Role, CurrentUser.GrantedPermissions, CurrentClassId, HttpContext.RequestAborted);
+        return EditableGroupIds is null || EditableGroupIds.Count > 0 ? null : RedirectToPage("/Denied");
     }
 
     private async Task LoadAsync(CancellationToken ct)
     {
         Groups = (IsAdmin
                 ? await extensionGroups.BuildForAllClassesAsync(ct: ct)
-                : extensionGroups.BuildForClass(CurrentClassId))
+                : extensionGroups.BuildForClass(CurrentClassId).Where(x => EditableGroupIds!.Contains(x.Id)))
             .Where(x => x.HasSettings)
             .ToList();
+        if (IsAdmin) ClassAdminAllowedGroupIds = await groupPolicies.ListClassAdminAllowedAsync(ct);
         if (string.IsNullOrWhiteSpace(GroupId)) return;
 
         Group = Groups.FirstOrDefault(x => string.Equals(x.Id, GroupId, StringComparison.Ordinal));

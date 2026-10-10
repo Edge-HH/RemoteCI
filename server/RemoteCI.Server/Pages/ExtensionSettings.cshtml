@@ -25,12 +25,12 @@
         <div class="panel-heading">
             <div>
                 <h2>已上报设置页的插件</h2>
-                <p class="muted">@(Model.IsAdmin ? "汇总全部班级设备上报的插件；安装支持 RemoteCI 扩展分组的插件后会自动出现在这里。" : $"{Model.CurrentClass?.Name} 的设备上报的插件。")</p>
+                <p class="muted">@(Model.IsAdmin ? "汇总全部班级设备上报的插件；安装支持 RemoteCI 扩展分组的插件后会自动出现在这里。打开插件可以设置是否允许各班班主任自行管理。" : $"系统管理员开放给班级自行管理、且 {Model.CurrentClass?.Name} 的设备已上报的插件。")</p>
             </div>
         </div>
         @if (Model.Groups.Count == 0)
         {
-            <div class="empty-state"><i class="bi bi-puzzle" aria-hidden="true"></i><strong>暂无可设置的扩展插件</strong><span>插件需要通过 RemoteCI 注册带设置字段的扩展分组，并保持设备在线同步。</span></div>
+            <div class="empty-state"><i class="bi bi-puzzle" aria-hidden="true"></i><strong>暂无可设置的扩展插件</strong><span>@(Model.IsAdmin ? "插件需要通过 RemoteCI 注册带设置字段的扩展分组，并保持设备在线同步。" : "已开放的插件需要在本班设备上安装并保持在线同步后才会出现在这里。")</span></div>
         }
         else
         {
@@ -43,6 +43,11 @@
                             @if (!string.IsNullOrWhiteSpace(item.Description)) { <small>@item.Description</small> }
                             <small>ID：@item.Id · @item.Settings.Count 项设置 · @item.Extensions.Count 个扩展功能</small>
                         </div>
+                        @if (Model.IsAdmin)
+                        {
+                            var open = Model.ClassAdminAllowedGroupIds.Contains(item.Id);
+                            <span class="status-pill @(open ? "online" : null)">@(open ? "班级可自行管理" : "仅统一管理")</span>
+                        }
                         <div class="extension-row-actions">
                             <a class="button" asp-page="/ExtensionSettings" asp-route-groupId="@item.Id">打开设置</a>
                         </div>
@@ -76,6 +81,24 @@ else
                     </li>
                 }
             </ul>
+        </section>
+    }
+
+    @if (Model.IsAdmin)
+    {
+        var open = Model.ClassAdminAllowedGroupIds.Contains(group.Id);
+        <section class="panel" id="class-admin-access">
+            <div class="panel-heading">
+                <div>
+                    <h2>班级自治</h2>
+                    <p class="muted">开放后，各班班主任可以在侧栏“扩展插件”中看到此插件并修改本班设置；不开放时只能由系统管理员统一下发。</p>
+                </div>
+                <span class="status-pill @(open ? "online" : null)">@(open ? "班级可自行管理" : "仅统一管理")</span>
+            </div>
+            <form method="post" asp-page-handler="ClassAdminAccess" asp-route-groupId="@group.Id" class="stack">
+                <input type="hidden" name="AllowClassAdmin" value="@(open ? "false" : "true")" />
+                <div><button type="submit" class="@(open ? "ghost" : null)">@(open ? "收回班主任管理权限" : "允许班主任自行管理")</button></div>
+            </form>
         </section>
     }
 

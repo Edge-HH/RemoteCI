@@ -89,11 +89,13 @@ public sealed class ExtensionGroupPagesTests
         var list = WebUtility.HtmlDecode(await browser.GetStringAsync("/ExtensionSettings"));
         Assert.Contains("提醒插件", list);
         Assert.Contains("2 项设置 · 1 个扩展功能", list);
+        Assert.Contains("仅统一管理", list);
 
         var settings = WebUtility.HtmlDecode(await browser.GetStringAsync("/ExtensionSettings?groupId=demo.reminder"));
         Assert.Contains("当前班级", settings);
         Assert.Contains("批量下发", settings);
         Assert.Contains("各班级当前值", settings);
+        Assert.Contains("允许班主任自行管理", settings);
         Assert.Contains("两次提醒之间的分钟数", settings);
         Assert.Contains(">柔和</option>", settings);
         Assert.Contains("data-extension-field-apply", settings);
