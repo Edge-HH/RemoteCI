@@ -1,0 +1,131 @@
+@model RemoteCI.Server.Pages.ExtensionFieldRender
+@using System.Globalization
+@using RemoteCI.Shared.Models
+@{
+    var form = Model.Form;
+    var index = Model.Slot.Index;
+    var field = Model.Slot.Field;
+    var label = string.IsNullOrWhiteSpace(field.Label) ? field.Key : field.Label;
+    var value = form.ValueOf(field);
+    var isOn = string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+    var valueName = $"{form.Prefix}[{index}].Value";
+    var inputId = $"{form.IdPrefix}-{index}";
+    // 部分修改模式下未勾选的字段不会提交，因此不能用 required 阻止表单提交。
+    var required = field.Required && !form.Selectable;
+    // 设置页式布局（左文字、右控件）只在插件声明了分区/卡片时启用，旧扩展参数表单保持原样。
+    var row = form.HasLayout;
+    var visible = form.IsVisible(field);
+    var enabled = form.IsEnabled(field);
+    var classes = "extension-field"
+        + (form.Selectable ? " extension-field-selectable" : "")
+        + (row ? " extension-field-row" : "")
+        + (Model.Compact ? " extension-field-compact" : "")
+        + (enabled ? "" : " is-disabled");
+    string Invariant(double? number) => number?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+    var step = field.Step is { } s ? Invariant(s) : "any";
+}
+<div class="@classes" data-extension-field data-key="@field.Key"
+     data-visible-when="@ExtensionFieldsModel.ConditionJson(field.VisibleWhen)"
+     data-enabled-when="@ExtensionFieldsModel.ConditionJson(field.EnabledWhen)"
+     hidden="@(!visible)" inert="@(!enabled)">
+    <input type="hidden" name="@($"{form.Prefix}[{index}].Key")" value="@field.Key" />
+    @if (form.Selectable && !row)
+    {
+        <label class="check extension-field-apply"><input type="checkbox" name="@($"{form.Prefix}[{index}].Apply")" value="true" data-extension-field-apply /> 修改此项</label>
+    }
+    @if (row && !Model.Compact)
+    {
+        <div class="extension-field-text">
+            <label class="extension-field-label" for="@inputId">@label@(field.Required ? " *" : "")</label>
+            @if (!string.IsNullOrWhiteSpace(field.Description))
+            {
+                <small class="muted extension-field-help">@field.Description</small>
+            }
+        </div>
+    }
+    @* 旧版堆叠布局用 label 包住标题与控件（点标题聚焦控件）；行式布局的标题在左侧已用 for 关联。 *@
+    @Html.Raw(row ? "<div class=\"extension-field-control\">" : "<label class=\"extension-field-stack\">")
+        @if (!row)
+        {
+            <span class="extension-field-label">@label@(field.Required ? " *" : "")</span>
+        }
+        @if (field.Type == ExtensionParameterType.Switch && row)
+        {
+            <label class="extension-switch">
+                <input type="checkbox" id="@inputId" data-extension-switch checked="@isOn" aria-label="@label" />
+                <span class="extension-switch-track" aria-hidden="true"></span>
+                <span class="extension-switch-text" data-switch-text>@(isOn ? "开" : "关")</span>
+            </label>
+            <input type="hidden" name="@valueName" value="@(isOn ? "true" : "false")" data-extension-value />
+        }
+        else if (field.Type == ExtensionParameterType.Switch)
+        {
+            <select name="@valueName" id="@inputId" data-extension-value>
+                <option value="false" selected="@(!isOn)">关闭</option>
+                <option value="true" selected="@isOn">开启</option>
+            </select>
+        }
+        else if (field.Type == ExtensionParameterType.Select)
+        {
+            <select name="@valueName" id="@inputId" required="@required" data-extension-value>
+                @if (!field.Required) { <option value="">未选择</option> }
+                @for (var optionIndex = 0; optionIndex < (field.Options?.Count ?? 0); optionIndex++)
+                {
+                    var option = field.Options![optionIndex];
+                    <option value="@option" selected="@(option == value)">@field.OptionLabel(optionIndex)</option>
+                }
+            </select>
+        }
+        else if (field.Type == ExtensionParameterType.Text && field.Multiline)
+        {
+            <textarea name="@valueName" id="@inputId" rows="3" maxlength="@ExtensionFieldValidator.MaxValueLength" placeholder="@field.Placeholder" required="@required" data-extension-value>@value</textarea>
+        }
+        else if (field.Type == ExtensionParameterType.Number && field.Slider && field.Min is not null && field.Max is not null)
+        {
+            <div class="extension-slider">
+                <input type="range" min="@Invariant(field.Min)" max="@Invariant(field.Max)" step="@step" value="@value" data-extension-range aria-label="@label" />
+                <input name="@valueName" id="@inputId" type="number" step="@step" min="@Invariant(field.Min)" max="@Invariant(field.Max)" value="@value" placeholder="@field.Placeholder" required="@required" data-extension-value />
+            </div>
+        }
+        else if (field.Type == ExtensionParameterType.Number)
+        {
+            <input name="@valueName" id="@inputId" type="number" step="@step" min="@Invariant(field.Min)" max="@Invariant(field.Max)" value="@value" placeholder="@field.Placeholder" required="@required" data-extension-value />
+        }
+        else if (field.Type == ExtensionParameterType.Color)
+        {
+            var parsed = ExtensionColor.TryParse(value, out var c);
+            var rgb = parsed ? $"#{c.R:X2}{c.G:X2}{c.B:X2}" : "#000000";
+            var alpha = parsed ? c.A : (byte)255;
+            var preview = parsed ? $"rgba({c.R}, {c.G}, {c.B}, {(c.A / 255.0).ToString("0.###", CultureInfo.InvariantCulture)})" : "transparent";
+            <div class="extension-color" data-extension-color>
+                <span class="extension-color-swatch" title="选择颜色">
+                    <span class="extension-color-preview" style="background-color: @preview" data-color-preview></span>
+                    <input type="color" value="@rgb.ToLowerInvariant()" data-color-picker aria-label="@($"{label}：选择颜色")" />
+                </span>
+                <input type="range" class="extension-color-alpha" min="0" max="255" step="1" value="@alpha" data-color-alpha aria-label="@($"{label}：不透明度")" title="不透明度" />
+                <input name="@valueName" id="@inputId" type="text" class="extension-color-text" maxlength="9" spellcheck="false" autocomplete="off" value="@value" placeholder="@(field.Placeholder ?? "#AARRGGBB")" required="@required" data-extension-value data-color-text />
+                <details class="extension-color-palette">
+                    <summary title="色卡"><i class="bi bi-palette" aria-hidden="true"></i><span class="visually-hidden">色卡</span></summary>
+                    <div class="extension-color-swatches">
+                        @foreach (var swatch in ExtensionFieldsModel.ColorSwatches)
+                        {
+                            <button type="button" class="extension-color-chip" style="background-color: @swatch" data-color-swatch="@swatch" title="@swatch" aria-label="@swatch"></button>
+                        }
+                    </div>
+                </details>
+            </div>
+        }
+        else
+        {
+            <input name="@valueName" id="@inputId" type="text" maxlength="@ExtensionFieldValidator.MaxValueLength" value="@value" placeholder="@field.Placeholder" required="@required" data-extension-value />
+        }
+        @if (form.Selectable && row)
+        {
+            <label class="check extension-field-apply" title="勾选后才会下发此项"><input type="checkbox" name="@($"{form.Prefix}[{index}].Apply")" value="true" data-extension-field-apply /> 修改此项</label>
+        }
+    @Html.Raw(row ? "</div>" : "</label>")
+    @if (!row && !string.IsNullOrWhiteSpace(field.Description))
+    {
+        <small class="muted extension-field-help">@field.Description</small>
+    }
+</div>

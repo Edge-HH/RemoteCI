@@ -11,6 +11,9 @@ using RemoteCI.Shared;
 namespace RemoteCI.Server.Pages;
 
 [Authorize]
+// 手动上传的服务端更新包远超 Kestrel 默认 30MB 请求体上限；整页仅管理员可用。
+[RequestSizeLimit(UpdateService.MaxUploadedPackageBytes + 1024 * 1024)]
+[RequestFormLimits(MultipartBodyLengthLimit = UpdateService.MaxUploadedPackageBytes)]
 public sealed class SystemConfigModel(
     UserManager<AppUser> users,
     UpdateService updates,
@@ -29,6 +32,7 @@ public sealed class SystemConfigModel(
     [BindProperty] public ImportInput ImportOptions { get; set; } = new();
     [BindProperty] public bool ForceSenderInTitle { get; set; }
     [BindProperty] public string? MobileServerUrl { get; set; }
+    [BindProperty] public IFormFile? UpdatePackage { get; set; }
     public IReadOnlyList<BackupFileInfo> Backups { get; private set; } = [];
 
     public string CurrentVersion => updates.CurrentVersion;
@@ -41,6 +45,7 @@ public sealed class SystemConfigModel(
     public bool IsPlatformManaged => UpdateService.CurrentApplyMode == UpdateApplyMode.ManagedByPlatform;
     public bool UsesPersistentOverlay => UpdateService.CurrentApplyMode == UpdateApplyMode.PersistentOverlay;
     public bool IsDevelopment => environment.IsDevelopment();
+    public string CurrentPlatform => UpdateService.CurrentPlatform;
     public UpdateChannel SelectedUpdateChannel =>
         UpdateOptions.Channel == UpdateChannel.Beta ? UpdateChannel.Beta : UpdateChannel.Stable;
 
@@ -135,25 +140,11 @@ public sealed class SystemConfigModel(
                         ? "当前版本高于所选渠道的最新版本，拒绝降级。"
                         : "已是最新版本；如需覆盖安装，请启用强制更新。");
 
-            var databasePath = Path.IsPathRooted(serverOptions.Value.DatabasePath)
-                ? serverOptions.Value.DatabasePath
-                : Path.Combine(environment.ContentRootPath, serverOptions.Value.DatabasePath);
             ServerAsset = updates.SelectServerAsset(LatestRelease)
                 ?? throw new InvalidOperationException("未找到当前平台的更新包，请到 GitHub 手动下载。");
             var prepared = await updates.PrepareUpdateAsync(
-                LatestRelease, ServerAsset, databasePath, environment.ContentRootPath, ct);
-            var installDirectory = UpdateService.ResolveInstallDirectory(AppContext.BaseDirectory);
-            var mode = await updates.BeginApplyAsync(prepared, installDirectory, ct);
-
-            CheckMessage = mode == UpdateApplyMode.ExternalInstaller
-                ? $"{latestVersion} 更新包已准备，服务端退出后将完成替换并自动重启，请稍后刷新页面。"
-                : $"{latestVersion} 更新包已应用，服务端即将重启，请稍后刷新页面。";
-            UpdateSucceeded = true;
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(2000);
-                lifetime.StopApplication();
-            });
+                LatestRelease, ServerAsset, ResolveDatabasePath(), environment.ContentRootPath, ct);
+            await ApplyAndRestartAsync(prepared, latestVersion, ct);
         }
         catch (Exception ex)
         {
@@ -161,6 +152,57 @@ public sealed class SystemConfigModel(
         }
         return Page();
     }
+
+    /// <summary>调试用：安装管理员上传的服务端包，允许同版本覆盖与降级。</summary>
+    public async Task<IActionResult> OnPostUploadUpdateAsync(CancellationToken ct)
+    {
+        if (await RequireAdminAsync() is { } denied) return denied;
+        await LoadBackupAsync();
+        if (!UpdateService.CanSelfUpdateNow(IsDevelopment))
+        {
+            CheckMessage = IsPlatformManaged
+                ? UpdateService.FnosManagedMessage
+                : UpdateService.DevelopmentManagedMessage;
+            return Page();
+        }
+        if (UpdatePackage is null || UpdatePackage.Length == 0)
+        {
+            CheckMessage = "请选择服务端更新包（.zip）。";
+            return Page();
+        }
+        try
+        {
+            await using var stream = UpdatePackage.OpenReadStream();
+            var (prepared, version) = await updates.PrepareUploadedUpdateAsync(
+                stream, ResolveDatabasePath(), environment.ContentRootPath, ct);
+            await ApplyAndRestartAsync(prepared, version, ct);
+        }
+        catch (Exception ex)
+        {
+            CheckMessage = "手动更新失败：" + ex.Message;
+        }
+        return Page();
+    }
+
+    private async Task ApplyAndRestartAsync(PreparedUpdate prepared, string version, CancellationToken ct)
+    {
+        var installDirectory = UpdateService.ResolveInstallDirectory(AppContext.BaseDirectory);
+        var mode = await updates.BeginApplyAsync(prepared, installDirectory, ct);
+        CheckMessage = mode == UpdateApplyMode.ExternalInstaller
+            ? $"{version} 更新包已准备，服务端退出后将完成替换并自动重启，请稍后刷新页面。"
+            : $"{version} 更新包已应用，服务端即将重启，请稍后刷新页面。";
+        UpdateSucceeded = true;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(2000);
+            lifetime.StopApplication();
+        });
+    }
+
+    private string ResolveDatabasePath() =>
+        Path.IsPathRooted(serverOptions.Value.DatabasePath)
+            ? serverOptions.Value.DatabasePath
+            : Path.Combine(environment.ContentRootPath, serverOptions.Value.DatabasePath);
 
     public async Task<IActionResult> OnPostSaveBackupSettingsAsync(CancellationToken ct)
     {

@@ -105,7 +105,9 @@ WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手
 
 `extensions_sync` 的载荷是其他 ClassIsland 插件通过 RemoteCI 注册的扩展功能列表；云端服务端和插件局域网服务都会缓存最近一次清单，并在手表完成认证后主动补发。命令值 7 为 `RunExtension`；命令值 8 的旧提醒指令仍由协议层兼容处理，但当前各端不提供入口。通过 `extensionId` 指定目标扩展，`extensionArgs` 携带参数字典（值统一为字符串）。扩展调用必须同时通过独立的 `RunExtensions` 权限和管理员为该扩展设置的启用/普通账号开放策略；`RequiredPermission` 只作为旧扩展兼容字段传输，不再关联通知、电源等权限。账号的 `allowedExtensionIds` 与 `visibleExtensionIds` 随认证状态和 `account_sync` 下发，后者只控制自己的手表入口。未注册、缺少必填参数或权限不足时分别返回 `INVALID_REQUEST` / `FORBIDDEN`，执行异常统一返回 `INTERNAL_ERROR`。
 
-扩展参数与扩展设置字段共用 `ExtensionParameter` 结构：`key`、`label`（显示名称）、`type`（1=文本、2=数字、3=开关、4=选项）、`defaultValue`、`required`、`options`，以及可选的 `optionLabels`（与 `options` 按下标对应的选项显示名称）、`description`（字段说明）、`placeholder`、`multiline`（WebUI 多行文本）和 `min` / `max`（数字范围）。服务端预检与插件执行端使用同一套校验：数字必须可解析且在范围内，开关只能是 `true` / `false`（规范化为小写），选项必须是 `options` 之一；未声明的执行参数键原样透传以兼容旧扩展。旧手表忽略新增字段，选项按原值显示。
+扩展参数与扩展设置字段共用 `ExtensionParameter` 结构：`key`、`label`（显示名称）、`type`（1=文本、2=数字、3=开关、4=选项、5=颜色）、`defaultValue`、`required`、`options`，以及可选的 `optionLabels`（与 `options` 按下标对应的选项显示名称）、`description`（字段说明）、`placeholder`、`multiline`（WebUI 多行文本）、`min` / `max`（数字范围）和 `step`（数字步长，仅影响输入控件）。服务端预检与插件执行端使用同一套校验：数字必须可解析且在范围内，开关只能是 `true` / `false`（规范化为小写），选项必须是 `options` 之一，颜色必须是 `#RGB` / `#ARGB` / `#RRGGBB` / `#AARRGGBB`；未声明的执行参数键原样透传以兼容旧扩展。旧手表忽略新增字段，选项按原值显示，颜色按文本处理。
+
+扩展设置字段还可以声明 WebUI 设置页布局，让插件在 WebUI 中复刻自己在 ClassIsland 里的设置页（全部可选，旧服务端忽略后退回平铺表单）：`section`（分区标题，连续同名字段归为一段）、`card` / `cardDescription`（设置卡片标题与说明，同一分区内连续同名字段归为一张可折叠卡片）、`cardToggle`（开关字段渲染在卡片标题行，作为卡片总开关）、`slider`（数字字段同时显示滑块，需同时声明 `min` 与 `max`），以及 `visibleWhen` / `enabledWhen` 联动条件数组。每个条件为 `{ key, values, not }`：引用同一表单内另一字段的当前值，值属于 `values` 之一即满足（数字按数值比较，其余忽略大小写），`not` 取反；数组内条件全部满足才显示 / 可编辑。卡片总开关只决定摆放位置，卡片内条目是否随开关禁用须在条目的 `enabledWhen` 中显式声明。隐藏或禁用的字段仍按原值提交，不会被清空；卡片内字段全部隐藏时整张卡片隐藏。
 
 扩展清单的 `icon` 为可选 Material 图标名，由手表端白名单解析（不区分大小写，忽略下划线、连字符、空格与 `Icons.Rounded.` 前缀）；未命中白名单或缺失时手表按钮回退为纯文字，服务端与 WebUI 不解析该字段。
 
@@ -287,7 +289,7 @@ ClassIsland 的临时层是 `ClassPlans` 中 `IsOverlay=true` 的课表：`Overl
 - `GET/POST/PUT/DELETE /api/roles`、`GET/PUT /api/visitor`
 - `GET/PUT /api/settings/notifications`（读取需登录，修改仅系统管理员）、`GET/PUT /api/settings/schedule-pull`
 - `GET/PUT /api/extensions`
-- `GET /api/admin/system`、`POST /api/admin/updates/check`、`GET/POST/DELETE /api/admin/backups`
+- `GET /api/admin/system`、`POST /api/admin/updates/check`、`POST /api/admin/updates/upload`（请求体为服务端发布包 zip，调试用，安装后自动重启）、`GET/POST/DELETE /api/admin/backups`
 
 REST 手表请求使用 `Authorization: Bearer <accessToken>`。Razor WebUI 使用 HttpOnly、SameSite Cookie 和表单防伪令牌，不把令牌放入浏览器存储。
 

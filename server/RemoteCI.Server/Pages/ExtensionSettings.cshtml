@@ -187,11 +187,22 @@ else
                 <div class="user-account-table-wrap">
                     <table class="user-account-table extension-values-table">
                         <thead>
+                            @if (ExtensionSettingsModel.SectionRuns(group.Settings) is { Count: > 0 } runs)
+                            {
+                                <tr class="extension-values-sections">
+                                    <th></th>
+                                    @foreach (var run in runs)
+                                    {
+                                        <th colspan="@run.Count">@run.Title</th>
+                                    }
+                                    <th></th>
+                                </tr>
+                            }
                             <tr>
                                 <th>班级</th>
                                 @foreach (var field in group.Settings)
                                 {
-                                    <th>@(string.IsNullOrWhiteSpace(field.Label) ? field.Key : field.Label)</th>
+                                    <th>@field.QualifiedLabel()</th>
                                 }
                                 <th>待补发</th>
                             </tr>
@@ -204,13 +215,22 @@ else
                                     @foreach (var field in group.Settings)
                                     {
                                         var value = state.Values.GetValueOrDefault(field.Key);
-                                        <td class="@(value != Model.MajorityValue(field.Key) ? "extension-value-diff" : null)">@ExtensionSettingsModel.FormatValue(field, value)</td>
+                                        <td class="@(value != Model.MajorityValue(field.Key) ? "extension-value-diff" : null)">
+                                            @if (field.Type == ExtensionParameterType.Color && ExtensionColor.TryParse(value, out _))
+                                            {
+                                                <span class="extension-value-color"><i style="--chip: @ExtensionSettingsModel.CssColor(value)" aria-hidden="true"></i>@value</span>
+                                            }
+                                            else
+                                            {
+                                                @ExtensionSettingsModel.FormatValue(field, value)
+                                            }
+                                        </td>
                                     }
                                     <td>
                                         @if (state.Pending is { Count: > 0 } queued)
                                         {
                                             <span class="status-pill">待补发</span>
-                                            <small class="muted">@string.Join("、", group.Settings.Where(field => queued.ContainsKey(field.Key)).Select(field => $"{(string.IsNullOrWhiteSpace(field.Label) ? field.Key : field.Label)}={ExtensionSettingsModel.FormatValue(field, queued[field.Key])}"))</small>
+                                            <small class="muted">@ExtensionSettingsModel.FormatPending(group.Settings, queued)</small>
                                         }
                                         else
                                         {

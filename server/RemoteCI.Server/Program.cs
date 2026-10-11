@@ -1258,6 +1258,45 @@ app.MapPost("/api/admin/updates/check", async (UpdateCheckBody body, HttpContext
     var release = await updates.FetchLatestReleaseAsync(channel, ct);
     return Results.Ok(new { tag = release?.Tag, name = release?.Name });
 });
+// 调试用：请求体为当前平台的服务端发布包 zip，安装后服务端自动重启；不限制版本高低。
+app.MapPost("/api/admin/updates/upload", async (
+    HttpContext ctx, IdentityCoordinator identities, UpdateService updates,
+    Microsoft.Extensions.Options.IOptions<ServerOptions> serverOptions, IHostEnvironment environment,
+    IHostApplicationLifetime lifetime, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!UpdateService.CanSelfUpdateNow(environment.IsDevelopment()))
+        return Results.Conflict(Error(ApiErrorCodes.InvalidRequest,
+            UpdateService.CurrentApplyMode == UpdateApplyMode.ManagedByPlatform
+                ? UpdateService.FnosManagedMessage
+                : UpdateService.DevelopmentManagedMessage));
+    if (ctx.Request.ContentLength is 0)
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "请求体应为服务端更新包 zip"));
+    if (ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
+        limit.MaxRequestBodySize = UpdateService.MaxUploadedPackageBytes;
+    try
+    {
+        var databasePath = Path.IsPathRooted(serverOptions.Value.DatabasePath)
+            ? serverOptions.Value.DatabasePath
+            : Path.Combine(environment.ContentRootPath, serverOptions.Value.DatabasePath);
+        var (prepared, version) = await updates.PrepareUploadedUpdateAsync(
+            ctx.Request.Body, databasePath, environment.ContentRootPath, ct);
+        var mode = await updates.BeginApplyAsync(
+            prepared, UpdateService.ResolveInstallDirectory(AppContext.BaseDirectory), ct);
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(2000);
+            lifetime.StopApplication();
+        });
+        return Results.Accepted(value: new { version, mode = mode.ToString() });
+    }
+    catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or IOException)
+    {
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, ex.Message));
+    }
+});
 app.MapGet("/api/admin/backups", async (HttpContext ctx, IdentityCoordinator identities, ConfigurationArchiveService archives, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);

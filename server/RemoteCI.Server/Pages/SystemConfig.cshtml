@@ -63,6 +63,14 @@
                 <p class="muted">当前平台暂无可用的更新包，请到 GitHub 手动下载。</p>
             }
         }
+        <details class="release-notes">
+            <summary>手动上传更新包（调试）</summary>
+            <p class="muted">上传当前平台（@Model.CurrentPlatform）的服务端发布包 zip，例如 GitHub Release 中的 RemoteCI.Server-版本-@(Model.CurrentPlatform).zip 或本地 dotnet publish 输出打包。不校验 SHA-256，允许同版本覆盖和降级；降级后若数据库结构不兼容可能无法启动。</p>
+            <form method="post" asp-page-handler="UploadUpdate" enctype="multipart/form-data" class="stack system-config-form" onsubmit="if(!confirm('将用上传的更新包覆盖当前服务端并重启，确定继续？'))return false;this.querySelector('button').disabled=true;this.querySelector('button').textContent='上传并安装中…'">
+                <label>更新包<input asp-for="UpdatePackage" type="file" accept=".zip" required /></label>
+                <button type="submit" class="danger">上传并安装</button>
+            </form>
+        </details>
     }
 </section>
 

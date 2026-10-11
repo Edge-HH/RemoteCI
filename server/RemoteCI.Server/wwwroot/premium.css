@@ -1032,10 +1032,6 @@ textarea { resize: vertical; }
 
 .permissions legend { color: var(--muted); font-size: 10px; }
 .permissions label, .check { gap: 7px; font-size: 12px; }
-.permissions input, .check input,
-.user-account-table input[type="checkbox"],
-.broadcast-targets input[type="checkbox"],
-input[type="checkbox"][form] { accent-color: var(--accent); }
 
 .admin-permission-note {
     padding: 11px 12px;
@@ -1609,12 +1605,6 @@ input[type="checkbox"][form] { accent-color: var(--accent); }
     align-items: center;
     gap: 12px;
     cursor: pointer;
-}
-
-.device-select input {
-    width: 17px;
-    height: 17px;
-    accent-color: var(--accent);
 }
 
 .device-select span:last-child {
@@ -2272,7 +2262,7 @@ body.sidebar-collapsed .nav-link .nav-badge { position: absolute; top: 4px; righ
 
 .swap-form { grid-template-columns: 1fr; }
 .swap-mode { display: flex; flex-wrap: wrap; gap: 16px; margin: 0; padding: 0; border: 0; }
-.swap-mode label { display: inline-flex; align-items: center; gap: 6px; }
+.swap-mode label { display: inline-flex; align-items: center; gap: 7px; color: var(--text); font-size: 13px; white-space: nowrap; }
 .swap-slot { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-inset); }
 .swap-slot[hidden], [data-swap-subject][hidden] { display: none; }
 .swap-slot h3 { margin: 0; font-size: 14px; }
@@ -2316,3 +2306,23 @@ body.sidebar-collapsed .nav-link .nav-badge { position: absolute; top: 4px; righ
     .swap-card header { align-items: flex-start; flex-direction: column; }
     .swap-actions button, .swap-decision button { flex: 1 1 auto; }
 }
+
+/* 勾选框与单选框：全局统一为与文字等高的小控件、主题色，不吃通用输入框的整宽/最小高度。
+   开关（.extension-switch）等自绘控件用更具体的选择器覆盖。 */
+input[type="checkbox"], input[type="radio"] {
+    width: 15px;
+    height: 15px;
+    min-height: 0;
+    flex: 0 0 15px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+input[type="checkbox"]:disabled, input[type="radio"]:disabled { cursor: not-allowed; }
+input[type="checkbox"]:focus, input[type="radio"]:focus { outline: none; }
+input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 2px; }
+label:where(:has(> input[type="checkbox"], > input[type="radio"])) { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+.batch-risk-confirm input[type="checkbox"] { margin-top: 2px; }

@@ -180,6 +180,69 @@ public sealed class ExtensionParameter
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? Max { get; set; }
 
+    /// <summary>number 类型的步长（仅影响输入控件，不参与校验）。</summary>
+    [JsonPropertyName("step")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? Step { get; set; }
+
+    /// <summary>number 类型在 WebUI 中同时显示滑块（需同时声明 Min 与 Max）；手表忽略。</summary>
+    [JsonPropertyName("slider")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Slider { get; set; }
+
+    /// <summary>
+    /// 可选分区标题（WebUI 设置页布局，手表忽略）。连续出现的同名分区归为一段，以小标题分隔，
+    /// 对应插件设置界面里的分节标题；字段按声明顺序渲染。
+    /// </summary>
+    [JsonPropertyName("section")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Section { get; set; }
+
+    /// <summary>
+    /// 可选卡片标题（WebUI 设置页布局）。同一分区内连续出现的同名卡片归为一张可折叠卡片，
+    /// 对应插件设置界面里的一个设置组；未声明卡片的字段单独成行。
+    /// </summary>
+    [JsonPropertyName("card")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Card { get; set; }
+
+    /// <summary>卡片说明；同一卡片取第一个非空值。</summary>
+    [JsonPropertyName("cardDescription")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CardDescription { get; set; }
+
+    /// <summary>
+    /// switch 字段作为所在卡片的总开关，渲染在卡片标题行。只决定摆放位置：
+    /// 卡片内其它字段是否随开关禁用，由各自的 <see cref="EnabledWhen"/> 显式声明。
+    /// </summary>
+    [JsonPropertyName("cardToggle")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool CardToggle { get; set; }
+
+    /// <summary>
+    /// 显示条件（全部满足才显示，条件引用同一表单内其它字段的当前值）。隐藏的字段仍按原值提交，
+    /// 因此不会被意外清空；卡片内字段全部隐藏时整张卡片隐藏。
+    /// </summary>
+    [JsonPropertyName("visibleWhen")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ExtensionFieldCondition>? VisibleWhen { get; set; }
+
+    /// <summary>可编辑条件（全部满足才可编辑）；不满足时字段置灰但仍按原值提交。</summary>
+    [JsonPropertyName("enabledWhen")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ExtensionFieldCondition>? EnabledWhen { get; set; }
+
+    /// <summary>
+    /// 带卡片名的完整字段名（如“阴影 · 阴影颜色”），用于表格列头、待补发摘要与校验错误等脱离卡片上下文的场景。
+    /// </summary>
+    public string QualifiedLabel()
+    {
+        var label = string.IsNullOrWhiteSpace(Label) ? Key : Label;
+        return string.IsNullOrWhiteSpace(Card) || string.Equals(Card, label, StringComparison.Ordinal)
+            ? label
+            : $"{Card} · {label}";
+    }
+
     /// <summary>候选项在界面上的显示名称：优先 OptionLabels 中的同位置名称，否则为候选项原值。</summary>
     public string OptionLabel(int index)
     {
@@ -198,6 +261,73 @@ public enum ExtensionParameterType
     Number = 2,
     Switch = 3,
     Select = 4,
+
+    /// <summary>
+    /// 颜色，值为 #RGB / #ARGB / #RRGGBB / #AARRGGBB（可带透明度）。WebUI 渲染取色器 + 透明度 + 色卡；
+    /// 不认识该类型的旧版服务端与手表按文本处理。
+    /// </summary>
+    Color = 5,
+}
+
+/// <summary>
+/// 字段联动条件：引用同一表单内另一个字段（<see cref="Key"/>）的当前值。
+/// 当前值属于 <see cref="Values"/> 之一即为满足（数字按数值比较，其余忽略大小写），<see cref="Not"/> 时取反。
+/// </summary>
+public sealed class ExtensionFieldCondition
+{
+    [JsonPropertyName("key")]
+    public string Key { get; set; } = string.Empty;
+
+    [JsonPropertyName("values")]
+    public List<string> Values { get; set; } = [];
+
+    [JsonPropertyName("not")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Not { get; set; }
+
+    public bool Matches(string? value)
+    {
+        var hit = Values.Any(candidate => ValueEquals(candidate, value));
+        return Not ? !hit : hit;
+    }
+
+    /// <summary>全部条件满足（无条件视为满足）；<paramref name="lookup"/> 按字段 Key 取当前值。</summary>
+    public static bool All(IEnumerable<ExtensionFieldCondition>? conditions, Func<string, string?> lookup) =>
+        conditions is null || conditions.All(condition => condition.Matches(lookup(condition.Key)));
+
+    private static bool ValueEquals(string candidate, string? value)
+    {
+        value = value?.Trim() ?? string.Empty;
+        if (string.Equals(candidate, value, StringComparison.OrdinalIgnoreCase)) return true;
+        const System.Globalization.NumberStyles style = System.Globalization.NumberStyles.Float;
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        return double.TryParse(candidate, style, culture, out var a) &&
+            double.TryParse(value, style, culture, out var b) &&
+            a == b;
+    }
+}
+
+/// <summary>颜色字段的解析：支持 #RGB / #ARGB / #RRGGBB / #AARRGGBB，缺省透明度视为不透明。</summary>
+public static class ExtensionColor
+{
+    public static bool TryParse(string? value, out (byte A, byte R, byte G, byte B) color)
+    {
+        color = default;
+        var text = value?.Trim();
+        if (string.IsNullOrEmpty(text) || text[0] != '#') return false;
+        var hex = text[1..];
+        if (hex.Length is not (3 or 4 or 6 or 8) || !hex.All(Uri.IsHexDigit)) return false;
+        if (hex.Length <= 4)
+            hex = string.Concat(hex.Select(c => new string(c, 2)));
+        if (hex.Length == 6) hex = "FF" + hex;
+        var argb = Convert.ToUInt32(hex, 16);
+        color = ((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb);
+        return true;
+    }
+
+    /// <summary>规范为 #AARRGGBB（大写），非法值返回 null。</summary>
+    public static string? Normalize(string? value) =>
+        TryParse(value, out var c) ? $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}" : null;
 }
 
 /// <summary>
@@ -309,13 +439,17 @@ public static class ExtensionFieldValidator
                 return field.Options is { Count: > 0 } options && !options.Contains(value, StringComparer.Ordinal)
                     ? $"“{DisplayName(field)}”不是有效选项"
                     : null;
+            case ExtensionParameterType.Color:
+                if (!ExtensionColor.TryParse(value, out _))
+                    return $"“{DisplayName(field)}”必须是 #RRGGBB 或 #AARRGGBB 格式的颜色";
+                value = value.Trim();
+                return null;
             default:
                 return null;
         }
     }
 
-    private static string DisplayName(ExtensionParameter field) =>
-        string.IsNullOrWhiteSpace(field.Label) ? field.Key : field.Label;
+    private static string DisplayName(ExtensionParameter field) => field.QualifiedLabel();
 
     private static string FormatRange(ExtensionParameter field) =>
         $"{field.Min?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-∞"} 到 " +

@@ -72,7 +72,7 @@ else
         @if (Model.PendingValues is { Count: > 0 } queued)
         {
             <div class="notice">
-                <span>待补发：@string.Join("、", group.Settings.Where(field => queued.ContainsKey(field.Key)).Select(field => $"{(string.IsNullOrWhiteSpace(field.Label) ? field.Key : field.Label)}={ExtensionSettingsModel.FormatValue(field, queued[field.Key])}"))</span>
+                <span>待补发：@ExtensionSettingsModel.FormatPending(group.Settings, queued)</span>
             </div>
         }
         <form method="post" asp-page-handler="Apply" asp-route-groupId="@group.Id" class="stack extension-settings-form">

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using RemoteCI.Server.Services;
 using Xunit;
@@ -271,6 +272,62 @@ public sealed class UpdateServiceTests
             Path.Combine(Path.GetTempPath(), "RemoteCI.Tests", "db", "x.db"),
             "/app",
             CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("publish/")]
+    public async Task PrepareUploadedUpdateAsync_ExtractsPackageRootAndReadsVersion(string prefix)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "RemoteCI.Tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var serverAssembly = Path.Combine(AppContext.BaseDirectory, "RemoteCI.Server.dll");
+            using var package = new MemoryStream();
+            using (var zip = new ZipArchive(package, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                zip.CreateEntryFromFile(serverAssembly, prefix + "RemoteCI.Server.dll");
+                zip.CreateEntry(prefix + "wwwroot/app.css");
+            }
+            package.Position = 0;
+
+            var (prepared, version) = await new UpdateService().PrepareUploadedUpdateAsync(
+                package, Path.Combine(root, "data", "remoteci.db"), root, CancellationToken.None);
+
+            Assert.Equal(FileVersionInfo.GetVersionInfo(serverAssembly).ProductVersion?.Split('+', 2)[0], version);
+            Assert.Equal(Path.Combine(root, "data", "updates", "manual-upload"), prepared.StagingDirectory);
+            Assert.Equal(prepared.StagingDirectory, Path.GetDirectoryName(prepared.ExtractedDirectory));
+            Assert.True(File.Exists(Path.Combine(prepared.ExtractedDirectory, "RemoteCI.Server.dll")));
+            Assert.True(File.Exists(Path.Combine(prepared.ExtractedDirectory, "wwwroot", "app.css")));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PrepareUploadedUpdateAsync_RejectsNonServerPackages()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "RemoteCI.Tests", Guid.NewGuid().ToString("N"));
+        var database = Path.Combine(root, "data", "remoteci.db");
+        try
+        {
+            using var notZip = new MemoryStream("not a zip"u8.ToArray());
+            await Assert.ThrowsAsync<InvalidDataException>(() => new UpdateService().PrepareUploadedUpdateAsync(
+                notZip, database, root, CancellationToken.None));
+
+            using var withoutServer = new MemoryStream();
+            using (var zip = new ZipArchive(withoutServer, ZipArchiveMode.Create, leaveOpen: true))
+                zip.CreateEntry("readme.txt");
+            withoutServer.Position = 0;
+            await Assert.ThrowsAsync<InvalidDataException>(() => new UpdateService().PrepareUploadedUpdateAsync(
+                withoutServer, database, root, CancellationToken.None));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]

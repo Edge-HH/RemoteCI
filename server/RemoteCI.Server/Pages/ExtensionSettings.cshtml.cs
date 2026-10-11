@@ -160,6 +160,34 @@ public sealed class ExtensionSettingsModel(
         return value;
     }
 
+    /// <summary>待补发摘要：“卡片 · 字段=值”逐项列出（按字段声明顺序）。</summary>
+    public static string FormatPending(IReadOnlyList<ExtensionParameter> fields, IReadOnlyDictionary<string, string?> queued) =>
+        string.Join("、", fields
+            .Where(field => queued.ContainsKey(field.Key))
+            .Select(field => $"{field.QualifiedLabel()}={FormatValue(field, queued[field.Key])}"));
+
+    /// <summary>颜色值转成 CSS rgba()，用于对比表里的色块；非法值返回 transparent。</summary>
+    public static string CssColor(string? value) =>
+        ExtensionColor.TryParse(value, out var c)
+            ? $"rgba({c.R}, {c.G}, {c.B}, {(c.A / 255.0).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)})"
+            : "transparent";
+
+    /// <summary>
+    /// 对比表列头上方的分区行：连续同名分区合并为一格。没有任何字段声明分区时返回空，表头保持单行。
+    /// </summary>
+    public static IReadOnlyList<(string Title, int Count)> SectionRuns(IReadOnlyList<ExtensionParameter> fields)
+    {
+        if (fields.All(field => string.IsNullOrWhiteSpace(field.Section))) return [];
+        var runs = new List<(string Title, int Count)>();
+        foreach (var field in fields)
+        {
+            var title = field.Section?.Trim() ?? string.Empty;
+            if (runs.Count > 0 && runs[^1].Title == title) runs[^1] = (title, runs[^1].Count + 1);
+            else runs.Add((title, 1));
+        }
+        return runs;
+    }
+
     /// <summary>某字段在各班中出现最多的值，用于标出与多数班级不一致的设置。</summary>
     public string? MajorityValue(string key) => ClassStates
         .Where(x => x.Values.Count > 0)

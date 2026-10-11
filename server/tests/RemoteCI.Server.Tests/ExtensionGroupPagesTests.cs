@@ -115,6 +115,114 @@ public sealed class ExtensionGroupPagesTests
         Assert.Contains("href=\"/ClassExtensions\"", control);
     }
 
+    [Fact]
+    public async Task ExtensionSettings_RenderSectionsCardsConditionsAndColors()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        _ = await factory.LoginAsync();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<IStateStore>();
+            store.SaveExtensionGroups(TestWebApplicationFactory.DefaultClassId, new[]
+            {
+                new ExtensionGroupDefinition
+                {
+                    Id = "demo.style",
+                    DisplayName = "样式插件",
+                    Settings =
+                    [
+                        new ExtensionParameter { Key = "enabled", Label = "运行时注入", Type = ExtensionParameterType.Switch },
+                        new ExtensionParameter
+                        {
+                            Key = "shadow", Label = "阴影", Type = ExtensionParameterType.Switch, Section = "边框和阴影",
+                            Card = "阴影", CardDescription = "添加投影效果", CardToggle = true,
+                        },
+                        new ExtensionParameter
+                        {
+                            Key = "shadowColor", Label = "阴影颜色", Type = ExtensionParameterType.Color, Section = "边框和阴影", Card = "阴影",
+                            EnabledWhen = [new ExtensionFieldCondition { Key = "shadow", Values = ["true"] }],
+                        },
+                        new ExtensionParameter
+                        {
+                            Key = "shadowOpacity", Label = "阴影不透明度", Type = ExtensionParameterType.Number, Section = "边框和阴影", Card = "阴影",
+                            Min = 0, Max = 1, Step = 0.05, Slider = true,
+                        },
+                        new ExtensionParameter
+                        {
+                            Key = "mode", Label = "样式", Type = ExtensionParameterType.Select, Section = "即将上课", Card = "即将上课样式",
+                            Options = ["Arrows", "Scan"], OptionLabels = ["箭头", "扫描线"],
+                        },
+                        new ExtensionParameter
+                        {
+                            Key = "arrowCount", Label = "箭头组数", Type = ExtensionParameterType.Number, Section = "即将上课", Card = "箭头",
+                            VisibleWhen = [new ExtensionFieldCondition { Key = "mode", Values = ["Arrows"] }],
+                        },
+                    ],
+                    Values = new Dictionary<string, string?>
+                    {
+                        ["enabled"] = "true", ["shadow"] = "false", ["shadowColor"] = "#99000000",
+                        ["shadowOpacity"] = "0.5", ["mode"] = "Scan", ["arrowCount"] = "3",
+                    },
+                },
+            });
+        }
+
+        using var browser = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            HandleCookies = true,
+        });
+        await LoginWebUiAsync(browser);
+
+        var page = WebUtility.HtmlDecode(await browser.GetStringAsync("/ClassExtensions?groupId=demo.style"));
+        Assert.Contains("data-extension-fields", page);
+        Assert.Contains("<h3 class=\"extension-section-title\">边框和阴影</h3>", page);
+        Assert.Contains("<strong>阴影</strong>", page);
+        Assert.Contains("添加投影效果", page);
+        // 卡片总开关渲染在标题行；开关值由隐藏域提交（字段名仍按声明下标）。
+        Assert.Matches("data-card-toggle-slot[\\s\\S]*?name=\"SettingInputs\\[1\\]\\.Value\" value=\"false\"", page);
+        // 颜色：取色器（RGB）+ 透明度（A）+ 十六进制文本（提交值）。
+        Assert.Contains("type=\"color\" value=\"#000000\"", page);
+        Assert.Contains("value=\"153\" data-color-alpha", page);
+        Assert.Matches("name=\"SettingInputs\\[2\\]\\.Value\"[^>]*value=\"#99000000\"", page);
+        // 卡片开关关闭时，依赖它的字段初始即置灰（inert）；条件交给脚本在表单变化时重算。
+        Assert.Matches("data-key=\"shadowColor\"[^>]*data-enabled-when=\"[^\"]+\"[^>]*inert", page);
+        // 滑块与数字框同步，步长取声明值。
+        Assert.Matches("type=\"range\" min=\"0\" max=\"1\" step=\"0.05\" value=\"0.5\"", page);
+        // 样式不是“箭头”，箭头卡片初始隐藏。
+        Assert.Matches("data-key=\"arrowCount\"[^>]*hidden", page);
+
+        var admin = WebUtility.HtmlDecode(await browser.GetStringAsync("/ExtensionSettings?groupId=demo.style"));
+        Assert.Contains("extension-values-sections", admin);
+        Assert.Contains("<th colspan=\"3\">边框和阴影</th>", admin);
+        Assert.Contains("<th>阴影 · 阴影颜色</th>", admin);
+        Assert.Contains("extension-value-color", admin);
+    }
+
+    [Fact]
+    public void ExtensionFieldValidator_ValidatesColorsAndUsesQualifiedLabels()
+    {
+        var fields = new List<ExtensionParameter>
+        {
+            new() { Key = "color", Label = "阴影颜色", Card = "阴影", Type = ExtensionParameterType.Color },
+        };
+        foreach (var valid in new[] { "#fff", "#8fff", "#112233", "#80112233", " #80112233 " })
+        {
+            var values = ExtensionFieldValidator.ValidateSettings(fields, new Dictionary<string, string?> { ["color"] = valid }, out var error);
+            Assert.Null(error);
+            Assert.Equal(valid.Trim(), values["color"]);
+        }
+        ExtensionFieldValidator.ValidateSettings(fields, new Dictionary<string, string?> { ["color"] = "red" }, out var invalid);
+        Assert.Equal("“阴影 · 阴影颜色”必须是 #RRGGBB 或 #AARRGGBB 格式的颜色", invalid);
+        Assert.Equal("#FF112233", ExtensionColor.Normalize("#112233"));
+        Assert.Equal("#88FFFFFF", ExtensionColor.Normalize("#8fff"));
+
+        var condition = new ExtensionFieldCondition { Key = "x", Values = ["0"], Not = true };
+        Assert.False(condition.Matches("0.0"));
+        Assert.True(condition.Matches("1.5"));
+        Assert.True(new ExtensionFieldCondition { Key = "x", Values = ["Arrows"] }.Matches("arrows"));
+    }
+
     private static async Task LoginWebUiAsync(HttpClient browser)
     {
         var html = await browser.GetStringAsync("/Login");

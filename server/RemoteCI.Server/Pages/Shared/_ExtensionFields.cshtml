@@ -1,56 +1,77 @@
 @model RemoteCI.Server.Pages.ExtensionFieldsModel
-@using RemoteCI.Shared.Models
-@for (var index = 0; index < Model.Fields.Count; index++)
+@using RemoteCI.Server.Pages
+@if (!Model.HasLayout)
 {
-    var field = Model.Fields[index];
-    var label = string.IsNullOrWhiteSpace(field.Label) ? field.Key : field.Label;
-    var value = Model.Values is { } values && values.TryGetValue(field.Key, out var current) ? current : field.DefaultValue;
-    var isOn = string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
-    var valueName = $"{Model.Prefix}[{index}].Value";
-    // 部分修改模式下未勾选的字段不会提交，因此不能用 required 阻止表单提交。
-    var required = field.Required && !Model.Selectable;
-    <div class="extension-field@(Model.Selectable ? " extension-field-selectable" : "")" data-extension-field>
-        <input type="hidden" name="@($"{Model.Prefix}[{index}].Key")" value="@field.Key" />
-        @if (Model.Selectable)
+    @* 未声明分区/卡片的字段（扩展功能参数、旧插件）：保持逐字段堆叠的旧布局。 *@
+    for (var index = 0; index < Model.Fields.Count; index++)
+    {
+        <partial name="_ExtensionField" model="new ExtensionFieldRender(Model, new ExtensionFieldSlot(index, Model.Fields[index]))" />
+    }
+}
+else
+{
+    <div class="extension-fields" data-extension-fields>
+        @foreach (var part in Model.BuildLayout())
         {
-            <label class="check extension-field-apply"><input type="checkbox" name="@($"{Model.Prefix}[{index}].Apply")" value="true" data-extension-field-apply /> 修改此项</label>
-        }
-        <label>
-            <span class="extension-field-label">@label@(field.Required ? " *" : "")</span>
-            @if (field.Type == ExtensionParameterType.Switch)
-            {
-                <select name="@valueName">
-                    <option value="false" selected="@(!isOn)">关闭</option>
-                    <option value="true" selected="@isOn">开启</option>
-                </select>
-            }
-            else if (field.Type == ExtensionParameterType.Select)
-            {
-                <select name="@valueName" required="@required">
-                    @if (!field.Required) { <option value="">未选择</option> }
-                    @for (var optionIndex = 0; optionIndex < (field.Options?.Count ?? 0); optionIndex++)
+            var sectionVisible = part.Cards.Any(card => card.AllSlots.Any(slot => Model.IsVisible(slot.Field)));
+            <section class="extension-section" data-extension-section hidden="@(!sectionVisible)">
+                @if (part.Title is not null)
+                {
+                    <h3 class="extension-section-title">@part.Title</h3>
+                }
+                <div class="extension-section-body">
+                    @foreach (var card in part.Cards)
                     {
-                        var option = field.Options![optionIndex];
-                        <option value="@option" selected="@(option == value)">@field.OptionLabel(optionIndex)</option>
+                        var cardVisible = card.AllSlots.Any(slot => Model.IsVisible(slot.Field));
+                        if (card.Title is null)
+                        {
+                            <div class="extension-card extension-card-single" data-extension-card hidden="@(!cardVisible)">
+                                @foreach (var slot in card.Items)
+                                {
+                                    <partial name="_ExtensionField" model="new ExtensionFieldRender(Model, slot)" />
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            var hasBody = card.Items.Count > 0;
+                            var bodyId = $"{Model.IdPrefix}-card-{card.AllSlots.Min(slot => slot.Index)}";
+                            <div class="extension-card" data-extension-card hidden="@(!cardVisible)">
+                                <div class="extension-card-head@(hasBody ? " is-expandable" : "")"
+                                     data-card-expand="@(hasBody ? bodyId : null)" role="@(hasBody ? "button" : null)"
+                                     tabindex="@(hasBody ? "0" : null)" aria-expanded="@(hasBody ? "false" : null)" aria-controls="@(hasBody ? bodyId : null)">
+                                    <div class="extension-card-title">
+                                        <strong>@card.Title</strong>
+                                        @if (card.Description is not null)
+                                        {
+                                            <small class="muted">@card.Description</small>
+                                        }
+                                    </div>
+                                    @if (card.Toggle is { } headerToggle)
+                                    {
+                                        <div class="extension-card-toggle" data-card-toggle-slot>
+                                            <partial name="_ExtensionField" model="new ExtensionFieldRender(Model, headerToggle, true)" />
+                                        </div>
+                                    }
+                                    @if (hasBody)
+                                    {
+                                        <i class="bi bi-chevron-down extension-card-chevron" aria-hidden="true"></i>
+                                    }
+                                </div>
+                                @if (hasBody)
+                                {
+                                    <div class="extension-card-body" id="@bodyId" hidden>
+                                        @foreach (var slot in card.Items)
+                                        {
+                                            <partial name="_ExtensionField" model="new ExtensionFieldRender(Model, slot)" />
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
                     }
-                </select>
-            }
-            else if (field.Type == ExtensionParameterType.Text && field.Multiline)
-            {
-                <textarea name="@valueName" rows="3" maxlength="@ExtensionFieldValidator.MaxValueLength" placeholder="@field.Placeholder" required="@required">@value</textarea>
-            }
-            else if (field.Type == ExtensionParameterType.Number)
-            {
-                <input name="@valueName" type="number" step="any" min="@field.Min" max="@field.Max" value="@value" placeholder="@field.Placeholder" required="@required" />
-            }
-            else
-            {
-                <input name="@valueName" type="text" maxlength="@ExtensionFieldValidator.MaxValueLength" value="@value" placeholder="@field.Placeholder" required="@required" />
-            }
-        </label>
-        @if (!string.IsNullOrWhiteSpace(field.Description))
-        {
-            <small class="muted extension-field-help">@field.Description</small>
+                </div>
+            </section>
         }
     </div>
 }

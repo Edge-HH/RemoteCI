@@ -197,18 +197,16 @@ public sealed class UpdateService
             root.TryGetProperty("draft", out var draft) && draft.ValueKind == JsonValueKind.True);
     }
 
+    /// <summary>当前运行平台对应的发布 RID，如 win-x64、linux-arm64。</summary>
+    public static string CurrentPlatform =>
+        $"{(OperatingSystem.IsWindows() ? "win" : "linux")}-{(RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "arm64" : "x64")}";
+
     /// <summary>挑选与当前运行平台匹配的服务端压缩包。</summary>
     public ReleaseAsset? SelectServerAsset(ReleaseInfo release)
     {
-        var os = OperatingSystem.IsWindows() ? "win" : "linux";
-        var arch = RuntimeInformation.ProcessArchitecture switch
-        {
-            Architecture.Arm64 => "arm64",
-            _ => "x64",
-        };
         var version = NormalizeVersion(release.Tag);
         return release.Assets.FirstOrDefault(asset =>
-            asset.Name.StartsWith($"RemoteCI.Server-{version}-{os}-{arch}", StringComparison.OrdinalIgnoreCase) &&
+            asset.Name.StartsWith($"RemoteCI.Server-{version}-{CurrentPlatform}", StringComparison.OrdinalIgnoreCase) &&
             asset.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
     }
 
@@ -303,6 +301,65 @@ public sealed class UpdateService
             var version = NormalizeVersion(release.Tag);
             ValidatePackageVersion(extracted, version);
             return new PreparedUpdate(staging, extracted);
+        }
+        finally
+        {
+            _prepareGate.Release();
+        }
+    }
+
+    /// <summary>手动上传更新包的大小上限；正式服务端包远小于此。</summary>
+    public const long MaxUploadedPackageBytes = 512L * 1024 * 1024;
+
+    /// <summary>
+    /// 管理员手动上传的服务端包（调试用）：落盘解压到暂存目录并读取包内版本，此阶段不触碰运行文件。
+    /// 不经 GitHub 校验和，也不限制版本高低，由调用方决定是否安装。
+    /// 兼容压缩时多包了一层目录的包（根目录只有一个子目录且其中含 RemoteCI.Server.dll）。
+    /// </summary>
+    public async Task<(PreparedUpdate Update, string Version)> PrepareUploadedUpdateAsync(
+        Stream package,
+        string databasePath,
+        string contentRoot,
+        CancellationToken ct)
+    {
+        await _prepareGate.WaitAsync(ct);
+        try
+        {
+            var staging = Path.Combine(GetUpdatesRoot(databasePath, contentRoot), "manual-upload");
+            if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
+            Directory.CreateDirectory(staging);
+
+            var archive = Path.Combine(staging, "package.zip");
+            await CopyToFileAsync(package, archive, MaxUploadedPackageBytes, ct);
+
+            var unpacked = Path.Combine(staging, "unpacked");
+            try
+            {
+                ZipFile.ExtractToDirectory(archive, unpacked, overwriteFiles: true);
+            }
+            catch (InvalidDataException ex)
+            {
+                throw new InvalidDataException("上传的文件不是有效的 zip 压缩包。", ex);
+            }
+
+            // 外部安装器成功后删除 SourceDirectory 的父目录，所以包根目录必须直接位于暂存目录下。
+            var extracted = Path.Combine(staging, "extracted");
+            var root = !File.Exists(Path.Combine(unpacked, "RemoteCI.Server.dll")) &&
+                       Directory.GetFiles(unpacked).Length == 0 &&
+                       Directory.GetDirectories(unpacked) is [var single] &&
+                       File.Exists(Path.Combine(single, "RemoteCI.Server.dll"))
+                ? single
+                : unpacked;
+            Directory.Move(root, extracted);
+            if (Directory.Exists(unpacked)) Directory.Delete(unpacked, recursive: true);
+
+            var assembly = Path.Combine(extracted, "RemoteCI.Server.dll");
+            if (!File.Exists(assembly))
+                throw new InvalidDataException("更新包根目录缺少 RemoteCI.Server.dll，请上传服务端发布包。");
+            var version = FileVersionInfo.GetVersionInfo(assembly).ProductVersion?.Split('+', 2)[0];
+            if (string.IsNullOrWhiteSpace(version))
+                throw new InvalidDataException("无法读取更新包内服务端的版本号。");
+            return (new PreparedUpdate(staging, extracted), version);
         }
         finally
         {
@@ -427,12 +484,18 @@ public sealed class UpdateService
     /// </summary>
     private static async Task DownloadAsync(string url, string target, long maxBytes, CancellationToken ct)
     {
-        var partial = target + ".part";
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.UserAgent.ParseAdd(UserAgent);
         using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         response.EnsureSuccessStatusCode();
         await using var input = await response.Content.ReadAsStreamAsync(ct);
+        await CopyToFileAsync(input, target, maxBytes, ct);
+    }
+
+    /// <summary>流式写入 .part 后改名；按实际读取量累计，超出 <paramref name="maxBytes"/> 即中断并删除部分文件。</summary>
+    private static async Task CopyToFileAsync(Stream input, string target, long maxBytes, CancellationToken ct)
+    {
+        var partial = target + ".part";
         try
         {
             await using var output = File.Create(partial);
@@ -443,7 +506,7 @@ public sealed class UpdateService
             {
                 total += read;
                 if (total > maxBytes)
-                    throw new InvalidDataException($"下载内容超出大小上限 {maxBytes} 字节，已中断。");
+                    throw new InvalidDataException($"文件超出大小上限 {maxBytes} 字节，已中断。");
                 await output.WriteAsync(buffer.AsMemory(0, read), ct);
             }
         }

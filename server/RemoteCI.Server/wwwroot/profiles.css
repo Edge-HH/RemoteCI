@@ -15,7 +15,6 @@
 .profile-record { display: flex; align-items: center; border-radius: 8px; border: 1px solid transparent; }
 .profile-record.active { border-color: var(--line-strong); background: var(--accent-faint); }
 .profile-record-select { padding: 9px 0 9px 9px; }
-.profile-record-select input { width: 17px; height: 17px; }
 .profile-record > button { display: grid; flex: 1; min-width: 0; justify-content: start; justify-items: start; gap: 3px; padding: 10px; border: 0; background: transparent; text-align: left; }
 .profile-record > button:hover { background: var(--surface-soft); }
 .profile-record strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
@@ -61,7 +60,7 @@
 .profile-choice-list { display: grid; gap: 12px; }
 .profile-choice-list small { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; }
 .profile-choice-list .check { align-items: flex-start; }
-.profile-choice-list input { margin-top: 5px; }
+.profile-choice-list input { margin-top: 2px; }
 .profile-apply-sections { display: flex; flex-wrap: wrap; gap: 18px; }
 .profile-dialog fieldset { padding: 14px; border: 1px solid var(--line); border-radius: 8px; }
 .profile-dialog legend { padding: 0 6px; font-size: 13px; font-weight: 650; }
