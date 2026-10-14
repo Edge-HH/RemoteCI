@@ -44,7 +44,7 @@
       0Harmony，运行时同名不同实现，Patch 时会在共享状态上抛 TypeLoadException，导致插件启动中断。
       因此这里只保留编译期引用，运行时统一解析宿主自带的 0Harmony。
     -->
-    <PackageReference Include="Lib.Harmony" Version="2.4.2">
+    <PackageReference Include="Lib.Harmony" Version="2.4.3">
       <ExcludeAssets>runtime; native</ExcludeAssets>
     </PackageReference>
     <!-- NAudio.Wasapi：通过 Windows Core Audio 读取和控制默认播放设备的主音量。 -->
