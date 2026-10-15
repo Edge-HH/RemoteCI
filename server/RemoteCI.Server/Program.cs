@@ -98,6 +98,7 @@ builder.Services.AddScoped<MobileLoginSettings>();
 builder.Services.AddScoped<TeacherBindingService>();
 builder.Services.AddScoped<ClassAccessService>();
 builder.Services.AddScoped<ProfileLibraryService>();
+builder.Services.AddScoped<ScheduleViewService>();
 builder.Services.AddScoped<ProfileDispatchService>();
 builder.Services.AddScoped<ClassBroadcastService>();
  builder.Services.AddScoped<DeviceInventoryService>();
@@ -523,13 +524,14 @@ app.MapGet("/api/state", async (
 });
 
 app.MapGet("/api/schedule", async (
-    HttpContext ctx, Guid? classId, IdentityCoordinator identities, ClassAccessService access, IStateStore store, CancellationToken ct) =>
+    HttpContext ctx, Guid? classId, IdentityCoordinator identities, ClassAccessService access, ScheduleViewService schedules, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
     if (await ResolveClassAsync(principal, classId, access, ct) is not { } target) return Forbidden();
-    return store.GetLatestSchedule(target) is { } schedule
-        ? Results.Ok(schedule)
+    // 插件尚未同步课表时按班级档案推算（bundle.source = "profile"），插件离线也能查看。
+    return await schedules.GetAsync(target, ct) is { } view
+        ? Results.Ok(view.Bundle)
         : Results.Json(Error(ApiErrorCodes.NotFound, "尚无课表"), statusCode: StatusCodes.Status404NotFound);
 });
 
@@ -590,7 +592,8 @@ usersApi.MapPost("/", async (
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
     if (!HasPermission(principal, UserPermissions.ManageUsers)) return Forbidden();
-    if (MissingFields(request.Username, request.Password) is { } bad) return bad;
+    // 初始密码可留空：账号进入待激活状态，首次以空密码登录时设置密码（与 WebUI 新建账号一致）。
+    if (MissingFields(request.Username) is { } bad) return bad;
     // 被授予 ManageUsers 的普通用户只能管理普通账号，不能创建管理员。
     if ((request.Role == UserRole.Admin || request.RoleId == AccountRole.AdministratorId) && principal.User.Role != UserRole.Admin) return Forbidden();
     try

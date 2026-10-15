@@ -166,6 +166,12 @@ class AuthorizationAndNotificationTest {
     }
 
     @Test
+    fun `empty password login still authenticates so pending accounts can set a password`() {
+        assertTrue(planConnection(WatchSettings(), password = "").bootstrapCloudAuthentication)
+        assertFalse(planConnection(WatchSettings(), password = null).bootstrapCloudAuthentication)
+    }
+
+    @Test
     fun `password login prefers selected lan plugin after cloud authentication`() {
         val plan = planConnection(
             WatchSettings(lanConnectionEnabled = true, lanHost = "192.168.50.8", lanPort = 9123),

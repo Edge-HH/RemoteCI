@@ -1732,9 +1732,13 @@ internal fun requireCloudServerUrl(url: String) {
 }
 
 /** 密码只能由云端验证，因此密码登录始终允许一次云端引导；开发者开关只控制后续连接回退。 */
+/**
+ * password 为 null 表示复用已保存的会话；非 null（含空字符串）表示用户主动登录。
+ * 空密码同样要走云端认证：未设密码的待激活账号以空密码登录后进入首登设置密码流程。
+ */
 internal fun planConnection(settings: WatchSettings, password: String?): ConnectionPlan = ConnectionPlan(
-    bootstrapCloudAuthentication = !password.isNullOrEmpty(),
-    preferLanAfterCloudAuthentication = !password.isNullOrEmpty() && settings.lanConnectionEnabled &&
+    bootstrapCloudAuthentication = password != null,
+    preferLanAfterCloudAuthentication = password != null && settings.lanConnectionEnabled &&
         lanEndpointHosts(settings).isNotEmpty(),
     allowCloudFallback = settings.cloudConnectionEnabled,
 )

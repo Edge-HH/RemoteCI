@@ -267,7 +267,13 @@ fun UsersScreen(onBack: () -> Unit, snackbar: androidx.compose.material3.Snackba
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(username, { username = it }, label = { Text("ID") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(displayName, { displayName = it }, label = { Text("显示名") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(password, { password = it }, label = { Text("密码") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                password,
+                { password = it },
+                label = { Text("初始密码") },
+                supportingText = { Text("留空则账号首次登录时自行设置密码") },
+                modifier = Modifier.fillMaxWidth(),
+            )
             Text("角色", style = MaterialTheme.typography.titleSmall)
             val selectableRoles = roles.filter { currentUser?.isAdmin == true || it.kind != "Administrator" }
             Box {
@@ -325,7 +331,7 @@ fun UsersScreen(onBack: () -> Unit, snackbar: androidx.compose.material3.Snackba
                     }
                         .onFailure { snackbar.showSnackbar(it.message ?: "创建失败") }
                 }
-            }, modifier = Modifier.fillMaxWidth().height(56.dp), enabled = selectedRoleId != null && username.length >= 3 && displayName.isNotBlank() && password.length >= 8) { Text("新建账号") }
+            }, modifier = Modifier.fillMaxWidth().height(56.dp), enabled = selectedRoleId != null && username.length >= 3 && displayName.isNotBlank() && (password.isEmpty() || password.length >= 8)) { Text("新建账号") }
         }
     }
     editing?.let { item ->

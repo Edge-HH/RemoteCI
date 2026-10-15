@@ -144,6 +144,15 @@ fun RemoteCiApp(appContext: android.content.Context) {
             }
     }
     LaunchedEffect(Unit) {
+        // 在设置页切换到尚未设置密码的账号时，回到登录页展示首登设置密码表单。
+        ConnectionManager.pendingPasswordSetup.collect { challenge ->
+            if (challenge != null && stack.last() !is Screen.Login) {
+                navigationDirection = -1
+                stack = listOf(Screen.Login)
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
         ConnectionManager.discoveredSettings.collectLatest {
             settings = it
             store.save(it)

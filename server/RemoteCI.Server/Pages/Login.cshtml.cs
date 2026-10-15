@@ -54,15 +54,16 @@ public sealed class LoginModel(
     {
         VisitorAccessEnabled = await visitorAccess.AnyVisitorClassEnabledAsync(ct);
         if (!ModelState.IsValid) return Page();
+        var password = Input.Password ?? string.Empty;
         var user = await users.FindByNameAsync(Input.Username.Trim());
         if (user is null || !user.Enabled)
         {
             // 恒定时间：与 REST 登录端点同一逻辑，避免响应时间泄露用户名是否存在。
-            await identities.EqualizeLoginTimingAsync(Input.Password);
+            await identities.EqualizeLoginTimingAsync(password);
             ModelState.AddModelError(string.Empty, "ID 或密码错误");
             return Page();
         }
-        if (user.PasswordPending && string.IsNullOrEmpty(Input.Password))
+        if (user.PasswordPending && password.Length == 0)
         {
             // 首次登录的待激活账号：生成一次性令牌并进入“设置密码”页。
             var setup = await identities.BeginPasswordSetupAsync(user, ct);
@@ -76,7 +77,7 @@ public sealed class LoginModel(
             ModelState.AddModelError(string.Empty, "该账号尚未设置密码，请留空密码登录以完成首次设置");
             return Page();
         }
-        var result = await signIn.PasswordSignInAsync(user, Input.Password, Input.RememberMe, true);
+        var result = await signIn.PasswordSignInAsync(user, password, Input.RememberMe, true);
         if (!result.Succeeded)
         {
             ModelState.AddModelError(string.Empty, result.IsLockedOut ? "登录失败次数过多，请稍后再试" : "ID 或密码错误");
@@ -151,9 +152,10 @@ public sealed class LoginModel(
         [Required, StringLength(32, MinimumLength = 3)]
         public string Username { get; set; } = string.Empty;
 
-        // 密码可留空：批量导入的待激活账号首次登录时以此为入口设置密码。
+        // 密码可留空：未设置密码的待激活账号首次登录时以此为入口设置密码。
+        // 必须声明为可空：非空 string 会被 MVC 隐式视为 [Required]，空密码提交会被静默拦截。
         [StringLength(128)]
-        public string Password { get; set; } = string.Empty;
+        public string? Password { get; set; }
 
         public bool RememberMe { get; set; }
     }

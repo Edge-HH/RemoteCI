@@ -381,7 +381,7 @@ fun ConnectionScreen(
                 value = password,
                 onValueChange = { password = it },
                 label = { Text("密码") },
-                supportingText = { Text("切换账号或服务器时必填；密码只用于本次登录，不会保存") },
+                supportingText = { Text("切换账号或服务器时用于登录；尚未设置密码的账号可留空。密码不会保存") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
@@ -396,13 +396,10 @@ fun ConnectionScreen(
                     scope.launch { snackbar.showSnackbar("请填写服务器地址和 ID") }
                     return@Button
                 }
-                if (identityChanged && password.isBlank()) {
-                    scope.launch { snackbar.showSnackbar("切换账号或服务器需要输入密码") }
-                    return@Button
-                }
                 val next = settings.copy(cloudServerUrl = nextServer, username = nextUsername)
                 onPersist(next)
-                ConnectionManager.connect(next, password.takeIf(String::isNotEmpty))
+                // 切换账号或服务器一定重新登录（空密码用于待激活账号首登设置密码）；否则留空表示沿用已保存的会话。
+                ConnectionManager.connect(next, if (identityChanged) password else password.takeIf(String::isNotEmpty))
                 password = ""
             }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
                 Text(if (identityChanged) "登录并切换" else "保存并重新连接")

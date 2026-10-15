@@ -12,7 +12,8 @@ namespace RemoteCI.Server.Pages;
 public sealed class VisitorModel(
     VisitorAccessSettings visitorAccess,
     ClassroomService classrooms,
-    IStateStore state) : PageModel
+    IStateStore state,
+    ScheduleViewService scheduleViews) : PageModel
 {
     public ScheduleBundle? Bundle { get; private set; }
 
@@ -50,7 +51,8 @@ public sealed class VisitorModel(
         CurrentClassId = @class is { } id && VisitorClasses.Any(x => x.Id == id)
             ? id
             : VisitorClasses[0].Id;
-        Bundle = state.GetLatestSchedule(CurrentClassId);
+        // 插件尚未同步课表时按班级档案推算，访客也能看到当前档案的课表。
+        Bundle = (await scheduleViews.GetAsync(CurrentClassId, ct))?.Bundle;
         ViewData["ScheduleToday"] = ClassClock.Today(state, CurrentClassId).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         return Page();
     }

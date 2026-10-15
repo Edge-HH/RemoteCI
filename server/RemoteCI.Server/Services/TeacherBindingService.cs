@@ -17,12 +17,17 @@ public sealed record TaughtClass(
 /// 老师与课表课程的绑定：老师账号（全局角色 Kind=Teacher）的显示名与班级课表中的科目教师名
 /// （ClassIsland 档案 Subject.TeacherName，随 ScheduleBundle 推送）一致时，绑定到对应课程。
 /// 课表由插件推送、服务端仅保留内存缓存，因此绑定完全动态计算：不落库、不迁移；
-/// 班级插件尚未推送课表时绑定暂不可见，收到课表后自动生效。
+/// 班级插件尚未推送课表时绑定（任教班级的访问权限）暂不可见，收到课表后自动生效。
+/// “我的日程”与下一节课另外纳入插件从未同步过课表的班级：按该班当前档案推算（只读，不授予班级访问权）。
 /// </summary>
-public sealed class TeacherBindingService(AppDbContext db, IStateStore state)
+public sealed class TeacherBindingService(AppDbContext db, IStateStore state, ScheduleViewService scheduleViews)
 {
-    /// <summary>教师字段中的姓名分隔符：课表里的教师名可能是“张三/李四”这类多人列表。</summary>
-    private static readonly char[] NameSeparators = ['、', ',', '，', '/', ';', '；', '|'];
+    /// <summary>
+    /// 教师字段中的姓名分隔符：一个科目由多位老师任教时，课表里的教师名写成“张三/李四”这类多人列表，
+    /// 每位老师各自按姓名对应到自己的个人日程。半角与全角写法都识别；空格不作分隔（英文姓名含空格）。
+    /// </summary>
+    private static readonly char[] NameSeparators =
+        ['/', '／', '\\', '＼', '、', ',', '，', ';', '；', '|', '｜', '&', '＆', '+', '＋'];
 
     /// <summary>
     /// 老师姓名与科目教师名匹配：去首尾空白后完全相等，或教师字段按分隔符拆分后任一姓名完全相等。
@@ -93,21 +98,47 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state)
             .ToHashSet();
     }
 
+    /// <summary>
+    /// “我的日程”的数据来源：插件同步过课表的班级用最后一次同步的课表（与任教班级绑定一致）；
+    /// 插件从未同步过课表的班级按当前班级档案推算，Source 标记为 profile。
+    /// </summary>
+    private async Task<IReadOnlyList<(TaughtClass Class, string? Source)>> GetScheduledClassesAsync(
+        string? boundName, CancellationToken ct)
+    {
+        var name = boundName?.Trim();
+        if (string.IsNullOrEmpty(name)) return [];
+        var classrooms = (await db.Classrooms.AsNoTracking().ToListAsync(ct)).OrderBy(x => x.CreatedAt).ToList();
+        var estimated = await scheduleViews.BuildFromProfilesAsync(classrooms.Select(x => x.Id).ToList(), ct);
+        var result = new List<(TaughtClass, string?)>();
+        foreach (var classroom in classrooms)
+        {
+            TaughtClass Taught(ScheduleBundle schedule) =>
+                new(classroom.Id, classroom.Name, classroom.VisitorAccessEnabled, classroom.Avatar != null, schedule);
+            if (state.GetLatestSchedule(classroom.Id) is { } bundle)
+            {
+                if (IsTaught(name, classroom.Id, bundle)) result.Add((Taught(bundle), null));
+            }
+            else if (estimated.GetValueOrDefault(classroom.Id) is { } view && HasMatchedCourse(name, view.Bundle))
+                result.Add((Taught(view.Bundle), ScheduleBundleSources.Profile));
+        }
+        return result;
+    }
+
     /// <summary>把当前用户任教班级的课表聚合为“我的日程”：按日期排序，每天按班级分组、节次排序。</summary>
     public async Task<MyScheduleResponse> BuildMyScheduleAsync(string? boundName, CancellationToken ct = default)
     {
         var response = new MyScheduleResponse();
-        var taught = await GetTaughtClassesAsync(boundName, ct);
+        var taught = await GetScheduledClassesAsync(boundName, ct);
         if (taught.Count == 0) return response;
-        response.FromDate = taught.Min(x => x.Bundle.FromDate)!;
-        var dates = taught.SelectMany(x => x.Bundle.Days)
+        response.FromDate = taught.Min(x => x.Class.Bundle.FromDate)!;
+        var dates = taught.SelectMany(x => x.Class.Bundle.Days)
             .Select(x => x.Date)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(x => x, StringComparer.Ordinal);
         foreach (var date in dates)
         {
             var items = new List<MyScheduleItem>();
-            foreach (var taughtClass in taught)
+            foreach (var (taughtClass, source) in taught)
             {
                 var courses = taughtClass.Bundle.Days
                     .Where(x => x.Date == date)
@@ -116,7 +147,7 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state)
                     .OrderBy(x => x.Index)
                     .ToList();
                 if (courses.Count > 0)
-                    items.Add(new MyScheduleItem { ClassId = taughtClass.ClassId, ClassName = taughtClass.ClassName, Courses = courses });
+                    items.Add(new MyScheduleItem { ClassId = taughtClass.ClassId, ClassName = taughtClass.ClassName, Courses = courses, Source = source });
             }
             if (items.Count > 0) response.Days.Add(new MyScheduleDay { Date = date, Items = items });
         }
@@ -132,7 +163,7 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state)
         string? boundName, DateTimeOffset now, CancellationToken ct = default)
     {
         var slots = new List<MyCourseSlot>();
-        foreach (var taughtClass in await GetTaughtClassesAsync(boundName, ct))
+        foreach (var (taughtClass, source) in await GetScheduledClassesAsync(boundName, ct))
         {
             var offset = state.GetLatestSnapshot(taughtClass.ClassId)?.TimeZoneOffsetMinutes is { } minutes
                 ? TimeSpan.FromMinutes(minutes)
@@ -156,6 +187,7 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state)
                         Course = course,
                         StartsAt = startsAt,
                         EndsAt = endsAt,
+                        Source = source,
                     });
                 }
             }

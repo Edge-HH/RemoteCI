@@ -705,6 +705,33 @@ public sealed class ClassManagementTests : IClassFixture<TestWebApplicationFacto
         Assert.Equal(HttpStatusCode.Unauthorized, badSetup.StatusCode);
     }
 
+    [Fact]
+    public async Task WebUi_PendingAccount_EmptyPasswordLogin_RedirectsToPasswordSetup()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        var admin = await factory.LoginAsync();
+        using var client = factory.CreateClient();
+        var created = await client.SendAsync(Bearer(HttpMethod.Post, "/api/users", admin.AccessToken, new CreateUserRequest
+        {
+            Username = "web.pending",
+            DisplayName = "待激活",
+            Password = "",
+            Role = UserRole.User,
+            RoleId = AccountRole.StudentId,
+        }));
+        created.EnsureSuccessStatusCode();
+
+        using var browser = CreateBrowser(factory);
+        var html = await browser.GetStringAsync("/Login");
+        var response = await PostRazorFormAsync(browser, "/Login", html, new Dictionary<string, string>
+        {
+            ["Input.Username"] = "web.pending",
+            ["Input.Password"] = "",
+        });
+        Assert.Equal(HttpStatusCode.SeeOther, response.StatusCode);
+        Assert.StartsWith("/SetupPassword?", response.Headers.Location!.OriginalString);
+    }
+
     // ---------- WebUI 班级切换 ----------
 
     [Fact]

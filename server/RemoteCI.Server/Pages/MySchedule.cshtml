@@ -20,6 +20,10 @@
 }
 else
 {
+    @if (Model.Schedule.Days.Any(day => day.Items.Any(item => item.Source == RemoteCI.Shared.Models.ScheduleBundleSources.Profile)))
+    {
+        <div class="notice">标有“按档案推算”的班级尚未连接过教室端插件，课程按该班当前档案推算，可能与教室端实际课表不同；插件同步后自动改用实际课表。</div>
+    }
     <div class="my-schedule-list">
         @foreach (var day in Model.Schedule.Days)
         {
@@ -34,7 +38,7 @@ else
                     @foreach (var item in day.Items)
                     {
                         <article class="my-schedule-class">
-                            <h3>@item.ClassName</h3>
+                            <h3>@item.ClassName @if (item.Source == RemoteCI.Shared.Models.ScheduleBundleSources.Profile) { <span class="role-badge muted">按档案推算</span> }</h3>
                             <div class="my-schedule-courses">
                                 @foreach (var course in item.Courses)
                                 {

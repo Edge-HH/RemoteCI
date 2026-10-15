@@ -171,8 +171,9 @@ fun LoginScreen(
     fun submit() {
         val next = settings.copy(username = username.trim(), cloudServerUrl = server.trim())
         onSettings(next)
-        if (username.isBlank() || password.isBlank() || server.isBlank()) {
-            scope.launch { snackbar.showSnackbar("请填写服务器、ID 和密码") }
+        // 密码可留空：未设置密码的账号以空密码登录后进入首登设置密码流程。
+        if (username.isBlank() || server.isBlank()) {
+            scope.launch { snackbar.showSnackbar("请填写服务器和 ID") }
         } else ConnectionManager.connect(next, password)
     }
     val colors = MaterialTheme.colorScheme
@@ -275,6 +276,7 @@ fun LoginScreen(
                             password,
                             { password = it },
                             label = { Text("密码") },
+                            supportingText = { Text("尚未设置密码的账号可留空，登录后设置新密码") },
                             leadingIcon = { Icon(Icons.Rounded.Lock, contentDescription = null) },
                             trailingIcon = {
                                 IconButton({ passwordVisible = !passwordVisible }) {
@@ -350,6 +352,8 @@ fun LoginScreen(
                                         scope.launch { snackbar.showSnackbar("两次输入的新密码不一致") }
                                     } else {
                                         settingUp = true
+                                        // setupInitialPassword 成功后会清空挑战，先记下账号 ID。
+                                        val setupUsername = pendingSetup!!.username
                                         scope.launch {
                                             val ok = runCatching {
                                                 ConnectionManager.setupInitialPassword(newPassword)
@@ -359,7 +363,7 @@ fun LoginScreen(
                                                 password = newPassword
                                                 newPassword = ""
                                                 confirmNewPassword = ""
-                                                ConnectionManager.connect(settings.copy(username = pendingSetup!!.username), password)
+                                                ConnectionManager.connect(settings.copy(username = setupUsername), password)
                                                 snackbar.showSnackbar("密码已设置，正在登录")
                                             } else {
                                                 snackbar.showSnackbar("设置失败，请重试或联系管理员")
@@ -434,7 +438,8 @@ fun ClassPickerScreen(onPicked: () -> Unit) {
     val classes by ConnectionManager.classes.collectAsState()
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(24.dp),
+            // 班级较多时超出一屏需要可滚动；内容较少时 fillMaxSize 保留的最小高度仍让列表垂直居中。
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
         ) {
             Text("选择进入的班级", style = MaterialTheme.typography.headlineSmall)

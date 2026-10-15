@@ -75,6 +75,19 @@ public sealed class ScheduleBundle
 
     [JsonPropertyName("subjects")]
     public List<SubjectEntry> Subjects { get; set; } = [];
+
+    /// <summary>
+    /// 课表来源：插件同步的课表（含插件离线时最后一次同步的数据）不输出；"profile" 表示插件从未同步过课表，由服务端班级档案推算，
+    /// 只用于展示，修订号不能用于向插件提交换课。
+    /// </summary>
+    [JsonPropertyName("source")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Source { get; set; }
+}
+
+public static class ScheduleBundleSources
+{
+    public const string Profile = "profile";
 }
 
 public sealed class ScheduleDay
@@ -222,6 +235,11 @@ public sealed class MyScheduleItem
 
     [JsonPropertyName("courses")]
     public List<CourseEntry> Courses { get; set; } = [];
+
+    /// <summary>"profile" 表示该班插件从未同步过课表，课程按服务端班级档案推算；插件课表不输出。</summary>
+    [JsonPropertyName("source")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Source { get; set; }
 }
 
 /// <summary>“我的日程”中的一节课：所在班级、课程以及换算成绝对时间的起止时刻。</summary>
@@ -244,6 +262,11 @@ public sealed class MyCourseSlot
 
     [JsonPropertyName("endsAt")]
     public DateTimeOffset EndsAt { get; set; }
+
+    /// <summary>"profile" 表示课程按服务端班级档案推算（该班插件从未同步过课表）；插件课表不输出。</summary>
+    [JsonPropertyName("source")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Source { get; set; }
 }
 
 /// <summary>“下一节课”响应：指定时刻正在上的课与接下来的第一节课；没有时对应字段省略。</summary>
