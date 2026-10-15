@@ -16,7 +16,8 @@ public sealed class ScheduleModel(
     PeerRegistry peers,
     SchedulePullSettings pullSettings,
     ScheduleSyncService scheduleSync,
-    ScheduleViewService scheduleViews) : WebPageModel(users)
+    ScheduleViewService scheduleViews,
+    ProfileLibraryService profiles) : WebPageModel(users)
 {
     [BindProperty]
     public ScheduleInput Input { get; set; } = new();
@@ -24,6 +25,8 @@ public sealed class ScheduleModel(
     /// <summary>课表来源；按班级档案推算时只供查看，科目教师与换课需等插件同步实际课表。</summary>
     public ScheduleView? CurrentView { get; private set; }
     public bool FromProfile => CurrentView?.Source == ScheduleViewSource.Profile;
+    /// <summary>能否进入本班“档案”页（管理员，或具有本班换课权限的班主任）；不能时不显示档案入口。</summary>
+    public bool CanEditClassProfile { get; private set; }
     public bool PluginOnline => peers.HasPluginFor(CurrentClassId);
     // 拉取课表会覆盖服务端缓存，只允许系统管理员或获准的本班班主任使用；其他账号不显示入口。
     public bool CanPullSchedule => ClassSelfService.CanPullSchedule &&
@@ -50,6 +53,7 @@ public sealed class ScheduleModel(
         if (await RequireAsync() is { } denied) return denied;
         CurrentView = await scheduleViews.GetAsync(CurrentClassId, HttpContext.RequestAborted);
         Bundle = CurrentView?.Bundle;
+        CanEditClassProfile = await profiles.CanManageClassAsync(CurrentUser, CurrentClassId, HttpContext.RequestAborted);
         ViewData["ScheduleToday"] = ClassClock.Today(state, CurrentClassId).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         PullInterval = await pullSettings.GetIntervalAsync();
         return Page();

@@ -21,13 +21,13 @@
 }
 @if (Model.Bundle is null)
 {
-    <div class="notice warning">插件尚未同步课表，本班也还没有班级档案。<a asp-page="/ClassProfiles">在班级档案中设置课表</a>后即可在此查看。</div>
+    <div class="notice warning">插件尚未同步课表，本班也还没有班级档案。@if (Model.CanEditClassProfile) { <a asp-page="/ClassProfiles">在班级档案中设置课表</a><text>后即可在此查看。</text> } else { <text>请班主任或管理员在“档案”页设置本班档案后查看。</text> }</div>
 }
 else
 {
     @if (Model.FromProfile)
     {
-        <div class="notice">插件从未同步过课表，以下按本班当前档案“@(Model.CurrentView!.ProfileName)”推算。插件连接并同步后将显示教室端的实际课表；科目教师与换课需在插件同步后操作，或直接<a asp-page="/ClassProfiles">编辑班级档案</a>。</div>
+        <div class="notice">插件从未同步过课表，以下按本班当前档案“@(Model.CurrentView!.ProfileName)”推算。插件连接并同步后将显示教室端的实际课表；科目教师与换课需在插件同步后操作@if (Model.CanEditClassProfile) { <text>，或直接</text><a asp-page="/ClassProfiles">编辑班级档案</a> }。</div>
         @if (Model.CurrentView!.UsesWeekRotation)
         {
             <div class="notice warning">档案包含多周轮换课表。轮换起始周保存在教室端，服务端按“本周为第 1 周”推算，可能与教室端不同。</div>
