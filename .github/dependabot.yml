@@ -1,11 +1,22 @@
 version: 2
 updates:
   # GitHub Actions 与 NuGet 依赖每周检查一次，自动开 PR。
+  # 同一生态的更新合并为一个 PR，避免同族包（如 EF Core 各包）被拆开升级导致 CS1705。
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      github-actions:
+        patterns: ["*"]
   - package-ecosystem: "nuget"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      nuget:
+        patterns: ["*"]
+    ignore:
+      # 插件只编译期引用 Harmony，运行时用宿主 ClassIsland 自带的 0Harmony 2.4.2.0；
+      # 引用更高版本会让运行时请求不存在的程序集版本。跟随宿主升级时再手动调整。
+      - dependency-name: "Lib.Harmony"

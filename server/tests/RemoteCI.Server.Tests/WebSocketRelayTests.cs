@@ -301,7 +301,8 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         }));
 
         var registry = _factory.Services.GetRequiredService<PeerRegistry>();
-        await WaitUntilAsync(() => registry.GetPluginDeviceSnapshots().Count == 1);
+        // 等能力上报处理完成，否则命令会因未声明 SoftwareInventory 能力被直接拒绝而不下发。
+        await WaitUntilAsync(() => registry.GetPluginDeviceSnapshots() is [{ HasExplicitCapabilities: true }]);
         var target = registry.GetPluginDeviceSnapshots().Single();
         var pending = registry.SendCommandAndWaitToConnectionAsync(new CommandMessage
         {
