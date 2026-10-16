@@ -12,7 +12,10 @@ using RemoteCI.Shared.Models;
 
 namespace RemoteCI.Plugin.Views;
 
-/// <summary>独立于课表窗口的非激活浮窗；关闭时立即释放音频和计时器，不把语音写入磁盘。</summary>
+/// <summary>
+/// 独立于课表窗口的非激活浮窗；关闭时立即释放音频和计时器，不把语音写入磁盘。
+/// 强制播放的语音在播完前锁定暂停、拖动进度和关闭，只允许后退重听。
+/// </summary>
 internal sealed class VoiceMessageWindow : Window
 {
     private const string PlayGlyph = "\uEDB8";
@@ -23,6 +26,7 @@ internal sealed class VoiceMessageWindow : Window
     private readonly WasapiOut _output;
     private readonly FluentIcon _pauseIcon = new(PauseGlyph, 30);
     private readonly Button _pause;
+    private readonly Button _close;
     private readonly TextBlock _progress = new() { FontSize = 16, VerticalAlignment = VerticalAlignment.Center };
     private readonly Slider _progressBar = new() { Minimum = 0, Height = 32 };
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(40) };
@@ -34,9 +38,18 @@ internal sealed class VoiceMessageWindow : Window
     private bool _seeking;
     private bool _wasLeftButtonDown;
     private string? _playbackError;
+    private bool _locked;
+    private bool _forceClosing;
+    private int _queued;
 
-    public VoiceMessageWindow(byte[] audio, string title)
+    /// <summary>播放到结尾或因设备异常停止时触发；用户暂停不会触发。</summary>
+    public event EventHandler? PlaybackFinished;
+
+    public bool IsPlaybackFinished { get; private set; }
+
+    public VoiceMessageWindow(byte[] audio, string title, bool forceComplete = false)
     {
+        _locked = forceComplete;
         Title = title;
         Width = 240;
         Height = 116;
@@ -72,14 +85,15 @@ internal sealed class VoiceMessageWindow : Window
         };
         _pause = CreateIconButton(_pauseIcon, "暂停");
         var rewind = CreateIconButton(new FluentIcon("\uEE91", 30), "后退 5 秒");
-        var close = CreateIconButton(new FluentIcon("\uE671", 30), "关闭");
-        HostApiCompat.BindDynamicResource(close, ForegroundProperty, "SystemFillColorCriticalBrush");
+        _close = CreateIconButton(new FluentIcon("\uE671", 30), "关闭");
+        HostApiCompat.BindDynamicResource(_close, ForegroundProperty, "SystemFillColorCriticalBrush");
         _pause.Click += (_, _) => TryPlaybackAction(TogglePlayback);
         rewind.Click += (_, _) =>
         {
             TryPlaybackAction(Rewind);
         };
-        close.Click += (_, _) => Close();
+        _close.Click += (_, _) => Close();
+        ToolTip.SetShowOnDisabled(_close, true);
         // 原生 Slider 拖动期间由用户控制位置，避免播放计时器把滑块拉回。
         _progressBar.AddHandler(PointerPressedEvent, (_, _) => _seeking = true,
             Avalonia.Interactivity.RoutingStrategies.Tunnel);
@@ -115,14 +129,14 @@ internal sealed class VoiceMessageWindow : Window
                     {
                         ColumnDefinitions = new ColumnDefinitions("*,*,*"),
                         [Grid.RowProperty] = 2,
-                        Children = { _pause, rewind, close },
+                        Children = { _pause, rewind, _close },
                     },
                 },
             },
         };
         surface.Classes.Add("popup-bg");
         Grid.SetColumn(rewind, 1);
-        Grid.SetColumn(close, 2);
+        Grid.SetColumn(_close, 2);
         Content = surface;
         _output = new WasapiOut();
         try { _output.Init(_source); }
@@ -133,7 +147,11 @@ internal sealed class VoiceMessageWindow : Window
             if (_disposed) return;
             SetPauseButton(playing: false);
             if (e.Exception is not null) _playbackError = "播放失败，请检查音频设备后关闭重试";
+            IsPlaybackFinished = true;
+            Unlock();
+            PlaybackFinished?.Invoke(this, EventArgs.Empty);
         });
+        ApplyLock();
         Opened += (_, _) =>
         {
             var area = (Screens.ScreenFromWindow(this) ?? Screens.Primary)?.WorkingArea;
@@ -160,7 +178,25 @@ internal sealed class VoiceMessageWindow : Window
             if (CloseOnOutsidePointerPressed()) return;
             UpdateProgress();
         };
+        // 强制播放期间同时拦截 Alt+F4 等系统关闭请求。
+        Closing += (_, e) =>
+        {
+            if (_locked && !_forceClosing) e.Cancel = true;
+        };
         Closed += (_, _) => DisposeAudio();
+    }
+
+    /// <summary>插件停止或替换浮窗时使用，忽略强制播放锁定。</summary>
+    public void CloseForcibly()
+    {
+        _forceClosing = true;
+        Close();
+    }
+
+    public void SetQueuedCount(int count)
+    {
+        _queued = count;
+        UpdateProgress();
     }
 
     public void StartPlayback() { _output.Play(); UpdateProgress(); }
@@ -176,14 +212,17 @@ internal sealed class VoiceMessageWindow : Window
         {
             if (_source.Position >= _source.Length) _source.Position = 0;
             _output.Play();
+            IsPlaybackFinished = false;
             SetPauseButton(playing: true);
         }
     }
 
     private void UpdateProgress()
     {
-        _progress.Text = _playbackError is null ? $"{Math.Ceiling(_source.TotalTime.TotalSeconds):0}″" : "播放失败";
-        ToolTip.SetTip(_progress, _playbackError ?? $"{_source.CurrentTime:mm\\:ss} / {_source.TotalTime:mm\\:ss}");
+        var queued = _queued > 0 ? $" +{_queued}" : string.Empty;
+        _progress.Text = (_playbackError is null ? $"{Math.Ceiling(_source.TotalTime.TotalSeconds):0}″" : "播放失败") + queued;
+        var tip = _playbackError ?? $"{_source.CurrentTime:mm\\:ss} / {_source.TotalTime:mm\\:ss}";
+        ToolTip.SetTip(_progress, _queued > 0 ? $"{tip}\n后面还有 {_queued} 条语音，播完后自动播放" : tip);
         _updatingProgress = true;
         if (!_seeking)
             _progressBar.Value = Math.Min(_source.CurrentTime.TotalSeconds, _progressBar.Maximum);
@@ -204,9 +243,25 @@ internal sealed class VoiceMessageWindow : Window
         catch (Exception)
         {
             _playbackError = "播放失败，请检查音频设备后关闭重试";
+            Unlock();
             _pause.IsEnabled = false;
             UpdateProgress();
         }
+    }
+
+    private void Unlock()
+    {
+        if (!_locked) return;
+        _locked = false;
+        ApplyLock();
+    }
+
+    private void ApplyLock()
+    {
+        _pause.IsEnabled = !_locked && _playbackError is null;
+        _progressBar.IsEnabled = !_locked;
+        _close.IsEnabled = !_locked;
+        ToolTip.SetTip(_close, _locked ? "需要播放完成后才能关闭" : "关闭");
     }
 
     private void SetPauseButton(bool playing)
@@ -240,7 +295,7 @@ internal sealed class VoiceMessageWindow : Window
         var isDown = IsLeftButtonDown();
         var isNewPress = isDown && !_wasLeftButtonDown;
         _wasLeftButtonDown = isDown;
-        if (!isNewPress || !GetCursorPos(out var point)) return false;
+        if (_locked || !isNewPress || !GetCursorPos(out var point)) return false;
 
         var width = (int)Math.Ceiling(Bounds.Width * RenderScaling);
         var height = (int)Math.Ceiling(Bounds.Height * RenderScaling);

@@ -113,7 +113,7 @@ public sealed class ControlModel(
         return new JsonResult(await SendAsync(new CommandMessage
         {
             Command = CommandKind.SendVoiceMessage,
-            VoiceMessage = new VoiceMessageRequest { AudioBase64 = Convert.ToBase64String(audio.ToArray()) },
+            VoiceMessage = CreateVoiceRequest(audio.ToArray()),
         }, ct));
     }
 

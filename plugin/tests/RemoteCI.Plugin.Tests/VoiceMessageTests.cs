@@ -67,4 +67,17 @@ public sealed class VoiceMessageTests
         }), JsonDefaults.Options);
         Assert.True(wire.Length <= VoiceMessageRequest.MaxEnvelopeBytes);
     }
+
+    [Fact]
+    public void ForceCompleteIsOptionalOnTheWire()
+    {
+        var plain = JsonSerializer.Serialize(new VoiceMessageRequest { AudioBase64 = "AAA=" }, JsonDefaults.Options);
+        Assert.DoesNotContain("forceComplete", plain);
+        Assert.False(JsonSerializer.Deserialize<VoiceMessageRequest>(plain, JsonDefaults.Options)!.ForceComplete);
+
+        var forced = JsonSerializer.Deserialize<VoiceMessageRequest>(
+            """{"format":"pcm_s16le_16000_mono","audioBase64":"AAA=","forceComplete":true}""", JsonDefaults.Options)!;
+        Assert.True(forced.ForceComplete);
+        Assert.True(VoiceMessageRequest.TryDecode(forced, out _));
+    }
 }

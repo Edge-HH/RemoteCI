@@ -105,7 +105,7 @@ object ConnectionManager {
     private val voiceReplies = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<CommandResult>>()
 
     /** 语音体积较大，在后台编码，并只接受本条消息的回执；断线时不自动重发。 */
-    suspend fun sendVoiceMessage(audio: ByteArray): CommandResult = withContext(Dispatchers.IO) {
+    suspend fun sendVoiceMessage(audio: ByteArray, forceComplete: Boolean = false): CommandResult = withContext(Dispatchers.IO) {
         if (!hasClassPermission(Protocol.PERMISSION_SEND_VOICE_MESSAGES))
             return@withContext CommandResult(false, "FORBIDDEN", "没有发送语音权限")
         if (!supports(Protocol.CAP_VOICE_MESSAGE_SEND))
@@ -118,7 +118,8 @@ object ConnectionManager {
         try {
             val command = CommandMessage(command = Protocol.CMD_SEND_VOICE_MESSAGE,
                 classId = currentClassId.value,
-                voiceMessage = VoiceMessageRequest(audioBase64 = android.util.Base64.encodeToString(audio, android.util.Base64.NO_WRAP)))
+                voiceMessage = VoiceMessageRequest(audioBase64 = android.util.Base64.encodeToString(audio, android.util.Base64.NO_WRAP),
+                    forceComplete = forceComplete))
             val envelope = Envelope(type = Protocol.TYPE_COMMAND, messageId = id,
                 payload = json.encodeToJsonElement(CommandMessage.serializer(), command))
             if (webSocket?.send(json.encodeToString(Envelope.serializer(), envelope)) != true)

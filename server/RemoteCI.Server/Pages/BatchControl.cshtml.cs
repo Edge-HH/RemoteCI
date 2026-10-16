@@ -342,7 +342,7 @@ public class BatchControlModel(
             _ => new CommandMessage
             {
                 Command = CommandKind.SendVoiceMessage,
-                VoiceMessage = new VoiceMessageRequest { AudioBase64 = Convert.ToBase64String(audio.ToArray()) },
+                VoiceMessage = CreateVoiceRequest(audio.ToArray()),
                 RequestedBy = profile,
             },
             "语音广播",
@@ -375,7 +375,7 @@ public class BatchControlModel(
             _ => new CommandMessage
             {
                 Command = CommandKind.SendVoiceMessage,
-                VoiceMessage = new VoiceMessageRequest { AudioBase64 = Convert.ToBase64String(audio.ToArray()) },
+                VoiceMessage = CreateVoiceRequest(audio.ToArray()),
                 RequestedBy = profile,
             },
             "语音消息",
@@ -786,6 +786,13 @@ public class BatchControlModel(
         .Select(value => Guid.TryParse(value, out var id) ? id : Guid.Empty)
         .Where(id => id != Guid.Empty)
         .ToList();
+
+    /// <summary>语音正文是原始 PCM，“强制播放完成”与广播目标一样由 voice-message.js 写入查询参数。</summary>
+    protected VoiceMessageRequest CreateVoiceRequest(byte[] audio) => new()
+    {
+        AudioBase64 = Convert.ToBase64String(audio),
+        ForceComplete = string.Equals(Request.Query["forceComplete"], "true", StringComparison.OrdinalIgnoreCase),
+    };
 
     protected async Task LoadBatchAsync(CancellationToken ct)
     {

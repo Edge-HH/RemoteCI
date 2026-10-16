@@ -222,6 +222,7 @@ fun VoiceScreen(onBack: () -> Unit) {
     var seconds by remember { mutableIntStateOf(0) }
     var recording by remember { mutableStateOf(false) }
     var sending by remember { mutableStateOf(false) }
+    var forceComplete by remember { mutableStateOf(false) }
     var audio by remember { mutableStateOf<ByteArray?>(null) }
     val stop = remember { AtomicBoolean(false) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -243,12 +244,19 @@ fun VoiceScreen(onBack: () -> Unit) {
             },
             modifier = Modifier.fillMaxWidth().height(56.dp),
         ) { Text(if (recording) "停止" else "开始录音") }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("强制播放完成")
+                Text("播完前课表端不能暂停或关闭语音浮窗", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(forceComplete, { forceComplete = it }, enabled = !sending)
+        }
         Button(
             onClick = {
                 val data = audio ?: return@Button
                 sending = true
                 scope.launch {
-                    val result = ConnectionManager.sendVoiceMessage(data)
+                    val result = ConnectionManager.sendVoiceMessage(data, forceComplete)
                     sending = false
                     if (result.success) onBack()
                 }

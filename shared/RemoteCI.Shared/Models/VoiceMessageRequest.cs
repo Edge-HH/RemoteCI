@@ -18,6 +18,11 @@ public sealed class VoiceMessageRequest
     [JsonPropertyName("audioBase64")]
     public string AudioBase64 { get; set; } = string.Empty;
 
+    /// <summary>为 true 时课表端在播放结束前不允许暂停或关闭语音浮窗；旧版插件忽略该字段。</summary>
+    [JsonPropertyName("forceComplete")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ForceComplete { get; set; }
+
     public static bool TryDecode(VoiceMessageRequest? request, out byte[] audio)
     {
         audio = [];

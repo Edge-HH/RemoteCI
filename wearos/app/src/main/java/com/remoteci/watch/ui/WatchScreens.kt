@@ -1301,7 +1301,7 @@ private fun Input(value: String, onValueChange: (String) -> Unit, label: String,
 }
 
 @Composable
-private fun Toggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+internal fun Toggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     ToggleChip(
         checked = checked,
         onCheckedChange = onChange,

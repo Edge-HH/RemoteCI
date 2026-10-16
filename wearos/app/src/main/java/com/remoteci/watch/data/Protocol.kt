@@ -307,6 +307,8 @@ data class CommandMessage(
 data class VoiceMessageRequest(
     val format: String = "pcm_s16le_16000_mono",
     @SerialName("audioBase64") val audioBase64: String,
+    /** 课表端播放结束前不允许暂停或关闭语音浮窗。 */
+    @SerialName("forceComplete") val forceComplete: Boolean = false,
 )
 
 @Serializable

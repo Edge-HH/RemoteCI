@@ -2065,6 +2065,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         await LoginWebUiAsync(browser, username, "Voice-Password-2026");
         var html = await browser.GetStringAsync("/Control");
         Assert.Equal(voiceGranted, html.Contains("data-voice-form"));
+        Assert.Equal(voiceGranted, html.Contains("data-voice-force-complete"));
         Assert.Equal(!voiceGranted, html.Contains(@"data-batch-open=""Notify"""));
         // 二进制上传仍受 Razor 防伪保护，不能通过跨站请求触发教室播放。
         using var missingToken = new ByteArrayContent([0, 0]);

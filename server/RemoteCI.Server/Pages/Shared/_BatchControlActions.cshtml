@@ -662,6 +662,7 @@ foreach (var extension in Model.BatchExtensionGroups.SelectMany(group => group.E
                     <button type="button" data-voice-send data-voice-next-to-targets disabled>@(Model.IsSingleControl ? "发送语音" : "下一步：选择设备")</button>
                 </div>
                 <audio controls data-voice-preview hidden aria-label="试听语音"></audio>
+                <label class="check"><input type="checkbox" data-voice-force-complete /> 强制播放完成（播完前课表端不能暂停或关闭语音浮窗）</label>
                 <p class="control-note" data-voice-status role="status">@(Model.IsSingleControl ? "录制完成后点击“发送语音”，发送到当前班级。" : "录制完成后点击“下一步：选择设备”，再确认广播目标。")</p>
                 <p class="control-note" data-voice-transport-warning hidden>（当前使用不安全的HTTP连接）</p>
             </form>

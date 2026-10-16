@@ -200,7 +200,8 @@ public sealed class CommandHandler
         if (!VoiceMessageRequest.TryDecode(request, out var audio))
             return CommandResult.Failure(CommandResultCodes.InvalidRequest, "语音格式无效或超过 60 秒");
         var title = $"来自{senderName}的语音消息";
-        var result = await Dispatcher.UIThread.InvokeAsync(() => _voiceMessages.Play(audio, title));
+        var forceComplete = request!.ForceComplete;
+        var result = await Dispatcher.UIThread.InvokeAsync(() => _voiceMessages.Play(audio, title, forceComplete));
         if (!result.Success) return result;
         try
         {

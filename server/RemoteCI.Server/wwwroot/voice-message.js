@@ -4,7 +4,7 @@
     const find = name => form.querySelector(`[data-voice-${name}]`);
     const record = find("record"), stop = find("stop"), discard = find("discard"), send = find("send");
     const preview = find("preview"), status = find("status");
-    const transportWarning = find("transport-warning");
+    const transportWarning = find("transport-warning"), forceComplete = find("force-complete");
     const offline = record.disabled;
     let stream, context, node, timer, previewUrl, pcm;
     let chunks = [], bytes = 0, recording = false, starting = false, generation = 0;
@@ -109,6 +109,8 @@
             document.querySelectorAll("input[data-voice-query]:checked").forEach(input => {
                 action.searchParams.append(input.dataset.voiceQuery || input.name, input.value);
             });
+            // 正文是原始 PCM，强制播放完成同样通过查询参数传给服务端。
+            if (forceComplete?.checked) action.searchParams.set("forceComplete", "true");
             const response = await fetch(action, {
                 method: "POST", credentials: "same-origin",
                 headers: { "Content-Type": "application/octet-stream", "X-CSRF-TOKEN": form.querySelector('[name="__RequestVerificationToken"]').value },

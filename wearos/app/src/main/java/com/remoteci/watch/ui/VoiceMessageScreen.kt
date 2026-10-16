@@ -29,6 +29,7 @@ internal fun VoiceMessageScreen(connectionReady: Boolean, onBack: () -> Unit) {
     var audio by remember { mutableStateOf<ByteArray?>(null) }
     var recording by remember { mutableStateOf(false) }
     var sending by remember { mutableStateOf(false) }
+    var forceComplete by remember { mutableStateOf(false) }
     var requestingPermission by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("每条最长 60 秒") }
     var preview by remember { mutableStateOf<AudioTrack?>(null) }
@@ -92,13 +93,14 @@ internal fun VoiceMessageScreen(connectionReady: Boolean, onBack: () -> Unit) {
                 } catch (e: Exception) { stopPreview(); status = "试听失败：${e.message}" }
             })
         }
+        item { Toggle("强制播放完成", forceComplete) { if (!sending) forceComplete = it } }
         item {
             ActionButton(if (sending) "发送中…" else "发送语音", null, audio != null && connectionReady && !recording && !sending, {
                 val bytes = audio ?: return@ActionButton
                 stopPreview(); sending = true; status = "等待课表端回执…"
                 scope.launch {
                     try {
-                        val result = ConnectionManager.sendVoiceMessage(bytes)
+                        val result = ConnectionManager.sendVoiceMessage(bytes, forceComplete)
                         status = result.message
                         if (result.success) audio = null
                     } catch (e: CancellationException) { throw e }
