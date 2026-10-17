@@ -65,6 +65,9 @@ object Protocol {
     const val ROLE_ADMIN = 2
     const val ROLE_KIND_CLASS_ADMINISTRATOR = 4
     const val ROLE_KIND_TEACHER = 5
+
+    /** 课表来源：插件从未同步过课表，按服务端班级档案推算。 */
+    const val BUNDLE_SOURCE_PROFILE = "profile"
     const val PERMISSION_VIEW_CURRENT = 1
     const val PERMISSION_ACCESS_WEB_UI = 2
     const val PERMISSION_MANAGE_USERS = 4
@@ -201,7 +204,11 @@ data class ScheduleBundle(
     @SerialName("generatedAt") val generatedAt: String? = null,
     val days: List<ScheduleDay> = emptyList(),
     val subjects: List<SubjectEntry> = emptyList(),
-)
+    /** "profile"：插件从未同步过课表，服务端按班级档案推算，只供查看，不能据此换课；插件课表不带该字段。 */
+    val source: String? = null,
+) {
+    val fromProfile: Boolean get() = source == Protocol.BUNDLE_SOURCE_PROFILE
+}
 
 @Serializable
 data class ScheduleDay(
@@ -225,6 +232,27 @@ data class CourseEntry(
 
 @Serializable
 data class SubjectEntry(val id: String, val name: String)
+
+@Serializable
+data class PersonalCourseView(
+    val id: String,
+    val subject: String,
+    val location: String = "",
+    val startsAt: String,
+    val endsAt: String,
+    val reminderMinutes: Int? = null,
+    val notifyAtStart: Boolean = true,
+)
+
+@Serializable
+data class PersonalNotification(
+    val id: String,
+    val kind: String = "",
+    val title: String = "",
+    val body: String = "",
+    val createdAt: String = "",
+    val readAt: String? = null,
+)
 
 @Serializable
 data class ClassEvent(

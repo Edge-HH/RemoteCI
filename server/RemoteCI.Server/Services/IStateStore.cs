@@ -10,6 +10,8 @@ public interface IStateStore
 {
     void SaveSnapshot(Guid classId, ClassStateSnapshot snapshot);
     ClassStateSnapshot? GetLatestSnapshot(Guid classId);
+    /// <summary>所有班级中最近一份带有效时区偏移（±14 小时内）的状态快照所上报的教室端时区偏移（分钟）；没有时为 null。</summary>
+    int? GetLatestTimeZoneOffsetMinutes();
     void SaveSchedule(Guid classId, ScheduleBundle schedule);
     /// <summary>最新课表，已叠加换课申请产生的单节临时任课老师覆盖；对外展示与个人日程都用它。</summary>
     ScheduleBundle? GetLatestSchedule(Guid classId);

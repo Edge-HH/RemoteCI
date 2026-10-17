@@ -101,14 +101,15 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state, Sc
     /// <summary>
     /// “我的日程”的数据来源：插件同步过课表的班级用最后一次同步的课表（与任教班级绑定一致）；
     /// 插件从未同步过课表的班级按当前班级档案推算，Source 标记为 profile。
+    /// <paramref name="fallbackOffset"/> 是没有任何班级快照时使用的时区（客户端上报的本机时区），见 <see cref="ClassClock"/>。
     /// </summary>
     private async Task<IReadOnlyList<(TaughtClass Class, string? Source)>> GetScheduledClassesAsync(
-        string? boundName, CancellationToken ct)
+        string? boundName, TimeSpan? fallbackOffset, CancellationToken ct)
     {
         var name = boundName?.Trim();
         if (string.IsNullOrEmpty(name)) return [];
         var classrooms = (await db.Classrooms.AsNoTracking().ToListAsync(ct)).OrderBy(x => x.CreatedAt).ToList();
-        var estimated = await scheduleViews.BuildFromProfilesAsync(classrooms.Select(x => x.Id).ToList(), ct);
+        var estimated = await scheduleViews.BuildFromProfilesAsync(classrooms.Select(x => x.Id).ToList(), fallbackOffset, ct);
         var result = new List<(TaughtClass, string?)>();
         foreach (var classroom in classrooms)
         {
@@ -125,10 +126,11 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state, Sc
     }
 
     /// <summary>把当前用户任教班级的课表聚合为“我的日程”：按日期排序，每天按班级分组、节次排序。</summary>
-    public async Task<MyScheduleResponse> BuildMyScheduleAsync(string? boundName, CancellationToken ct = default)
+    public async Task<MyScheduleResponse> BuildMyScheduleAsync(
+        string? boundName, TimeSpan? fallbackOffset = null, CancellationToken ct = default)
     {
         var response = new MyScheduleResponse();
-        var taught = await GetScheduledClassesAsync(boundName, ct);
+        var taught = await GetScheduledClassesAsync(boundName, fallbackOffset, ct);
         if (taught.Count == 0) return response;
         response.FromDate = taught.Min(x => x.Class.Bundle.FromDate)!;
         var dates = taught.SelectMany(x => x.Class.Bundle.Days)
@@ -147,7 +149,11 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state, Sc
                     .OrderBy(x => x.Index)
                     .ToList();
                 if (courses.Count > 0)
-                    items.Add(new MyScheduleItem { ClassId = taughtClass.ClassId, ClassName = taughtClass.ClassName, Courses = courses, Source = source });
+                    items.Add(new MyScheduleItem
+                    {
+                        ClassId = taughtClass.ClassId, ClassName = taughtClass.ClassName, Courses = courses, Source = source,
+                        TimeZoneOffsetMinutes = (int)ClassClock.Offset(state, taughtClass.ClassId, response.GeneratedAt, fallbackOffset).TotalMinutes,
+                    });
             }
             if (items.Count > 0) response.Days.Add(new MyScheduleDay { Date = date, Items = items });
         }
@@ -155,19 +161,18 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state, Sc
     }
 
     /// <summary>
-    /// 在“我的日程”中找出指定时刻正在上的课与下一节课。课程时间是教室电脑的本地时间，
-    /// 按该班最近一次状态快照携带的时区偏移换算；尚无快照时退回服务端本地时区。
+    /// 在“我的日程”中找出指定时刻正在上的课与下一节课。课程时间是教室电脑的本地时间，按 <see cref="ClassClock"/>
+    /// 的规则换算：该班状态快照的时区偏移，其次任一班级快照的偏移（按档案推算的班级没有自己的快照），
+    /// 再次 <paramref name="fallbackOffset"/>（客户端上报的本机时区），最后服务端本地时区。
     /// 没有起始时间或日期无法解析的课程不参与计算。
     /// </summary>
     public async Task<MyNextCourseResponse> BuildMyNextCourseAsync(
-        string? boundName, DateTimeOffset now, CancellationToken ct = default)
+        string? boundName, DateTimeOffset now, TimeSpan? fallbackOffset = null, CancellationToken ct = default)
     {
         var slots = new List<MyCourseSlot>();
-        foreach (var (taughtClass, source) in await GetScheduledClassesAsync(boundName, ct))
+        foreach (var (taughtClass, source) in await GetScheduledClassesAsync(boundName, fallbackOffset, ct))
         {
-            var offset = state.GetLatestSnapshot(taughtClass.ClassId)?.TimeZoneOffsetMinutes is { } minutes
-                ? TimeSpan.FromMinutes(minutes)
-                : TimeZoneInfo.Local.GetUtcOffset(now);
+            var offset = ClassClock.Offset(state, taughtClass.ClassId, now, fallbackOffset);
             foreach (var day in taughtClass.Bundle.Days)
             {
                 if (!DateOnly.TryParseExact(day.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))

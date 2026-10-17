@@ -107,6 +107,9 @@ fun RemoteCiApp(context: Context) {
     val lanBootstrapPending by ConnectionManager.lanBootstrapPending.collectAsState()
     val displayedSnapshot = liveSnapshot ?: cachedSnapshot
     val displayedSchedule = liveSchedule ?: cachedSchedule
+    // 按档案推算的课表只供查看（修订号不对应教室端实际课表）：去掉换课能力，首页菜单与快速换课入口随之隐藏。
+    val swapCapabilities = if (displayedSchedule?.fromProfile == true) availableCapabilities - Protocol.CAP_SCHEDULE_CHANGE
+        else availableCapabilities
     val currentSettings by rememberUpdatedState(settings)
     val afterSchool = displayedSnapshot?.currentState == Protocol.STATE_AFTER_SCHOOL
     // 日期判断以插件时区推算“今天”，避免手表与插件时区不一致时选错课表日。
@@ -124,6 +127,14 @@ fun RemoteCiApp(context: Context) {
         if (ConnectionManager.hasSavedSession()) ConnectionManager.connect(settings)
         ConnectionManager.events.collect { event ->
             NotificationHelper.handle(context, event, currentSettings, eventHistory)
+        }
+    }
+    LaunchedEffect(currentUser?.id) {
+        if (currentUser != null) while (true) {
+            runCatching { ConnectionManager.personalNotifications() }.onSuccess { notes ->
+                notes.sortedBy { it.createdAt }.forEach(ConnectionManager::personalNotification)
+            }
+            kotlinx.coroutines.delay(30_000)
         }
     }
     LaunchedEffect(Unit) {
@@ -146,14 +157,14 @@ fun RemoteCiApp(context: Context) {
     LaunchedEffect(liveSchedule) {
         liveSchedule?.let { withContext(Dispatchers.IO) { snapshotStore.saveSchedule(it) }; cachedSchedule = it }
     }
-    LaunchedEffect(currentUser, availableCapabilities) {
+    LaunchedEffect(currentUser, availableCapabilities, swapCapabilities) {
         val user = currentUser
         if (user != null && screen == Screen.Login) {
             // 多班级账号登录后先选班级；单班级账号直接进首页。
             screen = if (ConnectionManager.classes.value.size > 1) Screen.ClassPicker else Screen.Home
         }
         if (user != null && (!user.has(Protocol.PERMISSION_MANAGE_SCHEDULE) ||
-                Protocol.CAP_SCHEDULE_CHANGE !in availableCapabilities) &&
+                Protocol.CAP_SCHEDULE_CHANGE !in swapCapabilities) &&
             screen in listOf(
                 Screen.DayPicker,
                 Screen.Swap,
@@ -252,7 +263,7 @@ fun RemoteCiApp(context: Context) {
                 val scheduleDate = displayedSnapshot?.scheduleDate ?: today.toString()
                 val scheduleDay = displayedSchedule?.days?.firstOrNull { it.date == scheduleDate }
                 val canSwap = currentUser?.has(Protocol.PERMISSION_MANAGE_SCHEDULE) == true &&
-                    Protocol.CAP_SCHEDULE_CHANGE in availableCapabilities
+                    Protocol.CAP_SCHEDULE_CHANGE in swapCapabilities
                 val displayedCourseIndex = if (canSwap) {
                     homeQuickSwapLessonIndex(scheduleDay, displayedSnapshot)
                 } else null
@@ -272,7 +283,7 @@ fun RemoteCiApp(context: Context) {
                     connectionState = connectionState,
                     snapshot = displayedSnapshot,
                     user = currentUser,
-                    capabilities = availableCapabilities,
+                    capabilities = swapCapabilities,
                     onOpenScheduleOverview = {
                         selectedDate = initialScheduleDate(displayedSchedule, afterSchool, today)
                         screen = Screen.ScheduleOverview
@@ -305,6 +316,7 @@ fun RemoteCiApp(context: Context) {
                 onRequestSchedule = ConnectionManager::requestSchedulePull,
                 onPickDate = { screen = Screen.ScheduleDatePicker },
                 onBack = { screen = Screen.Home },
+                fromProfile = displayedSchedule?.fromProfile == true,
             )
 
             Screen.ScheduleDatePicker -> ScheduleDatePickerScreen(
@@ -331,7 +343,7 @@ fun RemoteCiApp(context: Context) {
                 replacementSubject = displayedSchedule?.subjects?.firstOrNull { it.id == replacementSubjectId }?.name,
                 connectionReady = (connectionState is ConnectionManager.State.LanConnected ||
                     connectionState is ConnectionManager.State.CloudConnected) &&
-                    Protocol.CAP_SCHEDULE_CHANGE in availableCapabilities,
+                    Protocol.CAP_SCHEDULE_CHANGE in swapCapabilities,
                 resultText = commandResult?.let {
                     context.getString(if (it.success) R.string.result_success else R.string.result_failure, it.message)
                 },

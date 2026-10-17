@@ -592,6 +592,7 @@ object ConnectionManager {
         }
 
     private fun persist(auth: AuthResponse) {
+        accessToken = auth.accessToken
         sessions.save(
             PersistedDeviceSession(
                 username = auth.user.username,
@@ -715,6 +716,10 @@ object ConnectionManager {
     }
 
     private fun handleEnvelope(envelope: Envelope): AuthState? = when (envelope.type) {
+        "user_notify" -> {
+            decodePayload(envelope.payload, PersonalNotification.serializer())?.let(::personalNotification)
+            null
+        }
         Protocol.TYPE_AUTH_STATE -> decodePayload(envelope.payload, AuthState.serializer())?.also { auth ->
             applyUserProfile(if (auth.authenticated) auth.user else null)
             serverVersion.value = if (auth.authenticated) auth.serverVersion else null
@@ -732,7 +737,8 @@ object ConnectionManager {
                 if (incoming.classId == null || incoming.classId == currentClassId.value) {
                     schedule.value = incoming
                     // 兼容未实现状态消息的旧插件：收到新课表本身也可作为成功终态。
-                    if (schedulePullState.value is SchedulePullState.Pulling)
+                    // 按档案推算的课表不是插件拉取结果，拉取状态等服务端的任务状态消息收尾。
+                    if (!incoming.fromProfile && schedulePullState.value is SchedulePullState.Pulling)
                         finishSchedulePull(SchedulePullState.Success("课表拉取完成，已使用插件最新课表"))
                 }
             }
@@ -884,6 +890,44 @@ object ConnectionManager {
     }
 
     private fun newMessageId(): String = UUID.randomUUID().toString().replace("-", "")
+
+    fun personalNotification(note: PersonalNotification) {
+        if (note.readAt == null && note.kind.startsWith("personal_course_")) events.tryEmit(ClassEvent(
+            id = "personal:${note.id}", event = Protocol.EVENT_CUSTOM,
+            subject = note.title, message = note.body, occurredAt = note.createdAt,
+        ))
+    }
+
+    suspend fun personalCourses(): List<PersonalCourseView> =
+        ownGet("/api/me/schedule/courses", ListSerializer(PersonalCourseView.serializer()))
+
+    suspend fun personalNotifications(): List<PersonalNotification> =
+        ownGet("/api/me/notifications?unread=true", ListSerializer(PersonalNotification.serializer()))
+
+    private suspend fun <T> ownGet(path: String, serializer: KSerializer<T>): T = withContext(Dispatchers.IO) {
+        val config = desiredSettings ?: throw IOException("请先登录服务端")
+        val owner = currentUser.value?.id ?: throw IOException("请先登录服务端")
+        repeat(2) { attempt ->
+            val token = accessToken
+            if (token != null) {
+                val request = Request.Builder().url("${config.cloudServerUrl.trimEnd('/')}$path")
+                    .header("Authorization", "Bearer $token").build()
+                okHttp.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val result = json.decodeFromString(serializer, response.body.string())
+                        if (currentUser.value?.id != owner) throw IOException("账号已切换")
+                        return@withContext result
+                    }
+                    if (response.code != 401 || attempt != 0) throw IOException("读取个人日程失败：HTTP ${response.code}")
+                }
+            }
+            val saved = sessions.load() ?: throw IOException("请重新登录")
+            val auth = refreshCloud(config, saved)
+            if (currentUser.value?.id != owner) throw IOException("账号已切换")
+            persist(auth)
+        }
+        throw IOException("请重新登录")
+    }
     private class MissingSessionException : Exception()
     private class AuthenticationException : Exception()
 }

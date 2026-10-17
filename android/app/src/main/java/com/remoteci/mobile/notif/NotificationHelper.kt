@@ -28,6 +28,8 @@ import com.remoteci.mobile.data.WatchSettings
 import com.remoteci.mobile.data.receives
 import com.remoteci.mobile.ui.extractTimeRange
 import com.remoteci.mobile.ui.nextClassSubjectAfterCurrent
+import com.remoteci.mobile.ui.teacherCourseState
+import com.remoteci.mobile.ui.teacherSlotDayLabel
 import com.remoteci.mobile.ui.snapshotStageEnd
 import java.time.Duration
 import java.time.OffsetDateTime
@@ -97,7 +99,7 @@ object NotificationHelper {
             PackageManager.PERMISSION_GRANTED
         ) return
         val intent = Intent(context, MainActivity::class.java)
-            .putExtra(EXTRA_OPEN, OPEN_SWAP_REQUESTS)
+            .putExtra(EXTRA_OPEN, if (notification.kind.startsWith("personal_course_")) OPEN_SCHEDULE else OPEN_SWAP_REQUESTS)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pending = PendingIntent.getActivity(
             context, notification.id.hashCode(), intent,
@@ -164,6 +166,7 @@ object NotificationHelper {
             .setOngoing(true)
             // 只在首次出现时响铃振动，后续每 15 秒的倒计时刷新保持安静。
             .setOnlyAlertOnce(true)
+            .setSilent(content.silent)
             .setShowWhen(content.endsAt != null)
             .setContentIntent(openAppIntent(context))
 
@@ -316,6 +319,7 @@ object NotificationHelper {
         /** 倒计时指向的事件，如“下课”“上课”。 */
         val timerLabel: String = "",
         val inClass: Boolean = false,
+        val silent: Boolean = false,
     ) {
         /** 上课用日历图标，课间/即将上课用勿扰月亮。 */
         val icon: Int get() = if (inClass) R.drawable.ic_stat_class else R.drawable.ic_stat_break
@@ -348,21 +352,31 @@ object NotificationHelper {
         )
     }
 
+    /**
+     * 老师模式只在上课中，或下一节课开始前 TeacherUpcomingLeadMinutes 分钟内常驻通知（相当于上课提醒，出现时提醒一次）；
+     * 空闲与放学时收起，不再整晚、整个周末显示“即将上课”。即将上课时倒计时指向下一节的开始时间。
+     */
     private fun teacherStatus(response: MyNextCourseResponse?): SchoolStatusContent? {
-        val current = response?.current
-        val next = response?.next
-        if (current == null && next == null) return null
-        val title = if (current != null) "上课中 · ${current.course.subject}" else "即将上课 · ${next!!.course.subject}"
+        val state = teacherCourseState(response)
+        val current = state.current
+        val upcoming = state.upcoming
+        if (current == null && upcoming == null) return null
+        val title = if (current != null) "上课中 · ${current.course.subject}" else "即将上课 · ${upcoming!!.course.subject}"
         val currentText = current?.let { "${slotRange(it)} · ${it.className}" }
-        val nextText = next?.let { "下一节：${it.course.subject} ${slotRange(it)}（${it.className}）" }
-        val end = current?.endsAt?.let(::parseTime)
+        val nextText = state.next?.let { slot ->
+            val subject = listOfNotNull(teacherSlotDayLabel(slot), slot.course.subject).joinToString(" ")
+            "下一节：$subject ${slotRange(slot)}（${slot.className}）"
+        }
+        val end = parseTime(current?.endsAt ?: upcoming!!.startsAt)
         return SchoolStatusContent(
             title,
             listOfNotNull(currentText, nextText).joinToString("\n"),
             end,
-            islandLabel = (current ?: next!!).course.subject,
+            islandLabel = (current ?: upcoming!!).course.subject,
             timerLabel = if (current != null) "下课" else "上课",
             inClass = current != null,
+            // 自定义课程由 user_notify 统一提醒，常驻状态不额外响铃。
+            silent = (current ?: upcoming!!).course.personalCourseId != null,
         )
     }
 

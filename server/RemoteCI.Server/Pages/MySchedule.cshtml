@@ -6,18 +6,48 @@
 
 <div class="page-head">
     <div>
-        <p class="eyebrow">任教安排</p>
+        <p class="eyebrow">个人安排</p>
         <h1>我的日程</h1>
-        <p class="muted">课表中教师名为“@Model.CurrentUser.DisplayName”的课程。</p>
+        <p class="muted">任教课程和仅自己可见的自定义课程，自动同步到此账号的所有设备。</p>
     </div>
 </div>
+
+@if (Model.Error is not null) { <div class="notice warning" role="alert">@Model.Error</div> }
+<section class="panel">
+    <h2>@(Model.Editing is null ? "添加自定义课程" : "修改自定义课程")</h2>
+    <form method="post" asp-page-handler="Save" class="form-grid" data-personal-course-form>
+        <input type="hidden" name="id" value="@Model.Editing?.Id" />
+        <label>课程名称 <input name="Subject" value="@Model.Subject" maxlength="100" required /></label>
+        <label>地点（可选） <input name="Location" value="@Model.Location" maxlength="200" /></label>
+        <label>开始时间（本机时区） <input type="datetime-local" data-course-start required /></label>
+        <input type="hidden" name="StartsAt" value="@Model.StartsAt" data-course-start-iso />
+        <label>结束时间（本机时区） <input type="datetime-local" data-course-end required /></label>
+        <input type="hidden" name="EndsAt" value="@Model.EndsAt" data-course-end-iso />
+        <label>提前提醒（分钟，留空关闭） <input type="number" name="ReminderMinutes" value="@Model.ReminderMinutes" min="1" max="10080" /></label>
+        <label><input type="checkbox" name="NotifyAtStart" value="true" checked="@Model.NotifyAtStart" /> 上课时提醒</label>
+        <input type="hidden" name="NotifyAtStart" value="false" />
+        <button type="submit">保存课程</button>
+        @if (Model.Editing is not null) { <a asp-page="/MySchedule">取消修改</a> }
+    </form>
+    <p class="muted">提醒会发送到个人通知；可在<a asp-page="/Inbox">通知页</a>开启浏览器推送。已绑定的 AstrBot 可推送课程提醒。</p>
+    @foreach (var course in Model.Courses)
+    {
+        <article class="my-schedule-class">
+            <strong>@course.Subject</strong> <span>@course.StartsAt.ToString("yyyy-MM-dd HH:mm")–@course.EndsAt.ToString("MM-dd HH:mm") @course.Location</span>
+            <span class="muted">@(course.ReminderMinutes is { } minutes ? $"提前 {minutes} 分钟提醒" : "课前不提醒") · @(course.NotifyAtStart ? "上课提醒" : "上课不提醒")</span>
+            <a asp-page="/MySchedule" asp-route-edit="@course.Id">修改</a>
+            <form method="post" asp-page-handler="Delete"><input type="hidden" name="id" value="@course.Id" /><button type="submit" class="ghost">删除</button></form>
+        </article>
+    }
+</section>
 
 @if (Model.Schedule.Days.Count == 0)
 {
     <div class="notice warning">
-        没有找到教师名与你用户名一致的课程。请让管理员在课表页设置科目教师，或请系统管理员修改你的用户名。
+        暂无课程。可在上方添加自定义课程；任教课程按账号显示名匹配课表中的教师名。
     </div>
 }
+
 else
 {
     @if (Model.Schedule.Days.Any(day => day.Items.Any(item => item.Source == RemoteCI.Shared.Models.ScheduleBundleSources.Profile)))
@@ -56,3 +86,4 @@ else
         }
     </div>
 }
+<script src="~/js/personal-schedule.js" asp-append-version="true" defer></script>

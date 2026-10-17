@@ -8,6 +8,8 @@
     <LangVersion>latest</LangVersion>
     <!-- 软件版本与协议版本独立；任意 3.x.x 软件通过协议 V3 的能力协商互通。 -->
     <Version>3.2.1.4</Version>
+    <!-- 本地验证与运行时解压目录不能再次作为 Web 内容打包，否则会递归复制旧发布产物。 -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**;bin-check/**;Data/updates/**;Data/backups/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

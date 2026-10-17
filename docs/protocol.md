@@ -87,6 +87,8 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 插件通过云端 WebSocket 认证后，服务端必须立即发送一次 `schedule_pull`，避免插件启动时的首次 `schedule_sync` 早于云端连接建立而丢失。任何已认证手表都可以发送该只读消息：云端连接由服务端立即转发给在线插件，局域网连接直接交给插件。插件端是最终任务锁，服务端同时维护云端入口的前置锁；插件推送、WebUI 拉取、手表拉取、自动拉取和连接初始化任一正在运行时，新请求返回 `schedule_sync_status.state=Busy`，其中 `activeTaskId` 指向占用任务。Running、Completed、Failed 和 Busy 状态会广播到在线手表并供插件设置页、WebUI 展示；任务成功、失败、插件断开或 15 秒超时后释放。WebUI 收到新 `schedule_sync` 后用完整 `ScheduleBundle` 整体替换旧缓存，不做字段合并。该请求不授予换课能力，也不绕过 `ChangeSchedule` 的权限检查。插件离线期间不排队。
 
+插件从未同步过课表的班级（服务端没有该班插件课表缓存）由服务端按该班当前班级档案推算七日课表，以 `schedule_sync` 下发给手机与手表，载荷 `ScheduleBundle.source` 为 `"profile"`（插件课表不带该字段）：手表/手机连接时随初始数据推送；班级档案保存后推送给覆盖该班的在线连接；手机/手表发送 `schedule_pull` 时先向发起方补发一份重新推算的结果（例如跨天后刷新），再照常转发给插件（插件离线时随后收到 `Failed` 状态）。推算课表不写入服务端插件课表缓存，修订号带 `profile:` 前缀，只供查看：客户端应隐藏换课入口，收到它时不把进行中的拉取任务当作成功；插件第一次推送 `schedule_sync` 后各端改用插件课表。
+
 云端服务端直接在认证成功的 `auth_state.serverVersion` 中下发自身软件版本；插件通过 `account_sync.serverVersion` 保存同一版本，并在局域网认证成功时转发给手表。服务端与手表正式渠道只选择协议主版本相同的四段纯数字 Release，Beta 渠道额外选择 `v3.x.x-beta.y`及在 GitHub 标为预发布的四段 Release，旧三段 `v3.x.x` 稳定标签和 V4 不会进入自动更新候选。手表不再以 WebUI 软件版本为上限，仍保留渠道筛选、禁止降级、同版本强制覆盖和 APK 签名校验。
 
 ## 能力协商
@@ -261,12 +263,36 @@ ClassIsland 的临时层是 `ClassPlans` 中 `IsOverlay=true` 的课表：`Overl
 
 `schedule_sync` 载荷中的 `CourseEntry` 与 `SubjectEntry` 新增可选 `teacher` 字段（教师名，未设置时省略），旧版服务端与插件不下发、所有端可安全忽略。
 
-- `GET /api/me/schedule`：返回当前老师或班主任账号按姓名绑定后跨班级聚合的“我的日程”`MyScheduleResponse { fromDate, generatedAt, days[] }`，每天 `items[]` 按班级分组（`classId`、`className`、`courses[]`，课程按节次排序）。全局角色既不是老师也不是班主任，或没有绑定时，`days` 为空。
-- `GET /api/me/schedule/next`：返回 `MyNextCourseResponse { at, current?, next? }`，分别是指定时刻正在上的课与接下来的第一节课；每项含 `date`、`classId`、`className`、`course`、`startsAt`、`endsAt`。可选查询参数 `at`（ISO 8601）指定计算时刻，省略时取服务端当前时间。课程钟点是教室电脑本地时间，服务端按该班最近状态快照的 `timeZoneOffsetMinutes` 换算为绝对时间，尚无快照时退回服务端本地时区。非老师/班主任账号、无绑定或七日内没有后续课程时对应字段省略。两个日程端点都接受 API Key。
+- `GET /api/me/schedule`：返回“我的日程”`MyScheduleResponse { fromDate, generatedAt, days[] }`。老师或班主任账号按姓名绑定的跨班级课程，与本账号的自定义课程按日期合并；其他账号只返回自己的自定义课程。每天 `items[]` 含 `classId`、`className`、`courses[]`。可选查询参数 `timeZoneOffsetMinutes`（调用方本机的 UTC 偏移分钟数，-840～840，超出范围返回 400）只在还没有任何班级上报过状态快照时，用于确定按档案推算课表的“今天”；自定义课程使用保存时的绝对时间。
+- `GET /api/me/schedule/next`：返回 `MyNextCourseResponse { at, current?, next? }`，分别是指定时刻正在上的课与接下来的第一节课；每项含 `date`、`classId`、`className`、`course`、`startsAt`、`endsAt`。可选查询参数 `at`（ISO 8601）指定计算时刻，省略时取服务端当前时间。课程钟点是教室电脑本地时间，服务端依次按以下时区偏移换算为绝对时间：该班最近状态快照的 `timeZoneOffsetMinutes`；该班没有快照时（例如按档案推算课表、从未连接插件的班级）取任一班级最近上报的偏移；还没有任何班级快照时取可选查询参数 `timeZoneOffsetMinutes`（调用方本机的 UTC 偏移分钟数，-840～840，超出范围返回 400，手机 App 自动携带）；都没有时才退回服务端本地时区（Docker 容器默认是 UTC）。同时纳入本账号自定义课程（不限于班级课表七日窗口）；自定义课程的时间直接使用已保存的绝对时间。没有当前或后续课程时对应字段省略。两个日程端点都接受 API Key。
 - `POST /api/me/display-name`：系统管理员修改显示名（即老师姓名），载荷 `{displayName}`（1-40 字），成功返回 204 并触发授权镜像同步；普通账号即使保留旧的 `ChangeDisplayName` 权限也会被拒绝。
 - 命令值 21 为 `SetSubjectTeacher`，要求 `ManageSchedule` 权限和能力 `schedule.subject-teacher`。载荷 `subjectTeacher` 包含 `subjectId` 与 `teacherName`（≤100 字，空表示清除）；插件在 UI 线程写入档案 `Subject.TeacherName` 并保存，保存失败回滚并返回 `SAVE_FAILED`，成功后立即重推课表。WebUI 课表页“科目教师”区由此为班级科目分配授课教师。
 
 手机端老师登录后课表页默认展示“我的日程”（可切换“本班课表”）；班主任课表页默认展示“本班课表”，也可切换到“我的日程”，列表按天分组显示班级、科目、教师与节次时间。
+
+
+### 私人自定义课程
+
+所有已认证账号均可使用以下端点（Bearer 设备令牌或用户 API Key），只访问凭据所属账号，不接受 userId 或 classId：
+
+- `GET /api/me/schedule/courses`：按开始时间列出本人的自定义课程。
+- `POST /api/me/schedule/courses`：创建一节单次课程。
+- `PUT /api/me/schedule/courses/{id}`：完整替换本人的课程；修改前先查询当前字段。
+- `DELETE /api/me/schedule/courses/{id}`：删除本人的课程，返回 204。操作他人的编号与不存在的编号均返回 404。
+
+创建/修改示例（起止时间必须使用含时区偏移的 ISO 8601）：
+
+```json
+{"subject":"自习","location":"图书馆","startsAt":"2026-10-18T14:00:00+08:00","endsAt":"2026-10-18T15:00:00+08:00","reminderMinutes":20,"notifyAtStart":true}
+```
+
+课程名称 1–100 字、地点最多 200 字，结束晚于开始且时长不超过 24 小时，支持跨午夜。`reminderMinutes` 为 1–10080 分钟，null 或省略表示关闭课前提醒；`notifyAtStart` 默认 true。响应包含同样字段和 `id`。数据库按账号持久保存，删除账号时级联清除。
+
+合并后的个人日程以 `items[].source: "personal"` 标识自定义课程，`classId` 为全零 GUID（不代表班级、不授予班级访问权限），`className` 为地点或“自定义课程”，`timeZoneOffsetMinutes` 为课程保存时的偏移。`courses[]` 包含稳定的 `personalCourseId`、`startsAt`、`endsAt`、`reminderMinutes`、`notifyAtStart`，不应以节次索引识别自定义课程。课程不写入班级课表，也不受班级节假日停课影响。
+
+服务端每 15 秒检查一次课前和上课提醒，分别生成 `personal_course_upcoming` 与 `personal_course_start` 个人通知，沿 `user_notify`、浏览器 Web Push 和 `/api/me/notifications` 分发。上课提醒在开始后的 5 分钟内可补发，过期不补发。发送标记与通知一同落库，重启后不会重复生成。客户端勿再对自定义课程独立生成同类提醒；手机的常驻课堂状态仍可显示课程，但保持静默。
+
+WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebUI 有未保存编辑时保留表单。AstrBot 通过个人通知通道转发提醒，专用 `remoteci_personal_courses` / `remoteci_save_personal_course` / `remoteci_delete_personal_course` 工具仅允许私聊；个人日程与个人通知也不可通过通用 API 工具向群聊输出。
 
 ## REST API
 

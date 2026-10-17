@@ -8,7 +8,7 @@
     <div>
         <p class="eyebrow">个人</p>
         <h1>通知</h1>
-        <p class="muted">换课申请、审批结果与强制换课提醒。</p>
+        <p class="muted">自定义课程提醒、换课申请与审批结果。</p>
     </div>
     <form method="post" asp-page-handler="ReadAll">
         <button type="submit" class="ghost" disabled="@(!Model.Items.Any(x => x.ReadAt is null))">全部标为已读</button>
@@ -20,7 +20,7 @@
     @Html.AntiForgeryToken()
     <div>
         <h2>浏览器通知</h2>
-        <p class="muted" data-push-status>开启后，即使关闭网页也会在系统通知中心收到换课提醒。</p>
+        <p class="muted" data-push-status>开启后，即使关闭网页也会在系统通知中心收到课程和换课提醒。</p>
     </div>
     <div class="push-actions">
         <button type="button" data-push-enable hidden>开启浏览器通知</button>
@@ -37,7 +37,7 @@
         @foreach (var item in Model.Items)
         {
             <li class="inbox-item@(item.ReadAt is null ? " unread" : "")">
-                <a href="@(item.SwapRequestId is null ? "#" : Url.Page("/SwapRequests") + InboxModel.SwapTab(item.Kind))" data-inbox-read="@item.Id">
+                <a href="@(item.Kind.StartsWith("personal_course_") ? Url.Page("/MySchedule") : item.SwapRequestId is null ? "#" : Url.Page("/SwapRequests") + InboxModel.SwapTab(item.Kind))" data-inbox-read="@item.Id">
                     <strong>@item.Title</strong>
                     <span class="inbox-body">@item.Body</span>
                     <time class="muted" datetime="@item.CreatedAt.ToString("O")">@InboxModel.Ago(item.CreatedAt)</time>

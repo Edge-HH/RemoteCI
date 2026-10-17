@@ -8,7 +8,7 @@ using RemoteCI.Shared.Models;
 namespace RemoteCI.Server.Services;
 
 /// <summary>档案库唯一读写入口；页面提供的 ID、班级和修订号均在此重新核对。</summary>
-public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService access)
+public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService access, ScheduleViewService scheduleViews)
 {
     public async Task<bool> CanManageClassAsync(AppUser actor, Guid classId, CancellationToken ct = default) =>
         await access.CanAccessAsync(actor.Id, actor.Role, classId, ct) &&
@@ -122,6 +122,9 @@ public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService ac
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) { throw Conflict(); }
             await transaction.CommitAsync(ct);
+            // 插件从未同步过课表的班级，手机/手表的课表按班级档案推算：保存后立即推送新课表。
+            await scheduleViews.PublishProfileSchedulesAsync(
+                saved.Where(x => x.ClassId is not null).Select(x => x.ClassId!.Value).ToList(), ct);
             return saved.Select(ToDto).ToList();
         }
         catch

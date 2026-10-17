@@ -120,6 +120,20 @@ public sealed class ScheduleDay
 
 public sealed class CourseEntry
 {
+    [JsonPropertyName("personalCourseId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? PersonalCourseId { get; set; }
+    [JsonPropertyName("startsAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? StartsAt { get; set; }
+    [JsonPropertyName("endsAt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? EndsAt { get; set; }
+    [JsonPropertyName("reminderMinutes")]
+    public int? ReminderMinutes { get; set; }
+    [JsonPropertyName("notifyAtStart")]
+    public bool NotifyAtStart { get; set; }
+
     [JsonPropertyName("index")]
     public int Index { get; set; }
 
@@ -227,6 +241,10 @@ public sealed class MyScheduleDay
 /// <summary>某一天中用户在某个班级的课程集合。</summary>
 public sealed class MyScheduleItem
 {
+    /// <summary>该班课程钟点的 UTC 偏移，与“下一节课”的换算规则一致。</summary>
+    [JsonPropertyName("timeZoneOffsetMinutes")]
+    public int? TimeZoneOffsetMinutes { get; set; }
+
     [JsonPropertyName("classId")]
     public Guid ClassId { get; set; }
 

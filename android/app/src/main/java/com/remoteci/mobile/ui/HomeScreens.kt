@@ -553,8 +553,11 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
     val day = schedule?.days?.firstOrNull { it.date == today.toString() }
     val home = homeCourseContent(snapshot)
     val teacherMode = user?.isTeacher == true
-    val teacherCurrent = personalNext?.current
-    val teacherNext = personalNext?.next
+    // nowTick 每秒重组一次：已下课/已开始的课按当前时刻修正；主卡片只展示今天的课，
+    // 开课前 TeacherUpcomingLeadMinutes 分钟内才显示“即将上课”，今天没课了显示放学。
+    val teacher = teacherCourseState(personalNext)
+    val teacherCurrent = teacher.current
+    val teacherNext = teacher.laterToday
     val progress = if (teacherMode) teacherCurrent?.let { teacherProgress(it.startsAt, it.endsAt) } ?: 0f
         else if (shouldShowStateProgress(snapshot)) lessonProgress(snapshot?.currentTimeLayoutItem, now) else 0f
     val period = if (teacherMode) teacherCurrent?.course?.label ?: teacherNext?.course?.label ?: "—"
@@ -563,13 +566,7 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
         else home.timeLayoutItem?.substringAfter(' ', missingDelimiterValue = "")?.ifBlank { snapshot?.classPlanName }.orEmpty()
     val timeRange = if (teacherMode) teacherCurrent?.let(::teacherSlotRange) ?: teacherNext?.let(::teacherSlotRange) ?: "—"
         else extractTimeRange(home.timeLayoutItem).ifBlank { "—" }
-    val stateTitle = if (teacherMode) {
-        when {
-            teacherCurrent != null -> "上课"
-            teacherNext != null -> "即将上课"
-            else -> "放学"
-        }
-    } else when (snapshot?.currentState) {
+    val stateTitle = if (teacherMode) teacher.title else when (snapshot?.currentState) {
         Protocol.STATE_CLASS -> "上课"
         Protocol.STATE_BREAKING -> "课间"
         Protocol.STATE_PREPARE_CLASS -> "即将上课"
@@ -633,12 +630,14 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
                 }
             }
         }
-        val next = if (teacherMode) teacherNext?.course?.subject else nextClassSubjectAfterCurrent(snapshot)
+        val next = if (teacherMode) teacher.next?.course?.subject else nextClassSubjectAfterCurrent(snapshot)
         ConnectedListCard {
             if ((teacherMode || shouldShowNextLessonSummary(snapshot?.currentState)) && !next.isNullOrBlank()) {
                 AppListItem(
                     title = "下一节 · $next",
-                    supporting = if (teacherMode) listOfNotNull(teacherNext?.className, teacherNext?.let(::teacherSlotRange)).joinToString(" · ")
+                    supporting = if (teacherMode) teacher.next?.let { slot ->
+                        listOfNotNull(teacherSlotDayLabel(slot), slot.className, teacherSlotRange(slot)).joinToString(" · ")
+                    }.orEmpty()
                     else listOfNotNull(extractPeriod(snapshot?.nextClassTimeLayoutItem), extractTimeRange(snapshot?.nextClassTimeLayoutItem)).joinToString(" ") +
                         (snapshot?.nextClassTimeLayoutItem?.substringAfter(' ', "")?.let { " · $it" } ?: ""),
                     leading = Icons.Rounded.DirectionsRun,
@@ -701,23 +700,36 @@ fun ScheduleScreen(
     val classPermissions = effectiveClassPermissions(classes, currentClassId, user?.permissions ?: 0)
     // 换课是否可执行由服务端按班级权限和插件能力最终复核。
     // 能力快照可能在连接切换/插件刚上线时短暂缺失，不能因此把 Android 入口直接禁用。
-    val canChange = (classPermissions and Protocol.PERMISSION_MANAGE_SCHEDULE) == Protocol.PERMISSION_MANAGE_SCHEDULE
+    // 按档案推算的课表只供查看：修订号不对应教室端实际课表，不提供换课入口。
+    val canChange = (classPermissions and Protocol.PERMISSION_MANAGE_SCHEDULE) == Protocol.PERMISSION_MANAGE_SCHEDULE &&
+        bundle?.fromProfile != true
     val canPull = user?.canPullScheduleFor(currentClassId) == true
 
     // 老师与班主任：显示名与课表教师名绑定后，可跨班级查看“我的日程”；null 表示尚未手动切换。
     // 老师默认进入“我的日程”，班主任默认仍看本班课表。
     var mineChoice by remember { mutableStateOf<Boolean?>(null) }
     // 委派属性无法智能转换，先取局部值再判断，避免 user 为 null 时误读。
-    val mineMode = user?.let { it.hasPersonalSchedule && (mineChoice ?: it.isTeacher) } == true
-    var mySchedule by remember { mutableStateOf<MyScheduleResponse?>(null) }
-    var myScheduleStatus by remember { mutableStateOf<String?>(null) }
+    val mineMode = user?.let { mineChoice ?: it.isTeacher } == true
+    var mySchedule by remember(user?.id) { mutableStateOf<MyScheduleResponse?>(null) }
+    var myScheduleStatus by remember(user?.id) { mutableStateOf<String?>(null) }
     var myScheduleRefresh by remember { mutableIntStateOf(0) }
-    var mySelected by remember { mutableIntStateOf(0) }
+    var mySelected by remember(user?.id) { mutableIntStateOf(0) }
+    var personalCourses by remember(user?.id) { mutableStateOf(emptyList<com.remoteci.mobile.data.PersonalCourseView>()) }
+    var editingCourse by remember(user?.id) { mutableStateOf<com.remoteci.mobile.data.PersonalCourseView?>(null) }
+    var showCourseEditor by remember(user?.id) { mutableStateOf(false) }
+    if (showCourseEditor) PersonalCourseEditor(editingCourse,
+        onDismiss = { showCourseEditor = false },
+        onSaved = { showCourseEditor = false; myScheduleRefresh++ })
     LaunchedEffect(user?.id, mineMode, myScheduleRefresh) {
         if (mineMode && user != null) {
-            runCatching { AdminApi.mySchedule() }
-                .onSuccess { mySchedule = it; myScheduleStatus = null }
-                .onFailure { myScheduleStatus = it.message ?: "暂时无法读取我的日程" }
+            mySchedule = null
+            while (true) {
+                runCatching { AdminApi.mySchedule() }
+                    .onSuccess { mySchedule = it; myScheduleStatus = null }
+                    .onFailure { myScheduleStatus = it.message ?: "暂时无法读取我的日程" }
+                runCatching { AdminApi.personalCourses() }.onSuccess { personalCourses = it }
+                kotlinx.coroutines.delay(30_000)
+            }
         }
     }
     val myDays = mySchedule?.days.orEmpty()
@@ -740,7 +752,7 @@ fun ScheduleScreen(
                 }
             },
         )
-        if (user?.hasPersonalSchedule == true) {
+        if (user != null) {
             Row(
                 Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -750,6 +762,10 @@ fun ScheduleScreen(
             }
         }
         if (mineMode) {
+            TextButton(onClick = { editingCourse = null; showCourseEditor = true }, modifier = Modifier.padding(horizontal = 16.dp)) {
+                Text("添加自定义课程")
+            }
+            PersonalCalendarImport(snackbar, myScheduleRefresh)
             when {
                 myDays.isEmpty() -> EmptyState(
                     if (myScheduleStatus != null) "暂时无法读取我的日程" else "还没有与你关联的课程",
@@ -773,7 +789,9 @@ fun ScheduleScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         myDay.items.forEach { item ->
-                            Text(item.className, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                            // 插件从未同步过课表的班级按档案推算，可能与教室端实际课表不同，与 WebUI 一样标注出来。
+                            val title = if (item.source == Protocol.BUNDLE_SOURCE_PROFILE) "${item.className} · 按档案推算" else item.className
+                            Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                             ConnectedListCard {
                                 item.courses.forEachIndexed { index, course ->
                                     val time = listOfNotNull(course.startTime, course.endTime).joinToString("–")
@@ -783,6 +801,11 @@ fun ScheduleScreen(
                                         leading = subjectIcon(course.subject),
                                         index = index,
                                         count = item.courses.size,
+                                        trailing = if (course.personalCourseId != null) Icons.Rounded.Edit else null,
+                                        onClick = course.personalCourseId?.let { id -> ({
+                                            editingCourse = personalCourses.firstOrNull { it.id == id }
+                                            if (editingCourse != null) showCourseEditor = true
+                                        }) },
                                     )
                                 }
                             }
@@ -807,6 +830,9 @@ fun ScheduleScreen(
             val day = days[selected]
             val courses = day.courses.filter { it.enabled }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (bundle?.fromProfile == true) {
+                    PermissionHint("本班教室端尚未同步过课表，以下按班级档案推算，可能与实际课表不同；插件同步后自动改用实际课表，届时才能换课。")
+                }
                 if (courses.isEmpty()) {
                     EmptyState("这一天没有课程", if (canPull) "管理员或班主任可拉取最新课表，或选择其他日期。" else "请选择其他日期。")
                 } else {
@@ -900,6 +926,8 @@ fun SwapScreen(date: String?, index: Int?, onBack: () -> Unit, snackbar: Snackba
             }
             if (!canChange) {
                 PermissionHint("当前账号没有换课权限。")
+            } else if (bundle?.fromProfile == true) {
+                PermissionHint("本班课表按班级档案推算，需等教室端插件同步实际课表后才能换课。")
             } else if (day == null) {
                 EmptyState("没有可换课的日期", "请先同步课表。")
             } else {

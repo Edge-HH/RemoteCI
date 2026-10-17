@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.SystemClock
 import com.remoteci.mobile.BuildConfig
+import com.remoteci.mobile.calendar.CalendarSync
 import com.remoteci.mobile.widget.WidgetUpdater
 import java.io.IOException
 import java.security.MessageDigest
@@ -304,6 +305,7 @@ object ConnectionManager {
                             }
                         }
                     }
+                appContext?.let { CalendarSync.syncIfEnabled(it) }
                 delay(PersonalScheduleRefreshMs)
             }
         }
@@ -322,7 +324,7 @@ object ConnectionManager {
      * 这里再按短周期补齐未读通知并刷新待处理数，覆盖局域网直连或断线期间漏掉的通知。
      */
     private fun syncSwapInbox(user: UserProfile?) {
-        val userId = user?.takeIf { it.id.isNotBlank() && it.has(Protocol.PERMISSION_REQUEST_SWAP) }?.id
+        val userId = user?.takeIf { it.id.isNotBlank() }?.id
         if (userId == swapInboxUserId && swapInboxJob?.isActive == true) return
         swapInboxJob?.cancel()
         swapInboxUserId = userId
@@ -340,6 +342,7 @@ object ConnectionManager {
     suspend fun refreshSwapInbox() {
         runCatching { AdminApi.notifications(unreadOnly = true) }
             .onSuccess { items -> items.sortedBy { it.createdAt }.forEach { userNotifications.tryEmit(it) } }
+        if (currentUser.value?.has(Protocol.PERMISSION_REQUEST_SWAP) != true) return
         runCatching { AdminApi.swapRequests("incoming") }
             .onSuccess { items -> pendingSwapCount.value = items.count { it.canDecide || it.canRevoke } }
     }
@@ -666,6 +669,7 @@ object ConnectionManager {
     }
 
     fun logout(settings: WatchSettings) {
+        appContext?.let(CalendarSync::disable)
         val token = issuedAuth?.response?.accessToken
         val saved = sessions.load()
         if (token != null && saved != null) {
@@ -989,7 +993,7 @@ object ConnectionManager {
      * 取得可用的云端访问令牌：仍有余量的令牌直接复用（重连不再多一次 HTTP 往返，也不会触发认证限流），
      * 否则用设备会话刷新。[rejectedToken] 是已确认失效的令牌，即使未到期也不再复用。
      */
-    private suspend fun cloudAuth(settings: WatchSettings, rejectedToken: String? = null): IssuedAuth =
+    private suspend fun cloudAuth(settings: WatchSettings, rejectedToken: String? = null, publishProfile: Boolean = true): IssuedAuth =
         sessionMutex.withLock {
             requireCloudServerUrl(settings.cloudServerUrl)
             val serverUrl = normalizeServerUrl(settings.cloudServerUrl)
@@ -1019,7 +1023,7 @@ object ConnectionManager {
                     throw MissingSessionException()
                 }
                 if (sessionEpoch.get() != epoch) throw MissingSessionException()
-                persist(issued)
+                persist(issued, publishProfile)
                 issued
             }
         }
@@ -1049,7 +1053,7 @@ object ConnectionManager {
             }
         }
 
-    private fun persist(issued: IssuedAuth) {
+    private fun persist(issued: IssuedAuth, publishProfile: Boolean = true) {
         val auth = issued.response
         sessions.save(
             PersistedDeviceSession(
@@ -1060,7 +1064,29 @@ object ConnectionManager {
             ),
         )
         issuedAuth = issued
-        applyUserProfile(auth.user)
+        if (publishProfile) applyUserProfile(auth.user)
+    }
+
+    /** 后台日历任务复用会话锁与密钥轮换，不启动 WebSocket 或个人日程轮询。 */
+    internal suspend fun calendarSchedule(settings: WatchSettings, userId: String): MyScheduleResponse = withContext(Dispatchers.IO) {
+        val epoch = sessionEpoch.get()
+        var issued = cloudAuth(settings, publishProfile = false)
+        suspend fun fetch(): MyScheduleResponse? {
+            check(issued.response.user.id == userId) { "登录账号已变化，请重新导入日程" }
+            val offset = OffsetDateTime.now().offset.totalSeconds / 60
+            val request = Request.Builder().url("${issued.serverUrl}/api/me/schedule?timeZoneOffsetMinutes=$offset")
+                .header("Authorization", "Bearer ${issued.response.accessToken}").build()
+            authHttp.newCall(request).execute().use { response ->
+                if (response.code == 401) return null
+                check(response.isSuccessful) { "读取个人日程失败（HTTP ${response.code}）" }
+                check(epoch == sessionEpoch.get()) { "登录会话已变化" }
+                return json.decodeFromString(MyScheduleResponse.serializer(), response.body.string())
+            }
+        }
+        fetch() ?: run {
+            issued = cloudAuth(settings, rejectedToken = issued.response.accessToken, publishProfile = false)
+            fetch() ?: error("登录已失效，请重新登录")
+        }
     }
 
     /**
@@ -1336,7 +1362,8 @@ object ConnectionManager {
                         snapshotStore?.saveSchedule(incoming)
                         appContext?.let { WidgetUpdater.updateAll(it, force = true) }
                         // 兼容未实现状态消息的旧插件：收到新课表本身也可作为成功终态。
-                        if (schedulePullState.value is SchedulePullState.Pulling)
+                        // 按档案推算的课表不是插件拉取结果，拉取状态等服务端的任务状态消息收尾。
+                        if (!incoming.fromProfile && schedulePullState.value is SchedulePullState.Pulling)
                             finishSchedulePull(SchedulePullState.Success("课表拉取完成，已使用插件最新课表"))
                     }
                 }

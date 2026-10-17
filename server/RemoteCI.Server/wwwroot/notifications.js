@@ -19,7 +19,7 @@
         if (!toasts) return;
         const link = document.createElement("a");
         link.className = "toast";
-        link.href = "/SwapRequests" + (item.kind === "swap_approved" || item.kind === "swap_rejected" || item.kind === "swap_revoked" ? "#outgoing" : "#incoming");
+        link.href = item.kind?.startsWith("personal_course_") ? "/MySchedule" : "/SwapRequests" + (item.kind === "swap_approved" || item.kind === "swap_rejected" || item.kind === "swap_revoked" ? "#outgoing" : "#incoming");
         const title = document.createElement("strong");
         title.textContent = item.title;
         const body = document.createElement("span");

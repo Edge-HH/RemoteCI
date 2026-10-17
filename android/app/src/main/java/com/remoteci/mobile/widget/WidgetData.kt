@@ -8,6 +8,8 @@ import com.remoteci.mobile.data.MyNextCourseResponse
 import com.remoteci.mobile.data.Protocol
 import com.remoteci.mobile.data.ScheduleBundle
 import com.remoteci.mobile.data.SnapshotStore
+import com.remoteci.mobile.ui.teacherCourseState
+import com.remoteci.mobile.ui.teacherSlotDayLabel
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneOffset
@@ -64,27 +66,25 @@ fun statusWidgetContent(
     personalNext: MyNextCourseResponse? = null,
     now: LocalTime = widgetLocalNow(snapshot),
 ): StatusWidgetContent {
-    val personalCurrent = personalNext?.current
-    val personalUpcoming = personalNext?.next
     if (personalNext != null) {
-        val slot = personalCurrent ?: personalUpcoming
+        // 与首页、课堂状态通知一致：主内容只展示今天的课，“即将上课”只在开课前几分钟内出现。
+        val teacher = teacherCourseState(personalNext)
+        val slot = teacher.current ?: teacher.laterToday
         val range = slot?.course?.let { listOfNotNull(it.startTime, it.endTime).joinToString("-") }.orEmpty()
         val teacherItem = range.ifBlank {
             listOfNotNull(slot?.startsAt?.let(::parseIsoTime), slot?.endsAt?.let(::parseIsoTime))
                 .joinToString("-")
         }
         return StatusWidgetContent(
-            stateTitle = when {
-                personalCurrent != null -> "上课"
-                personalUpcoming != null -> "即将上课"
-                else -> "放学"
-            },
+            stateTitle = teacher.title,
             subject = slot?.course?.subject?.ifBlank { "暂无课程" } ?: "暂无课程",
             period = slot?.course?.label?.ifBlank { "下一节" } ?: "下一节",
             room = slot?.className.orEmpty(),
             timeRange = teacherItem.ifBlank { "—" },
-            nextLesson = personalUpcoming?.course?.subject?.ifBlank { "暂无下一节" } ?: "暂无下一节",
-            progress = personalCurrent?.let { progressFromIso(it.startsAt, it.endsAt) } ?: 0,
+            nextLesson = teacher.next?.let { next ->
+                listOfNotNull(teacherSlotDayLabel(next), next.course.subject.ifBlank { null }).joinToString(" ").ifBlank { null }
+            } ?: "暂无下一节",
+            progress = teacher.current?.let { progressFromIso(it.startsAt, it.endsAt) } ?: 0,
         )
     }
     val currentRange = snapshot?.currentTimeLayoutItem.orEmpty()

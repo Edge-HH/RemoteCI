@@ -22,6 +22,7 @@ public static class WebSocketHub
         ScheduleSyncService scheduleSync,
         ClassAccessService classAccess,
         TeacherBindingService teacherBinding,
+        ScheduleViewService scheduleViews,
         ILogger logger)
     {
         if (!context.WebSockets.IsWebSocketRequest)
@@ -45,7 +46,7 @@ public static class WebSocketHub
         var connectionId = registry.Register(socket, token, principal);
         var session = new ConnectionSession(
             context, identities, registry, store, extensionPolicies, authorizationSync, scheduleSync, classAccess,
-            teacherBinding, logger, socket, connectionId, principal);
+            teacherBinding, scheduleViews, logger, socket, connectionId, principal);
         logger.LogInformation(
             "WebSocket connected: {Role}/{User} ({Id})",
             principal.PeerRole,
@@ -106,12 +107,14 @@ public static class WebSocketHub
         await session.Registry.SendLatestPluginNetworkInfoToWatchAsync(session.ConnectionId, ct);
 
         // 该账号可访问的每个班级各推一份最新数据；消息负载带 classId 供新版客户端区分，
-        // 旧客户端在单班级部署下只会收到一份，行为不变。
-        foreach (var classId in session.Principal.AccessibleClassIds ?? [])
+        // 旧客户端在单班级部署下只会收到一份，行为不变。插件从未同步过课表的班级改推按班级档案推算的课表（source = "profile"）。
+        var accessible = session.Principal.AccessibleClassIds ?? [];
+        var estimated = await session.ScheduleViews.BuildFromProfilesAsync(accessible.ToList(), ct: ct);
+        foreach (var classId in accessible)
         {
             if (session.Store.GetLatestSnapshot(classId) is { } snapshot)
                 await session.Registry.SendToWatchAsync(session.ConnectionId, Envelope.StatePush(snapshot), ct);
-            if (session.Store.GetLatestSchedule(classId) is { } schedule)
+            if ((session.Store.GetLatestSchedule(classId) ?? estimated.GetValueOrDefault(classId)?.Bundle) is { } schedule)
                 await session.Registry.SendToWatchAsync(session.ConnectionId, Envelope.ScheduleSync(schedule), ct);
             if (session.Store.GetLatestExtensions(classId) is { } extensions)
                 await session.Registry.SendToWatchAsync(session.ConnectionId, Envelope.ExtensionsSync(extensions), ct);
@@ -467,6 +470,11 @@ public static class WebSocketHub
                     : ScheduleSyncSource.Watch;
                 var classId = await ResolveClassAsync(request?.ClassId, session);
                 if (classId is null) return;
+                // 插件从未同步过课表时先按当前班级档案重新推算一份（例如跨天后刷新）；插件在线时随后照常拉取。
+                if (session.Store.GetLatestSchedule(classId.Value) is null &&
+                    (await session.ScheduleViews.GetAsync(classId.Value, session.CancellationToken)) is { } estimatedView)
+                    await session.Registry.SendToWatchAsync(
+                        session.ConnectionId, Envelope.ScheduleSync(estimatedView.Bundle), session.CancellationToken);
                 // 拉取课表会覆盖服务端缓存：系统管理员，或班级自治策略允许的本班班主任。
                 // 被拒绝时回一条 Failed 状态，避免手机/手表一直停在“正在拉取”直到超时。
                 if (!(await session.ClassAccess.GetClassSelfServiceAsync(
@@ -746,6 +754,7 @@ public static class WebSocketHub
         ScheduleSyncService scheduleSync,
         ClassAccessService classAccess,
         TeacherBindingService teacherBinding,
+        ScheduleViewService scheduleViews,
         ILogger logger,
         WebSocket socket,
         Guid connectionId,
@@ -760,6 +769,7 @@ public static class WebSocketHub
         public ScheduleSyncService ScheduleSync { get; } = scheduleSync;
         public ClassAccessService ClassAccess { get; } = classAccess;
         public TeacherBindingService TeacherBinding { get; } = teacherBinding;
+        public ScheduleViewService ScheduleViews { get; } = scheduleViews;
         public ILogger Logger { get; } = logger;
         public WebSocket Socket { get; } = socket;
         public Guid ConnectionId { get; } = connectionId;

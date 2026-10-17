@@ -7,6 +7,7 @@ obj/
 *.sln.docstates
 packages/
 artifacts/
+/.codex-build/
 .tools/
 .vs/
 # ClassIsland 插件打包产物（可重新生成）

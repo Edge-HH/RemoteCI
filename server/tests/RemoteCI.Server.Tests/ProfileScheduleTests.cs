@@ -1,5 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Net.WebSockets;
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
 using RemoteCI.Server.Data;
@@ -149,6 +152,121 @@ public sealed class ProfileScheduleTests
         var classes = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, "/api/me/classes", teacher.AccessToken));
         classes.EnsureSuccessStatusCode();
         Assert.DoesNotContain((await classes.Content.ReadFromJsonAsync<List<ClassSummary>>())!, x => x.Id == classId);
+    }
+
+    [Fact]
+    public void ClassClock_WithoutOwnSnapshotUsesAnyClassThenCallerOffset()
+    {
+        var state = new StateStore();
+        var profileClass = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var phone = TimeSpan.FromHours(-5);
+
+        // 还没有任何班级快照：用调用方（手机）上报的时区，而不是服务端时区（Docker 默认 UTC）。
+        Assert.Equal(phone, ClassClock.Offset(state, profileClass, now, phone));
+
+        // 其他班级的教室电脑上报过时区：按档案推算的班级沿用它；超出范围的偏移被忽略。
+        state.SaveSnapshot(Guid.NewGuid(), new ClassStateSnapshot { TimeZoneOffsetMinutes = 600, GeneratedAt = now.AddMinutes(-5) });
+        state.SaveSnapshot(Guid.NewGuid(), new ClassStateSnapshot { TimeZoneOffsetMinutes = 99999, GeneratedAt = now });
+        Assert.Equal(TimeSpan.FromHours(10), ClassClock.Offset(state, profileClass, now, phone));
+
+        // 本班自己的快照优先。
+        state.SaveSnapshot(profileClass, new ClassStateSnapshot { TimeZoneOffsetMinutes = 480, GeneratedAt = now.AddDays(-1) });
+        Assert.Equal(TimeSpan.FromHours(8), ClassClock.Offset(state, profileClass, now, phone));
+    }
+
+    [Fact]
+    public async Task NextCourse_ProfileClassUsesCallerTimeZoneWhenNoClassroomReported()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        await CreateClassWithProfileAsync(factory, "档案时区班");
+        var admin = await factory.LoginAsync();
+        using var client = factory.CreateClient();
+        (await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post, "/api/users", admin.AccessToken, new CreateUserRequest
+        {
+            Username = "profile.teacher",
+            DisplayName = "原教师",
+            Password = "Teacher-Password-2026",
+            RoleId = AccountRole.TeacherId,
+        }))).EnsureSuccessStatusCode();
+        var teacher = await factory.LoginAsync("profile.teacher", "Teacher-Password-2026");
+
+        // 档案只排了周一 08:00-08:40 的语文；手机所在时区为 UTC-5，测试环境里没有任何班级快照。
+        var offset = TimeSpan.FromHours(-5);
+        var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(offset).DateTime);
+        var monday = today.AddDays(((int)DayOfWeek.Monday - (int)today.DayOfWeek + 7) % 7);
+        var at = new DateTimeOffset(monday.ToDateTime(new TimeOnly(8, 10)), offset);
+        var response = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get,
+            $"/api/me/schedule/next?at={Uri.EscapeDataString(at.ToString("O"))}&timeZoneOffsetMinutes=-300", teacher.AccessToken));
+        response.EnsureSuccessStatusCode();
+        var next = (await response.Content.ReadFromJsonAsync<MyNextCourseResponse>())!;
+
+        Assert.NotNull(next.Current);
+        Assert.Equal("语文", next.Current!.Course.Subject);
+        Assert.Equal(ScheduleBundleSources.Profile, next.Current.Source);
+        Assert.Equal(new DateTimeOffset(monday.ToDateTime(new TimeOnly(8, 0)), offset), next.Current.StartsAt);
+
+        var scheduleResponse = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get,
+            "/api/me/schedule?timeZoneOffsetMinutes=-300", teacher.AccessToken));
+        scheduleResponse.EnsureSuccessStatusCode();
+        var schedule = (await scheduleResponse.Content.ReadFromJsonAsync<MyScheduleResponse>())!;
+        Assert.NotEmpty(schedule.Days);
+        Assert.All(schedule.Days.SelectMany(day => day.Items), item => Assert.Equal(-300, item.TimeZoneOffsetMinutes));
+
+        var invalid = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get,
+            "/api/me/schedule/next?timeZoneOffsetMinutes=2000", teacher.AccessToken));
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+
+    [Fact]
+    public async Task WatchConnection_ReceivesProfileScheduleAndRefreshAfterSave()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        var classId = await CreateClassWithProfileAsync(factory, "档案推送班");
+        var admin = await factory.LoginAsync();
+        using var socket = await factory.Server.CreateWebSocketClient().ConnectAsync(
+            new Uri(factory.Server.BaseAddress, $"/ws?{Protocol.QueryToken}={Uri.EscapeDataString(admin.AccessToken)}"),
+            CancellationToken.None);
+
+        // 手机/手表只经 WebSocket 收课表：插件从未同步过的班级在连接时收到按档案推算的课表。
+        var initial = await ReceiveScheduleAsync(socket, classId);
+        Assert.Equal(ScheduleBundleSources.Profile, initial.Source);
+        Assert.Contains(initial.Days.SelectMany(x => x.Courses), x => x.Subject == "语文");
+
+        // 保存班级档案后立即推送新的推算结果。
+        using (var scope = factory.Services.CreateScope())
+        {
+            var library = scope.ServiceProvider.GetRequiredService<ProfileLibraryService>();
+            var adminUser = await ProfileTestData.AdminAsync(scope.ServiceProvider);
+            var stored = (await library.ListAsync(adminUser, classId)).Single();
+            var edited = ProfileDocument.Parse(stored.ProfileJson);
+            edited["Subjects"]![ProfileTestData.SubjectId]!["Name"] = "数学";
+            await library.SaveAsync(adminUser, [ProfileTestData.Edit(stored, stored.Name, ProfileDocument.Serialize(edited))], classId);
+        }
+        var updated = await ReceiveScheduleAsync(socket, classId);
+        Assert.Equal(ScheduleBundleSources.Profile, updated.Source);
+        Assert.Contains(updated.Days.SelectMany(x => x.Courses), x => x.Subject == "数学");
+    }
+
+    private static async Task<ScheduleBundle> ReceiveScheduleAsync(WebSocket socket, Guid classId)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (true)
+        {
+            var buffer = new byte[256 * 1024];
+            using var message = new MemoryStream();
+            WebSocketReceiveResult result;
+            do
+            {
+                result = await socket.ReceiveAsync(buffer, timeout.Token);
+                Assert.NotEqual(WebSocketMessageType.Close, result.MessageType);
+                message.Write(buffer, 0, result.Count);
+            } while (!result.EndOfMessage);
+            var envelope = JsonSerializer.Deserialize<Envelope>(Encoding.UTF8.GetString(message.ToArray()), JsonDefaults.Options)!;
+            if (envelope.Type != Protocol.MessageTypeScheduleSync) continue;
+            var bundle = JsonSerializer.Deserialize<ScheduleBundle>(JsonSerializer.Serialize(envelope.Payload), JsonDefaults.Options)!;
+            if (bundle.ClassId == classId) return bundle;
+        }
     }
 
     private static async Task<Guid> CreateClassWithProfileAsync(TestWebApplicationFactory factory, string name)

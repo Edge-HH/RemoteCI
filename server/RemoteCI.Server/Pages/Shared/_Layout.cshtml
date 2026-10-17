@@ -17,7 +17,7 @@
         ? UserPermissions.None
         : RolePermissions.Effective(current.Role, current.GrantedPermissions, roleDefaults);
     var currentPage = ViewContext.RouteData.Values["page"]?.ToString();
-    var hasPersonalSchedule = current is not null && AccountRole.HasPersonalSchedule(current.RoleDefinitionId);
+    var hasPersonalSchedule = current is not null;
     var canRequestSwap = current is not null && permissions.HasFlag(UserPermissions.RequestScheduleSwap);
     // 铃铛未读数与换课页待处理数在服务端渲染首屏，之后由 notifications.js 轮询刷新。
     var unreadNotifications = current is null ? 0 : await Db.UserNotifications.CountAsync(x => x.UserId == current.Id && x.ReadAt == null);

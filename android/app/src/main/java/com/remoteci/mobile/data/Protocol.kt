@@ -81,6 +81,9 @@ object Protocol {
 
     /** 服务端全局角色种类（AccountRoleKind）：内置“老师”角色按显示名与课表教师名绑定任教班级。 */
     const val ROLE_KIND_TEACHER = 5
+
+    /** 课表/“我的日程”条目来源：插件从未同步过课表，按服务端班级档案推算。 */
+    const val BUNDLE_SOURCE_PROFILE = "profile"
     const val PERMISSION_VIEW_CURRENT = 1
     const val PERMISSION_ACCESS_WEB_UI = 2
     const val PERMISSION_MANAGE_USERS = 4
@@ -224,7 +227,11 @@ data class ScheduleBundle(
     @SerialName("generatedAt") val generatedAt: String? = null,
     val days: List<ScheduleDay> = emptyList(),
     val subjects: List<SubjectEntry> = emptyList(),
-)
+    /** "profile"：插件从未同步过课表，服务端按班级档案推算，只供查看，不能据此换课；插件课表不带该字段。 */
+    val source: String? = null,
+) {
+    val fromProfile: Boolean get() = source == Protocol.BUNDLE_SOURCE_PROFILE
+}
 
 @Serializable
 data class ScheduleDay(
@@ -246,6 +253,11 @@ data class CourseEntry(
     /** 授课教师名，来自教室端 ClassIsland 档案；旧版服务端不下发。 */
     val teacher: String? = null,
     val enabled: Boolean = true,
+    val personalCourseId: String? = null,
+    val startsAt: String? = null,
+    val endsAt: String? = null,
+    val reminderMinutes: Int? = null,
+    val notifyAtStart: Boolean = false,
 )
 
 @Serializable
@@ -267,6 +279,10 @@ data class MyScheduleItem(
     @SerialName("classId") val classId: String,
     @SerialName("className") val className: String,
     val courses: List<CourseEntry> = emptyList(),
+    /** "profile"：该班插件从未同步过课表，课程按服务端班级档案推算，可能与教室端实际课表不同。 */
+    val source: String? = null,
+    /** 课程钟点所在班级的 UTC 偏移；旧服务端缺省时使用本机时区。 */
+    val timeZoneOffsetMinutes: Int? = null,
 )
 
 /** “我的日程”当前/下一节课，时间已经由服务端按班级时区换算为绝对时间。 */

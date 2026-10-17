@@ -50,9 +50,23 @@ object AdminApi {
     }
 
     /** “我的日程”：老师账号按显示名绑定课表后的跨班级个人课表。 */
-    suspend fun mySchedule(): MyScheduleResponse = get("/api/me/schedule", MyScheduleResponse.serializer())
+    suspend fun mySchedule(): MyScheduleResponse =
+        get("/api/me/schedule?timeZoneOffsetMinutes=${deviceOffsetMinutes()}", MyScheduleResponse.serializer())
+    suspend fun personalCourses(): List<PersonalCourseView> =
+        get("/api/me/schedule/courses", ListSerializer(PersonalCourseView.serializer()))
+    suspend fun savePersonalCourse(id: String?, body: PersonalCourseRequest): PersonalCourseView =
+        if (id == null) post("/api/me/schedule/courses", body, PersonalCourseRequest.serializer(), PersonalCourseView.serializer())
+        else put("/api/me/schedule/courses/${enc(id)}", body, PersonalCourseRequest.serializer(), PersonalCourseView.serializer())
+    suspend fun deletePersonalCourse(id: String) { request("DELETE", "/api/me/schedule/courses/${enc(id)}") }
     /** 老师状态栏/超级岛使用的当前课与下一节课。 */
-    suspend fun myNextCourse(): MyNextCourseResponse = get("/api/me/schedule/next", MyNextCourseResponse.serializer())
+    suspend fun myNextCourse(): MyNextCourseResponse =
+        get("/api/me/schedule/next?timeZoneOffsetMinutes=${deviceOffsetMinutes()}", MyNextCourseResponse.serializer())
+
+    /**
+     * 本机当前的 UTC 偏移分钟数。还没有任何班级上报状态快照时（例如只有按档案推算课表的班级），
+     * 服务端用它代替自身时区换算课程钟点；旧服务端忽略该参数。
+     */
+    private fun deviceOffsetMinutes(): Int = java.time.OffsetDateTime.now().offset.totalSeconds / 60
     suspend fun updateDisplayName(name: String) {
         post("/api/me/display-name", UpdateDisplayNameRequest(name), UpdateDisplayNameRequest.serializer(), UnitSerializer)
     }

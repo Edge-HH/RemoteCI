@@ -22,6 +22,7 @@
     <!-- 课表 -->
     <string name="schedule_title">课表</string>
     <string name="schedule_not_synced">尚未同步课表</string>
+    <string name="schedule_from_profile">按班级档案推算，可能与实际课表不同；插件同步后才能换课</string>
     <string name="schedule_pull_button">向插件拉取</string>
     <string name="schedule_pulling_button">正在拉取</string>
     <string name="schedule_empty_day">当天没有课程</string>

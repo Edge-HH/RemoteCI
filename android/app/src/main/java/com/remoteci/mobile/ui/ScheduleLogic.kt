@@ -2,6 +2,8 @@ package com.remoteci.mobile.ui
 
 import com.remoteci.mobile.data.ClassStateSnapshot
 import com.remoteci.mobile.data.CourseEntry
+import com.remoteci.mobile.data.MyCourseSlot
+import com.remoteci.mobile.data.MyNextCourseResponse
 import com.remoteci.mobile.data.Protocol
 import com.remoteci.mobile.data.ScheduleBundle
 import com.remoteci.mobile.data.ScheduleDay
@@ -13,6 +15,8 @@ import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
+import java.util.Locale
 
 data class LessonChoice(
     val id: String,
@@ -201,6 +205,67 @@ internal fun snapshotStageEnd(snapshot: ClassStateSnapshot?): OffsetDateTime? {
         ?: ZoneId.systemDefault().rules.getOffset(date.atTime(endTime))
     return date.atTime(endTime).atOffset(offset)
 }
+
+/** 老师模式“即将上课”的提前量：下一节课开始前这么多分钟内才显示即将上课并常驻课堂状态通知（相当于上课提醒）。 */
+internal const val TeacherUpcomingLeadMinutes = 10L
+
+/**
+ * 老师个人日程在某一时刻的展示状态，首页、课堂状态通知与小组件共用。
+ * 服务端只给出“当前课”和“下一节”，后者可能在几天之后；直接把它当成即将上课，会让通知整晚、整个周末都显示“即将上课”。
+ * @property current 正在上的课。个人日程每分钟才刷新一次，已经下课的“当前课”不再算，已经开始的“下一节”算作当前课。
+ * @property laterToday 今天（按课程所在教室的本地日期）稍后的下一节课。
+ * @property upcoming [laterToday] 在 [TeacherUpcomingLeadMinutes] 分钟内开始时才有值，只有它显示“即将上课”。
+ * @property next 接下来的第一节课，可能在之后几天，供“下一节”条目展示。
+ */
+internal data class TeacherCourseState(
+    val current: MyCourseSlot? = null,
+    val laterToday: MyCourseSlot? = null,
+    val upcoming: MyCourseSlot? = null,
+    val next: MyCourseSlot? = null,
+) {
+    /** 上课 / 即将上课 / 空闲（今天稍后还有课）/ 放学（今天没有课了）。 */
+    val title: String
+        get() = when {
+            current != null -> "上课"
+            upcoming != null -> "即将上课"
+            laterToday != null -> "空闲"
+            else -> "放学"
+        }
+}
+
+internal fun teacherCourseState(
+    response: MyNextCourseResponse?,
+    now: OffsetDateTime = OffsetDateTime.now(),
+): TeacherCourseState {
+    response ?: return TeacherCourseState()
+    val instant = now.toInstant()
+    fun started(slot: MyCourseSlot) = parseSlotTime(slot.startsAt)?.toInstant()?.isAfter(instant) == false
+    fun ended(slot: MyCourseSlot) = parseSlotTime(slot.endsAt)?.toInstant()?.isAfter(instant) == false
+    val current = response.current?.takeUnless(::ended)
+        ?: response.next?.takeIf { started(it) && parseSlotTime(it.endsAt) != null && !ended(it) }
+    val next = response.next?.takeUnless { it === current || started(it) }
+    val start = next?.let { parseSlotTime(it.startsAt) }
+    val laterToday = next?.takeIf { start != null && start.toLocalDate() == now.withOffsetSameInstant(start.offset).toLocalDate() }
+    val lead = next?.course?.let { course ->
+        if (course.personalCourseId != null) course.reminderMinutes?.toLong() else TeacherUpcomingLeadMinutes
+    }
+    val upcoming = laterToday?.takeIf { lead != null && start!!.toInstant() <= instant.plusSeconds(lead * 60) }
+    return TeacherCourseState(current, laterToday, upcoming, next)
+}
+
+/** 个人日程课程不在今天时的日期提示，如“明天”“10-19 周一”；今天或时间无法解析时返回 null。 */
+internal fun teacherSlotDayLabel(slot: MyCourseSlot, now: OffsetDateTime = OffsetDateTime.now()): String? {
+    val start = parseSlotTime(slot.startsAt) ?: return null
+    val date = start.toLocalDate()
+    val today = now.withOffsetSameInstant(start.offset).toLocalDate()
+    return when (date) {
+        today -> null
+        today.plusDays(1) -> "明天"
+        else -> "${date.format(DateTimeFormatter.ofPattern("MM-dd"))} ${date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.CHINA)}"
+    }
+}
+
+private fun parseSlotTime(value: String): OffsetDateTime? = runCatching { OffsetDateTime.parse(value) }.getOrNull()
 
 /**
  * 根据插件快照推算“插件本地当前时间”：

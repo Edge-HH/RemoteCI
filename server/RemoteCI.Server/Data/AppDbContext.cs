@@ -32,10 +32,20 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<StoredProfile> StoredProfiles => Set<StoredProfile>();
     public DbSet<HolidayYearSnapshot> HolidayYearSnapshots => Set<HolidayYearSnapshot>();
     public DbSet<HolidayMakeupOverride> HolidayMakeupOverrides => Set<HolidayMakeupOverride>();
+    public DbSet<PersonalCourse> PersonalCourses => Set<PersonalCourse>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+        builder.Entity<PersonalCourse>(entity =>
+        {
+            entity.Property(x => x.Subject).HasMaxLength(100);
+            entity.Property(x => x.Location).HasMaxLength(200);
+            entity.HasIndex(x => new { x.UserId, x.StartsAtUnixMs });
+            entity.HasIndex(x => x.EndsAtUnixMs);
+            entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
 
         builder.Entity<StoredProfile>(entity =>
         {

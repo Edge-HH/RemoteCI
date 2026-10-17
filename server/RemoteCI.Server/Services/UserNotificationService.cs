@@ -57,7 +57,8 @@ public sealed class UserNotificationService(
             {
                 webPush.SendInBackground(keys,
                     subscriptions.Where(x => x.UserId == row.UserId).Select(x => x.Target).ToList(),
-                    new { title = view.Title, body = view.Body, kind = view.Kind, id = view.Id, url = "/SwapRequests" });
+                    new { title = view.Title, body = view.Body, kind = view.Kind, id = view.Id,
+                        url = view.Kind.StartsWith("personal_course_", StringComparison.Ordinal) ? "/MySchedule" : "/SwapRequests" });
             }
         }
         await TrimAsync(recipients, ct);

@@ -14,6 +14,11 @@ public sealed class StateStore(LessonOverrideTable? overrides = null) : IStateSt
 
     public ClassStateSnapshot? GetLatestSnapshot(Guid classId) => Bucket(classId).GetLatestSnapshot();
 
+    public int? GetLatestTimeZoneOffsetMinutes() => _buckets.Values
+        .Select(bucket => bucket.GetLatestSnapshot())
+        .Where(snapshot => ClassClock.Valid(snapshot?.TimeZoneOffsetMinutes) is not null)
+        .MaxBy(snapshot => snapshot!.GeneratedAt)?.TimeZoneOffsetMinutes;
+
     public void SaveSchedule(Guid classId, ScheduleBundle schedule) => Bucket(classId).SaveSchedule(schedule);
 
     public ScheduleBundle? GetLatestSchedule(Guid classId) =>

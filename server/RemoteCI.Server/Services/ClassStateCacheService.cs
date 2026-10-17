@@ -114,6 +114,7 @@ public sealed class PersistentStateStore(StateStore inner, ClassStateCacheServic
 {
     public void SaveSnapshot(Guid classId, ClassStateSnapshot snapshot) => inner.SaveSnapshot(classId, snapshot);
     public ClassStateSnapshot? GetLatestSnapshot(Guid classId) => inner.GetLatestSnapshot(classId);
+    public int? GetLatestTimeZoneOffsetMinutes() => inner.GetLatestTimeZoneOffsetMinutes();
 
     public void SaveSchedule(Guid classId, ScheduleBundle schedule)
     {

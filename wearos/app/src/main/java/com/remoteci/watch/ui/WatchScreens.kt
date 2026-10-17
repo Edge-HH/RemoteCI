@@ -469,10 +469,35 @@ internal fun ScheduleOverviewScreen(
     onRequestSchedule: () -> Unit,
     onPickDate: () -> Unit,
     onBack: () -> Unit,
-) = WatchList(title = stringResource(R.string.schedule_title)) {
+    fromProfile: Boolean = false,
+) {
+    val account by ConnectionManager.currentUser.collectAsState()
+    var personal by remember(account?.id) { mutableStateOf(emptyList<com.remoteci.watch.data.PersonalCourseView>()) }
+    var showPersonal by remember { mutableStateOf(false) }
+    var personalError by remember(account?.id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(account?.id, showPersonal) {
+        if (account != null && showPersonal) while (true) {
+            runCatching { ConnectionManager.personalCourses() }
+                .onSuccess { personal = it; personalError = null }
+                .onFailure { personalError = it.message }
+            kotlinx.coroutines.delay(30_000)
+        }
+    }
+    WatchList(title = if (showPersonal) "我的日程" else stringResource(R.string.schedule_title)) {
+    item { ActionButton(if (showPersonal) "查看班级课表" else "查看自定义课程", null, account != null, { showPersonal = !showPersonal }) }
+    if (showPersonal) {
+        personalError?.let { item { Hint(it) } }
+        if (personal.isEmpty() && personalError == null) item { Hint("暂无自定义课程，可在手机或 WebUI 添加。") }
+        personal.forEach { course ->
+            item { Hint("${course.subject}\n${course.startsAt.take(16).replace('T', ' ')}–${course.endsAt.substringAfter('T').take(5)}\n${course.location}") }
+        }
+        item { BackButton(onBack) }
+        return@WatchList
+    }
     if (day == null) {
         item { Hint(stringResource(R.string.schedule_not_synced)) }
     } else {
+        if (fromProfile) item { Hint(stringResource(R.string.schedule_from_profile)) }
         // 日期标题同时承担切换入口，单页始终只渲染一天，避免七日内容在圆屏上过长。
         item { ActionButton(scheduleDateTitle(day.date, today), null, true, onPickDate) }
         if (day.courses.isEmpty()) item { Hint(stringResource(R.string.schedule_empty_day)) }
@@ -502,6 +527,7 @@ internal fun ScheduleOverviewScreen(
         }
     }
     item { BackButton(onBack) }
+}
 }
 
 /** 无论本地是否已有缓存，只要在线就允许强制拉取并覆盖旧课表。 */

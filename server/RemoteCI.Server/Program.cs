@@ -96,6 +96,9 @@ builder.Services.AddScoped<VisitorAccessSettings>();
 builder.Services.AddScoped<LoginPageSettings>();
 builder.Services.AddScoped<MobileLoginSettings>();
 builder.Services.AddScoped<TeacherBindingService>();
+builder.Services.AddScoped<PersonalScheduleService>();
+builder.Services.AddScoped<PersonalCourseReminderService>();
+builder.Services.AddHostedService<PersonalCourseReminderWorker>();
 builder.Services.AddScoped<ClassAccessService>();
 builder.Services.AddScoped<ProfileLibraryService>();
 builder.Services.AddScoped<ScheduleViewService>();
@@ -218,6 +221,7 @@ app.Map("/ws", async context =>
         context.RequestServices.GetRequiredService<ScheduleSyncService>(),
         context.RequestServices.GetRequiredService<ClassAccessService>(),
         context.RequestServices.GetRequiredService<TeacherBindingService>(),
+        context.RequestServices.GetRequiredService<ScheduleViewService>(),
         logger);
 });
 
@@ -406,25 +410,55 @@ app.MapPost("/api/me/display-name", async (
 
 // “我的日程”：当前老师或班主任账号按显示名绑定课表后，跨班级聚合出的个人课表。
 app.MapGet("/api/me/schedule", async (
-    HttpContext ctx, IdentityCoordinator identities, TeacherBindingService teachers, CancellationToken ct) =>
+    HttpContext ctx, int? timeZoneOffsetMinutes, IdentityCoordinator identities, PersonalScheduleService schedule, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    // 只有内置“老师”与“班主任”角色按显示名绑定课表；其他账号即使同名也返回空日程，与 WebUI“我的日程”一致。
-    if (!HasPersonalSchedule(principal)) return Results.Ok(new MyScheduleResponse());
-    return Results.Ok(await teachers.BuildMyScheduleAsync(principal.User.DisplayName, ct));
+    if (InvalidTimeZoneOffset(timeZoneOffsetMinutes) is { } bad) return bad;
+    return Results.Ok(await schedule.BuildAsync(principal.User.Id,
+        HasPersonalSchedule(principal) ? principal.User.DisplayName : null, ClassClock.Valid(timeZoneOffsetMinutes), ct));
 });
 
 // “我的日程”的下一节课：返回老师正在上的课和接下来要上的课（含班级与起止时间），
 // 供脚本或 Agent 直接回答“下节课去哪个班上什么”。at 省略时取服务端当前时间。
+// timeZoneOffsetMinutes 是调用方本机时区：还没有任何班级上报状态快照时（例如只有按档案推算的班级），
+// 用它代替服务端本地时区换算课程钟点，避免 Docker 容器的 UTC 时区让上课时间整体偏移。
 app.MapGet("/api/me/schedule/next", async (
-    HttpContext ctx, DateTimeOffset? at, IdentityCoordinator identities, TeacherBindingService teachers, CancellationToken ct) =>
+    HttpContext ctx, DateTimeOffset? at, int? timeZoneOffsetMinutes, IdentityCoordinator identities, PersonalScheduleService schedule, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
+    if (InvalidTimeZoneOffset(timeZoneOffsetMinutes) is { } bad) return bad;
     var now = at ?? DateTimeOffset.UtcNow;
-    if (!HasPersonalSchedule(principal)) return Results.Ok(new MyNextCourseResponse { At = now });
-    return Results.Ok(await teachers.BuildMyNextCourseAsync(principal.User.DisplayName, now, ct));
+    return Results.Ok(await schedule.NextAsync(principal.User.Id,
+        HasPersonalSchedule(principal) ? principal.User.DisplayName : null, now, ClassClock.Valid(timeZoneOffsetMinutes), ct));
+});
+
+app.MapGet("/api/me/schedule/courses", async (HttpContext ctx, IdentityCoordinator identities, PersonalScheduleService schedule, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    return principal?.User is null ? Unauthorized() : Results.Ok(await schedule.ListAsync(principal.User.Id, ct));
+});
+app.MapPost("/api/me/schedule/courses", async (HttpContext ctx, PersonalCourseRequest body, IdentityCoordinator identities, PersonalScheduleService schedule, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    try { return Results.Ok(await schedule.SaveAsync(principal.User.Id, null, body, ct)); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+app.MapPut("/api/me/schedule/courses/{id:guid}", async (Guid id, HttpContext ctx, PersonalCourseRequest body, IdentityCoordinator identities, PersonalScheduleService schedule, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    try { return Results.Ok(await schedule.SaveAsync(principal.User.Id, id, body, ct)); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+app.MapDelete("/api/me/schedule/courses/{id:guid}", async (Guid id, HttpContext ctx, IdentityCoordinator identities, PersonalScheduleService schedule, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    try { await schedule.DeleteAsync(principal.User.Id, id, ct); return Results.NoContent(); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
 });
 
 // ---------- 换课申请：老师发起、对方老师审批；强制换课立即生效、对方可撤回 ----------
@@ -1393,6 +1427,12 @@ static async Task<Guid?> ResolveClassAsync(
 static IResult? MissingFields(params string?[] values) =>
     values.Any(string.IsNullOrEmpty)
         ? Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "缺少必填字段"))
+        : null;
+
+/// <summary>客户端上报的时区偏移（分钟）超出 ±14 小时时返回 400。</summary>
+static IResult? InvalidTimeZoneOffset(int? minutes) =>
+    minutes is not null && ClassClock.Valid(minutes) is null
+        ? Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "timeZoneOffsetMinutes 必须在 -840 到 840 之间"))
         : null;
 
 static int CommandStatus(CommandResult result) => result.Code switch
