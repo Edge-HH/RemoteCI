@@ -11,14 +11,17 @@ namespace RemoteCI.Server.Services;
 public sealed class CalendarFeedService(AppDbContext db, ClassAccessService access, PersonalScheduleService personal,
     ScheduleViewService schedules, IStateStore state, TimeProvider time)
 {
-    private static readonly SemaphoreSlim FeedGate = new(1, 1);
+    // 每个 (用户, 班级) 最多一条有效订阅：同一日历的创建与拉取互斥，不同日历可并发。
+    private static readonly SemaphoreSlim[] Stripes = Enumerable.Range(0, 64).Select(_ => new SemaphoreSlim(1, 1)).ToArray();
+    private static SemaphoreSlim Stripe(Guid userId, Guid? classId) => Stripes[(uint)HashCode.Combine(userId, classId) % Stripes.Length];
     public static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     public async Task<(CalendarSubscription Subscription, string Token)> CreateAsync(AppUser user, Guid? classId, int? reminder, int offset, CancellationToken ct)
     {
-        await FeedGate.WaitAsync(ct);
+        var gate = Stripe(user.Id, classId);
+        await gate.WaitAsync(ct);
         try { return await CreateCoreAsync(user, classId, reminder, offset, ct); }
-        finally { FeedGate.Release(); }
+        finally { gate.Release(); }
     }
 
     private async Task<(CalendarSubscription Subscription, string Token)> CreateCoreAsync(AppUser user, Guid? classId, int? reminder, int offset, CancellationToken ct)
@@ -39,16 +42,25 @@ public sealed class CalendarFeedService(AppDbContext db, ClassAccessService acce
 
     public async Task<string?> ReadAsync(string token, CancellationToken ct)
     {
-        await FeedGate.WaitAsync(ct);
-        try { return await ReadCoreAsync(token, ct); }
-        finally { FeedGate.Release(); }
-    }
-
-    private async Task<string?> ReadCoreAsync(string token, CancellationToken ct)
-    {
         if (token.Length != 43 || token.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not '-' and not '_')) return null;
         var row = await db.CalendarSubscriptions.Include(x => x.User).SingleOrDefaultAsync(x => x.TokenHash == Hash(token), ct);
-        if (row is null || row.Revoked || !row.User.Enabled || !await AllowedAsync(row.User, row.ClassId, ct)) return null;
+        if (row is null || row.Revoked) return null;
+        var gate = Stripe(row.UserId, row.ClassId);
+        await gate.WaitAsync(ct);
+        try
+        {
+            // 等锁期间同一日历可能已被重新创建（轮换链接）或撤销。
+            if (!await db.CalendarSubscriptions.AnyAsync(x => x.Id == row.Id && !x.Revoked, ct)) return null;
+            return await ReadCoreAsync(row, ct);
+        }
+        // 恢复配置等批量删除与本次写入并发：订阅已不存在，按失效处理。
+        catch (DbUpdateException) { return null; }
+        finally { gate.Release(); }
+    }
+
+    private async Task<string?> ReadCoreAsync(CalendarSubscription row, CancellationToken ct)
+    {
+        if (!row.User.Enabled || !await AllowedAsync(row.User, row.ClassId, ct)) return null;
         var now = time.GetUtcNow();
         var desired = new Dictionary<string, (string Content, long EndsAt)>();
         var name = "RemoteCI 我的日程";

@@ -130,6 +130,35 @@ public sealed class MobileWebTests
     }
 
     [Fact]
+    public async Task CalendarFeeds_ServeConcurrentFetches_WithoutDuplicateVersions()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        var owner = await factory.LoginAsync();
+        string personal, classFeed;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var user = await scope.ServiceProvider.GetRequiredService<AppDbContext>().Users.SingleAsync(x => x.Id == owner.User.Id);
+            var courses = scope.ServiceProvider.GetRequiredService<PersonalScheduleService>();
+            var start = DateTimeOffset.UtcNow.AddDays(2).ToOffset(TimeSpan.FromHours(8));
+            for (var i = 0; i < 3; i++)
+                await courses.SaveAsync(user.Id, null, new PersonalCourseRequest { Subject = $"并发课程{i}", StartsAt = start.AddHours(i * 2), EndsAt = start.AddHours(i * 2 + 1) });
+            var feed = scope.ServiceProvider.GetRequiredService<CalendarFeedService>();
+            personal = (await feed.CreateAsync(user, null, 10, 480, default)).Token;
+            classFeed = (await feed.CreateAsync(user, TestWebApplicationFactory.DefaultClassId, null, 480, default)).Token;
+        }
+        using var client = factory.CreateClient();
+        // 两个日历交错并发拉取：不同日历互不阻塞，同一日历的首次写入版本仍然串行，不会重复插入或重复递增。
+        var responses = await Task.WhenAll(Enumerable.Range(0, 12).Select(i => client.GetAsync($"/calendar/{(i % 2 == 0 ? personal : classFeed)}.ics")));
+        Assert.All(responses, response => Assert.Equal(HttpStatusCode.OK, response.StatusCode));
+        foreach (var body in await Task.WhenAll(responses.Where((_, i) => i % 2 == 0).Select(x => x.Content.ReadAsStringAsync())))
+            Assert.Equal(3, Regex.Matches(body, "SUMMARY:并发课程").Count);
+        using var verify = factory.Services.CreateScope();
+        var versions = await verify.ServiceProvider.GetRequiredService<AppDbContext>().CalendarEventVersions.ToListAsync();
+        Assert.True(versions.Count >= 3);
+        Assert.All(versions, version => Assert.Equal(1, version.Sequence));
+    }
+
+    [Fact]
     public async Task ClassCalendar_RechecksMembership_AndRejectsInaccessibleClasses()
     {
         await using var factory = new TestWebApplicationFactory();
