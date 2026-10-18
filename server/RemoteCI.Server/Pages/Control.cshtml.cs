@@ -378,7 +378,7 @@ public sealed class ControlModel(
             CurrentClassId, Extensions.Select(item => item.Definition).ToList());
         EditableExtensionGroupIds = await extensionGroups.ListClassAdminEditableAsync(
             CurrentUser.Id, CurrentUser.Role, CurrentUser.GrantedPermissions, CurrentClassId, ct);
-        return !CanTeacherComing && !CanSendNotifications && !CanSendVoiceMessages && !CanClearNotifications && !CanControlMainMenu &&
+        return !MobileUi.IsMobile(HttpContext) && !CanTeacherComing && !CanSendNotifications && !CanSendVoiceMessages && !CanClearNotifications && !CanControlMainMenu &&
             !CanControlPower && !CanControlVolume && !CanUseExtensions && !HasMaintenanceOperations
             ? RedirectToPage("/Denied")
             : null;

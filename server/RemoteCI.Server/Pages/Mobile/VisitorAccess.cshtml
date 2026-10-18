@@ -1,0 +1,8 @@
+@page
+@model RemoteCI.Server.Pages.Mobile.VisitorAccessModel
+@{ ViewData["Title"] = "访客访问"; }
+<section class="panel"><h2>登录入口</h2><form method="post" class="stack"><label class="check"><input asp-for="AutoEnter" />自动进入访客页</label><button type="submit">保存</button></form><p class="muted">至少一个班级开放访客访问时生效。访客只能浏览已开放班级的课表。</p></section>
+@foreach (var classroom in Model.Classes)
+{
+    <section class="panel"><h2>@classroom.Name</h2><form method="post" asp-page-handler="Class" class="stack"><input type="hidden" name="id" value="@classroom.Id" /><label class="check"><input type="checkbox" name="enabled" value="true" checked="@classroom.VisitorEnabled" />开放访客课表</label><button type="submit" class="ghost">保存</button></form></section>
+}

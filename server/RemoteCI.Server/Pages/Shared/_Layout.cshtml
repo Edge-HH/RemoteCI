@@ -89,11 +89,14 @@
     var loginBackgroundStyle = loginStyleParts.Count == 0 ? null : string.Join(';', loginStyleParts);
 }
 <!doctype html>
-<html lang="zh-CN" data-login-theme-forced="@forcedLoginTheme">
+<html lang="zh-CN" data-login-theme-forced="@forcedLoginTheme" data-ui-preference="@Context.Request.Cookies[MobileUi.Cookie]">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>@ViewData["Title"] · RemoteCI</title>
+    <script>if(document.documentElement.dataset.uiPreference!=='desktop' && matchMedia('(max-width:820px) and (pointer:coarse)').matches && !new URL(location.href).searchParams.has('handler')) {const url=new URL(location.href);url.searchParams.set('view','mobile');location.replace(url);}</script>
+    <link rel="manifest" href="~/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="~/icons/apple-touch-icon.png" />
     <link rel="icon" href="~/favicon.ico" sizes="16x16 32x32 48x48" asp-append-version="true" />
     <link rel="icon" type="image/svg+xml" href="~/favicon.svg" asp-append-version="true" />
     <link rel="stylesheet" href="~/vendor/material-symbols/material-symbols.css" asp-append-version="true" />
@@ -202,6 +205,7 @@
                     <span class="search-feedback" data-search-feedback aria-live="polite"></span>
                 </div>
                 <div class="topbar-actions">
+                    @if (MobileUi.IsPhone(Context.Request) || Context.Request.Cookies[MobileUi.Cookie] == "desktop") { <a class="button ghost" href="?view=mobile">返回手机版</a> }
                     @if (accessibleClasses.Count > 1)
                     {
                         <form class="class-switcher" method="post" asp-page="/Account" asp-page-handler="SwitchClass">

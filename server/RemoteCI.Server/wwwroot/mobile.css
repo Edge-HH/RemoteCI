@@ -1,0 +1,156 @@
+/* Mobile shell follows the Android Material 3 theme. Desktop CSS is scoped out by this root. */
+/* Green is the default scheme; other palettes keep the neutral lavender-tinted surfaces. */
+html[data-mobile-ui] { --m-bg:#f7fbf1; --m-surface:#f1f5eb; --m-card:#ebefe6; --m-high:#e0e4da; --m-text:#181d17; --m-muted:#424940; --m-primary:#3b6939; --m-container:#bcf0b4; --m-on-container:#002204; --m-line:#c2c9bd; color-scheme:light; }
+html[data-mobile-ui][data-theme=dark] { --m-bg:#10140f; --m-surface:#181d17; --m-card:#1c211b; --m-high:#31362f; --m-text:#e0e4db; --m-muted:#c2c9bd; --m-primary:#a1d39a; --m-container:#235023; --m-on-container:#bcf0b4; --m-line:#424940; color-scheme:dark; }
+html[data-mobile-ui]:is([data-palette=lavender],[data-palette=purple],[data-palette=blue],[data-palette=orange],[data-palette=pink]) { --m-bg:#faf9fd; --m-surface:#f3f3fa; --m-card:#eeedf3; --m-high:#e3e2e6; --m-text:#1b1b1f; --m-muted:#44474e; --m-line:#c4c6d0; }
+html[data-mobile-ui][data-theme=dark]:is([data-palette=lavender],[data-palette=purple],[data-palette=blue],[data-palette=orange],[data-palette=pink]) { --m-bg:#131317; --m-surface:#1b1b1f; --m-card:#1f1f23; --m-high:#343439; --m-text:#e2e2e8; --m-muted:#c6c5d2; --m-line:#464651; }
+html[data-mobile-ui][data-palette=lavender] { --m-primary:#6750a4; --m-container:#d8d4ff; --m-on-container:#4a4459; }
+html[data-mobile-ui][data-theme=dark][data-palette=lavender] { --m-primary:#d8d4ff; --m-container:#4a4459; --m-on-container:#e8def8; }
+html[data-mobile-ui][data-palette=purple] { --m-primary:#6750a4; --m-container:#eaddff; --m-on-container:#4f378b; }
+html[data-mobile-ui][data-palette=blue] { --m-primary:#4660d9; --m-container:#d8e2ff; --m-on-container:#000e62; }
+html[data-mobile-ui][data-palette=orange] { --m-primary:#8b5000; --m-container:#ffdbb8; --m-on-container:#2a1707; }
+html[data-mobile-ui][data-palette=pink] { --m-primary:#984061; --m-container:#ffd8e2; --m-on-container:#2b151b; }
+html[data-mobile-ui][data-theme=dark][data-palette=purple] { --m-primary:#eaddff; --m-container:#4f378b; --m-on-container:#e8def8; }
+html[data-mobile-ui][data-theme=dark][data-palette=blue] { --m-primary:#d8e2ff; --m-container:#000e62; --m-on-container:#e0e0ff; }
+html[data-mobile-ui][data-theme=dark][data-palette=orange] { --m-primary:#ffdbb8; --m-container:#2a1707; --m-on-container:#ffdbbd; }
+html[data-mobile-ui][data-theme=dark][data-palette=pink] { --m-primary:#ffd8e2; --m-container:#2b151b; --m-on-container:#ffdae3; }
+.mobile-app { --bg:var(--m-bg); --panel:var(--m-surface); --text:var(--m-text); --muted:var(--m-muted); --line:var(--m-line); --primary:var(--m-primary); --accent:var(--m-primary); margin:0; background:var(--m-bg); color:var(--m-text); font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; overflow-x:hidden; }
+.mobile-app *, .mobile-app *::before, .mobile-app *::after { box-sizing:border-box; }
+.mobile-app [hidden] { display:none!important; }
+.mobile-frame { max-width:600px; margin:auto; min-height:100dvh; display:flex; flex-direction:column; padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+.mobile-topbar { position:sticky; top:0; z-index:30; min-height:64px; display:flex; gap:8px; align-items:center; padding:4px 8px; background:var(--m-bg); }
+.mobile-topbar>strong { flex:1; font-size:22px; font-weight:500; }
+.mobile-icon { width:48px; height:48px; display:inline-flex; align-items:center; justify-content:center; color:var(--m-text); border-radius:50%; text-decoration:none; font-size:24px; position:relative; }
+.mobile-icon:hover { background:var(--m-card); }
+.mobile-content { display:flex; flex-direction:column; flex:1; min-width:0; gap:16px; padding:8px 16px calc(104px + env(safe-area-inset-bottom)); }
+.mobile-content>form { margin:0; }
+.mobile-desktop-hint { margin-top:auto; text-align:center; color:var(--m-muted); font-size:13px; padding:24px 4px 4px; }
+.mobile-desktop-hint a { color:#2563eb; text-decoration:none; display:inline-block; padding:12px 2px; }
+[data-theme=dark] .mobile-desktop-hint a { color:#8ab4f8; }
+.mobile-bottom-nav { position:fixed; z-index:40; bottom:0; left:50%; transform:translateX(-50%); width:min(100%,600px); display:flex; align-items:start; padding:12px 4px calc(12px + env(safe-area-inset-bottom)); min-height:80px; background:var(--m-card); border-top:1px solid var(--m-line); }
+.mobile-bottom-nav>a { flex:1; min-width:0; text-align:center; font-size:12px; font-weight:500; text-decoration:none; color:var(--m-muted); display:flex; flex-direction:column; align-items:center; gap:4px; }
+.mobile-bottom-nav>a>span { position:relative; display:grid; place-content:center; min-width:56px; height:32px; border-radius:16px; font-size:24px; }
+.mobile-bottom-nav>a.active { color:var(--m-text); font-weight:700; }
+.mobile-bottom-nav>a.active>span { background:var(--m-container); color:var(--m-on-container); }
+.mobile-bottom-nav b { position:absolute; top:-4px; right:0; background:#b3261e; color:white; border-radius:12px; padding:0 5px; font-size:11px; }
+.mobile-app a { color:var(--m-primary); }
+.mobile-app .mobile-bottom-nav>a, .mobile-app .mobile-icon { color:var(--m-text); }
+.mobile-app .button, .mobile-app button { border-radius:28px; min-height:48px; font:inherit; font-weight:500; border:0; padding:10px 22px; background:var(--m-primary); color:var(--m-bg); box-shadow:none; cursor:pointer; max-width:100%; }
+.mobile-app .button { display:inline-flex; justify-content:center; align-items:center; text-decoration:none; }
+.mobile-app button:disabled { cursor:default; opacity:.45; }
+.mobile-app button.ghost, .mobile-app .button.ghost { color:var(--m-primary); background:var(--m-card); }
+.mobile-app input, .mobile-app select, .mobile-app textarea { min-height:52px; width:100%; max-width:100%; border:1px solid var(--m-line); color:var(--m-text); background:transparent; border-radius:12px; font:inherit; padding:12px; }
+.mobile-app input[type=checkbox], .mobile-app input[type=radio] { width:22px; min-height:22px; height:22px; padding:0; flex-shrink:0; accent-color:var(--m-primary); }
+.mobile-app input[type=range] { padding:0; accent-color:var(--m-primary); }
+.mobile-app label { display:flex; flex-direction:column; gap:8px; color:var(--m-text); }
+.mobile-app label.check, .mobile-app .permissions label { flex-direction:row; align-items:center; min-height:48px; gap:12px; }
+.mobile-app .stack, .mobile-app .form-grid, .mobile-app .two-column, .mobile-app .control-grid, .mobile-app .user-edit-form, .mobile-app .my-schedule-list { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; }
+.mobile-app .panel { margin:0; padding:20px; border:0; border-radius:24px; background:var(--m-surface); box-shadow:none; min-width:0; }
+.mobile-app h1 { font-size:26px; line-height:1.25; }
+.mobile-app h2 { font-size:19px; font-weight:500; margin:0 0 12px; }
+.mobile-app h3 { font-size:16px; }
+.mobile-app p { margin:0 0 12px; }
+.mobile-app small, .mobile-app .muted, .mobile-app .control-note { color:var(--m-muted); }
+.mobile-app .page-head { margin:0; padding:0; }
+.mobile-app .page-head h1 { margin:0; }
+.mobile-app .page-head .eyebrow, .mobile-app .member-excel-panel, .mobile-app .api-key-panel, .mobile-app .api-key-reveal-panel { display:none; }
+.mobile-app .notice, .mobile-app .flash { padding:14px 18px; margin:0; border-radius:18px; background:var(--m-container); color:var(--m-on-container); overflow-wrap:anywhere; }
+.mobile-app .flash.error { background:#ffdad6; color:#410002; }
+.mobile-hero { border-radius:28px; background:var(--m-container); color:var(--m-on-container); padding:24px; min-height:290px; display:flex; flex-direction:column; align-items:start; }
+.mobile-hero-label { font-size:14px; margin-bottom:12px; }
+.mobile-hero h1 { font-size:36px; margin:0 0 8px; font-weight:500; }
+.mobile-countdown { font-size:48px; font-variant-numeric:tabular-nums; letter-spacing:-1px; margin:12px 0; }
+.mobile-hero-action { margin-top:auto; color:inherit!important; font-weight:500; text-decoration:none; display:flex; align-items:center; gap:16px; min-height:48px; }
+.mobile-connected-list { display:flex; flex-direction:column; gap:2px; overflow:hidden; border-radius:24px; }
+.mobile-app .mobile-row { display:flex; align-items:center; justify-content:start; gap:16px; background:var(--m-card); color:var(--m-text); border-radius:4px; padding:16px; min-height:84px; text-align:left; text-decoration:none; width:100%; border:0; }
+.mobile-row>i { font-size:24px; flex-shrink:0; color:var(--m-primary); }
+.mobile-row>span { flex:1; min-width:0; }
+.mobile-row strong, .mobile-row small { display:block; overflow-wrap:anywhere; }
+.mobile-row strong { font-size:16px; font-weight:500; }
+.mobile-row small { font-size:13px; font-weight:400; margin-top:3px; }
+.mobile-app .mobile-row:disabled { opacity:1; }
+.mobile-button-pair { display:flex; gap:12px; }
+.mobile-button-pair>* { flex:1; }
+.mobile-button-pair button { width:100%; }
+.mobile-segments { display:flex; border:1px solid var(--m-line); border-radius:28px; overflow:hidden; flex-shrink:0; }
+.mobile-segments>a { flex:1; text-align:center; text-decoration:none; padding:12px; color:var(--m-text); }
+.mobile-segments>a.active { background:var(--m-container); color:var(--m-on-container); font-weight:600; }
+.mobile-date-tabs { display:flex; gap:8px; overflow-x:auto; padding:4px 0 12px; scrollbar-width:none; }
+.mobile-date-tabs>button { flex-shrink:0; font-size:13px; padding:10px 16px; }
+.mobile-date-tabs>button[aria-selected=true] { background:var(--m-container); color:var(--m-on-container); }
+.mobile-section-title { color:var(--m-primary); font-size:14px!important; margin:8px 0 12px!important; }
+.mobile-schedule { display:grid; gap:16px; }
+.mobile-empty { text-align:center; padding:32px 16px; }
+.mobile-empty>i { display:block; font-size:48px; color:var(--m-primary); margin-bottom:16px; }
+.mobile-class-picker { display:flex; gap:8px; align-items:center; }
+.mobile-class-picker label { flex:1; flex-direction:row; align-items:center; min-width:0; }
+.mobile-app .mobile-class-picker select { border:0; min-height:48px; padding:8px; }
+.mobile-app dialog { width:100%; max-width:600px; max-height:90dvh; margin:auto auto 0; border:0; border-radius:28px 28px 0 0; background:var(--m-bg); color:var(--m-text); padding:24px 20px calc(24px + env(safe-area-inset-bottom)); overflow:auto; }
+.mobile-app dialog::backdrop { background:#0007; }
+.mobile-app dialog header, .mobile-app .batch-dialog-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 0 16px; }
+.mobile-app .batch-dialog-shell, .mobile-app .user-edit-dialog-shell { border:0; box-shadow:none; background:none; padding:0; }
+.mobile-app .batch-dialog-body, .mobile-app .extension-dialog-form { padding:0; }
+.mobile-app .batch-action-grid { display:flex; flex-direction:column; gap:2px; }
+.mobile-app .batch-action-card { width:100%; border:0; border-radius:12px; background:var(--m-card); color:var(--m-text); min-height:84px; padding:16px; box-shadow:none; }
+.mobile-app .batch-action-icon { color:var(--m-primary); background:none; }
+.mobile-app .batch-action-copy small { color:var(--m-muted); }
+.mobile-app .control-command-section .panel-heading, .mobile-app .batch-step { display:none; }
+.mobile-app .push-settings, .mobile-app .push-actions { display:flex; flex-direction:column; gap:12px; }
+.mobile-notification-options { border:0; padding:0; width:100%; }
+.mobile-notification-options label { display:flex; justify-content:space-between; }
+.mobile-app .mobile-desktop-only, .mobile-app [data-mobile-area=visitor], .mobile-app .system-config-form:has(input[type=file]) { display:none; }
+.mobile-app .user-account-table-wrap { overflow:visible; }
+.mobile-app .user-account-table, .mobile-app .user-account-table tbody, .mobile-app .user-account-table tr, .mobile-app .user-account-table td { display:block; width:100%; }
+.mobile-app .user-account-table thead { display:none; }
+.mobile-app .user-account-table tr { background:var(--m-card); border-radius:20px; margin:0 0 12px; padding:8px; }
+.mobile-app .user-account-table td { border:0; padding:8px; overflow-wrap:anywhere; }
+.mobile-app .user-account-table td:empty { display:none; }
+.mobile-app .permissions { display:grid; grid-template-columns:minmax(0,1fr); padding:12px; border:1px solid var(--m-line); border-radius:16px; }
+.mobile-app .user-account-actions, .mobile-app .row-actions, .mobile-app .dialog-actions { flex-wrap:wrap; gap:8px; }
+.mobile-app .backup-list article, .mobile-app .list article, .mobile-app .inbox-item a, .mobile-app .my-schedule-class { display:flex; flex-wrap:wrap; gap:12px; padding:16px; background:var(--m-card); border-radius:16px; }
+.mobile-app .backup-list strong, .mobile-app code, .mobile-app .inbox-body { overflow-wrap:anywhere; }
+.mobile-app .my-schedule-courses, .mobile-app .my-schedule-classes { width:100%; }
+.mobile-app .my-schedule-course { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-height:60px; }
+.mobile-app .my-schedule-class h3 { width:100%; }
+.mobile-app .swap-grid, .mobile-app .swap-columns, .mobile-app .swap-request-grid { display:grid; grid-template-columns:minmax(0,1fr); }
+.mobile-app .swap-request-card { min-width:0; overflow-wrap:anywhere; }
+.mobile-app .auth-card, .mobile-app .setup-card { background:var(--m-surface); box-shadow:none; border:0; padding:24px; border-radius:24px; width:100%; }
+.mobile-app .auth-layout, .mobile-app .auth-shell { display:block; }
+.mobile-app .login-qr-section, .mobile-app .login-qr-divider { display:none; }
+.mobile-app .toast-stack { bottom:calc(96px + env(safe-area-inset-bottom)); max-width:calc(100% - 32px); }
+.mobile-app .toast { color:var(--m-text); background:var(--m-high); border:0; border-radius:20px; }
+.mobile-app :focus-visible { outline:3px solid var(--m-primary); outline-offset:3px; }
+@media (prefers-reduced-motion:no-preference) { .mobile-content { animation:mobile-enter .18s ease-out; } @keyframes mobile-enter { from { opacity:.6; transform:translateY(6px); } to { opacity:1; transform:none; } } }
+@media (max-width:360px) { .mobile-content { padding-left:12px; padding-right:12px; } .mobile-app .panel { padding:16px; } .mobile-button-pair { flex-wrap:wrap; } }
+@media (orientation:landscape) and (max-height:500px) { .mobile-topbar { position:static; } .mobile-hero { min-height:220px; } }
+
+.mobile-app .swap-tabs { display:flex; overflow-x:auto; border:1px solid var(--m-line); border-radius:28px; padding:0; gap:0; }
+.mobile-app .swap-tab { background:none; color:var(--m-text); flex:1; font-size:13px; padding:12px 8px; white-space:nowrap; border-radius:0; }
+.mobile-app .swap-tab[aria-selected=true] { background:var(--m-container); color:var(--m-on-container); }
+.mobile-app .swap-slot-fields { display:grid; grid-template-columns:minmax(0,1fr); gap:12px; }
+.mobile-app .swap-mode { display:flex; flex-wrap:wrap; border:0; gap:12px; padding:0; }
+.mobile-app .swap-mode label { flex-direction:row; align-items:center; min-height:48px; }
+.mobile-app .login-card { width:100%; max-width:none; border:0; border-radius:24px; padding:24px; background:var(--m-surface); box-shadow:none; }
+.mobile-app .login-tabs, .mobile-app .login-qr-divider { display:none; }
+.mobile-app .login-logo { width:72px; height:72px; }
+.mobile-app .login-card h1 { font-size:26px; }
+.mobile-app .visitor-switcher, .mobile-app .visitor-group-filter, .mobile-app .class-select-grid { display:flex; flex-wrap:wrap; gap:12px; }
+.mobile-app .schedule-table-wrap { overflow:auto; }
+
+html[data-mobile-ui] { min-width:0; }
+.mobile-app[data-mobile-page="/Mobile/Control"] .page-head,
+.mobile-app[data-mobile-page="/Mobile/Users"] .page-head,
+.mobile-app[data-mobile-page="/Mobile/SwapRequests"] .page-head,
+.mobile-app[data-mobile-page="/Mobile/Inbox"] .page-head,
+.mobile-app[data-mobile-page="/Mobile/SystemConfig"] .page-head { display:none; }
+.mobile-app [data-single-control]>.batch-section,
+.mobile-app .control-command-section { background:none; padding:0; border-radius:24px; overflow:hidden; }
+.mobile-app [data-single-control]>.batch-section>.panel-heading { display:none; }
+.mobile-app .batch-action-grid { border-radius:24px; overflow:hidden; }
+.mobile-app .batch-action-card { border-radius:4px; }
+
+.mobile-app .mobile-desktop-hint a { color:#2563eb; }
+[data-theme=dark] .mobile-app .mobile-desktop-hint a { color:#8ab4f8; }
+.mobile-topbar { top:env(safe-area-inset-top); }
+.mobile-app.mobile-keyboard .mobile-bottom-nav { display:none; }
+.mobile-app dialog { max-height:min(90dvh, calc(var(--mobile-viewport-height, 100dvh) - 24px)); }

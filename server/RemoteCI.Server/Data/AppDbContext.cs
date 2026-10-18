@@ -33,10 +33,33 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<HolidayYearSnapshot> HolidayYearSnapshots => Set<HolidayYearSnapshot>();
     public DbSet<HolidayMakeupOverride> HolidayMakeupOverrides => Set<HolidayMakeupOverride>();
     public DbSet<PersonalCourse> PersonalCourses => Set<PersonalCourse>();
+    public DbSet<WebPushJob> WebPushJobs => Set<WebPushJob>();
+    public DbSet<CalendarSubscription> CalendarSubscriptions => Set<CalendarSubscription>();
+    public DbSet<CalendarEventVersion> CalendarEventVersions => Set<CalendarEventVersion>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+        builder.Entity<WebPushSubscription>().Property(x => x.BrowserId).HasMaxLength(64);
+        builder.Entity<WebPushJob>(entity =>
+        {
+            entity.HasIndex(x => new { x.SubscriptionId, x.SourceId }).IsUnique();
+            entity.HasIndex(x => new { x.Finished, x.DueAt });
+            entity.HasOne(x => x.Subscription).WithMany().HasForeignKey(x => x.SubscriptionId).OnDelete(DeleteBehavior.Cascade);
+            entity.Property(x => x.SourceId).HasMaxLength(200);
+        });
+        builder.Entity<CalendarSubscription>(entity =>
+        {
+            entity.HasIndex(x => x.TokenHash).IsUnique();
+            entity.Property(x => x.TokenHash).HasMaxLength(64);
+            entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<CalendarEventVersion>(entity =>
+        {
+            entity.HasKey(x => new { x.SubscriptionId, x.Uid });
+            entity.Property(x => x.Uid).HasMaxLength(200);
+            entity.HasOne(x => x.Subscription).WithMany().HasForeignKey(x => x.SubscriptionId).OnDelete(DeleteBehavior.Cascade);
+        });
 
         builder.Entity<PersonalCourse>(entity =>
         {

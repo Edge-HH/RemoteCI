@@ -1,3 +1,1 @@
-@{
-    Layout = "_Layout";
-}
+@{ Layout = MobileUi.IsMobile(Context) ? "_MobileLayout" : "_Layout"; }

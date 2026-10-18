@@ -16,6 +16,8 @@ if (await ApplicationRestartCoordinator.TryRunHelperAsync(args)) return;
 if (await UpdateInstaller.TryRunAsync(args)) return;
 
 var builder = WebApplication.CreateBuilder(args);
+// Calendar URLs and push endpoints are bearer capabilities; do not put full URLs in framework request logs.
+builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
 builder.Services.Configure<ServerOptions>(builder.Configuration.GetSection(ServerOptions.SectionName));
 
 builder.Services.AddDbContext<AppDbContext>((services, options) =>
@@ -74,6 +76,7 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.LoginPath = "/Login";
     options.AccessDeniedPath = "/Denied";
 });
+builder.Services.Configure<SecurityStampValidatorOptions>(options => options.ValidationInterval = TimeSpan.Zero);
 builder.Services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
 builder.Services.AddRazorPages(options =>
 {
@@ -86,6 +89,8 @@ builder.Services.AddRazorPages(options =>
 });
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IdentityCoordinator>();
+builder.Services.AddScoped<TwoFactorService>();
+builder.Services.AddScoped<TwoFactorLoginService>();
 builder.Services.AddScoped<AccountRoleService>();
 builder.Services.AddScoped<ExtensionPolicyService>();
 builder.Services.AddScoped<AuthorizationSyncService>();
@@ -114,11 +119,17 @@ builder.Services.AddScoped<ExtensionGroupService>();
 builder.Services.AddScoped<PendingExtensionSettingsService>();
 builder.Services.AddSingleton<ExtensionSettingsReplayService>();
 builder.Services.AddScoped<UserNotificationService>();
+builder.Services.AddScoped<WebPushQueue>();
+builder.Services.AddSingleton<WebPushSignal>();
+builder.Services.AddScoped<CalendarFeedService>();
+builder.Services.AddHostedService<WebPushWorker>();
 builder.Services.AddScoped<ScheduleSwapService>();
 builder.Services.AddSingleton<IScheduleCommandSender, PeerScheduleCommandSender>();
 builder.Services.AddSingleton<WebPushSender>();
 builder.Services.AddSingleton<WebQrLoginService>();
-builder.Services.AddHttpClient(WebPushSender.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddHttpClient(WebPushSender.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(15))
+    .RemoveAllLoggers()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped(sp =>
 {
     // 插件在线数来自单例连接注册表；scoped 服务通过回调取数，避免直接依赖单例链。
@@ -185,9 +196,10 @@ if (!app.Environment.IsDevelopment())
 // 非法地址等空响应的错误状态渲染为 WebUI 状态页（带返回主页入口）；
 // API 与 WebSocket 由客户端按状态码/JSON 处理，保持原样不插入 HTML。
 app.UseWhen(
-    context => !context.Request.Path.StartsWithSegments("/api") && !context.Request.Path.StartsWithSegments("/ws"),
+    context => !context.Request.Path.StartsWithSegments("/api") && !context.Request.Path.StartsWithSegments("/ws") && !context.Request.Path.StartsWithSegments("/calendar"),
     branch => branch.UseStatusCodePagesWithReExecute("/status/{0}"));
 app.UseStaticFiles();
+app.Use(MobileUi.InvokeAsync);
 app.UseRouting();
 app.UseRateLimiter();
 app.UseAuthentication();
@@ -197,6 +209,14 @@ app.UseWebSockets(new WebSocketOptions
 {
     KeepAliveInterval = TimeSpan.FromSeconds(30),
     KeepAliveTimeout = TimeSpan.FromSeconds(60),
+});
+
+app.MapGet("/calendar/{token}.ics", async (string token, HttpContext context, CalendarFeedService calendars, CancellationToken ct) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    context.Response.Headers["Referrer-Policy"] = "no-referrer";
+    var content = await calendars.ReadAsync(token, ct);
+    return content is null ? Results.NotFound() : Results.Text(content, "text/calendar; charset=utf-8");
 });
 
 using (var scope = app.Services.CreateScope())

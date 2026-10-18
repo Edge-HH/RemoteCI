@@ -1,0 +1,15 @@
+@page
+@model LoginSecondFactorModel
+@{ ViewData["Title"] = "二步验证"; }
+<section class="login-card" data-login-card-root>
+    <p class="eyebrow">账号安全</p>
+    <h1>输入验证码</h1>
+    <p class="muted">打开已绑定的认证器，输入 6 位验证码。登录验证将在 5 分钟后失效。</p>
+    @if (Model.Error is { } error) { <p class="validation" role="alert">@error</p> }
+    <form method="post" class="stack">
+        <label>验证码或恢复码<input asp-for="Code" autocomplete="one-time-code" autofocus required maxlength="32" /></label>
+        <label class="check"><input asp-for="UseRecoveryCode" /><span>使用一次性恢复码</span></label>
+        <button type="submit">验证并登录</button>
+    </form>
+    <form method="post" asp-page-handler="Cancel"><button type="submit" class="ghost">返回登录</button></form>
+</section>

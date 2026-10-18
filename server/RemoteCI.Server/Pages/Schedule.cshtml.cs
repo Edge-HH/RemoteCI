@@ -47,10 +47,21 @@ public sealed class ScheduleModel(
 
     /// <summary>当前班级课表中出现过的科目及其教师名，供“科目教师”编辑区展示。</summary>
     public IReadOnlyList<SubjectEntry> Subjects => Bundle?.Subjects ?? [];
+    public string MobileRevision => CalendarFeedService.Hash(System.Text.Json.JsonSerializer.Serialize(Bundle?.Days, JsonDefaults.Options));
+
+    public async Task<IActionResult> OnGetRevisionAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is not null) return Unauthorized();
+        Bundle = (await scheduleViews.GetAsync(CurrentClassId, ct))?.Bundle;
+        Response.Headers.CacheControl = "no-store";
+        return new JsonResult(new { revision = MobileRevision });
+    }
 
     public async Task<IActionResult> OnGetAsync()
     {
         if (await RequireAsync() is { } denied) return denied;
+        if (MobileUi.IsMobile(HttpContext) && CurrentUser.RoleDefinitionId == AccountRole.TeacherId && !Request.Query.ContainsKey("class"))
+            return RedirectToPage("/Mobile/MySchedule");
         CurrentView = await scheduleViews.GetAsync(CurrentClassId, HttpContext.RequestAborted);
         Bundle = CurrentView?.Bundle;
         CanEditClassProfile = await profiles.CanManageClassAsync(CurrentUser, CurrentClassId, HttpContext.RequestAborted);

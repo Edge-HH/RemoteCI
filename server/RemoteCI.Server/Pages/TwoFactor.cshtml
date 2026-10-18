@@ -1,0 +1,49 @@
+@page
+@model TwoFactorModel
+@{ ViewData["Title"] = "二步验证"; }
+<link rel="stylesheet" href="~/two-factor.css" asp-append-version="true" />
+<div class="page-head"><div><p class="eyebrow">个人安全</p><h1>二步验证</h1><p class="muted">使用 TOTP 认证器保护账号，每次登录时需额外验证。</p></div></div>
+<section class="panel">
+    @if (Model.Error is { } error) { <p class="validation" role="alert">@error</p> }
+    @if (Model.RecoveryCodes is { } codes)
+    {
+        <h2>二步验证已开启</h2>
+        <p role="status">请立即保存以下一次性恢复码。离开页面后无法再次查看；每个恢复码只能使用一次。</p>
+        <ul>@foreach (var code in codes) { <li><code>@code</code></li> }</ul>
+        <p class="muted">认证器丢失时，可在登录页选择使用恢复码。绑定确认使用过的验证码不能再次登录，请等待下一组验证码。</p>
+        <a asp-page="/Account" class="button">已保存，返回个人账号</a>
+    }
+    else if (Model.CurrentUser.TwoFactorEnabled)
+    {
+        <h2>已开启</h2>
+        <p class="muted">剩余 @Model.RecoveryCodesRemaining 个恢复码。关闭后重新绑定可生成新的恢复码。</p>
+        <form method="post" asp-page-handler="Disable" class="stack">
+            <label>当前密码<input asp-for="CurrentPassword" type="password" autocomplete="current-password" required maxlength="128" /></label>
+            <label>验证码或恢复码<input asp-for="Code" autocomplete="one-time-code" required maxlength="32" /></label>
+            <label class="check"><input asp-for="UseRecoveryCode" /><span>使用一次性恢复码</span></label>
+            <button class="danger" type="submit">关闭二步验证</button>
+        </form>
+    }
+    else if (Model.SharedKey is { } key)
+    {
+        <h2>绑定认证器</h2>
+        <p>用支持 TOTP 的认证器扫描二维码，或手动输入下方密钥，然后输入认证器生成的 6 位验证码。绑定页面 10 分钟内有效。</p>
+        <div class="totp-qr" role="img" aria-label="TOTP 绑定二维码">@Html.Raw(Model.QrSvg)</div>
+        <p>手动密钥：<code class="totp-key">@key</code></p>
+        <form method="post" asp-page-handler="Enable" class="stack">
+            <input asp-for="SetupToken" type="hidden" />
+            <label>验证码<input asp-for="Code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required autofocus /></label>
+            <button type="submit">验证并开启</button>
+        </form>
+        <a asp-page="/TwoFactor">取消绑定</a>
+    }
+    else
+    {
+        <h2>尚未开启</h2>
+        <p class="muted">开启后，密码登录、扫码登录和客户端打开网页均需验证码。更改二步验证设置会撤销其他设备会话。</p>
+        <form method="post" asp-page-handler="Begin" class="stack">
+            <label>当前密码<input asp-for="CurrentPassword" type="password" autocomplete="current-password" required maxlength="128" /></label>
+            <button type="submit">开始绑定 TOTP</button>
+        </form>
+    }
+</section>

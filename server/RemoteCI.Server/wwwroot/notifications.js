@@ -6,7 +6,7 @@
     const unreadBadge = bell.querySelector("[data-unread-badge]");
     const swapBadge = document.querySelector("[data-swap-badge]");
     const toasts = document.querySelector("[data-toast-stack]");
-    const pollMs = 30000;
+    const pollMs = document.documentElement.hasAttribute("data-mobile-ui") ? 15000 : 30000;
     let since = new Date().toISOString();
 
     function setBadge(element, count, cap) {
@@ -38,6 +38,7 @@
             if (!response.ok || response.redirected) return;
             const data = await response.json();
             setBadge(unreadBadge, data.unread, 99);
+            if (navigator.setAppBadge) { if (data.unread) navigator.setAppBadge(data.unread).catch(() => {}); else navigator.clearAppBadge?.().catch(() => {}); }
             setBadge(swapBadge, data.pendingSwaps);
             if (data.serverTime) since = data.serverTime;
             // 浏览器通知已开启时由 service worker 弹出系统通知，页内仍补一个轻提示。
@@ -47,6 +48,7 @@
         }
     }
 
+    void poll();
     window.setInterval(poll, pollMs);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
 
@@ -57,6 +59,10 @@
     const enable = settings.querySelector("[data-push-enable]");
     const disable = settings.querySelector("[data-push-disable]");
     const token = settings.querySelector('input[name="__RequestVerificationToken"]')?.value || "";
+    const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    const installed = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+    const guide = settings.querySelector("[data-ios-push-guide]");
+    if (guide) guide.hidden = !ios || installed;
     const supported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 
     function keyBytes(base64Url) {
@@ -78,6 +84,7 @@
                 endpoint: subscription.endpoint,
                 p256dh: json.keys?.p256dh || encode(subscription.getKey("p256dh")),
                 auth: json.keys?.auth || encode(subscription.getKey("auth")),
+                eventMask: settings.querySelector("[data-push-event]") ? [...settings.querySelectorAll("[data-push-event]:checked")].reduce((mask, input) => mask | Number(input.value), 0) : null,
             }),
         });
         if (!response.ok) throw new Error((await response.json().catch(() => ({}))).message || "保存订阅失败");
@@ -88,8 +95,8 @@
             status.textContent = "浏览器通知需要通过 HTTPS（或本机 localhost）访问 WebUI；当前为 HTTP，仅能在打开网页时看到提醒。";
             return;
         }
-        if (!supported) {
-            status.textContent = "当前浏览器不支持网页推送通知。";
+        if (!supported || ios && !installed) {
+            status.textContent = ios && !installed ? "请先添加到主屏幕，再从桌面图标打开以启用通知。" : "当前浏览器不支持网页推送通知。";
             return;
         }
         if (Notification.permission === "denied") {
@@ -100,11 +107,12 @@
         }
         const registration = await navigator.serviceWorker.getRegistration("/");
         const subscription = await registration?.pushManager.getSubscription();
+        if (subscription) await post(settings.dataset.subscribeUrl, subscription);
         enable.hidden = !!subscription;
         disable.hidden = !subscription;
         status.textContent = subscription
-            ? "本浏览器已开启通知：关闭网页后仍会在系统通知中心收到换课提醒。"
-            : "开启后，即使关闭网页也会在系统通知中心收到换课提醒。";
+            ? "本浏览器已开启通知：关闭网页后仍会在系统通知中心收到课程与换课提醒。"
+            : "开启后，即使关闭网页也会在系统通知中心收到课程与换课提醒。";
     }
 
     enable?.addEventListener("click", async () => {
@@ -143,5 +151,20 @@
         navigator.sendBeacon?.("/Inbox?handler=Read", body);
     }));
 
-    refresh();
+    settings.querySelectorAll("[data-push-event]").forEach(input => input.addEventListener("change", async () => {
+        try {
+            const registration = await navigator.serviceWorker.getRegistration("/");
+            const subscription = await registration?.pushManager.getSubscription();
+            if (subscription) { await post(settings.dataset.subscribeUrl, subscription); status.textContent = "通知分类已保存"; }
+            else status.textContent = "开启通知后生效";
+        } catch { status.textContent = "保存失败，请重试"; }
+    }));
+    settings.querySelector("[data-push-test]")?.addEventListener("click", async () => {
+        try {
+            const response = await fetch(location.pathname + "?handler=Test", { method: "POST", credentials: "same-origin", headers: { "X-CSRF-TOKEN": token, Accept: "application/json" } });
+            if (!response.ok) throw Error((await response.json()).message || "发送失败");
+            status.textContent = "测试通知已排队，请查看系统通知中心";
+        } catch(error) { status.textContent = error.message || "发送失败"; }
+    });
+    refresh().catch(error => { status.textContent = `通知状态同步失败：${error.message || error}`; });
 })();

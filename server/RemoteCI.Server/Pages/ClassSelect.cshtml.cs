@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using RemoteCI.Server.Data;
+using RemoteCI.Server.Services;
 using RemoteCI.Shared;
 
 namespace RemoteCI.Server.Pages;
@@ -19,7 +20,7 @@ public sealed class ClassSelectModel(UserManager<AppUser> users) : WebPageModel(
         if (CurrentUser.Role == UserRole.Admin && AccessibleClasses.Count == 0) return RedirectToPage("/Setup");
         // 单班级（或无班级）账号没有选择的意义，直接走默认落地。
         if (AccessibleClasses.Count <= 1)
-            return RedirectToPage(Permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account");
+            return RedirectToPage(MobileUi.IsMobile(HttpContext) ? "/Mobile/Today" : Permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account");
         return Page();
     }
 }

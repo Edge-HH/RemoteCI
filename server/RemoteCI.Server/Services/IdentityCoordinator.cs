@@ -19,6 +19,7 @@ public sealed partial class IdentityCoordinator(
     ExtensionPolicyService extensionPolicies,
     ClassAccessService classAccess,
     TeacherBindingService teacherBinding,
+    TwoFactorService twoFactor,
     IOptions<ServerOptions> options,
     ILogger<IdentityCoordinator> logger)
 {
@@ -204,16 +205,29 @@ public sealed partial class IdentityCoordinator(
         // 批量导入且未设密码的账号：首次登录（空密码）下发一次性设置令牌，设置密码后重新登录。
         if (user.PasswordPending && string.IsNullOrEmpty(request.Password))
             return await BeginPasswordSetupAsync(user, ct);
+        await CheckLoginPasswordAsync(user, request.Password);
+        if (user.TwoFactorEnabled)
+        {
+            if (string.IsNullOrWhiteSpace(request.TwoFactorCode)) return new AuthResponse { TwoFactorRequired = true };
+            if (!await twoFactor.VerifyAsync(user, request.TwoFactorCode, request.UseRecoveryCode, ct))
+                throw new IdentityOperationException(ApiErrorCodes.Unauthorized, "验证码错误、已过期或已使用");
+        }
+        EnsureIdentitySucceeded(await users.ResetAccessFailedCountAsync(user));
+        return await CreateOrRotateSessionAsync(user, request.DeviceName, null, ct);
+    }
+
+    public async Task CheckLoginPasswordAsync(AppUser user, string password)
+    {
+        if (!user.Enabled || user.PasswordPending)
+            throw new IdentityOperationException(ApiErrorCodes.Unauthorized, "ID 或密码错误");
         if (await users.IsLockedOutAsync(user))
             throw new IdentityOperationException(ApiErrorCodes.Unauthorized, "失败次数过多，账号已临时锁定，请稍后再试");
-        if (!await users.CheckPasswordAsync(user, request.Password))
+        if (!await users.CheckPasswordAsync(user, password))
         {
             // 接入 Identity 锁定：连续失败 8 次锁定 10 分钟（与 WebUI 登录行为一致）。
             await users.AccessFailedAsync(user);
             throw new IdentityOperationException(ApiErrorCodes.Unauthorized, "ID 或密码错误");
         }
-        await users.ResetAccessFailedCountAsync(user);
-        return await CreateOrRotateSessionAsync(user, request.DeviceName, null, ct);
     }
 
     /// <summary>为首登账号生成一次性密码设置令牌（15 分钟有效，只保存 SHA-256 摘要）。</summary>
@@ -1067,6 +1081,7 @@ public sealed partial class IdentityCoordinator(
 
     private async Task RevokeAllSessionsAsync(Guid userId, CancellationToken ct)
     {
+        await db.WebPushSubscriptions.Where(x => x.UserId == userId).ExecuteDeleteAsync(ct);
         var now = DateTimeOffset.UtcNow;
         await db.DeviceSessions.Where(x => x.UserId == userId && x.RevokedAt == null)
             .ExecuteUpdateAsync(x => x.SetProperty(s => s.RevokedAt, now), ct);

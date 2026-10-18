@@ -44,13 +44,23 @@ public sealed partial class IdentityCoordinator
     public async Task<AuthResponse> RedeemMobileLoginTicketAsync(MobileLoginRequest request, CancellationToken ct = default)
     {
         const string invalidMessage = "登录二维码无效或已过期，请在 WebUI 重新生成";
-        if (!MobileLoginTickets.TryRemove(Hash(request.Ticket.Trim()), out var ticket) || ticket.ExpiresAt <= DateTimeOffset.UtcNow)
+        var ticketHash = Hash(request.Ticket.Trim());
+        if (!MobileLoginTickets.TryGetValue(ticketHash, out var ticket) || ticket.ExpiresAt <= DateTimeOffset.UtcNow)
             throw new IdentityOperationException(ApiErrorCodes.Unauthorized, invalidMessage);
         var user = await users.FindByIdAsync(ticket.UserId.ToString());
         if (user is null || !user.Enabled || user.PasswordPending || user.SecurityStamp != ticket.SecurityStamp ||
             await users.IsLockedOutAsync(user))
             throw new IdentityOperationException(ApiErrorCodes.Unauthorized, invalidMessage);
         var deviceName = string.IsNullOrWhiteSpace(request.DeviceName) ? "Android" : request.DeviceName.Trim();
+        if (user.TwoFactorEnabled)
+        {
+            if (string.IsNullOrWhiteSpace(request.TwoFactorCode)) return new AuthResponse { TwoFactorRequired = true };
+            if (!await twoFactor.VerifyAsync(user, request.TwoFactorCode, request.UseRecoveryCode, ct))
+                throw new IdentityOperationException(ApiErrorCodes.Unauthorized, "验证码错误、已过期或已使用");
+        }
+        if (!MobileLoginTickets.TryRemove(ticketHash, out _))
+            throw new IdentityOperationException(ApiErrorCodes.Unauthorized, invalidMessage);
+        EnsureIdentitySucceeded(await users.ResetAccessFailedCountAsync(user));
         return await CreateOrRotateSessionAsync(user, deviceName, null, ct);
     }
 }

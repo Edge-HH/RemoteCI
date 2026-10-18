@@ -17,8 +17,7 @@ public sealed record WebPushTarget(Guid Id, string Endpoint, string P256dh, stri
 /// </summary>
 public sealed class WebPushSender(
     IHttpClientFactory httpClients,
-    IServiceScopeFactory scopes,
-    ILogger<WebPushSender> logger)
+    Microsoft.Extensions.Options.IOptions<ServerOptions> options)
 {
     public const string HttpClientName = "webpush";
     private const int RecordSize = 4096;
@@ -58,44 +57,14 @@ public sealed class WebPushSender(
         return new VapidKeys(Base64Url(UncompressedPoint(parameters.Q)), Base64Url(parameters.D!));
     }
 
-    /// <summary>后台投递：不阻塞调用方；订阅已失效（404/410）时删除。</summary>
-    public void SendInBackground(VapidKeys keys, IReadOnlyList<WebPushTarget> targets, object payload)
-    {
-        if (targets.Count == 0) return;
-        var json = JsonSerializer.SerializeToUtf8Bytes(payload, RemoteCI.Shared.JsonDefaults.Options);
-        _ = Task.Run(async () =>
-        {
-            var expired = new List<Guid>();
-            foreach (var target in targets)
-            {
-                try
-                {
-                    var status = await SendAsync(keys, target, json, CancellationToken.None);
-                    if (status is HttpStatusCode.NotFound or HttpStatusCode.Gone) expired.Add(target.Id);
-                    else if ((int)status >= 400)
-                        logger.LogWarning("Web Push 投递失败：{Status} {Host}", (int)status, SafeHost(target.Endpoint));
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "Web Push 投递异常：{Host}", SafeHost(target.Endpoint));
-                }
-            }
-            if (expired.Count == 0) return;
-            try
-            {
-                await using var scope = scopes.CreateAsyncScope();
-                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                await db.WebPushSubscriptions.Where(x => expired.Contains(x.Id)).ExecuteDeleteAsync();
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "清理失效的 Web Push 订阅失败");
-            }
-        });
-    }
-
     public async Task<HttpStatusCode> SendAsync(VapidKeys keys, WebPushTarget target, byte[] payload, CancellationToken ct)
+    => (await DeliverAsync(keys, target, payload, 86400, ct)).Status;
+
+    public sealed record DeliveryResult(HttpStatusCode Status, TimeSpan? RetryAfter);
+
+    public async Task<DeliveryResult> DeliverAsync(VapidKeys keys, WebPushTarget target, byte[] payload, int ttl, CancellationToken ct)
     {
+        if (!WebPushQueue.IsTrustedEndpoint(target.Endpoint)) throw new HttpRequestException("Unsupported push endpoint");
         var endpoint = new Uri(target.Endpoint);
         var body = Encrypt(Base64UrlDecode(target.P256dh), Base64UrlDecode(target.Auth), payload);
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
@@ -104,12 +73,13 @@ public sealed class WebPushSender(
         };
         request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
         request.Content.Headers.ContentEncoding.Add("aes128gcm");
-        request.Headers.TryAddWithoutValidation("TTL", "86400");
+        request.Headers.TryAddWithoutValidation("TTL", Math.Clamp(ttl, 1, 86400).ToString(System.Globalization.CultureInfo.InvariantCulture));
         request.Headers.TryAddWithoutValidation("Urgency", "high");
-        var jwt = CreateVapidJwt(keys, $"{endpoint.Scheme}://{endpoint.Authority}", DateTimeOffset.UtcNow.AddHours(12));
+        var jwt = CreateVapidJwt(keys, $"{endpoint.Scheme}://{endpoint.Authority}", DateTimeOffset.UtcNow.AddHours(12), options.Value.WebPushSubject);
         request.Headers.TryAddWithoutValidation("Authorization", $"vapid t={jwt}, k={keys.PublicKey}");
         using var response = await httpClients.CreateClient(HttpClientName).SendAsync(request, ct);
-        return response.StatusCode;
+        return new DeliveryResult(response.StatusCode, response.Headers.RetryAfter?.Delta ??
+            (response.Headers.RetryAfter?.Date is { } retryAt ? retryAt - DateTimeOffset.UtcNow : null));
     }
 
     /// <summary>RFC 8291 aes128gcm：单记录加密，头部携带 salt、记录大小与服务端临时公钥。</summary>
@@ -158,14 +128,14 @@ public sealed class WebPushSender(
     }
 
     /// <summary>RFC 8292 VAPID：ES256 签名的 JWT，aud 为推送服务源。</summary>
-    public static string CreateVapidJwt(VapidKeys keys, string audience, DateTimeOffset expiresAt)
+    public static string CreateVapidJwt(VapidKeys keys, string audience, DateTimeOffset expiresAt, string subject = "https://github.com/Edge-HH/RemoteCI")
     {
         var header = Base64Url(Encoding.UTF8.GetBytes("""{"typ":"JWT","alg":"ES256"}"""));
         var claims = Base64Url(JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, object>
         {
             ["aud"] = audience,
             ["exp"] = expiresAt.ToUnixTimeSeconds(),
-            ["sub"] = "mailto:remoteci@localhost",
+            ["sub"] = subject,
         }));
         var publicKey = Base64UrlDecode(keys.PublicKey);
         using var ecdsa = ECDsa.Create(new ECParameters

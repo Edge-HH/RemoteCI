@@ -1,0 +1,4 @@
+@page
+@model UsersModel
+@{ ViewData["Title"] = Request.Query["section"] == "roles" ? "角色配置" : "账号管理"; }
+@await Html.PartialAsync("_WebUsersContent", Model)

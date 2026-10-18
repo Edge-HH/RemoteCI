@@ -1,0 +1,57 @@
+@page
+@model RemoteCI.Server.Pages.ScheduleModel
+@{ ViewData["Title"] = "课表"; }
+<div class="mobile-segments"><a href="/Mobile/Schedule?class=1" class="active">班级课表</a><a href="/Mobile/MySchedule">我的日程</a></div>
+<div class="mobile-schedule" data-offline-schedule data-schedule-watch="/Mobile/Schedule?handler=Revision" data-revision="@Model.MobileRevision">
+@if (Model.Bundle is null)
+{ <section class="panel mobile-empty"><i class="icon icon-calendar-month"></i><h2>还没有课表</h2><p>等待插件同步课表，或请管理员设置班级档案。</p></section> }
+else
+{
+    @if (Model.FromProfile) { <p class="notice">按班级档案推算，可能与教室端实际课表不同；同步后才能换课。</p> }
+    else if (!Model.PluginOnline) { <p class="notice">插件离线，显示最后一次同步的课表。</p> }
+    <nav class="mobile-date-tabs" aria-label="课表日期">
+        @foreach (var day in Model.Bundle.Days.Where(x => x.Enabled)) { <button type="button" class="ghost" data-date-tab="@day.Date">@MyScheduleModel.FormatDate(day.Date)</button> }
+    </nav>
+    @foreach (var day in Model.Bundle.Days.Where(x => x.Enabled))
+    {
+        <section data-schedule-day="@day.Date">
+            <h2 class="mobile-section-title">@MyScheduleModel.FormatDate(day.Date)</h2>
+            <div class="mobile-connected-list">
+            @foreach (var course in day.Courses.Where(x => x.Enabled))
+            {
+                <button type="button" class="mobile-row" data-course-pick data-date="@day.Date" data-index="@course.Index" data-revision="@day.Revision" disabled="@(!Model.CanManageSchedule || Model.FromProfile)">
+                    <i class="icon icon-menu-book"></i><span><strong>@course.Label · @course.Subject</strong><small>@course.StartTime–@course.EndTime @course.Teacher</small></span>@if (Model.CanManageSchedule && !Model.FromProfile) { <i class="icon icon-edit"></i> }
+                </button>
+            }
+            @if (!day.Courses.Any(x => x.Enabled)) { <p class="mobile-empty">这一天没有课程</p> }
+            </div>
+        </section>
+    }
+    <p class="muted">最后同步 @Model.Bundle.GeneratedAt.ToLocalTime().ToString("MM-dd HH:mm")</p>
+    @if (Model.CanManageSchedule && !Model.FromProfile)
+    {
+        <dialog class="user-edit-dialog" data-course-dialog><header><h2>换课</h2><button type="button" class="ghost" data-course-close>关闭</button></header>
+            <form method="post" class="stack" data-schedule-change-form>
+                <label>原课程<select data-schedule-source required>
+                    @foreach (var day in Model.Bundle.Days.Where(x => x.Enabled)) { foreach (var course in day.Courses.Where(x => x.Enabled)) { <option value="@(day.Date + ":" + course.Index)" data-date="@day.Date" data-index="@course.Index" data-revision="@day.Revision">@day.Date · @course.Label · @course.Subject</option> } }
+                </select></label>
+                <input asp-for="Input.Date" type="hidden" data-schedule-source-date /><input asp-for="Input.ExpectedRevision" type="hidden" data-schedule-source-revision /><input asp-for="Input.SourceIndex" type="hidden" data-schedule-source-index />
+                <label>模式<select asp-for="Input.Mode" data-schedule-mode><option value="Exchange">交换</option><option value="Replace">替换</option></select></label>
+                <label data-exchange-field>目标课程<select asp-for="Input.TargetIndex" data-schedule-target>
+                    @foreach (var day in Model.Bundle.Days.Where(x => x.Enabled)) { foreach (var course in day.Courses.Where(x => x.Enabled)) { <option value="@course.Index" data-date="@day.Date" data-index="@course.Index">@day.Date · @course.Label · @course.Subject</option> } }
+                </select></label>
+                <label data-replace-field hidden>替换科目<select asp-for="Input.ReplacementSubjectId" disabled>@foreach (var subject in Model.Bundle.Subjects) { <option value="@subject.Id">@subject.Name</option> }</select></label>
+                <label class="check"><input asp-for="Input.Permanent" />永久换课</label><button type="submit" disabled="@(!Model.PluginOnline)">提交换课</button>
+            </form>
+        </dialog>
+    }
+}
+</div>
+<div class="mobile-button-pair">
+    @if (Model.CanPullSchedule) { <form method="post" asp-page-handler="Pull"><button type="submit" disabled="@(!Model.PluginOnline || Model.CurrentTask is not null)">拉取课表</button></form> }
+    <a class="button ghost" href="/Mobile/Calendar">订阅系统日历</a>
+</div>
+@if (Model.CanConfigureSchedulePull)
+{
+    <details class="panel"><summary>自动拉取课表</summary><form method="post" asp-page-handler="PullInterval" class="stack"><label>拉取间隔<select asp-for="PullInterval"><option value="0">关闭</option><option value="15">每15分钟</option><option value="60">每小时</option><option value="360">每6小时</option><option value="1440">每天</option></select></label><button type="submit">保存</button></form></details>
+}

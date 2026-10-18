@@ -11,7 +11,7 @@ namespace RemoteCI.Server.Services;
 public sealed class UserNotificationService(
     AppDbContext db,
     PeerRegistry peers,
-    WebPushSender webPush,
+    WebPushQueue queue,
     ILogger<UserNotificationService> logger)
 {
     /// <summary>每个用户保留的通知条数上限，超出部分按时间最早删除。</summary>
@@ -19,7 +19,7 @@ public sealed class UserNotificationService(
 
     public async Task PublishAsync(
         IEnumerable<Guid> userIds, string kind, string title, string body, Guid? swapRequestId,
-        CancellationToken ct = default)
+        CancellationToken ct = default, DateTimeOffset? expiresAt = null)
     {
         var recipients = userIds.Distinct().ToList();
         if (recipients.Count == 0) return;
@@ -34,32 +34,23 @@ public sealed class UserNotificationService(
             SwapRequestId = swapRequestId,
             CreatedAt = now,
         }).ToList();
+        await using var transaction = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         db.UserNotifications.AddRange(rows);
-        await db.SaveChangesAsync(ct);
-
-        var subscriptions = await db.WebPushSubscriptions.AsNoTracking()
-            .Where(x => recipients.Contains(x.UserId))
-            .Select(x => new { x.UserId, Target = new WebPushTarget(x.Id, x.Endpoint, x.P256dh, x.Auth) })
-            .ToListAsync(ct);
-        WebPushSender.VapidKeys? keys = subscriptions.Count > 0 ? await webPush.GetKeysAsync(db, ct) : null;
+        var subscriptions = await db.WebPushSubscriptions.AsNoTracking().Where(x => recipients.Contains(x.UserId)).ToListAsync(ct);
         foreach (var row in rows)
         {
             var view = ToView(row);
-            try
-            {
-                await peers.SendToUserAsync(row.UserId, RemoteCI.Shared.Models.Envelope.UserNotify(view), ct);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "向用户在线连接推送个人通知失败");
-            }
-            if (keys is not null)
-            {
-                webPush.SendInBackground(keys,
-                    subscriptions.Where(x => x.UserId == row.UserId).Select(x => x.Target).ToList(),
-                    new { title = view.Title, body = view.Body, kind = view.Kind, id = view.Id,
-                        url = view.Kind.StartsWith("personal_course_", StringComparison.Ordinal) ? "/MySchedule" : "/SwapRequests" });
-            }
+            foreach (var subscription in subscriptions.Where(x => x.UserId == row.UserId))
+                queue.Add(subscription, "personal:" + row.Id, new { title = view.Title, body = view.Body,
+                    kind = view.Kind, id = view.Id, url = view.Kind.StartsWith("personal_course_", StringComparison.Ordinal) ? "/MySchedule" : "/SwapRequests" },
+                    expiresAt ?? (view.Kind.StartsWith("personal_course_", StringComparison.Ordinal) ? now.AddMinutes(5) : now.AddHours(24)), notificationId: row.Id);
+        }
+        await db.SaveChangesAsync(ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
+        foreach (var row in rows)
+        {
+            try { await peers.SendToUserAsync(row.UserId, Envelope.UserNotify(ToView(row)), ct); }
+            catch (Exception ex) { logger.LogWarning(ex, "向用户在线连接推送个人通知失败"); }
         }
         await TrimAsync(recipients, ct);
     }
@@ -104,7 +95,7 @@ public sealed class UserNotificationService(
 
     public async Task SubscribeWebPushAsync(Guid userId, WebPushSubscriptionRequest request, CancellationToken ct = default)
     {
-        if (!Uri.TryCreate(request.Endpoint, UriKind.Absolute, out var endpoint) || endpoint.Scheme != Uri.UriSchemeHttps ||
+        if (!WebPushQueue.IsTrustedEndpoint(request.Endpoint) ||
             request.Endpoint.Length > 1024 || string.IsNullOrWhiteSpace(request.P256dh) || string.IsNullOrWhiteSpace(request.Auth))
             throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "浏览器推送订阅无效");
         try
@@ -132,6 +123,10 @@ public sealed class UserNotificationService(
         else
         {
             // 同一浏览器换账号登录：订阅归属最新登录的账号，避免把他人的通知推到这台浏览器。
+            if (existing.UserId != userId)
+                await db.WebPushJobs.Where(x => x.SubscriptionId == existing.Id).ExecuteDeleteAsync(ct);
+            existing.ClassId = existing.UserId == userId ? existing.ClassId : null;
+            existing.EventMask = existing.UserId == userId ? existing.EventMask : 0;
             existing.UserId = userId;
             existing.P256dh = request.P256dh.Trim();
             existing.Auth = request.Auth.Trim();

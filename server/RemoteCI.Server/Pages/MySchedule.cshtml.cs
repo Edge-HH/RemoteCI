@@ -24,6 +24,15 @@ public sealed class MyScheduleModel(
     [BindProperty] public int? ReminderMinutes { get; set; } = 10;
     [BindProperty] public bool NotifyAtStart { get; set; } = true;
     public string? Error { get; private set; }
+    public string MobileRevision => CalendarFeedService.Hash(System.Text.Json.JsonSerializer.Serialize(Schedule.Days, JsonDefaults.Options));
+
+    public async Task<IActionResult> OnGetRevisionAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is not null) return Unauthorized();
+        await LoadAsync(ct);
+        Response.Headers.CacheControl = "no-store";
+        return new JsonResult(new { revision = MobileRevision });
+    }
 
     public async Task<IActionResult> OnGetAsync(Guid? edit, CancellationToken ct)
     {

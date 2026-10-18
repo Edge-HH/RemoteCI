@@ -89,4 +89,8 @@ public sealed class WebPushSubscription
     public string P256dh { get; set; } = string.Empty;
     public string Auth { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; }
+    public Guid? ClassId { get; set; }
+    // Existing desktop subscriptions receive personal notifications only.
+    public int EventMask { get; set; }
+    public string? BrowserId { get; set; }
 }

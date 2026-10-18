@@ -264,6 +264,8 @@ public sealed class MarkNotificationsReadRequest
 
 public sealed class WebPushSubscriptionRequest
 {
+    [JsonPropertyName("eventMask")]
+    public int? EventMask { get; set; }
     [JsonPropertyName("endpoint")]
     public string Endpoint { get; set; } = string.Empty;
 

@@ -280,7 +280,7 @@ public sealed class ProfileLibraryTests
     }
 
     [Fact]
-    public async Task BackupSchemaFiveRestoresProfilesAndLegacyBackupRestoresAnEmptyLibrary()
+    public async Task CurrentBackupRestoresProfilesAndLegacyBackupRestoresAnEmptyLibrary()
     {
         await using var factory = new TestWebApplicationFactory();
         ConfigurationSnapshot snapshot;
@@ -293,7 +293,7 @@ public sealed class ProfileLibraryTests
             var own = (await library.SaveAsync(actor, [ProfileTestData.New("备份班级", TestWebApplicationFactory.DefaultClassId, template.Id)]))[0];
             expected = [template, own];
             snapshot = await source.ServiceProvider.GetRequiredService<ConfigurationArchiveService>().CaptureAsync();
-            Assert.Equal(5, snapshot.Version);
+            Assert.Equal(6, snapshot.Version);
             var serialized = JsonSerializer.SerializeToNode(snapshot, JsonDefaults.Options)!;
             Assert.Equal(2, serialized["profiles"]!.AsArray().Count);
         }

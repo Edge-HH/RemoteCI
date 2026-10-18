@@ -1,0 +1,10 @@
+@page
+@model RemoteCI.Server.Pages.Mobile.PairingModel
+@{ ViewData["Title"] = "插件配对码"; }
+@if (Model.Code is { } code) { <section class="panel"><h2>配对码</h2><code>@code</code><button type="button" class="ghost" data-copy-value="@code">复制</button></section> }
+<section class="panel"><h2>生成配对码</h2><p>当前班级：@(Model.CurrentClass?.Name ?? "未选择")</p><a href="/ClassSelect">选择班级</a><form method="post" asp-page-handler="Create" class="stack"><label>配对方式<select asp-for="Mode"><option value="once">当前班级的一次性码</option><option value="persistent">当前班级的固定码</option><option value="shared">统一连接码（设备进入未分配列表）</option></select></label><label>自定义码（固定码或统一码，可选）<input asp-for="RequestedCode" autocomplete="off" /></label><button type="submit">生成</button></form></section>
+<h2>插件凭据</h2>
+@foreach (var credential in Model.Credentials)
+{
+    <section class="panel"><h2>@credential.Name</h2><p>@credential.ClassName · @(credential.Enabled ? "启用" : "已吊销")</p><p class="muted">最近活跃 @credential.LastSeenAt.ToLocalTime().ToString("MM-dd HH:mm")</p>@if (credential.Enabled) { <form method="post" asp-page-handler="Revoke" onsubmit="return confirm('吊销后插件将断开，需重新配对。继续？')"><input type="hidden" name="id" value="@credential.Id" /><button type="submit" class="ghost danger">吊销</button></form> }</section>
+}

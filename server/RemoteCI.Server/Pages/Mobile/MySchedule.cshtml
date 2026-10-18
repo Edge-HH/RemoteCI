@@ -1,0 +1,47 @@
+@page
+@model RemoteCI.Server.Pages.MyScheduleModel
+@{ ViewData["Title"] = "课表"; }
+<div class="mobile-segments"><a href="/Mobile/Schedule?class=1">班级课表</a><a href="/Mobile/MySchedule" class="active">我的日程</a></div>
+<div class="mobile-button-pair"><button type="button" data-user-edit-open="personal-course-editor">添加课程</button><a class="button ghost" href="/Mobile/Calendar">订阅系统日历</a></div>
+@if (Model.Error is not null) { <p class="notice" role="alert">@Model.Error</p> }
+<div class="mobile-schedule" data-offline-schedule data-schedule-watch="/Mobile/MySchedule?handler=Revision" data-revision="@Model.MobileRevision">
+    @if (Model.Schedule.Days.Count == 0) { <section class="panel mobile-empty"><i class="icon icon-calendar-add-on"></i><h2>还没有课程</h2><p>添加自定义课程，或由课表中的任教教师名关联课程。</p></section> }
+    else
+    {
+        <nav class="mobile-date-tabs" aria-label="日程日期">@foreach (var day in Model.Schedule.Days) { <button type="button" class="ghost" data-date-tab="@day.Date">@MyScheduleModel.FormatDate(day.Date)</button> }</nav>
+        @foreach (var day in Model.Schedule.Days)
+        {
+            <section data-schedule-day="@day.Date"><h2 class="mobile-section-title">@MyScheduleModel.FormatDate(day.Date)</h2>
+            @foreach (var item in day.Items)
+            {
+                <h3 class="mobile-section-title">@item.ClassName @(item.Source == ScheduleBundleSources.Profile ? " · 按档案推算" : "")</h3>
+                <div class="mobile-connected-list">
+                @foreach (var course in item.Courses)
+                {
+                    @if (course.PersonalCourseId is { } id)
+                    { <a class="mobile-row" href="/Mobile/MySchedule?edit=@id"><i class="icon icon-menu-book"></i><span><strong>@course.Label · @course.Subject</strong><small>@course.StartTime–@course.EndTime</small></span><i class="icon icon-edit"></i></a> }
+                    else
+                    { <div class="mobile-row"><i class="icon icon-menu-book"></i><span><strong>@course.Label · @course.Subject</strong><small>@course.StartTime–@course.EndTime @course.Teacher</small></span></div> }
+                }
+                </div>
+            }
+            </section>
+        }
+    }
+</div>
+<dialog id="personal-course-editor" class="user-edit-dialog" data-user-edit-dialog data-personal-editor data-auto-open="@(Model.Editing is not null || Model.Error is not null ? "true" : "false")">
+    <header><h2>@(Model.Editing is null ? "添加自定义课程" : "修改自定义课程")</h2><button type="button" class="ghost" data-user-edit-close>关闭</button></header>
+    <form method="post" asp-page-handler="Save" class="stack" data-personal-course-form>
+        <input type="hidden" name="id" value="@Model.Editing?.Id" />
+        <label>课程名称<input name="Subject" value="@Model.Subject" maxlength="100" required /></label>
+        <label>地点（可选）<input name="Location" value="@Model.Location" maxlength="200" /></label>
+        <label>开始时间（本机时区）<input type="datetime-local" data-course-start required /></label><input type="hidden" name="StartsAt" value="@Model.StartsAt" data-course-start-iso />
+        <label>结束时间（本机时区）<input type="datetime-local" data-course-end required /></label><input type="hidden" name="EndsAt" value="@Model.EndsAt" data-course-end-iso />
+        <label>提前提醒（分钟，留空关闭）<input type="number" name="ReminderMinutes" value="@Model.ReminderMinutes" min="1" max="10080" /></label>
+        <label class="check"><input type="checkbox" name="NotifyAtStart" value="true" checked="@Model.NotifyAtStart" />上课时提醒</label><input type="hidden" name="NotifyAtStart" value="false" />
+        <button type="submit">保存课程</button>
+    </form>
+    @if (Model.Editing is { } editing)
+    { <form method="post" asp-page-handler="Delete" onsubmit="return confirm('确定删除这节自定义课程？')"><input type="hidden" name="id" value="@editing.Id" /><button type="submit" class="ghost danger">删除课程</button></form> }
+</dialog>
+<script src="~/js/personal-schedule.js" asp-append-version="true" defer></script>

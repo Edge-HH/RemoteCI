@@ -1,0 +1,89 @@
+@model MyScheduleModel
+@{
+    ViewData["Title"] = "我的日程";
+}
+
+@if (MobileUi.IsMobile(Context)) { <div class="mobile-segments"><a href="/Mobile/Schedule">班级课表</a><a href="/Mobile/MySchedule" class="active">我的日程</a></div><a class="button ghost" href="/Mobile/Calendar">订阅系统日历</a> }
+<div class="page-head">
+    <div>
+        <p class="eyebrow">个人安排</p>
+        <h1>我的日程</h1>
+        <p class="muted">任教课程和仅自己可见的自定义课程，自动同步到此账号的所有设备。</p>
+    </div>
+</div>
+
+@if (Model.Error is not null) { <div class="notice warning" role="alert">@Model.Error</div> }
+<section class="panel">
+    <h2>@(Model.Editing is null ? "添加自定义课程" : "修改自定义课程")</h2>
+    <form method="post" asp-page-handler="Save" class="form-grid" data-personal-course-form>
+        <input type="hidden" name="id" value="@Model.Editing?.Id" />
+        <label>课程名称 <input name="Subject" value="@Model.Subject" maxlength="100" required /></label>
+        <label>地点（可选） <input name="Location" value="@Model.Location" maxlength="200" /></label>
+        <label>开始时间（本机时区） <input type="datetime-local" data-course-start required /></label>
+        <input type="hidden" name="StartsAt" value="@Model.StartsAt" data-course-start-iso />
+        <label>结束时间（本机时区） <input type="datetime-local" data-course-end required /></label>
+        <input type="hidden" name="EndsAt" value="@Model.EndsAt" data-course-end-iso />
+        <label>提前提醒（分钟，留空关闭） <input type="number" name="ReminderMinutes" value="@Model.ReminderMinutes" min="1" max="10080" /></label>
+        <label><input type="checkbox" name="NotifyAtStart" value="true" checked="@Model.NotifyAtStart" /> 上课时提醒</label>
+        <input type="hidden" name="NotifyAtStart" value="false" />
+        <button type="submit">保存课程</button>
+        @if (Model.Editing is not null) { <a asp-page="/MySchedule">取消修改</a> }
+    </form>
+    <p class="muted">提醒会发送到个人通知；可在<a asp-page="/Inbox">通知页</a>开启浏览器推送。已绑定的 AstrBot 可推送课程提醒。</p>
+    @foreach (var course in Model.Courses)
+    {
+        <article class="my-schedule-class">
+            <strong>@course.Subject</strong> <span>@course.StartsAt.ToString("yyyy-MM-dd HH:mm")–@course.EndsAt.ToString("MM-dd HH:mm") @course.Location</span>
+            <span class="muted">@(course.ReminderMinutes is { } minutes ? $"提前 {minutes} 分钟提醒" : "课前不提醒") · @(course.NotifyAtStart ? "上课提醒" : "上课不提醒")</span>
+            <a asp-page="/MySchedule" asp-route-edit="@course.Id">修改</a>
+            <form method="post" asp-page-handler="Delete"><input type="hidden" name="id" value="@course.Id" /><button type="submit" class="ghost">删除</button></form>
+        </article>
+    }
+</section>
+
+@if (Model.Schedule.Days.Count == 0)
+{
+    <div class="notice warning">
+        暂无课程。可在上方添加自定义课程；任教课程按账号显示名匹配课表中的教师名。
+    </div>
+}
+
+else
+{
+    @if (Model.Schedule.Days.Any(day => day.Items.Any(item => item.Source == RemoteCI.Shared.Models.ScheduleBundleSources.Profile)))
+    {
+        <div class="notice">标有“按档案推算”的班级尚未连接过教室端插件，课程按该班当前档案推算，可能与教室端实际课表不同；插件同步后自动改用实际课表。</div>
+    }
+    <div class="my-schedule-list" data-offline-schedule>
+        @foreach (var day in Model.Schedule.Days)
+        {
+            <section class="panel my-schedule-day">
+                <div class="panel-heading">
+                    <div>
+                        <h2>@MyScheduleModel.FormatDate(day.Date)</h2>
+                    </div>
+                    <span class="muted">@day.Items.Sum(item => item.Courses.Count) 节</span>
+                </div>
+                <div class="my-schedule-classes">
+                    @foreach (var item in day.Items)
+                    {
+                        <article class="my-schedule-class">
+                            <h3>@item.ClassName @if (item.Source == RemoteCI.Shared.Models.ScheduleBundleSources.Profile) { <span class="role-badge muted">按档案推算</span> }</h3>
+                            <div class="my-schedule-courses">
+                                @foreach (var course in item.Courses)
+                                {
+                                    <div class="my-schedule-course">
+                                        <span class="my-schedule-course-index">@course.Label</span>
+                                        <strong>@course.Subject</strong>
+                                        <span class="my-schedule-course-time">@(course.StartTime ?? "—")–@(course.EndTime ?? "—")</span>
+                                    </div>
+                                }
+                            </div>
+                        </article>
+                    }
+                </div>
+            </section>
+        }
+    </div>
+}
+<script src="~/js/personal-schedule.js" asp-append-version="true" defer></script>

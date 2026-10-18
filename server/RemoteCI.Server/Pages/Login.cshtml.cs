@@ -15,6 +15,7 @@ public sealed class LoginModel(
     IdentityCoordinator identities,
     VisitorAccessSettings visitorAccess,
     WebQrLoginService qrLogin,
+    TwoFactorLoginService twoFactorLogin,
     MobileLoginSettings mobileLogin) : PageModel
 {
     [BindProperty]
@@ -29,7 +30,7 @@ public sealed class LoginModel(
         if (User.Identity?.IsAuthenticated == true && await users.GetUserAsync(User) is { } user)
         {
             var permissions = RolePermissions.Effective(user.Role, user.GrantedPermissions);
-            return RedirectToPage(permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account");
+            return RedirectToPage(MobileUi.IsMobile(HttpContext) ? "/Mobile/Today" : permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account");
         }
 
         var visitorEnabled = await visitorAccess.AnyVisitorClassEnabledAsync(ct);
@@ -77,12 +78,19 @@ public sealed class LoginModel(
             ModelState.AddModelError(string.Empty, "该账号尚未设置密码，请留空密码登录以完成首次设置");
             return Page();
         }
-        var result = await signIn.PasswordSignInAsync(user, password, Input.RememberMe, true);
-        if (!result.Succeeded)
+        try { await identities.CheckLoginPasswordAsync(user, password); }
+        catch (IdentityOperationException ex)
         {
-            ModelState.AddModelError(string.Empty, result.IsLockedOut ? "登录失败次数过多，请稍后再试" : "ID 或密码错误");
+            ModelState.AddModelError(string.Empty, ex.Message);
             return Page();
         }
+        if (user.TwoFactorEnabled)
+        {
+            await twoFactorLogin.BeginAsync(HttpContext, user, Input.RememberMe, Url.Page(await LandingPageAsync(user, ct))!);
+            return RedirectAfterPost("/LoginSecondFactor");
+        }
+        if (!(await users.ResetAccessFailedCountAsync(user)).Succeeded) return Page();
+        await signIn.SignInAsync(user, Input.RememberMe);
         // 登录表单是 POST。使用 303 明确要求浏览器以 GET 打开落地页，避免
         // 用户返回时恢复 POST 历史并触发“重新提交表单”（ERR_CACHE_MISS）。
         return RedirectAfterPost(await LandingPageAsync(user, ct));
@@ -95,7 +103,7 @@ public sealed class LoginModel(
         var access = HttpContext.RequestServices.GetRequiredService<ClassAccessService>();
         var accessibleClasses = await access.GetAccessibleClassesAsync(user.Id, user.Role, user.GrantedPermissions, ct);
         if (accessibleClasses.Count > 1) return "/ClassSelect";
-        return permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account";
+        return MobileUi.IsMobile(HttpContext) ? "/Mobile/Today" : permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account";
     }
 
     // ---------- 手机扫码登录：浏览器显示二维码，已登录的手机 App 扫码确认后由本浏览器登录 ----------
@@ -134,8 +142,13 @@ public sealed class LoginModel(
         if (qrLogin.Consume(code, pollToken) is not { } userId)
             return new JsonResult(new { error = "二维码已过期，请刷新后重新扫码" }) { StatusCode = StatusCodes.Status409Conflict };
         var user = await users.FindByIdAsync(userId.ToString());
-        if (user is null || !user.Enabled || user.PasswordPending)
+        if (user is null || !user.Enabled || user.PasswordPending || await users.IsLockedOutAsync(user))
             return new JsonResult(new { error = "该账号当前不能登录" }) { StatusCode = StatusCodes.Status403Forbidden };
+        if (user.TwoFactorEnabled)
+        {
+            await twoFactorLogin.BeginAsync(HttpContext, user, rememberMe, Url.Page(await LandingPageAsync(user, ct))!);
+            return new JsonResult(new { redirectUrl = Url.Page("/LoginSecondFactor") });
+        }
         await signIn.SignInAsync(user, rememberMe);
         return new JsonResult(new { redirectUrl = Url.Page(await LandingPageAsync(user, ct)) ?? "/" });
     }

@@ -23,6 +23,12 @@ public sealed class AppUser : IdentityUser<Guid>, UserProfileLike
     /// <summary>批量导入时未设置密码：首次登录强制设置密码，设置完成后清除。</summary>
     public bool PasswordPending { get; set; }
 
+    /// <summary>TOTP 密钥由服务器 Data Protection 密钥环加密，并绑定账号 ID。</summary>
+    public string? ProtectedTotpKey { get; set; }
+    public long? LastTotpTimeStep { get; set; }
+    /// <summary>恢复码仅保存 SHA-256 摘要；使用后原子删除。</summary>
+    public string? TwoFactorRecoveryHashes { get; set; }
+
     /// <summary>首登设置密码的一次性令牌摘要（SHA-256）；15 分钟有效。</summary>
     public string? SetupTokenHash { get; set; }
     public DateTimeOffset? SetupTokenExpiresAt { get; set; }

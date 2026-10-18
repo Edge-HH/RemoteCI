@@ -1,0 +1,79 @@
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@inject UserManager<AppUser> Users
+@inject AppDbContext Db
+@inject ClassAccessService Access
+@{
+    var current = User.Identity?.IsAuthenticated == true ? await Users.GetUserAsync(User) : null;
+    var path = Context.Request.Path.Value ?? "";
+    var classes = current is null ? [] : await Access.GetAccessibleClassesAsync(current.Id, current.Role, current.GrantedPermissions, Context.RequestAborted);
+    var selected = Guid.TryParse(Context.Request.Cookies[WebPageModel.CurrentClassCookie], out var classId) ? classId : Guid.Empty;
+    var classroom = classes.FirstOrDefault(x => x.Id == selected) ?? classes.FirstOrDefault();
+    var defaults = current is null ? UserPermissions.None : await Db.AccountRoles.Where(x => x.Id == current.RoleDefinitionId).Select(x => x.DefaultPermissions).FirstOrDefaultAsync();
+    var permissions = current is null ? UserPermissions.None : RolePermissions.Effective(current.Role, current.GrantedPermissions, defaults);
+    var primary = path is "/Mobile/Today" or "/Mobile/Schedule" or "/Mobile/MySchedule" or "/Mobile/SwapRequests" or "/Mobile/Control" or "/Mobile/Manage";
+    var title = ViewData["Title"]?.ToString() ?? "RemoteCI";
+    var desktop = path == "/Mobile/Desktop" ? MobileUi.SafeDesktopPage(Context.Request.Query["page"]) : MobileUi.DesktopPath(path);
+    if (!desktop.StartsWith('/') || desktop.StartsWith("//")) desktop = "/Index";
+}
+<!doctype html>
+<html lang="zh-CN" data-mobile-ui>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#F7FBF1" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="~/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="~/icons/apple-touch-icon.png" />
+    <link rel="icon" href="~/favicon.svg" />
+    <title>@title · RemoteCI</title>
+    <script>try {const a=localStorage.getItem('remoteci-mobile-appearance')||'system';document.documentElement.dataset.theme=a==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):a;document.documentElement.dataset.palette=localStorage.getItem('remoteci-mobile-palette')||'green';} catch {}</script>
+    <link rel="stylesheet" href="~/vendor/material-symbols/material-symbols.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/app.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/premium.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/mobile.css" asp-append-version="true" />
+</head>
+<body class="mobile-app" data-mobile-page="@path" data-mobile-user="@current?.Id" data-mobile-class="@classroom?.Id" data-mobile-class-name="@classroom?.Name">
+    <div class="mobile-frame">
+        <header class="mobile-topbar">
+            <a class="mobile-icon" href="@(primary ? "/Mobile/Account" : "/Mobile/Today")" aria-label="@(primary ? "账号与设置" : "返回今天")"><i class="icon @(primary ? "icon-menu" : "icon-arrow-back")"></i></a>
+            <strong>@title</strong>
+            @if (current is not null)
+            { <a class="mobile-icon notification-bell" href="/Mobile/Inbox" data-notification-bell data-unread-url="/Inbox?handler=Unread" aria-label="通知"><i class="icon icon-notifications"></i><span class="bell-badge" data-unread-badge hidden></span></a> }
+        </header>
+        <main class="mobile-content" id="main">
+            @if (TempData["Message"] is string message) { <div class="flash" role="status">@message</div> }
+            @if (TempData["Error"] is string error) { <div class="flash error" role="alert">@error</div> }
+            @if (current is not null && primary && classes.Count > 1)
+            {
+                <form method="post" action="/Account?handler=SwitchClass" class="mobile-class-picker">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="returnUrl" value="@path" />
+                    <label><i class="icon icon-apartment"></i> <select name="classId" aria-label="当前班级" data-mobile-class-select>
+                        @foreach (var c in classes) { <option value="@c.Id" selected="@(c.Id == classroom?.Id)">@c.Name</option> }
+                    </select></label><button type="submit" class="ghost">切换</button>
+                </form>
+            }
+            @RenderBody()
+            <footer class="mobile-desktop-hint">更多操作请进入<a href="@(desktop + (desktop.Contains('?') ? "&" : "?") + "view=desktop")">电脑版</a></footer>
+        </main>
+        @if (current is not null && primary)
+        {
+            <nav class="mobile-bottom-nav" aria-label="主导航">
+                @foreach (var tab in new[] { ("今天", "icon-today", "/Mobile/Today"), ("课表", "icon-calendar-month", "/Mobile/Schedule"), ("换课", "icon-swap-horiz", "/Mobile/SwapRequests"), ("控制", "icon-tune", "/Mobile/Control"), ("管理", "icon-manage-accounts", "/Mobile/Manage") })
+                {
+                    if (tab.Item1 == "换课" && !permissions.HasFlag(UserPermissions.RequestScheduleSwap)) continue;
+                    if (tab.Item1 == "管理" && !permissions.HasFlag(UserPermissions.ManageUsers)) continue;
+                    var active = path == tab.Item3 || tab.Item1 == "课表" && path == "/Mobile/MySchedule";
+                    <a href="@tab.Item3" class="@(active ? "active" : "")" aria-current="@(active ? "page" : null)"><span><i class="icon @tab.Item2"></i>@if(tab.Item1 == "换课") { <b data-swap-badge hidden></b> }</span>@tab.Item1</a>
+                }
+            </nav>
+        }
+    </div>
+    <div class="toast-stack" data-toast-stack aria-live="polite"></div>
+    <script src="~/app.js" asp-append-version="true" defer></script>
+    <script src="~/mobile.js" asp-append-version="true" defer></script>
+    <script src="~/voice-message.js" asp-append-version="true" defer></script>
+    @if (current is not null) { <script src="~/notifications.js" asp-append-version="true" defer></script> }
+</body>
+</html>

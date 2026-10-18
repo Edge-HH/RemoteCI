@@ -1,0 +1,16 @@
+@page
+@model RemoteCI.Server.Pages.Mobile.TodayModel
+@{ ViewData["Title"] = "RemoteCI"; }
+<section class="mobile-hero" data-today-state data-state-url="/Mobile/Today?handler=State">
+    <span class="mobile-hero-label" data-current-stage>今天</span>
+    <h1 data-current-subject>正在同步课程</h1>
+    <p data-current-detail>稍候即可看到当前课程与下一节课</p>
+    <div class="mobile-countdown" data-current-countdown>--:--</div>
+    <a href="/Mobile/Schedule" class="mobile-hero-action">查看课表 <i class="icon icon-arrow-forward"></i></a>
+</section>
+<div class="mobile-connected-list">
+    <a class="mobile-row" href="/Mobile/Schedule"><i class="icon icon-directions-run"></i><span><strong>下一节</strong><small data-next-subject>正在同步</small></span><i class="icon icon-chevron-right"></i></a>
+    <div class="mobile-row"><i class="icon icon-cloud-done"></i><span><strong data-connection-status>正在连接 RemoteCI</strong><small data-sync-time>正在获取最新状态</small></span></div>
+</div>
+<div class="mobile-button-pair"><a class="button ghost" href="/Mobile/Schedule">课表</a><a class="button" href="/Mobile/Control">控制</a></div>
+<section class="mobile-install panel" data-install-guide hidden><h2>添加到主屏幕</h2><p>将 RemoteCI 添加到主屏幕，可以独立打开并开启系统通知。</p><p data-install-instructions>在 Safari 分享菜单选择“添加到主屏幕”，然后从桌面图标打开。</p><button type="button" data-install-button hidden>安装 RemoteCI</button><a href="/Mobile/Inbox">设置通知</a></section>

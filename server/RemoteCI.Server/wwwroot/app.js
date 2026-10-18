@@ -7,6 +7,13 @@ async function copyText(value) {
     const copied = document.execCommand("copy"); input.remove();
     if (!copied) throw new Error("浏览器拒绝复制");
 }
+document.addEventListener("submit", event => {
+    if (!event.target.action?.includes("/Logout")) return;
+    localStorage.removeItem("remoteci-offline-schedule");
+    localStorage.removeItem("remoteci-offline-user");
+    navigator.serviceWorker?.controller?.postMessage({ type: "clear-private" });
+    if ("BroadcastChannel" in window) { const channel = new BroadcastChannel("remoteci-identity"); channel.postMessage("signed-out"); channel.close(); }
+});
 function closeMobileSidebar() { document.body.classList.remove("sidebar-open"); }
 
 function syncRolePermissions(form) {

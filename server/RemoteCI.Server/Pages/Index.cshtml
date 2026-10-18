@@ -7,10 +7,10 @@
         <h1>课堂控制总览</h1>
     </div>
     <div class="dashboard-actions">
-        <form method="post" asp-page-handler="RetryConnection"><button class="primary-action" type="submit"><i class="bi bi-arrow-repeat" aria-hidden="true"></i>重新检测连接</button></form>
+        <form method="post" asp-page-handler="RetryConnection"><button class="primary-action" type="submit"><i class="icon icon-sync" aria-hidden="true"></i>重新检测连接</button></form>
         @if (Model.Permissions.HasFlag(UserPermissions.ManageUsers))
         {
-            <form method="post" asp-page-handler="PairCode"><button class="secondary-action" type="submit"><i class="bi bi-link-45deg" aria-hidden="true"></i>生成配对码</button></form>
+            <form method="post" asp-page-handler="PairCode"><button class="secondary-action" type="submit"><i class="icon icon-link" aria-hidden="true"></i>生成配对码</button></form>
         }
     </div>
 </header>
@@ -18,17 +18,17 @@
 @if (Model.PairCode is not null)
 {
     <div class="notice pair-code-notice">
-        <span class="notice-icon"><i class="bi bi-key" aria-hidden="true"></i></span>
+        <span class="notice-icon"><i class="icon icon-key" aria-hidden="true"></i></span>
         <div><strong>一次性插件配对码</strong><span>使用前持续有效，成功配对后立即作废。</span></div>
         <code>@Model.PairCode</code>
-        <button class="copy-button" type="button" data-copy-value="@Model.PairCode" aria-label="复制配对码" title="复制配对码"><i class="bi bi-copy" aria-hidden="true"></i></button>
+        <button class="copy-button" type="button" data-copy-value="@Model.PairCode" aria-label="复制配对码" title="复制配对码"><i class="icon icon-content-copy" aria-hidden="true"></i></button>
     </div>
 }
 
 @if (Model.PluginProtocolMismatch is { } mismatch)
 {
     <div class="notice warning" role="alert">
-        <span class="notice-icon"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i></span>
+        <span class="notice-icon"><i class="icon icon-warning" aria-hidden="true"></i></span>
         <div>
             <strong>ClassIsland 插件协议不匹配</strong>
             @if (int.TryParse(mismatch.ActualVersion, out var actualProtocol) && actualProtocol < mismatch.ExpectedVersion)
@@ -47,20 +47,20 @@
     <article class="metric-card metric-card-primary">
         <span class="metric-label">当前课程</span>
         <strong class="metric-value metric-value-text">@(Model.Snapshot?.CurrentSubject ?? "暂无课程")</strong>
-        <span class="metric-chip @(Model.Snapshot is null ? "neutral" : "positive")"><i class="bi bi-book" aria-hidden="true"></i>@(Model.Snapshot is null ? "等待状态" : "状态已同步")</span>
+        <span class="metric-chip @(Model.Snapshot is null ? "neutral" : "positive")"><i class="icon icon-book" aria-hidden="true"></i>@(Model.Snapshot is null ? "等待状态" : "状态已同步")</span>
     </article>
     <article class="metric-card">
         <span class="metric-label">插件连接</span>
         <strong class="metric-value">@(Model.PluginOnline ? "在线" : Model.PluginProtocolMismatch is null ? "离线" : "协议不匹配")</strong>
-        <span class="metric-chip @(Model.PluginOnline ? "positive" : "danger")"><i class="bi @(Model.PluginOnline ? "bi-arrow-up" : "bi-exclamation")" aria-hidden="true"></i>@(Model.PluginOnline ? "可执行操作" : Model.PluginProtocolMismatch is null ? "需要检查" : "请升级插件")</span>
+        <span class="metric-chip @(Model.PluginOnline ? "positive" : "danger")"><i class="icon @(Model.PluginOnline ? "icon-arrow-upward" : "icon-priority-high")" aria-hidden="true"></i>@(Model.PluginOnline ? "可执行操作" : Model.PluginProtocolMismatch is null ? "需要检查" : "请升级插件")</span>
     </article>
     <article class="metric-card">
         <span class="metric-label">在线手表</span><strong class="metric-value">@Model.WatchConnections</strong>
-        <span class="metric-chip neutral"><i class="bi bi-smartwatch" aria-hidden="true"></i>已连接设备</span>
+        <span class="metric-chip neutral"><i class="icon icon-watch" aria-hidden="true"></i>已连接设备</span>
     </article>
     <article class="metric-card">
         <span class="metric-label">系统账号</span><strong class="metric-value">@Model.AccountCount</strong>
-        <span class="metric-chip neutral"><i class="bi bi-people" aria-hidden="true"></i>权限内账号</span>
+        <span class="metric-chip neutral"><i class="icon icon-group" aria-hidden="true"></i>权限内账号</span>
     </article>
 </section>
 
@@ -71,7 +71,7 @@
             <span class="status-pill @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "在线刷新" : "连接中断")</span>
         </header>
         <div class="course-spotlight">
-            <span class="course-icon"><i class="bi bi-journal-bookmark" aria-hidden="true"></i></span>
+            <span class="course-icon"><i class="icon icon-menu-book" aria-hidden="true"></i></span>
             <div><span>当前课程</span><strong>@(Model.Snapshot?.CurrentSubject ?? "暂无")</strong><small>@(Model.Snapshot?.CurrentTimeLayoutItem ?? "尚未收到课堂状态")</small></div>
         </div>
         <dl class="signal-grid">
@@ -88,15 +88,15 @@
         </header>
         <div class="activity-list">
             <article>
-                <span class="activity-icon @(Model.PluginOnline ? "success" : "alert")"><i class="bi bi-plug" aria-hidden="true"></i></span>
+                <span class="activity-icon @(Model.PluginOnline ? "success" : "alert")"><i class="icon icon-power" aria-hidden="true"></i></span>
                 <div><strong>ClassIsland 插件@(Model.PluginOnline ? "连接正常" : Model.PluginProtocolMismatch is null ? "当前离线" : "协议不匹配")</strong><small>@(Model.PluginOnline ? "可执行远程操作" : Model.PluginProtocolMismatch is null ? "远程操作暂不可用" : "请升级插件")</small></div><span>现在</span>
             </article>
             <article>
-                <span class="activity-icon"><i class="bi bi-calendar-check" aria-hidden="true"></i></span>
+                <span class="activity-icon"><i class="icon icon-event-available" aria-hidden="true"></i></span>
                 <div><strong>@(Model.Schedule is null ? "尚无课表" : "课表已同步")</strong><small>@(Model.Schedule?.GeneratedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "连接插件后可立即拉取")</small></div><span>课表</span>
             </article>
             <article>
-                <span class="activity-icon"><i class="bi bi-smartwatch" aria-hidden="true"></i></span>
+                <span class="activity-icon"><i class="icon icon-watch" aria-hidden="true"></i></span>
                 <div><strong>@Model.WatchConnections 台手表在线</strong></div><span>设备</span>
             </article>
         </div>
@@ -111,26 +111,26 @@
             @if (Model.Permissions.HasFlag(UserPermissions.ManageSchedule) && Model.Supports(RemoteCiCapabilities.ScheduleChange))
             {
                 <a asp-page="/Schedule" data-search-label="课表 换课 同步课表">
-                    <span class="task-main"><i class="bi bi-calendar-week" aria-hidden="true"></i><span><strong>课表</strong><small>查看、拉取并调整未来七天课程</small></span></span>
-                    <span class="task-owner">课程管理</span><span class="task-status healthy">可用</span><i class="bi bi-arrow-right" aria-hidden="true"></i>
+                    <span class="task-main"><i class="icon icon-date-range" aria-hidden="true"></i><span><strong>课表</strong><small>查看、拉取并调整未来七天课程</small></span></span>
+                    <span class="task-owner">课程管理</span><span class="task-status healthy">可用</span><i class="icon icon-arrow-forward" aria-hidden="true"></i>
                 </a>
             }
             @if (Model.Permissions.HasFlag(UserPermissions.SendNotifications) && Model.Supports(RemoteCiCapabilities.NotificationSend))
             {
                 <a asp-page="/Control" asp-fragment="send-notification" data-search-label="发送通知 提醒 清除提醒">
-                    <span class="task-main"><i class="bi bi-send" aria-hidden="true"></i><span><strong>发送通知</strong><small>向课堂发送文字通知或清除提醒</small></span></span>
-                    <span class="task-owner">课堂消息</span><span class="task-status @(Model.PluginOnline ? "healthy" : "risk")">@(Model.PluginOnline ? "可用" : "离线")</span><i class="bi bi-arrow-right" aria-hidden="true"></i>
+                    <span class="task-main"><i class="icon icon-send" aria-hidden="true"></i><span><strong>发送通知</strong><small>向课堂发送文字通知或清除提醒</small></span></span>
+                    <span class="task-owner">课堂消息</span><span class="task-status @(Model.PluginOnline ? "healthy" : "risk")">@(Model.PluginOnline ? "可用" : "离线")</span><i class="icon icon-arrow-forward" aria-hidden="true"></i>
                 </a>
             }
             <a asp-page="/Account" data-search-label="个人账号 密码 登录设备">
-                <span class="task-main"><i class="bi bi-person-gear" aria-hidden="true"></i><span><strong>个人账号</strong><small>管理密码与登录设备</small></span></span>
-                <span class="task-owner">账号安全</span><span class="task-status healthy">可用</span><i class="bi bi-arrow-right" aria-hidden="true"></i>
+                <span class="task-main"><i class="icon icon-manage-accounts" aria-hidden="true"></i><span><strong>个人账号</strong><small>管理密码与登录设备</small></span></span>
+                <span class="task-owner">账号安全</span><span class="task-status healthy">可用</span><i class="icon icon-arrow-forward" aria-hidden="true"></i>
             </a>
             @if (Model.CurrentUser.Role == UserRole.Admin)
             {
                 <a asp-page="/SystemConfig" data-search-label="系统配置 系统更新 服务端维护">
-                    <span class="task-main"><i class="bi bi-sliders" aria-hidden="true"></i><span><strong>系统配置</strong><small>管理服务端全局配置与系统更新</small></span></span>
-                    <span class="task-owner">系统管理</span><span class="task-status healthy">可用</span><i class="bi bi-arrow-right" aria-hidden="true"></i>
+                    <span class="task-main"><i class="icon icon-tune" aria-hidden="true"></i><span><strong>系统配置</strong><small>管理服务端全局配置与系统更新</small></span></span>
+                    <span class="task-owner">系统管理</span><span class="task-status healthy">可用</span><i class="icon icon-arrow-forward" aria-hidden="true"></i>
                 </a>
             }
         </div>
@@ -144,10 +144,10 @@
         <p class="muted">在安卓版登录页点击二维码按钮扫描，直接登录当前账号 @Model.CurrentUser.UserName。二维码 5 分钟内有效且只能使用一次，请勿在投屏或截图中展示。</p>
         <div class="mobile-login-url">
             <code>@Model.MobileLoginUrl</code>
-            <button class="copy-button" type="button" data-copy-value="@Model.MobileLoginUrl" aria-label="复制服务器地址" title="复制服务器地址"><i class="bi bi-copy" aria-hidden="true"></i></button>
+            <button class="copy-button" type="button" data-copy-value="@Model.MobileLoginUrl" aria-label="复制服务器地址" title="复制服务器地址"><i class="icon icon-content-copy" aria-hidden="true"></i></button>
         </div>
         <form method="post" asp-page-handler="MobileLoginQr" class="mobile-login-actions" data-mobile-login-form>
-            <button type="submit" data-mobile-login-generate><i class="bi bi-qr-code" aria-hidden="true"></i> 生成登录二维码</button>
+            <button type="submit" data-mobile-login-generate><i class="icon icon-qr-code" aria-hidden="true"></i> 生成登录二维码</button>
             <span class="muted" data-mobile-login-status aria-live="polite"></span>
         </form>
     </div>
@@ -170,7 +170,7 @@
             <header class="panel-heading"><div><h2>连接能力诊断</h2></div><span class="status-pill">@Model.CapabilityDiagnostics.Count 个插件</span></header>
             @if (Model.CapabilityDiagnostics.Count == 0)
             {
-                <div class="empty-state"><i class="bi bi-diagram-3" aria-hidden="true"></i><strong>暂无已连接插件</strong><span>插件连接后显示版本与能力。</span></div>
+                <div class="empty-state"><i class="icon icon-account-tree" aria-hidden="true"></i><strong>暂无已连接插件</strong><span>插件连接后显示版本与能力。</span></div>
             }
             else
             {
@@ -197,7 +197,7 @@
             <header class="panel-heading"><div><h2>插件凭据</h2></div><span class="status-pill">@Model.PluginCredentials.Count 项</span></header>
             @if (Model.PluginCredentials.Count == 0)
             {
-                <div class="empty-state"><i class="bi bi-key" aria-hidden="true"></i><strong>暂无插件凭据</strong><span>完成首次配对后可在此查看和吊销。</span></div>
+                <div class="empty-state"><i class="icon icon-key" aria-hidden="true"></i><strong>暂无插件凭据</strong><span>完成首次配对后可在此查看和吊销。</span></div>
             }
             else
             {

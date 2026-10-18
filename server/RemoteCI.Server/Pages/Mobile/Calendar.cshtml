@@ -1,0 +1,20 @@
+@page
+@model RemoteCI.Server.Pages.Mobile.CalendarModel
+@{ ViewData["Title"] = "系统日历"; }
+@if (Model.CreatedUrl is { } link)
+{
+    <section class="panel"><h2>订阅链接已生成</h2><p>链接仅本次显示，请立即保存；重置后原链接失效，需要重新订阅。</p><a class="button" href="@("webcal://" + link.Split("://", 2)[1])">添加到系统日历</a><button type="button" class="ghost" data-copy-value="@link">复制订阅链接</button><p class="muted">也可在苹果日历的“添加订阅日历”中粘贴链接。</p></section>
+}
+<section class="panel"><h2>创建或重置订阅</h2><form method="post" asp-page-handler="Create" class="stack" data-calendar-create>
+    <label>订阅内容<select asp-for="CalendarClassId"><option value="">我的日程（任教与自定义课程）</option>@foreach (var classroom in Model.AccessibleClasses) { <option value="@classroom.Id">@classroom.Name · 班级课表</option> }</select></label>
+    <label>课前提醒<select asp-for="Reminder"><option value="">关闭</option><option value="0">开始时</option><option value="5">提前5分钟</option><option value="10">提前10分钟</option><option value="15">提前15分钟</option><option value="30">提前30分钟</option></select></label>
+    <input asp-for="Offset" type="hidden" data-calendar-offset /><button type="submit">生成链接</button>
+</form><p class="muted">同一内容再次生成会重置旧链接。班级日历固定绑定班级，不随界面切换。自定义课程使用课程自己的提醒设置。</p></section>
+@foreach (var sub in Model.Subscriptions)
+{
+    <section class="panel"><h2>@(sub.ClassId is null ? "我的日程" : Model.AccessibleClasses.FirstOrDefault(x => x.Id == sub.ClassId)?.Name ?? "不可访问的班级")</h2>
+        <form method="post" asp-page-handler="Reminder" class="stack"><input type="hidden" name="id" value="@sub.Id" /><label>提醒<select name="reminder">@foreach(var option in new[] { ("", "关闭"), ("0", "开始时"), ("5", "提前5分钟"), ("10", "提前10分钟"), ("15", "提前15分钟"), ("30", "提前30分钟") }) { <option value="@option.Item1" selected="@(sub.ReminderMinutes?.ToString() == (option.Item1 == "" ? null : option.Item1))">@option.Item2</option> }</select></label><button type="submit" class="ghost">保存提醒</button></form>
+        <form method="post" asp-page-handler="Revoke"><input type="hidden" name="id" value="@sub.Id" /><button type="submit" class="ghost danger">撤销订阅链接</button></form>
+    </section>
+}
+<p class="notice">日历由系统定期刷新，临时换课请同时开启推送。日历与推送都开启课前提醒时可能重复提示。撤销链接不会删除手机已经保存的事件，请在系统日历中取消订阅。</p>

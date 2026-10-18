@@ -5,6 +5,7 @@ public sealed class ServerOptions
     public const string SectionName = "Server";
 
     public string DatabasePath { get; set; } = "data/remoteci.db";
+    public string WebPushSubject { get; set; } = "https://github.com/Edge-HH/RemoteCI";
     public string BootstrapAdminUsername { get; set; } = "admin";
     public string? BootstrapAdminPassword { get; set; }
     public string? BootstrapPluginPairCode { get; set; }

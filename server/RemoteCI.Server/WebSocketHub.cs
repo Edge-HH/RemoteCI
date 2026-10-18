@@ -376,6 +376,9 @@ public static class WebSocketHub
         value.ClassId = classId;
         session.Store.SaveEvent(classId, value);
         await session.Registry.SendEventToWatchesAsync(classId, value, session.CancellationToken);
+        // A WebSocket request has a long-lived scope. Use a fresh unit of work for each event.
+        await using var scope = session.Context.RequestServices.CreateAsyncScope();
+        await scope.ServiceProvider.GetRequiredService<WebPushQueue>().ClassEventAsync(classId, value, session.CancellationToken);
     }
 
     private static async Task HandleSoftwareInventoryAsync(Envelope envelope, ConnectionSession session)

@@ -156,6 +156,10 @@ public class BatchControlModel(
     /// </summary>
     public bool CanUseOperation(BatchOperationKind operation)
     {
+        if (MobileUi.IsMobile(HttpContext) && operation is not (BatchOperationKind.Notify or BatchOperationKind.ClearNotifications or BatchOperationKind.Power or BatchOperationKind.VoiceMessage)) return false;
+        if (MobileUi.IsMobile(HttpContext) && this is ControlModel control)
+            return operation switch { BatchOperationKind.Notify => control.CanSendNotifications, BatchOperationKind.ClearNotifications => control.CanClearNotifications,
+                BatchOperationKind.Power => control.CanControlPower, BatchOperationKind.VoiceMessage => control.CanSendVoiceMessages, _ => false };
         if (!IsSingleControl) return true;
         if (CommandForOperation(operation) is not { } command) return false;
         var required = CommandPermissions.Required(command);
@@ -194,12 +198,12 @@ public class BatchControlModel(
 
     /// <summary>终端与文件分发的可见性：批量页整体已限定管理员；单班页要求系统管理员加班级维护权限。</summary>
     public bool CanUseMaintenanceOperation(BatchOperationKind operation) =>
-        IsSingleControl
+        !MobileUi.IsMobile(HttpContext) && (IsSingleControl
             ? IsAdmin && CommandForOperation(operation) is { } command &&
               CommandPermissions.Required(command) is var required &&
               required != UserPermissions.None &&
               ClassPermissions.HasFlag(required)
-            : CanUseOperation(operation);
+            : CanUseOperation(operation));
 
     /// <summary>批量操作对应的协议命令，用于复用 CommandPermissions 的权限口径。</summary>
     private static CommandKind? CommandForOperation(BatchOperationKind operation) => operation switch

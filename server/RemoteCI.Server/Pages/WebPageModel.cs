@@ -55,13 +55,21 @@ public abstract class WebPageModel(UserManager<AppUser> users) : PageModel
             user.RoleDefinition.DefaultPermissions);
 
         var access = HttpContext.RequestServices.GetRequiredService<ClassAccessService>();
-        AccessibleClasses = await access.GetAccessibleClassesAsync(
-            user.Id, user.Role, user.GrantedPermissions, HttpContext.RequestAborted);
-        var cookieClass = Guid.TryParse(Request.Cookies[CurrentClassCookie], out var parsed) ? parsed : (Guid?)null;
-        CurrentClass = AccessibleClasses.FirstOrDefault(x => x.Id == cookieClass) ?? AccessibleClasses.FirstOrDefault();
-        // 没有任何可访问班级时班级 Id 为空、权限为 None，页面自然呈现无权限状态。
-        ClassPermissions = CurrentClass?.Permissions ?? UserPermissions.None;
-        ClassSelfService = await access.GetClassSelfServiceAsync(user.Id, user.Role, CurrentClassId, HttpContext.RequestAborted);
+        try
+        {
+            AccessibleClasses = await access.GetAccessibleClassesAsync(
+                user.Id, user.Role, user.GrantedPermissions, HttpContext.RequestAborted);
+            var cookieClass = Guid.TryParse(Request.Cookies[CurrentClassCookie], out var parsed) ? parsed : (Guid?)null;
+            CurrentClass = AccessibleClasses.FirstOrDefault(x => x.Id == cookieClass) ?? AccessibleClasses.FirstOrDefault();
+            // 没有任何可访问班级时班级 Id 为空、权限为 None，页面自然呈现无权限状态。
+            ClassPermissions = CurrentClass?.Permissions ?? UserPermissions.None;
+            ClassSelfService = await access.GetClassSelfServiceAsync(user.Id, user.Role, CurrentClassId, HttpContext.RequestAborted);
+        }
+        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            // 请求已被客户端/代理中止：视为正常取消，停止后续处理并避免记录为错误
+            return new EmptyResult();
+        }
         return permission is not null && !Permissions.HasFlag(permission.Value)
             ? RedirectToPage("/Denied")
             : null;
@@ -80,6 +88,13 @@ public abstract class WebPageModel(UserManager<AppUser> users) : PageModel
                 IsEssential = true,
                 MaxAge = TimeSpan.FromDays(30),
             });
+            var browser = Request.Cookies[MobileUi.BrowserCookie];
+            if (browser is not null)
+            {
+                var db = HttpContext.RequestServices.GetRequiredService<AppDbContext>();
+                await db.WebPushSubscriptions.Where(x => x.UserId == CurrentUser.Id && x.BrowserId == browser && (x.ClassId != null || x.EventMask != 0))
+                    .ExecuteUpdateAsync(x => x.SetProperty(y => y.ClassId, classId), HttpContext.RequestAborted);
+            }
         }
         if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
             return LocalRedirect(returnUrl);

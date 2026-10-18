@@ -11,6 +11,12 @@ public sealed class LoginRequest
     [JsonPropertyName("password")]
     public string Password { get; set; } = string.Empty;
 
+    [JsonPropertyName("twoFactorCode")]
+    public string? TwoFactorCode { get; set; }
+
+    [JsonPropertyName("useRecoveryCode")]
+    public bool UseRecoveryCode { get; set; }
+
     [JsonPropertyName("deviceName")]
     public string DeviceName { get; set; } = "Wear OS";
 }
@@ -18,6 +24,12 @@ public sealed class LoginRequest
 /// <summary>手机扫码登录：凭 WebUI 二维码中的一次性票据换取设备会话。</summary>
 public sealed class MobileLoginRequest
 {
+    [JsonPropertyName("twoFactorCode")]
+    public string? TwoFactorCode { get; set; }
+
+    [JsonPropertyName("useRecoveryCode")]
+    public bool UseRecoveryCode { get; set; }
+
     [JsonPropertyName("ticket")]
     public string Ticket { get; set; } = string.Empty;
 
@@ -36,6 +48,11 @@ public sealed class RefreshSessionRequest
 
 public sealed class AuthResponse
 {
+    /// <summary>密码正确但尚未完成二步验证；本响应不包含任何会话凭据。</summary>
+    [JsonPropertyName("twoFactorRequired")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? TwoFactorRequired { get; set; }
+
     [JsonPropertyName("accessToken")]
     public string AccessToken { get; set; } = string.Empty;
 

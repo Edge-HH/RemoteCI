@@ -13,6 +13,7 @@ namespace RemoteCI.Server.Services;
 public sealed class ConfigurationArchiveService(
     AppDbContext db,
     IStateStore state,
+    TwoFactorService twoFactor,
     IOptions<ServerOptions> options,
     IHostEnvironment environment)
 {
@@ -29,7 +30,8 @@ public sealed class ConfigurationArchiveService(
         var roles = await db.AccountRoles.AsNoTracking().Select(x => new RoleSnapshot(x.Id, x.Name, x.Kind, x.DefaultPermissions, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
         var users = await db.Users.AsNoTracking().Select(x => new UserSnapshot(
             x.Id, x.UserName!, x.NormalizedUserName!, x.DisplayName, x.PasswordHash!, x.SecurityStamp!, x.ConcurrencyStamp!,
-            x.Role, x.RoleDefinitionId, x.GrantedPermissions, x.Enabled, x.Version, x.UpdatedAt, x.IsSystemOwner)).ToListAsync(ct);
+            x.Role, x.RoleDefinitionId, x.GrantedPermissions, x.Enabled, x.Version, x.UpdatedAt, x.IsSystemOwner,
+            x.TwoFactorEnabled, x.ProtectedTotpKey, x.LastTotpTimeStep, x.TwoFactorRecoveryHashes, null)).ToListAsync(ct);
         var groups = await db.ClassGroups.AsNoTracking().Select(x => new GroupSnapshot(x.Id, x.Name, x.ParentId, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
         var classrooms = await db.Classrooms.AsNoTracking().Select(x => new ClassroomSnapshot(x.Id, x.Name, x.VisitorAccessEnabled, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
         var memberships = await db.ClassMemberships.AsNoTracking().Select(x => new MembershipSnapshot(x.UserId, x.ClassroomId, x.RoleDefinitionId)).ToListAsync(ct);
@@ -52,7 +54,7 @@ public sealed class ConfigurationArchiveService(
             x.Id, x.Name, x.ProfileJson, x.Revision, x.ClassId, x.SourceTemplateId, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
         var holidayOverrides = await db.HolidayMakeupOverrides.AsNoTracking().OrderBy(x => x.Date)
             .Select(x => new HolidayOverrideSnapshot(x.Date, x.FollowWeekday)).ToListAsync(ct);
-        return new ConfigurationSnapshot(5, DateTimeOffset.UtcNow, roles, users, plugins,
+        return new ConfigurationSnapshot(6, DateTimeOffset.UtcNow, roles, users, plugins,
             new MetadataSnapshot(
                 metadata.AccountVersion,
                 metadata.ForceSenderInTitle,
@@ -93,7 +95,14 @@ public sealed class ConfigurationArchiveService(
     public async Task<byte[]> ExportEncryptedAsync(string password, CancellationToken ct = default)
     {
         ValidatePassword(password);
-        var compressed = Compress(await CaptureAsync(ct));
+        var snapshot = await CaptureAsync(ct);
+        // 跨服务器导出的密钥只出现在口令加密包内；普通本地备份始终保留 Data Protection 密文。
+        snapshot = snapshot with { Users = snapshot.Users.Select(user => user.ProtectedTotpKey is null ? user : user with
+        {
+            TotpSecret = twoFactor.UnprotectKey(new AppUser { Id = user.Id, ProtectedTotpKey = user.ProtectedTotpKey }),
+            ProtectedTotpKey = null,
+        }).ToList() };
+        var compressed = Compress(snapshot);
         var salt = RandomNumberGenerator.GetBytes(16);
         var nonce = RandomNumberGenerator.GetBytes(12);
         var key = Rfc2898DeriveBytes.Pbkdf2(password, salt, Iterations, HashAlgorithmName.SHA256, 32);
@@ -126,6 +135,9 @@ public sealed class ConfigurationArchiveService(
         Validate(snapshot);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         // 显式删除自引用对象，恢复前不遗留模板或班级副本；旧配置包恢复为空档案库。
+        await db.WebPushJobs.ExecuteDeleteAsync(ct);
+        await db.CalendarSubscriptions.ExecuteDeleteAsync(ct);
+        await db.WebPushSubscriptions.ExecuteDeleteAsync(ct);
         await db.StoredProfiles.ExecuteDeleteAsync(ct);
         await db.DeviceSessions.ExecuteDeleteAsync(ct);
         await db.UserApiKeys.ExecuteDeleteAsync(ct);
@@ -142,7 +154,7 @@ public sealed class ConfigurationArchiveService(
         db.ChangeTracker.Clear();
         db.AccountRoles.AddRange(snapshot.Roles.Select(x => new AccountRole { Id=x.Id, Name=x.Name, NormalizedName=x.Name.Trim().ToUpperInvariant(), Kind=x.Kind, DefaultPermissions=UpgradeImportedPermissions(snapshot.Version, x.DefaultPermissions), CreatedAt=x.CreatedAt, UpdatedAt=x.UpdatedAt }));
         await db.SaveChangesAsync(ct);
-        db.Users.AddRange(snapshot.Users.Select(x => new AppUser { Id=x.Id, UserName=x.Username, NormalizedUserName=x.NormalizedUsername, DisplayName=x.DisplayName, PasswordHash=x.PasswordHash, SecurityStamp=x.SecurityStamp, ConcurrencyStamp=x.ConcurrencyStamp, Role=x.Role, RoleDefinitionId=x.RoleId, GrantedPermissions=UpgradeImportedPermissions(snapshot.Version, x.GrantedPermissions), Enabled=x.Enabled, Version=x.Version, UpdatedAt=x.UpdatedAt, EmailConfirmed=false, PhoneNumberConfirmed=false, TwoFactorEnabled=false, LockoutEnabled=true, IsSystemOwner=x.IsSystemOwner == true }));
+        db.Users.AddRange(snapshot.Users.Select(x => new AppUser { Id=x.Id, UserName=x.Username, NormalizedUserName=x.NormalizedUsername, DisplayName=x.DisplayName, PasswordHash=x.PasswordHash, SecurityStamp=Guid.NewGuid().ToString(), ConcurrencyStamp=Guid.NewGuid().ToString(), Role=x.Role, RoleDefinitionId=x.RoleId, GrantedPermissions=UpgradeImportedPermissions(snapshot.Version, x.GrantedPermissions), Enabled=x.Enabled, Version=x.Version, UpdatedAt=x.UpdatedAt, EmailConfirmed=false, PhoneNumberConfirmed=false, TwoFactorEnabled=x.TwoFactorEnabled, ProtectedTotpKey=x.TotpSecret is { } secret ? twoFactor.ProtectKey(x.Id, secret) : x.ProtectedTotpKey, LastTotpTimeStep=x.LastTotpTimeStep, TwoFactorRecoveryHashes=x.TwoFactorRecoveryHashes, LockoutEnabled=true, IsSystemOwner=x.IsSystemOwner == true }));
         db.UserApiKeys.AddRange((snapshot.ApiKeys ?? []).Select(x => new UserApiKey { Id=x.Id, UserId=x.UserId, Name=x.Name, KeyHash=x.KeyHash, Prefix=x.Prefix, CreatedAt=x.CreatedAt, LastUsedAt=x.LastUsedAt, ExpiresAt=x.ExpiresAt, RevokedAt=x.RevokedAt }));
         // v1/v2 旧包没有班级数据：建一个承载旧数据的班级（沿用旧版默认班级 Id），访客开关沿用包内全局设置。
         var legacyPackage = snapshot.Classrooms is null;
@@ -251,7 +263,9 @@ public sealed class ConfigurationArchiveService(
             : permissions;
     private static void Validate(ConfigurationSnapshot value)
     {
-        if(value.Version is not (1 or 2 or 3 or 4 or 5) || value.Roles.Count==0 || value.Users.Count==0) throw new InvalidDataException("Invalid backup schema");
+        if(value.Version is not (1 or 2 or 3 or 4 or 5 or 6) || value.Roles.Count==0 || value.Users.Count==0) throw new InvalidDataException("Invalid backup schema");
+        if (value.Users.Any(x => x.TwoFactorEnabled && x.ProtectedTotpKey is null && x.TotpSecret is null))
+            throw new InvalidDataException("Two-factor key missing from backup");
         var roleIds=value.Roles.Select(x=>x.Id).ToHashSet();
         if(value.Users.Any(x=>!roleIds.Contains(x.RoleId))) throw new InvalidDataException("Unknown role reference");
         if(!value.Users.Any(x=>x.Enabled && x.Role==UserRole.Admin)) throw new InvalidDataException("At least one enabled administrator is required");
@@ -296,7 +310,8 @@ public sealed record HolidaySettingsSnapshot(bool Enabled, string? SourceUrlTemp
 public sealed record HolidayOverrideSnapshot(DateOnly Date, int? FollowWeekday);
 public sealed record StoredProfileSnapshot(Guid Id, string Name, string ProfileJson, long Revision, Guid? ClassId, Guid? SourceTemplateId, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 public sealed record RoleSnapshot(Guid Id,string Name,AccountRoleKind Kind,UserPermissions DefaultPermissions,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);
-public sealed record UserSnapshot(Guid Id,string Username,string NormalizedUsername,string DisplayName,string PasswordHash,string SecurityStamp,string ConcurrencyStamp,UserRole Role,Guid RoleId,UserPermissions GrantedPermissions,bool Enabled,long Version,DateTimeOffset UpdatedAt,bool? IsSystemOwner = null);
+public sealed record UserSnapshot(Guid Id,string Username,string NormalizedUsername,string DisplayName,string PasswordHash,string SecurityStamp,string ConcurrencyStamp,UserRole Role,Guid RoleId,UserPermissions GrantedPermissions,bool Enabled,long Version,DateTimeOffset UpdatedAt,bool? IsSystemOwner = null,
+    bool TwoFactorEnabled = false, string? ProtectedTotpKey = null, long? LastTotpTimeStep = null, string? TwoFactorRecoveryHashes = null, string? TotpSecret = null);
 public sealed record ClassroomSnapshot(Guid Id,string Name,bool VisitorAccessEnabled,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);
 public sealed record GroupSnapshot(Guid Id,string Name,Guid? ParentId,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);
 public sealed record MembershipSnapshot(Guid UserId,Guid ClassroomId,Guid RoleDefinitionId);

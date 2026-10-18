@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using RemoteCI.Server.Data;
 using RemoteCI.Server.Services;
 using RemoteCI.Shared.Models;
@@ -20,12 +21,16 @@ public sealed class InboxModel(
 {
     public IReadOnlyList<UserNotificationView> Items { get; private set; } = [];
     public string VapidPublicKey { get; private set; } = string.Empty;
+    public int PushEventMask { get; private set; } = 127;
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
         Items = await notifications.ListAsync(CurrentUser.Id, null, false, 100, ct);
         VapidPublicKey = (await webPush.GetKeysAsync(db, ct)).PublicKey;
+        var browser = MobileUi.Browser(HttpContext);
+        PushEventMask = await db.WebPushSubscriptions.Where(x => x.UserId == CurrentUser.Id && x.BrowserId == browser)
+            .Select(x => (int?)x.EventMask).FirstOrDefaultAsync(ct) ?? 127;
         return Page();
     }
 
@@ -64,6 +69,14 @@ public sealed class InboxModel(
         try
         {
             await notifications.SubscribeWebPushAsync(CurrentUser.Id, request, ct);
+            var sub = await db.WebPushSubscriptions.SingleAsync(x => x.UserId == CurrentUser.Id && x.Endpoint == request.Endpoint, ct);
+            sub.BrowserId = MobileUi.Browser(HttpContext);
+            if (MobileUi.IsMobile(HttpContext))
+            {
+                sub.ClassId = CurrentClass?.Id;
+                sub.EventMask = Math.Clamp(request.EventMask ?? 127, 0, 127);
+            }
+            await db.SaveChangesAsync(ct);
             return new JsonResult(new { ok = true });
         }
         catch (IdentityOperationException ex)
@@ -76,6 +89,19 @@ public sealed class InboxModel(
     {
         if (await RequireAsync() is { } denied) return Unauthorized();
         await notifications.UnsubscribeWebPushAsync(CurrentUser.Id, request.Endpoint, ct);
+        return new JsonResult(new { ok = true });
+    }
+
+    public async Task<IActionResult> OnPostTestAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is not null) return Unauthorized();
+        var browser = MobileUi.Browser(HttpContext);
+        var subscriptions = await db.WebPushSubscriptions.Where(x => x.UserId == CurrentUser.Id && x.BrowserId == browser).ToListAsync(ct);
+        if (subscriptions.Count == 0) return BadRequest(new { message = "请先开启当前浏览器的通知" });
+        var queue = HttpContext.RequestServices.GetRequiredService<WebPushQueue>();
+        foreach (var sub in subscriptions) queue.Add(sub, "test:" + Guid.NewGuid(),
+            new { title = "RemoteCI 测试通知", body = "系统通知已连接成功", kind = "test", url = "/Inbox", id = Guid.NewGuid() }, DateTimeOffset.UtcNow.AddMinutes(5));
+        await db.SaveChangesAsync(ct);
         return new JsonResult(new { ok = true });
     }
 

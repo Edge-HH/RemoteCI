@@ -24,7 +24,7 @@ public sealed class PersonalCourseReminderService(AppDbContext db, UserNotificat
             var where = string.IsNullOrEmpty(course.Location) ? "" : $" · {course.Location}";
             await notifications.PublishAsync([row.UserId], starting ? "personal_course_start" : "personal_course_upcoming",
                 starting ? $"上课提醒 · {row.Subject}" : $"即将上课 · {row.Subject}",
-                $"{course.StartsAt:yyyy-MM-dd HH:mm}–{course.EndsAt:HH:mm}{where}", null, ct);
+                $"{course.StartsAt:yyyy-MM-dd HH:mm}–{course.EndsAt:HH:mm}{where}", null, ct, expiresAt: starting ? course.EndsAt : course.StartsAt);
         }
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);

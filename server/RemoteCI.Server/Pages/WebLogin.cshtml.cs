@@ -14,6 +14,7 @@ namespace RemoteCI.Server.Pages;
 public sealed class WebLoginModel(
     SignInManager<AppUser> signIn,
     IdentityCoordinator identities,
+    TwoFactorLoginService twoFactorLogin,
     ClassAccessService access) : PageModel
 {
     /// <summary>兑换成功后要进入的本站地址，由落地页在浏览器内跳转。</summary>
@@ -26,9 +27,6 @@ public sealed class WebLoginModel(
         Response.Headers["Referrer-Policy"] = "no-referrer";
         var user = await identities.RedeemWebLoginTicketAsync(t, ct);
         if (user is null) return RedirectToPage("/Login", new { from = "visitor" });
-
-        await signIn.SignOutAsync();
-        await signIn.SignInAsync(user, isPersistent: false);
 
         var classes = await access.GetAccessibleClassesAsync(user.Id, user.Role, user.GrantedPermissions, ct);
         // 沿用客户端当前选中的班级，让 WebUI 打开后与手机上看到的是同一个班。
@@ -46,6 +44,16 @@ public sealed class WebLoginModel(
         Target = !string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl) ? returnUrl
             : classes.Count > 1 && classId is null ? Url.Page("/ClassSelect")!
             : Url.Page(permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account")!;
+        if (user.TwoFactorEnabled)
+        {
+            await twoFactorLogin.BeginAsync(HttpContext, user, false, Target);
+            Target = Url.Page("/LoginSecondFactor")!;
+        }
+        else
+        {
+            await signIn.SignOutAsync();
+            await signIn.SignInAsync(user, isPersistent: false);
+        }
         // 不能直接 302：链接由手机 App 交给浏览器打开，属于跨站导航，登录 Cookie 是 SameSite=Strict，
         // 跨站导航的重定向请求不会携带它，用户会被重新送回登录页。改为返回本站页面再由页面发起同站跳转。
         return Page();
