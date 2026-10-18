@@ -23,79 +23,121 @@ import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
-data class CalendarSyncSettings(val automatic: Boolean = false, val reminderMinutes: Int = 10)
+/**
+ * 与网页端两种订阅对应的两个本地日历：我的日程，以及固定绑定一个班级的班级课表。
+ * 我的日程沿用最初的无前缀偏好键与日历名，升级后无需重新导入。
+ */
+enum class CalendarFeed(internal val prefix: String, internal val calendarName: String) {
+    Personal("", "RemoteCI"),
+    Class("class.", "RemoteCI-class");
 
-/** 一个账号对应一个本地日历；系统日历负责提醒，后台任务只负责刷新课程。 */
+    internal fun key(name: String) = prefix + name
+}
+
+data class CalendarSyncSettings(
+    val automatic: Boolean = false,
+    val reminderMinutes: Int = 10,
+    val classId: String? = null,
+    val className: String? = null,
+)
+
+/** 每个账号每种订阅对应一个本地日历；系统日历负责提醒，后台任务只负责刷新课程。 */
 object CalendarSync {
     private const val JobId = 24017
     private val mutex = Mutex()
     private val configurationLock = Any()
-    val status = MutableStateFlow<String?>(null)
+    val status = MutableStateFlow<Map<CalendarFeed, String>>(emptyMap())
     val busy = MutableStateFlow(false)
     private fun prefs(context: Context) = context.getSharedPreferences("calendar_sync", Context.MODE_PRIVATE)
     private fun owner(server: String, userId: String): String = MessageDigest.getInstance("SHA-256")
         .digest("${normalizeServerUrl(server)}\n$userId".toByteArray()).joinToString("") { "%02x".format(it) }
+    private fun setStatus(feed: CalendarFeed, value: String?) =
+        status.update { if (value == null) it - feed else it + (feed to value) }
 
     fun hasPermission(context: Context): Boolean = listOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
         .all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
 
-    fun settings(context: Context, server: String, userId: String): CalendarSyncSettings {
+    fun settings(context: Context, feed: CalendarFeed, server: String, userId: String): CalendarSyncSettings {
         val prefs = prefs(context)
-        if (prefs.getString("owner", null) != owner(server, userId)) return CalendarSyncSettings()
-        return CalendarSyncSettings(prefs.getBoolean("automatic", false), prefs.getInt("reminder", 10))
+        if (prefs.getString(feed.key("owner"), null) != owner(server, userId)) return CalendarSyncSettings()
+        return CalendarSyncSettings(
+            prefs.getBoolean(feed.key("automatic"), false), prefs.getInt(feed.key("reminder"), 10),
+            prefs.getString(feed.key("classId"), null), prefs.getString(feed.key("className"), null),
+        )
     }
 
-    fun configure(context: Context, server: String, userId: String, settings: CalendarSyncSettings): Unit = synchronized(configurationLock) {
+    fun configure(context: Context, feed: CalendarFeed, server: String, userId: String, settings: CalendarSyncSettings): Unit = synchronized(configurationLock) {
         require(settings.reminderMinutes in listOf(0, 5, 10, 15, 30))
+        require(feed != CalendarFeed.Class || !settings.classId.isNullOrBlank() && !settings.className.isNullOrBlank()) { "请选择要同步的班级" }
+        prefs(context).edit().putString(feed.key("owner"), owner(server, userId))
+            .putString(feed.key("server"), normalizeServerUrl(server)).putString(feed.key("user"), userId)
+            .putBoolean(feed.key("automatic"), settings.automatic).putInt(feed.key("reminder"), settings.reminderMinutes)
+            .putString(feed.key("classId"), settings.classId).putString(feed.key("className"), settings.className)
+            .putString(feed.key("revision"), UUID.randomUUID().toString()).commit()
+        schedule(context)
+        setStatus(feed, null)
+    }
+
+    fun disable(context: Context): Unit = synchronized(configurationLock) {
+        val editor = prefs(context).edit()
+        CalendarFeed.entries.forEach { editor.putBoolean(it.key("automatic"), false).putString(it.key("revision"), UUID.randomUUID().toString()) }
+        editor.apply()
+        context.getSystemService(JobScheduler::class.java).cancel(JobId)
+        status.value = emptyMap()
+    }
+
+    /** 任一订阅开启自动同步时保留同一个周期任务，任务内逐个同步。 */
+    private fun schedule(context: Context) {
         val scheduler = context.getSystemService(JobScheduler::class.java)
-        if (settings.automatic) {
+        if (CalendarFeed.entries.any { prefs(context).getBoolean(it.key("automatic"), false) }) {
             check(scheduler.schedule(JobInfo.Builder(JobId, ComponentName(context, CalendarSyncJobService::class.java))
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setPeriodic(15 * 60_000L)
                 .setPersisted(true).build()) == JobScheduler.RESULT_SUCCESS) { "无法安排后台同步，请重新尝试" }
         } else scheduler.cancel(JobId)
-        prefs(context).edit().putString("owner", owner(server, userId))
-            .putString("server", normalizeServerUrl(server)).putString("user", userId)
-            .putBoolean("automatic", settings.automatic).putInt("reminder", settings.reminderMinutes)
-            .putString("revision", UUID.randomUUID().toString()).apply()
-        status.value = null
-    }
-
-    fun disable(context: Context): Unit = synchronized(configurationLock) {
-        prefs(context).edit().putBoolean("automatic", false).putString("revision", UUID.randomUUID().toString()).apply()
-        context.getSystemService(JobScheduler::class.java).cancel(JobId)
-        status.value = null
     }
 
     suspend fun syncIfEnabled(context: Context): Boolean {
-        if (!prefs(context).getBoolean("automatic", false)) return true
-        return sync(context, onlyIfEnabled = true)
+        var success = true
+        CalendarFeed.entries.forEach { feed ->
+            if (prefs(context).getBoolean(feed.key("automatic"), false)) success = sync(context, feed, onlyIfEnabled = true) && success
+        }
+        return success
     }
 
-    suspend fun sync(context: Context, onlyIfEnabled: Boolean = false): Boolean = withContext(Dispatchers.IO) {
+    suspend fun sync(context: Context, feed: CalendarFeed, onlyIfEnabled: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         mutex.withLock {
             val prefs = prefs(context)
-            if (onlyIfEnabled && !prefs.getBoolean("automatic", false)) return@withLock true
-            val revision = prefs.getString("revision", null) ?: return@withLock false
-            val account = prefs.getString("owner", null) ?: return@withLock false
-            val server = prefs.getString("server", null) ?: return@withLock false
-            val user = prefs.getString("user", null) ?: return@withLock false
+            if (onlyIfEnabled && !prefs.getBoolean(feed.key("automatic"), false)) return@withLock true
+            val revision = prefs.getString(feed.key("revision"), null) ?: return@withLock false
+            val account = prefs.getString(feed.key("owner"), null) ?: return@withLock false
+            val server = prefs.getString(feed.key("server"), null) ?: return@withLock false
+            val user = prefs.getString(feed.key("user"), null) ?: return@withLock false
+            val classId = prefs.getString(feed.key("classId"), null)
+            val className = prefs.getString(feed.key("className"), null)
             busy.value = true
             try {
                 check(hasPermission(context)) { "请授予日历读写权限后重新导入" }
                 val settings = SettingsStore(context).load()
                 check(normalizeServerUrl(settings.cloudServerUrl) == server) { "服务器已变更，请为当前账号重新导入" }
-                val schedule = ConnectionManager.calendarSchedule(settings, user)
                 val now = System.currentTimeMillis()
                 // 先完整校验，再写入；请求失败或格式错误不会删除已有事件。
-                val desired = calendarEvents(schedule, java.time.Instant.ofEpochMilli(now))
-                if (prefs.getString("revision", null) != revision || !ConnectionManager.hasSavedSession()) return@withLock false
-                val calendarId = calendar(context, account)
+                val desired = when (feed) {
+                    CalendarFeed.Personal -> calendarEvents(ConnectionManager.calendarSchedule(settings, user), java.time.Instant.ofEpochMilli(now))
+                    CalendarFeed.Class -> classCalendarEvents(
+                        ConnectionManager.calendarClassSchedule(settings, user, checkNotNull(classId) { "请选择要同步的班级" }),
+                        classId, checkNotNull(className) { "请选择要同步的班级" }, java.time.Instant.ofEpochMilli(now),
+                    )
+                }
+                if (prefs.getString(feed.key("revision"), null) != revision || !ConnectionManager.hasSavedSession()) return@withLock false
+                val calendarId = calendar(context, account, feed,
+                    if (feed == CalendarFeed.Class) "RemoteCI $className" else "RemoteCI 我的日程")
                 val existing = readEvents(context, account, calendarId)
                 val changes = calendarChanges(existing, desired, now)
                 val operations = arrayListOf<ContentProviderOperation>()
@@ -106,7 +148,7 @@ object CalendarSync {
                     operations += ContentProviderOperation.newUpdate(adapter(ContentUris.withAppendedId(Events.CONTENT_URI, id), account))
                         .withValues(values(calendarId, event)).build()
                 }
-                val reminder = prefs.getInt("reminder", 10)
+                val reminder = prefs.getInt(feed.key("reminder"), 10)
                 val desiredKeys = desired.map { it.key }.toSet()
                 val retained = existing.filter { it.event.key in desiredKeys && it.id !in changes.deletes }
                 val reminders = readReminders(context, retained.map { it.id }.toSet())
@@ -131,16 +173,16 @@ object CalendarSync {
                 val coroutineContext = currentCoroutineContext()
                 synchronized(configurationLock) {
                     coroutineContext.ensureActive()
-                    if (prefs.getString("revision", null) != revision) return@withLock false
+                    if (prefs.getString(feed.key("revision"), null) != revision) return@withLock false
                     if (normalizeServerUrl(SettingsStore(context).load().cloudServerUrl) != server) return@withLock false
                     if (operations.isNotEmpty()) context.contentResolver.applyBatch(CalendarContract.AUTHORITY, operations)
-                    status.value = "已同步 ${desired.size} 节课程 · ${java.time.LocalTime.now().withSecond(0).withNano(0)}"
+                    setStatus(feed, "已同步 ${desired.size} 节课程 · ${java.time.LocalTime.now().withSecond(0).withNano(0)}")
                 }
                 true
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                if (prefs.getString("revision", null) == revision) status.value = "同步失败：${error.message ?: "请稍后重试"}"
+                if (prefs.getString(feed.key("revision"), null) == revision) setStatus(feed, "同步失败：${error.message ?: "请稍后重试"}")
                 false
             } finally {
                 busy.value = false
@@ -153,16 +195,25 @@ object CalendarSync {
         .appendQueryParameter(Calendars.ACCOUNT_NAME, account)
         .appendQueryParameter(Calendars.ACCOUNT_TYPE, CalendarContract.ACCOUNT_TYPE_LOCAL).build()
 
-    private fun calendar(context: Context, account: String): Long {
+    private fun calendar(context: Context, account: String, feed: CalendarFeed, displayName: String): Long {
         val resolver = context.contentResolver
-        val cursor = checkNotNull(resolver.query(Calendars.CONTENT_URI, arrayOf(Calendars._ID),
+        val cursor = checkNotNull(resolver.query(Calendars.CONTENT_URI, arrayOf(Calendars._ID, Calendars.CALENDAR_DISPLAY_NAME),
             "${Calendars.ACCOUNT_NAME}=? AND ${Calendars.ACCOUNT_TYPE}=? AND ${Calendars.NAME}=?",
-            arrayOf(account, CalendarContract.ACCOUNT_TYPE_LOCAL, "RemoteCI"), null)) { "设备未提供系统日历" }
-        cursor.use { if (it.moveToFirst()) return it.getLong(0) }
+            arrayOf(account, CalendarContract.ACCOUNT_TYPE_LOCAL, feed.calendarName), null)) { "设备未提供系统日历" }
+        cursor.use {
+            if (it.moveToFirst()) {
+                val id = it.getLong(0)
+                // 班级课表改绑其他班级时同步改名，日历应用里显示的始终是当前绑定的班级。
+                if (it.getString(1) != displayName) resolver.update(adapter(ContentUris.withAppendedId(Calendars.CONTENT_URI, id), account),
+                    ContentValues().apply { put(Calendars.CALENDAR_DISPLAY_NAME, displayName) }, null, null)
+                return id
+            }
+        }
         val values = ContentValues().apply {
             put(Calendars.ACCOUNT_NAME, account); put(Calendars.ACCOUNT_TYPE, CalendarContract.ACCOUNT_TYPE_LOCAL)
-            put(Calendars.NAME, "RemoteCI"); put(Calendars.CALENDAR_DISPLAY_NAME, "RemoteCI 我的日程")
-            put(Calendars.CALENDAR_COLOR, 0xFF6750A4.toInt()); put(Calendars.CALENDAR_ACCESS_LEVEL, Calendars.CAL_ACCESS_OWNER)
+            put(Calendars.NAME, feed.calendarName); put(Calendars.CALENDAR_DISPLAY_NAME, displayName)
+            put(Calendars.CALENDAR_COLOR, (if (feed == CalendarFeed.Class) 0xFF3B6939 else 0xFF6750A4).toInt())
+            put(Calendars.CALENDAR_ACCESS_LEVEL, Calendars.CAL_ACCESS_OWNER)
             put(Calendars.OWNER_ACCOUNT, account); put(Calendars.VISIBLE, 1); put(Calendars.SYNC_EVENTS, 1)
             put(Calendars.CALENDAR_TIME_ZONE, java.time.ZoneId.systemDefault().id)
             put(Calendars.MAX_REMINDERS, 1); put(Calendars.ALLOWED_REMINDERS, Reminders.METHOD_ALERT.toString())

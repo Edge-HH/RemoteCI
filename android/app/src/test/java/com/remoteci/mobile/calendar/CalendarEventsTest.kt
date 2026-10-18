@@ -4,6 +4,8 @@ import com.remoteci.mobile.data.CourseEntry
 import com.remoteci.mobile.data.MyScheduleDay
 import com.remoteci.mobile.data.MyScheduleItem
 import com.remoteci.mobile.data.MyScheduleResponse
+import com.remoteci.mobile.data.ScheduleBundle
+import com.remoteci.mobile.data.ScheduleDay
 import java.time.Instant
 import java.time.ZoneId
 import kotlin.test.Test
@@ -82,5 +84,36 @@ class CalendarEventsTest {
         assertEquals(old.key, changed.first().key)
         assertEquals(Instant.parse("2026-10-18T06:00:00Z").toEpochMilli(), changed.first().startsAt)
         assertEquals(2, changed.map { it.key }.distinct().size)
+    }
+
+    private fun bundle(courses: List<CourseEntry> = listOf(course), enabled: Boolean = true, source: String? = null) = ScheduleBundle(
+        classId = "class-a", days = listOf(ScheduleDay("2026-10-17", "r1", enabled = enabled, courses = courses)), source = source,
+    )
+    private fun classEvents(bundle: ScheduleBundle = bundle(), classId: String = "class-a") =
+        classCalendarEvents(bundle, classId, "一班", now, ZoneId.of("Asia/Shanghai"))
+
+    @Test fun `class schedule uses device zone and class bound keys`() {
+        val event = classEvents().single()
+        assertEquals(Instant.parse("2026-10-17T01:00:00Z").toEpochMilli(), event.startsAt)
+        assertEquals("class/class-a/2026-10-17/1", event.key)
+        assertEquals("数学", event.title)
+        assertEquals("一班", event.location)
+    }
+
+    @Test fun `class schedule skips disabled days and courses`() {
+        assertTrue(classEvents(bundle(enabled = false)).isEmpty())
+        assertTrue(classEvents(bundle(listOf(course.copy(enabled = false)))).isEmpty())
+    }
+
+    @Test fun `profile derived class schedule is labelled`() {
+        assertTrue(classEvents(bundle(source = "profile")).single().description.contains("按档案推算"))
+    }
+
+    @Test fun `rebinding to another class removes the old class future events`() {
+        val old = classEvents().single()
+        val rebound = classEvents(classId = "class-b")
+        val result = calendarChanges(listOf(StoredCalendarEvent(12, old)), rebound, now.toEpochMilli())
+        assertEquals(listOf(12L), result.deletes)
+        assertEquals(rebound, result.inserts)
     }
 }

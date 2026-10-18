@@ -14,6 +14,7 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.coroutines.resume
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -42,6 +43,56 @@ import okhttp3.WebSocketListener
 
 /** 云端和局域网共用的认证、状态与命令入口。 */
 object ConnectionManager {
+    val twoFactorRequested = MutableStateFlow(false)
+    @Volatile private var twoFactorReply: CompletableDeferred<Pair<String, Boolean>?>? = null
+
+    private fun clearTwoFactorPrompt() {
+        twoFactorReply?.cancel()
+        twoFactorReply = null
+        twoFactorRequested.value = false
+    }
+
+    fun submitTwoFactor(code: String, recovery: Boolean) { twoFactorReply?.complete(code.trim() to recovery) }
+    fun cancelTwoFactor() { twoFactorReply?.complete(null) }
+
+    private suspend fun authenticateWithTwoFactor(request: suspend (String?, Boolean) -> AuthResponse): AuthResponse {
+        var auth = request(null, false)
+        if (auth.twoFactorRequired != true) return auth
+        var ownedReply: CompletableDeferred<Pair<String, Boolean>?>? = null
+        try {
+            return withTimeout(5 * 60 * 1000L) {
+                var message = "请输入认证器验证码或恢复码"
+                while (auth.twoFactorRequired == true) {
+                    val reply = CompletableDeferred<Pair<String, Boolean>?>()
+                    twoFactorReply = reply
+                    ownedReply = reply
+                    state.value = State.Error(message)
+                    twoFactorRequested.value = true
+                    val answer = reply.await()
+                    if (answer == null) {
+                        state.value = State.Error("已取消二步验证，请重新登录")
+                        throw CancellationException("Two-factor login cancelled")
+                    }
+                    state.value = State.Connecting
+                    try {
+                        auth = request(answer.first, answer.second)
+                        message = "请输入验证码"
+                    } catch (_: AuthenticationException) {
+                        message = "验证码错误、已过期或账号已锁定"
+                    }
+                }
+                auth
+            }
+        } catch (error: TimeoutCancellationException) {
+            state.value = State.Error("二步验证已超时，请重新登录")
+            throw error
+        } finally {
+            if (twoFactorReply === ownedReply) {
+                twoFactorReply = null
+                twoFactorRequested.value = false
+            }
+        }
+    }
     sealed interface State {
         data object Idle : State
         data object Connecting : State
@@ -255,6 +306,7 @@ object ConnectionManager {
 
     /** password 仅用于本次 HTTPS 登录；成功后只保存 Keystore 加密的设备会话密钥。 */
     fun connect(settings: WatchSettings, password: String? = null) {
+        clearTwoFactorPrompt()
         check(::sessions.isInitialized) { "ConnectionManager 尚未初始化" }
         discoveryJob?.cancel()
         lanDiscoveryScanning.value = false
@@ -333,6 +385,7 @@ object ConnectionManager {
     }
 
     fun disconnect(clearUser: Boolean = false) {
+        clearTwoFactorPrompt()
         generation.incrementAndGet()
         desiredSettings = null
         activeJob?.cancel()
@@ -560,11 +613,11 @@ object ConnectionManager {
     }
 
     private suspend fun loginCloud(settings: WatchSettings, password: String): AuthResponse =
-        postAuth(
+        authenticateWithTwoFactor { code, recovery -> postAuth(
             settings,
             "/api/auth/login",
-            json.encodeToString(LoginRequest(settings.username.trim(), password, "${Build.MANUFACTURER} ${Build.MODEL}")),
-        )
+            json.encodeToString(LoginRequest(settings.username.trim(), password, "${Build.MANUFACTURER} ${Build.MODEL}", code, recovery)),
+        ) }
 
     private suspend fun refreshCloud(settings: WatchSettings, session: PersistedDeviceSession): AuthResponse =
         try {

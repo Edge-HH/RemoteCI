@@ -21,6 +21,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Logout
+import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Key
@@ -107,6 +108,7 @@ fun SecondaryHost(
         Screen.Pairing -> PairingScreen(onBack, snackbar)
         Screen.Connection -> ConnectionScreen(settings, onBack, onPersist, snackbar)
         Screen.NotificationSettings -> NotificationSettingsScreen(settings, onBack, onPersist)
+        Screen.CalendarSync -> CalendarSyncScreen(onBack, snackbar)
         Screen.ScheduleSettings -> ScheduleSettingsScreen(onBack)
         Screen.Appearance -> AppearanceScreen(settings, onBack, onPersist)
         Screen.Updates -> UpdatesScreen(settings, onBack, onPersist)
@@ -202,6 +204,7 @@ fun AccountScreen(
             Triple("连接与服务器", "账号、云端地址、局域网插件发现与重新连接", Screen.Connection to Icons.Rounded.Wifi),
             Triple("密码与设备会话", "修改密码，查看并吊销已登录的手机和手表", Screen.Sessions to Icons.Rounded.Key),
             Triple("通知设置", "课程、自动化和第三方插件提醒的同步开关", Screen.NotificationSettings to Icons.Rounded.Notifications),
+            Triple("系统日历", "把我的日程或班级课表同步到系统日历，由日历应用提醒", Screen.CalendarSync to Icons.Rounded.CalendarMonth),
             // 自动拉取周期对全部班级生效，服务端只允许系统管理员修改。
             if (user?.isAdmin == true)
                 Triple("自动拉取课表", "设置在线插件自动刷新课表的周期（对全部班级生效）", Screen.ScheduleSettings to Icons.Rounded.Schedule)

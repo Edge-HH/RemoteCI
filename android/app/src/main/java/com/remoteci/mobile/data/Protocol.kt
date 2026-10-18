@@ -510,12 +510,15 @@ data class UserProfile(
 }
 
 @Serializable
-data class LoginRequest(val username: String, val password: String, @SerialName("deviceName") val deviceName: String)
+data class LoginRequest(val username: String, val password: String, @SerialName("deviceName") val deviceName: String,
+    val twoFactorCode: String? = null, val useRecoveryCode: Boolean = false)
 
 @Serializable
 data class MobileLoginRequest(
     val ticket: String,
     @SerialName("deviceName") val deviceName: String,
+    val twoFactorCode: String? = null,
+    val useRecoveryCode: Boolean = false,
 )
 
 /** WebUI 登录页“手机扫码”二维码：服务器地址与挑战码；已登录的 App 扫码确认后由显示二维码的浏览器登录。 */
@@ -576,6 +579,7 @@ data class RefreshSessionRequest(
 
 @Serializable
 data class AuthResponse(
+    val twoFactorRequired: Boolean? = null,
     @SerialName("accessToken") val accessToken: String,
     @SerialName("passwordPending") val passwordPending: Boolean? = null,
     @SerialName("setupToken") val setupToken: String? = null,

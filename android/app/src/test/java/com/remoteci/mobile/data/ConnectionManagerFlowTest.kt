@@ -185,6 +185,46 @@ class ConnectionManagerFlowTest {
     ): ConnectionManager.State = withTimeout(timeoutMs) { ConnectionManager.state.first(predicate) }
 
     @Test
+    fun `two factor waits without persisting a session and supports retry with recovery code`() = runBlocking {
+        val storage = FakeSessionStorage()
+        ConnectionManager.installSessionStorageForTest(storage)
+        server.enqueue(authBody(authResponse().copy(twoFactorRequired = true, accessToken = "", deviceSecret = "")))
+        server.enqueue(MockResponse.Builder().code(401).build())
+        server.enqueue(authBody())
+        server.enqueue(MockResponse.Builder().webSocketUpgrade(authStateListener()).build())
+        ConnectionManager.connect(mockServerSettings(), "correct-password")
+        withTimeout(15_000) { ConnectionManager.twoFactorRequested.first { it } }
+        assertNull(storage.stored)
+        ConnectionManager.submitTwoFactor("000000", false)
+        awaitState({ it is ConnectionManager.State.Error && it.message.contains("验证码错误") })
+        assertNull(storage.stored)
+        ConnectionManager.submitTwoFactor("AAAA-BBBB-CCCC-DDDD", true)
+        awaitState({ it is ConnectionManager.State.CloudConnected })
+        assertEquals(SESSION_ID, storage.stored?.deviceSessionId)
+        assertFalse(ConnectionManager.twoFactorRequested.value)
+        server.takeRequest()
+        val otp = json.decodeFromString(LoginRequest.serializer(), server.takeRequest().body!!.utf8())
+        assertEquals("000000", otp.twoFactorCode)
+        assertFalse(otp.useRecoveryCode)
+        val recovery = json.decodeFromString(LoginRequest.serializer(), server.takeRequest().body!!.utf8())
+        assertEquals("AAAA-BBBB-CCCC-DDDD", recovery.twoFactorCode)
+        assertTrue(recovery.useRecoveryCode)
+    }
+
+    @Test
+    fun `cancelling second factor does not create a device session`() = runBlocking {
+        val storage = FakeSessionStorage()
+        ConnectionManager.installSessionStorageForTest(storage)
+        server.enqueue(authBody(authResponse().copy(twoFactorRequired = true, accessToken = "", deviceSecret = "")))
+        ConnectionManager.connect(mockServerSettings(), "correct-password")
+        withTimeout(15_000) { ConnectionManager.twoFactorRequested.first { it } }
+        ConnectionManager.cancelTwoFactor()
+        withTimeout(15_000) { ConnectionManager.twoFactorRequested.first { !it } }
+        assertNull(storage.stored)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun `password login persists device session and reaches cloud connected`() = runBlocking {
         val storage = FakeSessionStorage()
         ConnectionManager.installSessionStorageForTest(storage)

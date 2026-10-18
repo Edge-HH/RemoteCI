@@ -125,6 +125,26 @@ class ConnectionManagerFlowTest {
     ): ConnectionManager.State = withTimeout(timeoutMs) { ConnectionManager.state.first(predicate) }
 
     @Test
+    fun `two factor waits without persisting a session and supports recovery code`() = runBlocking {
+        val storage = FakeSessionStorage()
+        ConnectionManager.installSessionStorageForTest(storage)
+        server.enqueue(MockResponse.Builder().code(200).body(json.encodeToString(AuthResponse.serializer(),
+            authResponse().copy(twoFactorRequired = true, accessToken = "", deviceSecret = ""))).build())
+        server.enqueue(MockResponse.Builder().code(200).body(json.encodeToString(AuthResponse.serializer(), authResponse())).build())
+        server.enqueue(MockResponse.Builder().webSocketUpgrade(authStateListener()).build())
+        ConnectionManager.connect(mockServerSettings(), "correct-password")
+        withTimeout(15_000) { ConnectionManager.twoFactorRequested.first { it } }
+        assertNull(storage.stored)
+        ConnectionManager.submitTwoFactor("AAAA-BBBB-CCCC-DDDD", true)
+        awaitState({ it is ConnectionManager.State.CloudConnected })
+        assertEquals(SESSION_ID, storage.stored?.deviceSessionId)
+        server.takeRequest()
+        val request = json.decodeFromString(LoginRequest.serializer(), server.takeRequest().body!!.utf8())
+        assertEquals("AAAA-BBBB-CCCC-DDDD", request.twoFactorCode)
+        assertTrue(request.useRecoveryCode)
+    }
+
+    @Test
     fun `password login persists device session and reaches cloud connected`() = runBlocking {
         val storage = FakeSessionStorage()
         ConnectionManager.installSessionStorageForTest(storage)

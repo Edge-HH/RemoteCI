@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.VisualTransformation
+import com.remoteci.mobile.calendar.CalendarFeed
 import com.remoteci.mobile.data.parseWebLoginQrPayload
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Arrangement
@@ -765,7 +766,7 @@ fun ScheduleScreen(
             TextButton(onClick = { editingCourse = null; showCourseEditor = true }, modifier = Modifier.padding(horizontal = 16.dp)) {
                 Text("添加自定义课程")
             }
-            PersonalCalendarImport(snackbar, myScheduleRefresh)
+            CalendarSyncRow(snackbar, myScheduleRefresh, CalendarFeed.Personal)
             when {
                 myDays.isEmpty() -> EmptyState(
                     if (myScheduleStatus != null) "暂时无法读取我的日程" else "还没有与你关联的课程",
@@ -814,6 +815,7 @@ fun ScheduleScreen(
                 }
             }
         } else {
+        if (user != null && classes.isNotEmpty()) CalendarSyncRow(snackbar, 0, CalendarFeed.Class, classes.firstOrNull { it.id == currentClassId })
         if (days.isEmpty()) {
             EmptyState("还没有课表", if (canPull) "连接成功后会显示未来七日课程。管理员或班主任可刷新课表。" else "连接成功后会显示未来七日课程。")
         } else {

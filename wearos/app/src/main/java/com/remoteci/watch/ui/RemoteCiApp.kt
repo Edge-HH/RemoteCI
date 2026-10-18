@@ -224,6 +224,7 @@ fun RemoteCiApp(context: Context) {
     }
 
     AppTheme(palette = WatchPalette.fromId(settings.themeId)) {
+        TwoFactorPrompt()
         when (screen) {
             Screen.Login -> LoginScreen(
                 settings = settings,

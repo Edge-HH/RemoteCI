@@ -56,6 +56,57 @@ import okhttp3.WebSocketListener
 
 /** 云端和局域网共用的认证、状态与命令入口。 */
 object ConnectionManager {
+    val twoFactorRequested = MutableStateFlow(false)
+    @Volatile private var twoFactorReply: CompletableDeferred<Pair<String, Boolean>?>? = null
+
+    private fun clearTwoFactorPrompt() {
+        twoFactorReply?.cancel()
+        twoFactorReply = null
+        twoFactorRequested.value = false
+    }
+
+    fun submitTwoFactor(code: String, recovery: Boolean) { twoFactorReply?.complete(code.trim() to recovery) }
+    fun cancelTwoFactor() { twoFactorReply?.complete(null) }
+
+    /** 仅在当前登录协程中保留密码/票据，5 分钟超时或取消即释放，不写入持久化存储。 */
+    private suspend fun authenticateWithTwoFactor(request: suspend (String?, Boolean) -> IssuedAuth): IssuedAuth {
+        var issued = request(null, false)
+        if (issued.response.twoFactorRequired != true) return issued
+        var ownedReply: CompletableDeferred<Pair<String, Boolean>?>? = null
+        try {
+            return withTimeout(5 * 60 * 1000L) {
+                var message = "请输入认证器验证码或一次性恢复码"
+                while (issued.response.twoFactorRequired == true) {
+                    val reply = CompletableDeferred<Pair<String, Boolean>?>()
+                    twoFactorReply = reply
+                    ownedReply = reply
+                    state.value = State.Error(message)
+                    twoFactorRequested.value = true
+                    val answer = reply.await()
+                    if (answer == null) {
+                        state.value = State.Error("已取消二步验证，请重新登录")
+                        throw CancellationException("Two-factor login cancelled")
+                    }
+                    state.value = State.Connecting
+                    try {
+                        issued = request(answer.first, answer.second)
+                        message = "请输入验证码"
+                    } catch (_: AuthenticationException) {
+                        message = "验证码错误、已过期或账号已锁定，请重试或重新登录"
+                    }
+                }
+                issued
+            }
+        } catch (error: TimeoutCancellationException) {
+            state.value = State.Error("二步验证已超时，请重新登录")
+            throw error
+        } finally {
+            if (twoFactorReply === ownedReply) {
+                twoFactorReply = null
+                twoFactorRequested.value = false
+            }
+        }
+    }
     sealed interface State {
         data object Idle : State
         data object Connecting : State
@@ -492,6 +543,7 @@ object ConnectionManager {
     /** password 或扫码登录票据仅用于本次 HTTPS 认证；成功后只保存 Keystore 加密的设备会话密钥。 */
     @Synchronized
     fun connect(settings: WatchSettings, password: String? = null, mobileLoginTicket: String? = null) {
+        clearTwoFactorPrompt()
         check(::sessions.isInitialized) { "ConnectionManager 尚未初始化" }
         discoveryJob?.cancel()
         lanDiscoveryScanning.value = false
@@ -631,6 +683,7 @@ object ConnectionManager {
 
     @Synchronized
     fun disconnect(clearUser: Boolean = false) {
+        clearTwoFactorPrompt()
         generation.incrementAndGet()
         desiredSettings = null
         activeJob?.cancel()
@@ -963,30 +1016,30 @@ object ConnectionManager {
 
     private suspend fun loginCloud(settings: WatchSettings, password: String): AuthResponse =
         sessionMutex.withLock {
-            withContext(NonCancellable) {
+            authenticateWithTwoFactor { code, recovery -> withContext(NonCancellable) {
                 val issued = postAuth(
                     settings,
                     "/api/auth/login",
-                    json.encodeToString(LoginRequest(settings.username.trim(), password, "Android · ${Build.MANUFACTURER} ${Build.MODEL}")),
+                    json.encodeToString(LoginRequest(settings.username.trim(), password, "Android · ${Build.MANUFACTURER} ${Build.MODEL}", code, recovery)),
                 )
                 // 首登待设密码的账号不下发可用会话，不能覆盖已保存的会话。
-                if (issued.response.passwordPending != true) persist(issued)
-                issued.response
-            }
+                if (issued.response.passwordPending != true && issued.response.twoFactorRequired != true) persist(issued)
+                issued
+            } }.response
         }
 
     /** 扫码登录：用 WebUI 二维码中的一次性票据换取设备会话，成功后复用正常连接流程。 */
     private suspend fun loginWithMobileTicket(settings: WatchSettings, ticket: String): AuthResponse =
         sessionMutex.withLock {
-            withContext(NonCancellable) {
+            authenticateWithTwoFactor { code, recovery -> withContext(NonCancellable) {
                 val issued = postAuth(
                     settings,
                     "/api/auth/mobile-login",
-                    json.encodeToString(MobileLoginRequest(ticket, "Android · ${Build.MANUFACTURER} ${Build.MODEL}")),
+                    json.encodeToString(MobileLoginRequest(ticket, "Android · ${Build.MANUFACTURER} ${Build.MODEL}", code, recovery)),
                 )
-                persist(issued)
-                issued.response
-            }
+                if (issued.response.twoFactorRequired != true) persist(issued)
+                issued
+            } }.response
         }
 
     /**
@@ -1068,19 +1121,41 @@ object ConnectionManager {
     }
 
     /** 后台日历任务复用会话锁与密钥轮换，不启动 WebSocket 或个人日程轮询。 */
-    internal suspend fun calendarSchedule(settings: WatchSettings, userId: String): MyScheduleResponse = withContext(Dispatchers.IO) {
+    internal suspend fun calendarSchedule(settings: WatchSettings, userId: String): MyScheduleResponse {
+        val offset = OffsetDateTime.now().offset.totalSeconds / 60
+        return calendarGet(settings, userId, "/api/me/schedule?timeZoneOffsetMinutes=$offset", MyScheduleResponse.serializer()) { code ->
+            "读取个人日程失败（HTTP $code）"
+        }
+    }
+
+    /** 班级课表日历按绑定的班级读取；失去访问权或暂无课表时报错并保留已导入的事件。 */
+    internal suspend fun calendarClassSchedule(settings: WatchSettings, userId: String, classId: String): ScheduleBundle =
+        calendarGet(settings, userId, "/api/schedule?classId=${java.net.URLEncoder.encode(classId, "UTF-8")}", ScheduleBundle.serializer()) { code ->
+            when (code) {
+                403 -> "已无权访问该班级，请重新选择班级"
+                404 -> "该班级暂无课表"
+                else -> "读取班级课表失败（HTTP $code）"
+            }
+        }
+
+    private suspend fun <T> calendarGet(
+        settings: WatchSettings,
+        userId: String,
+        path: String,
+        serializer: kotlinx.serialization.KSerializer<T>,
+        failure: (Int) -> String,
+    ): T = withContext(Dispatchers.IO) {
         val epoch = sessionEpoch.get()
         var issued = cloudAuth(settings, publishProfile = false)
-        suspend fun fetch(): MyScheduleResponse? {
+        fun fetch(): T? {
             check(issued.response.user.id == userId) { "登录账号已变化，请重新导入日程" }
-            val offset = OffsetDateTime.now().offset.totalSeconds / 60
-            val request = Request.Builder().url("${issued.serverUrl}/api/me/schedule?timeZoneOffsetMinutes=$offset")
+            val request = Request.Builder().url("${issued.serverUrl}$path")
                 .header("Authorization", "Bearer ${issued.response.accessToken}").build()
             authHttp.newCall(request).execute().use { response ->
                 if (response.code == 401) return null
-                check(response.isSuccessful) { "读取个人日程失败（HTTP ${response.code}）" }
+                check(response.isSuccessful) { failure(response.code) }
                 check(epoch == sessionEpoch.get()) { "登录会话已变化" }
-                return json.decodeFromString(MyScheduleResponse.serializer(), response.body.string())
+                return json.decodeFromString(serializer, response.body.string())
             }
         }
         fetch() ?: run {
