@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -227,6 +228,43 @@ public sealed class TwoFactorTests
             Assert.Equal(enabled.Secret, scope.ServiceProvider.GetRequiredService<TwoFactorService>().UnprotectKey(user));
         }
         Assert.True((await second.LoginAsync()).TwoFactorRequired);
+    }
+
+    [Fact]
+    public async Task EncryptedBackup_KeepsCiphertext_WhenKeyRingCannotDecrypt()
+    {
+        await using var first = new TestWebApplicationFactory();
+        var enabled = await EnableAdmin(first);
+        byte[] exported;
+        string foreign;
+        using (var scope = first.Services.CreateScope())
+        {
+            var user = await Admin(scope);
+            // 模拟 keys/ 丢失：密文来自另一套密钥环，当前服务器找不到对应密钥。
+            foreign = new EphemeralDataProtectionProvider()
+                .CreateProtector("RemoteCI.Totp.Key.v1", user.Id.ToString()).Protect(enabled.Secret);
+            await scope.ServiceProvider.GetRequiredService<AppDbContext>().Users.Where(x => x.Id == user.Id)
+                .ExecuteUpdateAsync(x => x.SetProperty(u => u.ProtectedTotpKey, foreign));
+            var archive = scope.ServiceProvider.GetRequiredService<ConfigurationArchiveService>();
+            Assert.Equal(TestWebApplicationFactory.AdminUsername, Assert.Single(await archive.FindUnreadableTwoFactorUsersAsync()));
+            exported = await archive.ExportEncryptedAsync("Backup-Password-2026");
+        }
+        await using var second = new TestWebApplicationFactory();
+        using (var scope = second.Services.CreateScope())
+        {
+            var archive = scope.ServiceProvider.GetRequiredService<ConfigurationArchiveService>();
+            var snapshot = archive.ReadEncrypted(exported, "Backup-Password-2026");
+            Assert.Null(snapshot.Users.Single().TotpSecret);
+            await archive.ApplyAsync(snapshot);
+            var user = await Admin(scope);
+            Assert.True(user.TwoFactorEnabled);
+            Assert.Equal(foreign, user.ProtectedTotpKey);
+        }
+        Assert.True((await second.LoginAsync()).TwoFactorRequired);
+        using var client = second.CreateClient();
+        var recovered = await client.PostAsJsonAsync("/api/auth/login", Login(enabled.Codes[0], true));
+        recovered.EnsureSuccessStatusCode();
+        Assert.NotEmpty((await recovered.Content.ReadFromJsonAsync<AuthResponse>())!.AccessToken);
     }
 
     private static LoginRequest Login(string code, bool recovery = false) => new()

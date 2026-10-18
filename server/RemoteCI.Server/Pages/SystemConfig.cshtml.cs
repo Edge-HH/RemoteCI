@@ -34,6 +34,7 @@ public sealed class SystemConfigModel(
     [BindProperty] public string? MobileServerUrl { get; set; }
     [BindProperty] public IFormFile? UpdatePackage { get; set; }
     public IReadOnlyList<BackupFileInfo> Backups { get; private set; } = [];
+    public IReadOnlyList<string> UnreadableTwoFactorUsers { get; private set; } = [];
 
     public string CurrentVersion => updates.CurrentVersion;
     public ReleaseInfo? LatestRelease { get; private set; }
@@ -289,6 +290,7 @@ public sealed class SystemConfigModel(
         var value = await db.BackupConfigurations.AsNoTracking().SingleAsync(x => x.Id == 1);
         BackupOptions = new BackupInput { Enabled=value.Enabled, Cadence=value.Cadence, TimeOfDay=value.TimeOfDay, DayOfWeek=value.DayOfWeek, MaxBackups=value.MaxBackups };
         Backups = archives.ListBackups();
+        UnreadableTwoFactorUsers = await archives.FindUnreadableTwoFactorUsersAsync(HttpContext.RequestAborted);
     }
 
     private void ScheduleRestart() => ApplicationRestartCoordinator.ScheduleRestart(lifetime, environment);

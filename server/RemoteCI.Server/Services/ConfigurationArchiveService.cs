@@ -15,7 +15,8 @@ public sealed class ConfigurationArchiveService(
     IStateStore state,
     TwoFactorService twoFactor,
     IOptions<ServerOptions> options,
-    IHostEnvironment environment)
+    IHostEnvironment environment,
+    ILogger<ConfigurationArchiveService> logger)
 {
     private static readonly byte[] Magic = "RCICFG01"u8.ToArray();
     private const int Iterations = 600_000;
@@ -97,11 +98,18 @@ public sealed class ConfigurationArchiveService(
         ValidatePassword(password);
         var snapshot = await CaptureAsync(ct);
         // 跨服务器导出的密钥只出现在口令加密包内；普通本地备份始终保留 Data Protection 密文。
-        snapshot = snapshot with { Users = snapshot.Users.Select(user => user.ProtectedTotpKey is null ? user : user with
+        // 当前密钥环解不开的密钥（keys/ 丢失或被替换）原样保留密文：本机也已无法校验验证码，
+        // 迁移后状态不变，用户仍可用恢复码登录后重新绑定，不因个别账号导致整包导出失败。
+        var unreadable = new List<string>();
+        snapshot = snapshot with { Users = snapshot.Users.Select(user =>
         {
-            TotpSecret = twoFactor.UnprotectKey(new AppUser { Id = user.Id, ProtectedTotpKey = user.ProtectedTotpKey }),
-            ProtectedTotpKey = null,
+            if (user.ProtectedTotpKey is null) return user;
+            if (TryUnprotect(user.Id, user.ProtectedTotpKey) is { } secret) return user with { TotpSecret = secret, ProtectedTotpKey = null };
+            unreadable.Add(user.Username);
+            return user;
         }).ToList() };
+        if (unreadable.Count > 0)
+            logger.LogWarning("导出配置时 {Count} 个账号的 TOTP 密钥无法用当前密钥环解密，已保留原密文：{Users}", unreadable.Count, string.Join(", ", unreadable));
         var compressed = Compress(snapshot);
         var salt = RandomNumberGenerator.GetBytes(16);
         var nonce = RandomNumberGenerator.GetBytes(12);
@@ -113,6 +121,20 @@ public sealed class ConfigurationArchiveService(
         output.Write(Magic); output.Write(BitConverter.GetBytes(Iterations)); output.Write(salt); output.Write(nonce); output.Write(tag); output.Write(cipher);
         CryptographicOperations.ZeroMemory(key);
         return output.ToArray();
+    }
+
+    /// <summary>已开启二步验证、但 TOTP 密钥无法用当前密钥环解密的账号 ID。</summary>
+    public async Task<IReadOnlyList<string>> FindUnreadableTwoFactorUsersAsync(CancellationToken ct = default)
+    {
+        var keys = await db.Users.AsNoTracking().Where(x => x.ProtectedTotpKey != null)
+            .Select(x => new { x.Id, x.UserName, x.ProtectedTotpKey }).ToListAsync(ct);
+        return keys.Where(x => TryUnprotect(x.Id, x.ProtectedTotpKey!) is null).Select(x => x.UserName!).ToList();
+    }
+
+    private string? TryUnprotect(Guid userId, string protectedKey)
+    {
+        try { return twoFactor.UnprotectKey(new AppUser { Id = userId, ProtectedTotpKey = protectedKey }); }
+        catch (CryptographicException) { return null; }
     }
 
     public ConfigurationSnapshot ReadEncrypted(ReadOnlySpan<byte> bytes, string password)
