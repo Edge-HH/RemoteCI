@@ -12,28 +12,28 @@
         @if (Model.CanUseOperation(BatchOperationKind.Notify))
         {
             <button type="button" class="batch-action-card" id="send-notification" data-batch-open="Notify" data-batch-title="通知广播" data-batch-risk="false">
-                <span class="batch-action-icon"><i class="bi bi-megaphone" aria-hidden="true"></i></span>
+                <span class="batch-action-icon"><i class="icon icon-campaign" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>通知广播</strong><small>向设备发送一条通知。</small></span>
             </button>
         }
         @if (Model.CanUseOperation(BatchOperationKind.ClearNotifications))
         {
             <button type="button" class="batch-action-card" data-batch-open="ClearNotifications" data-batch-title="清除通知" data-batch-risk="false">
-                <span class="batch-action-icon"><i class="bi bi-bell-slash" aria-hidden="true"></i></span>
+                <span class="batch-action-icon"><i class="icon icon-notifications-off" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>清除通知</strong><small>清除设备当前显示的提醒。</small></span>
             </button>
         }
         @if (Model.CanUseOperation(BatchOperationKind.Power))
         {
             <button type="button" class="batch-action-card" data-batch-open="Power" data-batch-title="电源控制" data-batch-risk="true">
-                <span class="batch-action-icon danger"><i class="bi bi-power" aria-hidden="true"></i></span>
+                <span class="batch-action-icon danger"><i class="icon icon-power-settings-new" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>电源控制</strong><small>关机、重启、睡眠或休眠教室端设备。</small></span>
             </button>
         }
         @if (Model.CanUseOperation(BatchOperationKind.VoiceMessage))
         {
             <button type="button" class="batch-action-card" data-batch-open="VoiceMessage" data-batch-title="语音消息" data-batch-risk="false">
-                <span class="batch-action-icon"><i class="bi bi-mic" aria-hidden="true"></i></span>
+                <span class="batch-action-icon"><i class="icon icon-mic" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>语音消息</strong><small>录制一段语音并在设备上播放。</small></span>
             </button>
         }
@@ -53,7 +53,7 @@
         @if (Model.CanUseOperation(BatchOperationKind.JoinManagement))
         {
             <button type="button" class="batch-action-card" data-batch-open="JoinManagement" data-batch-title="加入集控" data-batch-risk="true">
-                <span class="batch-action-icon danger"><i class="bi bi-diagram-3" aria-hidden="true"></i></span>
+                <span class="batch-action-icon danger"><i class="icon icon-account-tree" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>加入集控</strong><small>让设备加入 ClassIsland 内置集控服务器。</small></span>
             </button>
         }
@@ -73,49 +73,49 @@
         @if (Model.CanUseOperation(BatchOperationKind.InstallPlugins))
         {
             <button type="button" class="batch-action-card" data-batch-open="InstallPlugins" data-batch-title="安装插件" data-batch-risk="false">
-                <span class="batch-action-icon"><i class="bi bi-plus-square" aria-hidden="true"></i></span>
+                <span class="batch-action-icon"><i class="icon icon-add-box" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>安装插件</strong><small>从 ClassIsland 插件市场下载并安装。</small></span>
             </button>
         }
         @if (Model.CanUseOperation(BatchOperationKind.UninstallPlugins))
         {
             <button type="button" class="batch-action-card" data-batch-open="UninstallPlugins" data-batch-title="卸载插件" data-batch-risk="true">
-                <span class="batch-action-icon danger"><i class="bi bi-trash3" aria-hidden="true"></i></span>
+                <span class="batch-action-icon danger"><i class="icon icon-delete" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>卸载插件</strong><small>标记卸载并重启 ClassIsland 生效。</small></span>
             </button>
         }
         @if (Model.CanUseOperation(BatchOperationKind.SetPluginEnabled))
         {
             <button type="button" class="batch-action-card" data-batch-open="SetPluginEnabled" data-batch-title="启用或禁用插件" data-batch-risk="false">
-                <span class="batch-action-icon"><i class="bi bi-toggle2-on" aria-hidden="true"></i></span>
+                <span class="batch-action-icon"><i class="icon icon-toggle-on" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>启用或禁用插件</strong><small>批量切换本地插件状态，重启后生效。</small></span>
             </button>
         }
         @if (Model.CanUseOperation(BatchOperationKind.RefreshSoftwareInventory))
         {
             <button type="button" class="batch-action-card" data-batch-open="RefreshSoftwareInventory" data-batch-title="刷新版本清单" data-batch-risk="false">
-                <span class="batch-action-icon"><i class="bi bi-arrow-repeat" aria-hidden="true"></i></span>
+                <span class="batch-action-icon"><i class="icon icon-sync" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>刷新版本清单</strong><small>重新采集应用和插件版本。</small></span>
             </button>
         }
         @if (Model.CanUseOperation(BatchOperationKind.UpgradePlugins))
         {
             <button type="button" class="batch-action-card" data-batch-open="UpgradePlugins" data-batch-title="升级插件" data-batch-risk="true">
-                <span class="batch-action-icon danger"><i class="bi bi-cloud-arrow-up" aria-hidden="true"></i></span>
+                <span class="batch-action-icon danger"><i class="icon icon-cloud-upload" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>升级插件</strong><small>通过插件市场更新全部或指定插件。</small></span>
             </button>
         }
         @if (Model.CanUseOperation(BatchOperationKind.UpgradeClassIsland))
         {
             <button type="button" class="batch-action-card" data-batch-open="UpgradeClassIsland" data-batch-title="升级 ClassIsland" data-batch-risk="true">
-                <span class="batch-action-icon danger"><i class="bi bi-window-stack" aria-hidden="true"></i></span>
+                <span class="batch-action-icon danger"><i class="icon icon-system-update" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>升级 ClassIsland</strong><small>下载并部署宿主更新，完成后自动重启。</small></span>
             </button>
         }
         @if (Model.CanUseOperation(BatchOperationKind.RestartClassIsland))
         {
             <button type="button" class="batch-action-card" data-batch-open="RestartClassIsland" data-batch-title="重启 ClassIsland" data-batch-risk="true">
-                <span class="batch-action-icon danger"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i></span>
+                <span class="batch-action-icon danger"><i class="icon icon-refresh" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>重启 ClassIsland</strong><small>只重启 ClassIsland 实例，不重启 Windows。</small></span>
             </button>
         }
@@ -135,14 +135,14 @@
         @if (Model.CanUseMaintenanceOperation(BatchOperationKind.ExecuteTerminalCommand))
         {
             <button type="button" class="batch-action-card" data-batch-open="ExecuteTerminalCommand" data-batch-title="远程终端" data-batch-risk="true">
-                <span class="batch-action-icon danger"><i class="bi bi-terminal" aria-hidden="true"></i></span>
+                <span class="batch-action-icon danger"><i class="icon icon-terminal" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>远程终端</strong><small>在设备上执行命令并取回输出。</small></span>
             </button>
         }
         @if (Model.CanUseMaintenanceOperation(BatchOperationKind.SendFile))
         {
             <button type="button" class="batch-action-card" data-batch-open="SendFile" data-batch-title="文件分发" data-batch-risk="true">
-                <span class="batch-action-icon"><i class="bi bi-file-earmark-arrow-up" aria-hidden="true"></i></span>
+                <span class="batch-action-icon"><i class="icon icon-upload-file" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>文件分发</strong><small>把文件分发到设备的桌面或下载文件夹。</small></span>
             </button>
         }
@@ -170,7 +170,7 @@
                 @foreach (var extension in group.Extensions)
                 {
                     <button type="button" class="batch-action-card" data-batch-open="RunExtension" data-batch-dialog="batch-settings-extension-@batchExtensionIndex" data-batch-title="@extension.DisplayName" data-batch-risk="false">
-                        <span class="batch-action-icon"><i class="bi bi-puzzle" aria-hidden="true"></i></span>
+                        <span class="batch-action-icon"><i class="icon icon-extension" aria-hidden="true"></i></span>
                         <span class="batch-action-copy"><strong>@extension.DisplayName</strong><small>@(string.IsNullOrWhiteSpace(extension.Description) ? (extension.Parameters?.Count > 0 ? "填写参数后批量执行。" : "批量执行该扩展功能。") : extension.Description)</small></span>
                     </button>
                     batchExtensionIndex++;
@@ -178,7 +178,7 @@
                 @if (group.HasSettings)
                 {
                     <a class="batch-action-card" asp-page="@(Model.IsSingleControl ? "/ClassExtensions" : "/ExtensionSettings")" asp-route-groupId="@group.Id">
-                        <span class="batch-action-icon"><i class="bi bi-sliders" aria-hidden="true"></i></span>
+                        <span class="batch-action-icon"><i class="icon icon-tune" aria-hidden="true"></i></span>
                         <span class="batch-action-copy"><strong>插件设置</strong><small>@(Model.IsSingleControl ? $"修改本班的 {group.Settings.Count} 项设置。" : $"按范围统一修改 {group.Settings.Count} 项设置。")</small></span>
                     </a>
                 }
@@ -602,7 +602,7 @@ foreach (var extension in Model.BatchExtensionGroups.SelectMany(group => group.E
                                 <div class="device-card-head">
                                     <label class="device-select">
                                         <input type="checkbox" name="SelectedConnectionIds" value="@device.ConnectionId" data-voice-query="connectionIds" @(device.Online ? null : "disabled") />
-                                        <span class="device-icon"><i class="bi bi-pc-display" aria-hidden="true"></i></span>
+                                        <span class="device-icon"><i class="icon icon-computer" aria-hidden="true"></i></span>
                                         <span>
                                             <strong>@device.DeviceName</strong>
                                             <small>@device.ClassName · @device.ClassIslandVersion · @device.RemoteCiVersion</small>

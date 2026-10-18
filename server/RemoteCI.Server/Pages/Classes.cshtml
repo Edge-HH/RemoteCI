@@ -22,7 +22,7 @@
                 <li class="class-tree-item">
                     <div class="class-tree-row @(Model.SelectedGroupId is null ? "active" : null)">
                         <span class="tree-toggle-placeholder" aria-hidden="true"></span>
-                        <i class="bi bi-collection tree-icon" aria-hidden="true"></i>
+                        <i class="icon icon-library-books tree-icon" aria-hidden="true"></i>
                         <a class="tree-label" href="@Url.Page("/Classes")">全部班级</a>
                         <span class="tree-count">@Model.Classes.Count</span>
                         <span class="tree-menu-spacer" aria-hidden="true"></span>
@@ -31,7 +31,7 @@
                 <li class="class-tree-item">
                     <div class="class-tree-row @(Model.IsUngroupedSelected ? "active" : null)">
                         <span class="tree-toggle-placeholder" aria-hidden="true"></span>
-                        <i class="bi bi-inbox tree-icon" aria-hidden="true"></i>
+                        <i class="icon icon-inbox tree-icon" aria-hidden="true"></i>
                         <a class="tree-label" href="@Url.Page("/Classes", new { groupId = ClassesModel.UnassignedGroupId })">未分组</a>
                         <span class="tree-count">@Model.UnassignedClassCount</span>
                         <span class="tree-menu-spacer" aria-hidden="true"></span>
@@ -48,7 +48,7 @@
             }
         </nav>
         <details class="class-tree-create">
-            <summary><i class="bi bi-plus-lg" aria-hidden="true"></i>新建分组</summary>
+            <summary><i class="icon icon-add" aria-hidden="true"></i>新建分组</summary>
             <form method="post" asp-page="/Classes" asp-page-handler="CreateGroup">
                 <input type="hidden" name="groupId" value="@Model.SelectedGroupId" />
                 <label>分组名称<input asp-for="NewGroupName" required maxlength="40" placeholder="例如：高一年级" /></label>
@@ -75,7 +75,7 @@
             </div>
             <div class="class-content-actions">
                 <details class="inline-create">
-                    <summary class="button"><i class="bi bi-plus-lg" aria-hidden="true"></i>新建班级</summary>
+                    <summary class="button"><i class="icon icon-add" aria-hidden="true"></i>新建班级</summary>
                     <form method="post" asp-page="/Classes" asp-page-handler="Create" class="floating-form">
                         <input type="hidden" name="groupId" value="@Model.SelectedGroupId" />
                         <label>班级名称<input asp-for="NewClassName" required maxlength="40" placeholder="例如：高一（1）班" /></label>
@@ -137,7 +137,7 @@
             @if (Model.VisibleClasses.Count == 0)
             {
                 <div class="empty-state class-content-empty">
-                    <i class="bi bi-diagram-3" aria-hidden="true"></i>
+                    <i class="icon icon-account-tree" aria-hidden="true"></i>
                     <strong>当前分组暂无班级</strong>
                     <span>可在左侧切换范围，或把班级批量加入此分组。</span>
                 </div>
@@ -203,7 +203,7 @@
                                 </td>
                                 <td data-label="操作">
                                     <details class="row-menu">
-                                        <summary aria-label="管理 @classroom.Name"><i class="bi bi-three-dots" aria-hidden="true"></i></summary>
+                                        <summary aria-label="管理 @classroom.Name"><i class="icon icon-more-horiz" aria-hidden="true"></i></summary>
                                         <div class="row-menu-panel">
                                             <form method="post" asp-page="/Classes" asp-page-handler="Rename" class="row-menu-form">
                                                 <input type="hidden" name="id" value="@classroom.Id" />

@@ -15,7 +15,7 @@
     </div>
     @if (group is not null)
     {
-        <a class="button ghost" asp-page="/ClassExtensions"><i class="bi bi-arrow-left" aria-hidden="true"></i> 全部插件</a>
+        <a class="button ghost" asp-page="/ClassExtensions"><i class="icon icon-arrow-back" aria-hidden="true"></i> 全部插件</a>
     }
 </div>
 
@@ -31,7 +31,7 @@
         </div>
         @if (Model.Groups.Count == 0)
         {
-            <div class="empty-state"><i class="bi bi-puzzle" aria-hidden="true"></i><strong>本班暂无可设置的扩展插件</strong><span>安装支持 RemoteCI 扩展分组的插件，并让本班设备至少连接一次后会出现在这里。</span></div>
+            <div class="empty-state"><i class="icon icon-extension" aria-hidden="true"></i><strong>本班暂无可设置的扩展插件</strong><span>安装支持 RemoteCI 扩展分组的插件，并让本班设备至少连接一次后会出现在这里。</span></div>
         }
         else
         {
@@ -56,7 +56,7 @@
 else if (group is null)
 {
     <section class="panel">
-        <div class="empty-state"><i class="bi bi-question-circle" aria-hidden="true"></i><strong>没有找到该插件的设置</strong><span>本班设备没有上报这个插件，或你没有管理它的权限。</span></div>
+        <div class="empty-state"><i class="icon icon-help" aria-hidden="true"></i><strong>没有找到该插件的设置</strong><span>本班设备没有上报这个插件，或你没有管理它的权限。</span></div>
     </section>
 }
 else

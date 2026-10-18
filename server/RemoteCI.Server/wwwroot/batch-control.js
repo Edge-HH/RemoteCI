@@ -58,7 +58,7 @@
         results.forEach(item => {
             const li = document.createElement("li");
             const icon = document.createElement("i");
-            icon.className = `bi ${item.success ? "bi-check-circle ok" : "bi-x-circle bad"}`;
+            icon.className = `icon ${item.success ? "icon-check-circle ok" : "icon-cancel bad"}`;
             icon.setAttribute("aria-hidden", "true");
             const text = document.createElement("span");
             const name = document.createElement("strong");
@@ -149,7 +149,7 @@
         const context = document.createElement("div");
         context.className = "single-control-context";
         context.dataset.singleControlContext = "";
-        context.innerHTML = `<div class="single-control-context-icon" aria-hidden="true"><i class="bi bi-broadcast-pin"></i></div>
+        context.innerHTML = `<div class="single-control-context-icon" aria-hidden="true"><i class="icon icon-sensors"></i></div>
             <div><span class="single-control-context-label">执行范围</span><strong></strong><p>仅发送到当前班级的在线设备。</p></div>`;
         context.querySelector("strong").textContent = singleClassName;
         body.prepend(context);

@@ -16,7 +16,7 @@
 | OkHttp | 手表端 HTTP/WebSocket 客户端 | Apache-2.0 | © Square, Inc. |
 | kotlinx.serialization | 手表端 JSON 序列化 | Apache-2.0 | © JetBrains |
 | kotlinx.coroutines | 手表端协程 | Apache-2.0 | © JetBrains |
-| [Bootstrap Icons](https://icons.getbootstrap.com/) | WebUI 导航与操作图标 | MIT | Copyright (c) 2019-2024 The Bootstrap Authors；许可证原文位于 `server/RemoteCI.Server/wwwroot/vendor/bootstrap-icons/LICENSE` |
+| [Material Symbols Rounded](https://fonts.google.com/icons) | WebUI 导航与操作图标（按使用到的图标子集化，与安卓端 Material Rounded 图标同源） | Apache-2.0 | Copyright Google LLC；许可证原文位于 `server/RemoteCI.Server/wwwroot/vendor/material-symbols/LICENSE` |
 | [ClosedXML](https://github.com/ClosedXML/ClosedXML) | 服务端成员 Excel 导入、导出与覆盖导入 | MIT | Copyright (c) ClosedXML contributors；传递依赖包括 DocumentFormat.OpenXml（MIT）与 SixLabors.Fonts（Apache-2.0） |
 | [Markdig](https://github.com/xoofx/markdig) | WebUI 系统更新页渲染 GitHub Release 更新说明 | BSD-2-Clause | Copyright (c) Alexandre Mutel |
 

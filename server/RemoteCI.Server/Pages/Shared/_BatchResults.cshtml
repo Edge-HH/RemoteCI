@@ -13,7 +13,7 @@
             @foreach (var item in Model.LastResults)
             {
                 <li>
-                    <i class="bi @(item.Success ? "bi-check-circle ok" : "bi-x-circle bad")" aria-hidden="true"></i>
+                    <i class="icon @(item.Success ? "icon-check-circle ok" : "icon-cancel bad")" aria-hidden="true"></i>
                     <span>
                         <strong>@Model.ResultClassName(item)</strong>-@(item.Success ? "成功" : item.Message ?? "失败")（@item.TargetName）
                     </span>

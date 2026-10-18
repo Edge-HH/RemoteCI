@@ -105,7 +105,7 @@
                 <input type="range" class="extension-color-alpha" min="0" max="255" step="1" value="@alpha" data-color-alpha aria-label="@($"{label}：不透明度")" title="不透明度" />
                 <input name="@valueName" id="@inputId" type="text" class="extension-color-text" maxlength="9" spellcheck="false" autocomplete="off" value="@value" placeholder="@(field.Placeholder ?? "#AARRGGBB")" required="@required" data-extension-value data-color-text />
                 <details class="extension-color-palette">
-                    <summary title="色卡"><i class="bi bi-palette" aria-hidden="true"></i><span class="visually-hidden">色卡</span></summary>
+                    <summary title="色卡"><i class="icon icon-palette" aria-hidden="true"></i><span class="visually-hidden">色卡</span></summary>
                     <div class="extension-color-swatches">
                         @foreach (var swatch in ExtensionFieldsModel.ColorSwatches)
                         {

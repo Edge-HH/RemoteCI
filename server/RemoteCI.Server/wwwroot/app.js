@@ -46,12 +46,12 @@ async function handleCopyClick(event) {
         copyButton.classList.add("copied");
         copyButton.setAttribute("aria-label", "已复制");
         copyButton.title = "已复制";
-        icon?.classList.replace("bi-copy", "bi-check2");
+        icon?.classList.replace("icon-content-copy", "icon-check");
         window.setTimeout(() => {
             copyButton.classList.remove("copied");
             copyButton.setAttribute("aria-label", "复制");
             copyButton.title = "复制配对码";
-            icon?.classList.replace("bi-check2", "bi-copy");
+            icon?.classList.replace("icon-check", "icon-content-copy");
         }, 1600);
     } catch {
         copyButton.setAttribute("aria-label", "复制失败，请手动复制");
@@ -220,8 +220,8 @@ document.querySelectorAll("[data-volume-form]").forEach(form => {
         slider.dataset.muted = muted ? "true" : "false";
         if (muteInput) muteInput.value = muted ? "false" : "true";
         if (muteButton) muteButton.textContent = muted ? "取消静音" : "静音";
-        icon?.classList.toggle("bi-volume-mute", muted);
-        icon?.classList.toggle("bi-volume-up", !muted);
+        icon?.classList.toggle("icon-volume-off", muted);
+        icon?.classList.toggle("icon-volume-up", !muted);
     };
 
     const drainQueue = async () => {

@@ -5,14 +5,14 @@
     @* InitialJson 使用默认 System.Text.Json HTML 安全编码；完整档案仅在脚本里解析，绝不作为 HTML 渲染。 *@
     <script type="application/json" data-profile-initial>@Html.Raw(Model)</script>
     <nav class="profile-mode-tabs" aria-label="档案管理入口" data-profile-modes hidden>
-        <button type="button" class="ghost" data-profile-mode="library" aria-pressed="true"><i class="bi bi-folder2" aria-hidden="true"></i> 档案库</button>
-        <button type="button" class="ghost" data-profile-mode="classes" aria-pressed="false"><i class="bi bi-people" aria-hidden="true"></i> 批量编辑</button>
+        <button type="button" class="ghost" data-profile-mode="library" aria-pressed="true"><i class="icon icon-folder" aria-hidden="true"></i> 档案库</button>
+        <button type="button" class="ghost" data-profile-mode="classes" aria-pressed="false"><i class="icon icon-group" aria-hidden="true"></i> 批量编辑</button>
     </nav>
     <p class="notice profile-context" data-profile-context>正在加载档案…</p>
     <div class="flash" role="status" aria-live="polite" data-profile-feedback hidden></div>
     <div class="profile-workspace">
         <aside class="panel profile-rail" aria-label="档案或班级列表">
-            <div class="profile-rail-head"><h2 data-profile-list-title>档案库</h2><button type="button" class="ghost" data-profile-action="new" aria-label="新建档案"><i class="bi bi-plus-lg" aria-hidden="true"></i></button></div>
+            <div class="profile-rail-head"><h2 data-profile-list-title>档案库</h2><button type="button" class="ghost" data-profile-action="new" aria-label="新建档案"><i class="icon icon-add" aria-hidden="true"></i></button></div>
             <label class="profile-search">查找<input type="search" data-profile-search placeholder="输入名称" /></label>
             <label class="check" data-profile-select-all-label hidden><input type="checkbox" data-profile-select-all /> 全选班级</label>
             <div class="profile-record-list" data-profile-records></div>
@@ -21,15 +21,15 @@
             <div class="profile-editor-toolbar">
                 <div class="profile-editor-identity"><h2 data-profile-editor-title>选择一个档案</h2><span class="muted" data-profile-revision></span></div>
                 <div class="profile-toolbar-actions">
-                    <button type="button" class="ghost" data-profile-action="collect" title="读取班级在线设备的当前档案（含临时层），载入为草稿"><i class="bi bi-cloud-download" aria-hidden="true"></i> 从设备收集</button>
-                    <button type="button" class="ghost" data-profile-action="upload"><i class="bi bi-upload" aria-hidden="true"></i> 上传</button>
+                    <button type="button" class="ghost" data-profile-action="collect" title="读取班级在线设备的当前档案（含临时层），载入为草稿"><i class="icon icon-cloud-download" aria-hidden="true"></i> 从设备收集</button>
+                    <button type="button" class="ghost" data-profile-action="upload"><i class="icon icon-upload" aria-hidden="true"></i> 上传</button>
                     <button type="button" class="ghost" data-profile-action="export">导出</button>
                     <button type="button" class="ghost" data-profile-action="copy">复制</button>
                     <button type="button" class="ghost" data-profile-action="assign" hidden>分配给班级</button>
                     <button type="button" class="ghost danger" data-profile-action="delete">删除</button>
                 </div>
             </div>
-            <div data-profile-empty class="empty-state"><i class="bi bi-folder2-open" aria-hidden="true"></i><strong>尚无档案</strong><span>新建档案，或上传 ClassIsland 档案 JSON 后解析预览。</span></div>
+            <div data-profile-empty class="empty-state"><i class="icon icon-folder-open" aria-hidden="true"></i><strong>尚无档案</strong><span>新建档案，或上传 ClassIsland 档案 JSON 后解析预览。</span></div>
             <div data-profile-content hidden>
                 <label class="profile-name">档案名称<input data-profile-name maxlength="100" required /></label>
                 <nav class="profile-section-tabs" aria-label="档案内容">

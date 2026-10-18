@@ -1234,7 +1234,7 @@ textarea { resize: vertical; }
 .qr-login-image svg { width: 100%; height: 100%; }
 .qr-login-image.loading { opacity: .35; }
 .qr-login-overlay { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 6px; padding: 16px; border-radius: 14px; background: color-mix(in srgb, var(--surface) 94%, transparent); color: var(--text); text-align: center; }
-.qr-login-overlay .bi { font-size: 30px; color: var(--accent-strong, var(--accent)); }
+.qr-login-overlay .icon { font-size: 30px; color: var(--accent-strong, var(--accent)); }
 .qr-login-overlay span { color: var(--muted); font-size: 13px; }
 .qr-login-steps { display: grid; gap: 4px; width: 100%; margin: 0; padding-left: 20px; color: var(--muted); font-size: 13px; }
 .qr-login .remember-me { justify-self: start; }

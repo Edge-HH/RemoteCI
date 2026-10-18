@@ -513,7 +513,7 @@
     const renderResults = (result, kind = "apply") => {
         $("[data-profile-results]").hidden = false;
         $("[data-profile-results-title]").textContent = kind === "collect" ? "收集结果" : "下发结果";
-        $("[data-profile-result-list]").innerHTML = result.results.map(item => `<li><i class="bi ${item.success ? "bi-check-circle ok" : "bi-x-circle bad"}" aria-hidden="true"></i><span><strong>${escape(item.targetName || `${item.className}${item.deviceName ? ` / ${item.deviceName}` : ""}`)}</strong>：${escape(item.message)}</span></li>`).join("");
+        $("[data-profile-result-list]").innerHTML = result.results.map(item => `<li><i class="icon ${item.success ? "icon-check-circle ok" : "icon-cancel bad"}" aria-hidden="true"></i><span><strong>${escape(item.targetName || `${item.className}${item.deviceName ? ` / ${item.deviceName}` : ""}`)}</strong>：${escape(item.message)}</span></li>`).join("");
         $("[data-profile-action=retry]").hidden = kind === "collect";
         if (kind === "collect") return;
         $("[data-profile-action=retry]").disabled = !result.results.some(item => !item.success);

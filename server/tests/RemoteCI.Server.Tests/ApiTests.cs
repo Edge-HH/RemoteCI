@@ -1399,7 +1399,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Contains("一次性插件配对码", pairCodeHtml);
         Assert.Contains("使用前持续有效", pairCodeHtml);
         Assert.Contains("data-copy-value", pairCodeHtml);
-        Assert.Contains("bi-copy", pairCodeHtml);
+        Assert.Contains("icon-content-copy", pairCodeHtml);
     }
 
     [Fact]

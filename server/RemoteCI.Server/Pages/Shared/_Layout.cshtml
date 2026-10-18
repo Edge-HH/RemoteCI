@@ -96,7 +96,7 @@
     <title>@ViewData["Title"] · RemoteCI</title>
     <link rel="icon" href="~/favicon.ico" sizes="16x16 32x32 48x48" asp-append-version="true" />
     <link rel="icon" type="image/svg+xml" href="~/favicon.svg" asp-append-version="true" />
-    <link rel="stylesheet" href="~/vendor/bootstrap-icons/font/bootstrap-icons.min.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/vendor/material-symbols/material-symbols.css" asp-append-version="true" />
     @* 主题在样式表之前确定，避免登录页出现明暗闪烁；管理员强制主题优先于本地偏好。 *@
     <script>try { document.documentElement.dataset.theme = "@forcedLoginTheme" || (localStorage.getItem("remoteci-theme") === "light" ? "light" : "dark"); } catch { document.documentElement.dataset.theme = "dark"; }</script>
     <link rel="stylesheet" href="~/app.css" asp-append-version="true" />

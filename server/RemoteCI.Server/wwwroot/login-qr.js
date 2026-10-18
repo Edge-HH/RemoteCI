@@ -33,7 +33,7 @@
 
     function showOverlay(icon, title, text, canRefresh) {
         overlay.hidden = false;
-        overlayIcon.className = `bi ${icon}`;
+        overlayIcon.className = `icon ${icon}`;
         overlayTitle.textContent = title;
         overlayText.textContent = text || "";
         refresh.hidden = !canRefresh;
@@ -57,7 +57,7 @@
             statusText.textContent = "请用 RemoteCI 手机 App 扫描二维码。";
             schedule();
         } catch (error) {
-            showOverlay("bi-exclamation-circle", "二维码生成失败", error.message, true);
+            showOverlay("icon-error", "二维码生成失败", error.message, true);
             statusText.textContent = "";
         } finally {
             image.classList.remove("loading");
@@ -84,17 +84,17 @@
                     schedule();
                     break;
                 case "scanned":
-                    showOverlay("bi-phone", "已扫描", `请在手机上确认登录${status.scannedBy ? `（${status.scannedBy}）` : ""}`, false);
+                    showOverlay("icon-smartphone", "已扫描", `请在手机上确认登录${status.scannedBy ? `（${status.scannedBy}）` : ""}`, false);
                     statusText.textContent = "等待手机确认…";
                     schedule();
                     break;
                 case "approved":
-                    showOverlay("bi-check-circle", "已确认", "正在登录…", false);
+                    showOverlay("icon-check-circle", "已确认", "正在登录…", false);
                     await complete();
                     break;
                 case "denied":
                     challenge = null;
-                    showOverlay("bi-x-circle", "已在手机上取消", "需要时可以重新生成二维码。", true);
+                    showOverlay("icon-cancel", "已在手机上取消", "需要时可以重新生成二维码。", true);
                     statusText.textContent = "";
                     break;
                 default:
@@ -111,7 +111,7 @@
     function expire() {
         challenge = null;
         stop();
-        showOverlay("bi-arrow-clockwise", "二维码已过期", "点击刷新后重新扫码。", true);
+        showOverlay("icon-refresh", "二维码已过期", "点击刷新后重新扫码。", true);
         statusText.textContent = "";
     }
 
@@ -125,7 +125,7 @@
             window.location.assign(result.redirectUrl || "/");
         } catch (error) {
             challenge = null;
-            showOverlay("bi-exclamation-circle", "登录失败", error.message, true);
+            showOverlay("icon-error", "登录失败", error.message, true);
             statusText.textContent = "";
         }
     }
