@@ -66,9 +66,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.journeyapps.barcodescanner.ScanContract
 import com.remoteci.mobile.data.AdminApi
-import com.remoteci.mobile.data.ClassSummary
 import com.remoteci.mobile.data.CompatibleUpdate
 import com.remoteci.mobile.data.ConnectionManager
+import com.remoteci.mobile.data.canAutoFollowTeachingClass
 import com.remoteci.mobile.data.Protocol
 import com.remoteci.mobile.data.UpdateChannel
 import com.remoteci.mobile.data.UpdateManager
@@ -181,6 +181,22 @@ fun AccountScreen(
                 }
             }
             if (pickingClass) ClassSwitchDialog(classes, currentClassId, onDismiss = { pickingClass = false })
+            // 只有按显示名绑定课表的老师与班主任才有跨班级的个人日程可跟随。
+            if (canAutoFollowTeachingClass(user, classes)) {
+                Card(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth()) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("上课时自动切换到任教班级", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "按我的日程在上课时或课前 10 分钟切到所在班级；手动换班后，当前课结束前不再自动切回",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(settings.autoFollowTeachingClass, { onPersist(settings.copy(autoFollowTeachingClass = it)) })
+                    }
+                }
+            }
         }
         // 显示名是老师绑定课表教师名的依据，服务端只允许系统管理员修改，其他账号不显示入口。
         if (user?.isAdmin == true) {
@@ -229,35 +245,6 @@ fun AccountScreen(
             }
         }
     }
-}
-
-/** 多班级账号的换班对话框：选中即切换，并关闭对话框。 */
-@Composable
-private fun ClassSwitchDialog(classes: List<ClassSummary>, currentClassId: String?, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("切换班级") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                classes.forEach { classroom ->
-                    ListItem(
-                        headlineContent = { Text(classroom.name) },
-                        supportingContent = listOfNotNull(classroom.groupName, classroom.roleName)
-                            .joinToString(" · ")
-                            .takeIf { it.isNotBlank() }
-                            ?.let { { Text(it) } },
-                        trailingContent = { RadioButton(selected = classroom.id == currentClassId, onClick = null) },
-                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            ConnectionManager.switchClass(classroom.id)
-                            onDismiss()
-                        },
-                    )
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
-    )
 }
 
 /** 系统管理员的姓名（显示名）编辑：保存后从服务端拉取最新档案。 */

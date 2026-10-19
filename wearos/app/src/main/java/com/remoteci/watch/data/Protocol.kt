@@ -254,6 +254,24 @@ data class PersonalNotification(
     val readAt: String? = null,
 )
 
+/** “我的日程”当前/下一节课，时间已经由服务端按班级时区换算为绝对时间。 */
+@Serializable
+data class MyNextCourseResponse(
+    val at: String = "",
+    val current: MyCourseSlot? = null,
+    val next: MyCourseSlot? = null,
+)
+
+@Serializable
+data class MyCourseSlot(
+    val date: String = "",
+    @SerialName("classId") val classId: String = "",
+    @SerialName("className") val className: String = "",
+    val course: CourseEntry = CourseEntry(index = 0, label = "", subjectId = "", subject = ""),
+    @SerialName("startsAt") val startsAt: String = "",
+    @SerialName("endsAt") val endsAt: String = "",
+)
+
 @Serializable
 data class ClassEvent(
     @SerialName("classId") val classId: String? = null,
@@ -418,6 +436,11 @@ data class UserProfile(
     val version: Long = 0,
 ) {
     val isAdmin: Boolean get() = role == Protocol.ROLE_ADMIN
+    /** 内置“老师”角色（按显示名绑定课表教师名），roleKind 免受角色改名影响。 */
+    val isTeacher: Boolean get() = roleKind == Protocol.ROLE_KIND_TEACHER
+    /** 拥有个人“我的日程”的内置角色：老师与班主任（均按显示名匹配课表教师名）。 */
+    val hasPersonalSchedule: Boolean
+        get() = roleKind == Protocol.ROLE_KIND_TEACHER || roleKind == Protocol.ROLE_KIND_CLASS_ADMINISTRATOR
     /** 是否可管理指定班级的课表拉取：系统管理员，或该班级的班主任（与服务端按班级校验一致）。 */
     fun canPullScheduleFor(classId: String?): Boolean =
         isAdmin || classes?.firstOrNull { it.id == classId }?.isClassAdministrator == true

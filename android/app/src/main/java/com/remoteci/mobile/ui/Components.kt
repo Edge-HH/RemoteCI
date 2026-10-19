@@ -20,9 +20,20 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -30,14 +41,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,8 +61,12 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.remoteci.mobile.data.ClassSummary
+import com.remoteci.mobile.data.ConnectionManager
+import com.remoteci.mobile.data.classDisplayName
 
 fun connectedShape(index: Int, count: Int, outer: Dp = 28.dp, inner: Dp = 8.dp): Shape {
     if (count <= 1) return RoundedCornerShape(outer)
@@ -207,4 +227,82 @@ fun EmptyState(title: String, body: String, modifier: Modifier = Modifier) {
 @Composable
 fun PermissionHint(text: String) {
     Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
+}
+
+/**
+ * 当前班级芯片：显示真实班名；多班级账号带下拉箭头，点击展开班级菜单直接换班，单班级账号只显示名称。
+ * [selected] 不为 null 时作为筛选芯片使用（课表页“我的日程 / 班级课表”）：未选中时点击只切回班级视图，
+ * 选中后再点一次才展开班级菜单。
+ */
+@Composable
+fun ClassSwitcherChip(
+    modifier: Modifier = Modifier,
+    selected: Boolean? = null,
+    onSelect: () -> Unit = {},
+) {
+    val classes by ConnectionManager.classes.collectAsState()
+    val currentClassId by ConnectionManager.currentClassId.collectAsState()
+    val switchable = classes.size > 1
+    var expanded by remember { mutableStateOf(false) }
+    val label: @Composable () -> Unit = {
+        Text(classDisplayName(classes, currentClassId, fallback = "班级课表"), maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+    val arrow: (@Composable () -> Unit)? = if (switchable) {
+        { Icon(Icons.Rounded.ArrowDropDown, contentDescription = "切换班级", modifier = Modifier.size(FilterChipDefaults.IconSize)) }
+    } else null
+    Box(modifier) {
+        if (selected == null) {
+            AssistChip(onClick = { if (switchable) expanded = true }, label = label, trailingIcon = arrow)
+        } else {
+            FilterChip(
+                selected = selected,
+                onClick = { if (!selected) onSelect() else if (switchable) expanded = true },
+                label = label,
+                trailingIcon = arrow,
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            classes.forEach { classroom ->
+                DropdownMenuItem(
+                    text = { Text(classroom.name) },
+                    onClick = {
+                        expanded = false
+                        ConnectionManager.switchClass(classroom.id)
+                    },
+                    trailingIcon = if (classroom.id == currentClassId) {
+                        { Icon(Icons.Rounded.Check, contentDescription = "当前班级") }
+                    } else null,
+                )
+            }
+        }
+    }
+}
+
+/** 多班级账号的换班对话框：选中即切换，并关闭对话框。 */
+@Composable
+fun ClassSwitchDialog(classes: List<ClassSummary>, currentClassId: String?, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("切换班级") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                classes.forEach { classroom ->
+                    ListItem(
+                        headlineContent = { Text(classroom.name) },
+                        supportingContent = listOfNotNull(classroom.groupName, classroom.roleName)
+                            .joinToString(" · ")
+                            .takeIf { it.isNotBlank() }
+                            ?.let { { Text(it) } },
+                        trailingContent = { RadioButton(selected = classroom.id == currentClassId, onClick = null) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            ConnectionManager.switchClass(classroom.id)
+                            onDismiss()
+                        },
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
 }

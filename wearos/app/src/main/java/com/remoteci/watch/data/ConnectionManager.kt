@@ -23,6 +23,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -131,6 +132,12 @@ object ConnectionManager {
     private var discoveryJob: Job? = null
     private var schedulePullJob: Job? = null
     @Volatile private var desiredSettings: WatchSettings? = null
+    /** “上课时自动切换到任教班级”开关，由界面层同步；手动选班后在 [manualClassHoldUntilMs] 之前不自动切回。 */
+    @Volatile private var autoFollowTeachingClass = false
+    @Volatile private var manualClassHoldUntilMs = 0L
+    private var autoFollowJob: Job? = null
+    /** 自动跟随最近一次读到的当前/下一节课；手动选班时据此计算保持期。 */
+    @Volatile private var teachingNextCourse: MyNextCourseResponse? = null
     @Volatile private var accessToken: String? = null
     @Volatile private var lastLanAdvertisement: PluginNetworkInfo? = null
     // OkHttp 回调线程、主线程与协程会并发读写 generation，必须用原子操作保证 attempt 校验可靠。
@@ -152,6 +159,8 @@ object ConnectionManager {
     val extensions = MutableStateFlow<List<ExtensionDefinition>>(emptyList())
     val settings = MutableStateFlow<SettingsSync?>(null)
     val events = MutableSharedFlow<ClassEvent>(extraBufferCapacity = 32)
+    /** 自动跟随任教班级完成换班后的提示文案，由界面层短暂提示。 */
+    val autoClassSwitches = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val lastCommandResult = MutableStateFlow<CommandResult?>(null)
     private val voiceReplies = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<CommandResult>>()
 
@@ -221,9 +230,58 @@ object ConnectionManager {
         return effective and permission == permission
     }
 
-    /** 切换当前班级：清空旧班数据并立即拉取新班课表，之后的命令都会路由到新班级。 */
-    fun switchClass(classId: String) {
+    /**
+     * 界面层同步“上课时自动切换到任教班级”开关。开启后每 [AutoFollowPollMs] 读取一次当前/下一节课并判定目标班级，
+     * 开关变化时清除手动保持期，让新设置立即生效。连接层持有的设置一并更新，避免之后回传给界面时把开关改回去。
+     */
+    fun setAutoFollowTeachingClass(enabled: Boolean) {
+        desiredSettings?.takeIf { it.autoFollowTeachingClass != enabled }
+            ?.let { desiredSettings = it.copy(autoFollowTeachingClass = enabled) }
+        if (enabled == autoFollowTeachingClass) return
+        autoFollowTeachingClass = enabled
+        manualClassHoldUntilMs = 0L
+        teachingNextCourse = null
+        autoFollowJob?.cancel()
+        autoFollowJob = if (enabled) scope.launch {
+            while (isActive) {
+                followTeachingClass()
+                delay(AutoFollowPollMs)
+            }
+        } else null
+    }
+
+    /**
+     * 自动跟随一拍：只有老师与班主任才读取个人日程；读取失败时沿用上次结果（判定时会排除已结束的课）。
+     * 手动保持期内或已在目标班级时不动；换班后提示切到了哪个班的哪节课。
+     */
+    private suspend fun followTeachingClass() {
+        val accessible = classes.value
+        if (!autoFollowTeachingClass || !canAutoFollowTeachingClass(currentUser.value, accessible)) {
+            teachingNextCourse = null
+            return
+        }
+        val offset = OffsetDateTime.now().offset.totalSeconds / 60
+        runCatching { ownGet("/api/me/schedule/next?timeZoneOffsetMinutes=$offset", MyNextCourseResponse.serializer()) }
+            .onSuccess { teachingNextCourse = it }
+            .onFailure { if (it is CancellationException) throw it }
+        val now = System.currentTimeMillis()
+        if (now < manualClassHoldUntilMs) return
+        val slot = teachingClassTarget(teachingNextCourse, accessible, now) ?: return
+        val target = accessible.firstOrNull { it.id.equals(slot.classId, ignoreCase = true) } ?: return
+        if (target.id == currentClassId.value) return
+        switchClass(target.id, auto = true)
+        if (currentClassId.value == target.id)
+            autoClassSwitches.tryEmit(autoClassSwitchNotice(target.name.ifBlank { slot.className }, slot))
+    }
+
+    /**
+     * 切换当前班级：清空旧班数据并立即拉取新班课表，之后的命令都会路由到新班级。
+     * [auto] 表示由自动跟随任教班级发起；用户手动选班（含重选当前班级）时开启保持期，当前课结束前不再自动切回。
+     */
+    fun switchClass(classId: String, auto: Boolean = false) {
         if (classes.value.none { it.id == classId }) return
+        if (!auto && autoFollowTeachingClass)
+            manualClassHoldUntilMs = manualClassHoldUntil(teachingNextCourse, System.currentTimeMillis())
         if (currentClassId.value == classId) return
         currentClassId.value = classId
         snapshot.value = null
@@ -399,6 +457,8 @@ object ConnectionManager {
         accessToken = null
         if (clearUser) {
             applyUserProfile(null)
+            manualClassHoldUntilMs = 0L
+            teachingNextCourse = null
             snapshot.value = null
             schedule.value = null
         }

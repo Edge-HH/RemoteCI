@@ -2,6 +2,7 @@ package com.remoteci.watch.ui
 
 import android.content.Context
 import android.os.SystemClock
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,6 +24,8 @@ import com.remoteci.watch.data.Protocol
 import com.remoteci.watch.data.ScheduleChangeRequest
 import com.remoteci.watch.data.SettingsStore
 import com.remoteci.watch.data.SnapshotStore
+import com.remoteci.watch.data.canAutoFollowTeachingClass
+import com.remoteci.watch.data.withNetworkStateFrom
 import com.remoteci.watch.notif.NotificationHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -95,6 +98,7 @@ fun RemoteCiApp(context: Context) {
     val availableCapabilities by ConnectionManager.availableCapabilities.collectAsState()
     val currentUser by ConnectionManager.currentUser.collectAsState()
     val currentClassId by ConnectionManager.currentClassId.collectAsState()
+    val accessibleClasses by ConnectionManager.classes.collectAsState()
     val liveSnapshot by ConnectionManager.snapshot.collectAsState()
     val liveSchedule by ConnectionManager.schedule.collectAsState()
     val liveExtensions by ConnectionManager.extensions.collectAsState()
@@ -139,8 +143,19 @@ fun RemoteCiApp(context: Context) {
     }
     LaunchedEffect(Unit) {
         ConnectionManager.discoveredSettings.collect { updated ->
-            settings = updated
-            withContext(Dispatchers.IO) { settingsStore.save(updated) }
+            // 连接层只回传直连地址；它持有的其余字段可能早于界面上的修改（如自动跟随开关），不能整份覆盖。
+            val merged = settings.withNetworkStateFrom(updated)
+            settings = merged
+            withContext(Dispatchers.IO) { settingsStore.save(merged) }
+        }
+    }
+    // 自动跟随任教班级的开关保存在本机设置中，冷启动与切换开关时都同步给连接层。
+    LaunchedEffect(settings.autoFollowTeachingClass) {
+        ConnectionManager.setAutoFollowTeachingClass(settings.autoFollowTeachingClass)
+    }
+    LaunchedEffect(Unit) {
+        ConnectionManager.autoClassSwitches.collect { notice ->
+            Toast.makeText(context, notice, Toast.LENGTH_SHORT).show()
         }
     }
     // 快照推送每秒到达：倒计时字段每秒变化，仅状态字段变化时才落盘，避免持续写 SharedPreferences。
@@ -492,6 +507,13 @@ fun RemoteCiApp(context: Context) {
             onOpenAppearance = { screen = Screen.AppearanceSettings },
             onOpenUpdate = { screen = Screen.Update },
             onOpenDeveloper = { screen = Screen.DeveloperSettings },
+            // 只有按显示名绑定课表的老师与班主任、且能访问多个班级时才显示自动跟随开关。
+            autoFollowTeachingClass = settings.autoFollowTeachingClass
+                .takeIf { canAutoFollowTeachingClass(currentUser, accessibleClasses) },
+            onAutoFollowTeachingClassChange = { enabled ->
+                settings = settings.copy(autoFollowTeachingClass = enabled)
+                settingsStore.save(settings)
+            },
             onBack = { screen = Screen.Home },
         )
 

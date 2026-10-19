@@ -171,6 +171,10 @@ object ConnectionManager {
     @Volatile private var personalScheduleUserId: String? = null
     private var swapInboxJob: Job? = null
     @Volatile private var swapInboxUserId: String? = null
+    /** “上课时自动切换到任教班级”开关，由界面层同步；手动换班后在 [manualClassHoldUntilMs] 之前不自动切回。 */
+    @Volatile private var autoFollowTeachingClass = false
+    @Volatile private var manualClassHoldUntilMs = 0L
+    private var autoFollowJob: Job? = null
     @Volatile private var desiredSettings: WatchSettings? = null
     /** 最近一次能力快照：切换班级时按新班级重新计算可用控制项，无需等待服务端重发。 */
     @Volatile private var lastCapabilitiesSync: CapabilitiesSync? = null
@@ -220,6 +224,8 @@ object ConnectionManager {
     val userNotifications = MutableSharedFlow<UserNotification>(extraBufferCapacity = 32)
     /** 待我处理的换课申请数（待审批或可撤回的强制换课），用于底栏角标。 */
     val pendingSwapCount = MutableStateFlow(0)
+    /** 自动跟随任教班级完成换班后的提示文案，由界面层用 snackbar 展示。 */
+    val autoClassSwitches = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val lastCommandResult = MutableStateFlow<CommandResult?>(null)
     private val voiceReplies = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<CommandResult>>()
 
@@ -406,11 +412,50 @@ object ConnectionManager {
     }
 
     /**
+     * 界面层同步“上课时自动切换到任教班级”开关。开启后每 [AutoFollowTickMs] 按个人日程判定一次目标班级，
+     * 开关变化时清除手动保持期，让新设置立即生效。连接层持有的设置一并更新，避免之后回传给界面时把开关改回去。
+     */
+    @Synchronized
+    fun setAutoFollowTeachingClass(enabled: Boolean) {
+        desiredSettings?.takeIf { it.autoFollowTeachingClass != enabled }
+            ?.let { desiredSettings = it.copy(autoFollowTeachingClass = enabled) }
+        if (enabled == autoFollowTeachingClass) return
+        autoFollowTeachingClass = enabled
+        manualClassHoldUntilMs = 0L
+        autoFollowJob?.cancel()
+        // 复用个人日程轮询的结果，这里只做判定，不额外请求服务端。
+        autoFollowJob = if (enabled) scope.launch {
+            while (isActive) {
+                followTeachingClass()
+                delay(AutoFollowTickMs)
+            }
+        } else null
+    }
+
+    /** 自动跟随一拍：手动保持期内、个人日程未就绪或已在目标班级时不动；换班后提示切到了哪个班的哪节课。 */
+    private fun followTeachingClass() {
+        if (!autoFollowTeachingClass) return
+        val accessible = classes.value
+        if (!canAutoFollowTeachingClass(currentUser.value, accessible)) return
+        val now = System.currentTimeMillis()
+        if (now < manualClassHoldUntilMs) return
+        val slot = teachingClassTarget(personalNextCourse.value, accessible, now) ?: return
+        val target = accessible.firstOrNull { it.id.equals(slot.classId, ignoreCase = true) } ?: return
+        if (target.id == currentClassId.value) return
+        switchClass(target.id, auto = true)
+        if (currentClassId.value == target.id)
+            autoClassSwitches.tryEmit(autoClassSwitchNotice(target.name.ifBlank { slot.className }, slot))
+    }
+
+    /**
      * 切换当前班级：立即展示该班已缓存的数据，之后的命令都会路由到新班级。
      * 局域网连接只承载所连插件那个班级的数据，换班后必须改连新班插件或云端。
+     * [auto] 表示由自动跟随任教班级发起；用户手动换班（含重选当前班级）时开启保持期，当前课结束前不再自动切回。
      */
-    fun switchClass(classId: String) {
+    fun switchClass(classId: String, auto: Boolean = false) {
         if (classes.value.none { it.id == classId }) return
+        if (!auto && autoFollowTeachingClass)
+            manualClassHoldUntilMs = manualClassHoldUntil(personalNextCourse.value, System.currentTimeMillis())
         val previousClassId = currentClassId.value
         if (previousClassId == classId) return
         // 拉取任务属于原班级，不能在新班级继续显示或触发旧任务的超时提示。
@@ -707,6 +752,7 @@ object ConnectionManager {
         reconnectDelayMs = InitialReconnectDelayMs
         if (clearUser) {
             applyUserProfile(null)
+            manualClassHoldUntilMs = 0L
             pluginNetworkInfos.clear()
             classSnapshots.clear()
             classSchedules.clear()
@@ -753,7 +799,8 @@ object ConnectionManager {
     /** 请求当前连接对应的插件重新生成课表；所有端共享任务状态，运行中不会重复发送。 */
     fun requestSchedulePull() {
         if (currentUser.value?.canPullScheduleFor(currentClassId.value) != true) {
-            schedulePullState.value = SchedulePullState.Error("没有本班课表拉取权限，请等待插件同步课表")
+            schedulePullState.value =
+                SchedulePullState.Error("没有${classDisplayName(classes.value, currentClassId.value)}的课表拉取权限，请等待插件同步课表")
             return
         }
         if (schedulePullState.value is SchedulePullState.Pulling) {
@@ -1655,6 +1702,10 @@ internal fun effectiveClassPermissions(
     classId: String?,
     fallback: Int,
 ): Int = classes.firstOrNull { it.id == classId }?.effectivePermissions ?: fallback
+
+/** 界面展示的班级名称；班级列表缺失（旧服务端、局域网镜像）或班级未命名时显示 [fallback]。 */
+internal fun classDisplayName(classes: List<ClassSummary>, classId: String?, fallback: String = "当前班级"): String =
+    classes.firstOrNull { it.id == classId }?.name?.takeIf(String::isNotBlank) ?: fallback
 
 internal data class ConnectionPlan(
     val bootstrapCloudAuthentication: Boolean,

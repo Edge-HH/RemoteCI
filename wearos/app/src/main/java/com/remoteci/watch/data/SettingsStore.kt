@@ -11,6 +11,8 @@ data class WatchSettings(
     val lanHost: String = "",
     val lanHostCandidates: List<String> = emptyList(),
     val lanPort: Int = 8765,
+    /** 老师与班主任上课时自动切换到正在任教的班级；默认关闭。 */
+    val autoFollowTeachingClass: Boolean = false,
     val themeId: String = "lavender",
     val updateChannel: UpdateChannel = UpdateChannel.STABLE,
     val forceUpdateEnabled: Boolean = false,
@@ -35,6 +37,7 @@ class SettingsStore(context: Context) {
         lanHostCandidates = prefs.getString(KEY_LAN_HOST_CANDIDATES, "")
             ?.lineSequence()?.filter(String::isNotBlank)?.distinct()?.toList().orEmpty(),
         lanPort = prefs.getInt(KEY_LAN_PORT, 8765),
+        autoFollowTeachingClass = prefs.getBoolean(KEY_AUTO_FOLLOW_TEACHING_CLASS, false),
         themeId = prefs.getString(KEY_THEME_ID, "lavender") ?: "lavender",
         updateChannel = runCatching {
             UpdateChannel.valueOf(prefs.getString(KEY_UPDATE_CHANNEL, UpdateChannel.STABLE.name)!!)
@@ -58,6 +61,7 @@ class SettingsStore(context: Context) {
             .putString(KEY_LAN_HOST, settings.lanHost)
             .putString(KEY_LAN_HOST_CANDIDATES, settings.lanHostCandidates.joinToString("\n"))
             .putInt(KEY_LAN_PORT, settings.lanPort)
+            .putBoolean(KEY_AUTO_FOLLOW_TEACHING_CLASS, settings.autoFollowTeachingClass)
             .putString(KEY_THEME_ID, settings.themeId)
             .putString(KEY_UPDATE_CHANNEL, settings.updateChannel.name)
             .putBoolean(KEY_FORCE_UPDATE, settings.forceUpdateEnabled)
@@ -79,6 +83,7 @@ class SettingsStore(context: Context) {
         const val KEY_LAN_HOST = "lanHost"
         const val KEY_LAN_HOST_CANDIDATES = "lanHostCandidates"
         const val KEY_LAN_PORT = "lanPort"
+        const val KEY_AUTO_FOLLOW_TEACHING_CLASS = "autoFollowTeachingClass"
         const val KEY_THEME_ID = "themeId"
         const val KEY_UPDATE_CHANNEL = "updateChannel"
         const val KEY_FORCE_UPDATE = "forceUpdateEnabled"
@@ -104,6 +109,13 @@ internal fun mergePluginNetworkInfo(settings: WatchSettings, info: PluginNetwork
         lanPort = info.port,
     )
 }
+
+/** 界面持有的设置以用户可编辑字段为准；连接层回传的只有直连地址，其余字段不得覆盖界面上的新设置。 */
+internal fun WatchSettings.withNetworkStateFrom(network: WatchSettings): WatchSettings = copy(
+    lanHost = network.lanHost,
+    lanHostCandidates = network.lanHostCandidates,
+    lanPort = network.lanPort,
+)
 
 internal fun lanEndpointHosts(settings: WatchSettings): List<String> =
     (listOf(settings.lanHost) + settings.lanHostCandidates)

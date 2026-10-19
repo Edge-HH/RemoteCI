@@ -860,9 +860,15 @@ internal fun SettingsScreen(
     onOpenAppearance: () -> Unit,
     onOpenUpdate: () -> Unit,
     onOpenDeveloper: () -> Unit,
+    /** 自动跟随任教班级的开关状态；null 表示当前账号不适用（非老师/班主任或只有一个班级），不显示该项。 */
+    autoFollowTeachingClass: Boolean?,
+    onAutoFollowTeachingClassChange: (Boolean) -> Unit,
     onBack: () -> Unit,
 ) = WatchList(title = stringResource(R.string.settings_title)) {
     item { ActionButton(stringResource(R.string.settings_connection), Icons.Rounded.Wifi, true, onOpenConnection) }
+    if (autoFollowTeachingClass != null) {
+        item { Toggle("上课自动切到任教班级", autoFollowTeachingClass, onAutoFollowTeachingClassChange) }
+    }
     item { ActionButton(stringResource(R.string.settings_notifications), Icons.Rounded.EditNotifications, true, onOpenNotifications) }
     item { ActionButton(stringResource(R.string.settings_appearance), Icons.Rounded.Palette, true, onOpenAppearance) }
     item { ActionButton(stringResource(R.string.settings_update), Icons.Rounded.SystemUpdate, true, onOpenUpdate) }
@@ -1551,6 +1557,7 @@ internal fun ClassPickerScreen(onPicked: () -> Unit) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
+                            // 手动选班：开启自动跟随时，当前课结束前不再自动切回。
                             ConnectionManager.switchClass(classroom.id)
                             onPicked()
                         }

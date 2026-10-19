@@ -15,6 +15,8 @@ data class WatchSettings(
     val lanClassId: String = "",
     /** 多班级账号最近选择的班级，冷启动后恢复，避免每次都回到第一个班级。 */
     val selectedClassId: String = "",
+    /** 老师与班主任上课时自动切换到正在任教的班级；默认关闭。 */
+    val autoFollowTeachingClass: Boolean = false,
     val themeId: String = "lavender",
     val updateChannel: UpdateChannel = UpdateChannel.STABLE,
     val forceUpdateEnabled: Boolean = false,
@@ -48,6 +50,7 @@ class SettingsStore(context: Context) {
         lanPort = prefs.getInt(KEY_LAN_PORT, 8765),
         lanClassId = prefs.getString(KEY_LAN_CLASS_ID, "") ?: "",
         selectedClassId = prefs.getString(KEY_SELECTED_CLASS_ID, "") ?: "",
+        autoFollowTeachingClass = prefs.getBoolean(KEY_AUTO_FOLLOW_TEACHING_CLASS, false),
         themeId = prefs.getString(KEY_THEME_ID, "lavender") ?: "lavender",
         updateChannel = runCatching {
             UpdateChannel.valueOf(prefs.getString(KEY_UPDATE_CHANNEL, UpdateChannel.STABLE.name)!!)
@@ -77,6 +80,7 @@ class SettingsStore(context: Context) {
             .putInt(KEY_LAN_PORT, settings.lanPort)
             .putString(KEY_LAN_CLASS_ID, settings.lanClassId)
             .putString(KEY_SELECTED_CLASS_ID, settings.selectedClassId)
+            .putBoolean(KEY_AUTO_FOLLOW_TEACHING_CLASS, settings.autoFollowTeachingClass)
             .putString(KEY_THEME_ID, settings.themeId)
             .putString(KEY_UPDATE_CHANNEL, settings.updateChannel.name)
             .putBoolean(KEY_FORCE_UPDATE, settings.forceUpdateEnabled)
@@ -104,6 +108,7 @@ class SettingsStore(context: Context) {
         const val KEY_LAN_PORT = "lanPort"
         const val KEY_LAN_CLASS_ID = "lanClassId"
         const val KEY_SELECTED_CLASS_ID = "selectedClassId"
+        const val KEY_AUTO_FOLLOW_TEACHING_CLASS = "autoFollowTeachingClass"
         const val KEY_THEME_ID = "themeId"
         const val KEY_UPDATE_CHANNEL = "updateChannel"
         const val KEY_FORCE_UPDATE = "forceUpdateEnabled"

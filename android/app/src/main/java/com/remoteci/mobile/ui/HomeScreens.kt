@@ -112,6 +112,7 @@ import com.remoteci.mobile.data.Protocol
 import com.remoteci.mobile.data.ScheduleChangeRequest
 import com.remoteci.mobile.data.ScheduleDay
 import com.remoteci.mobile.data.WatchSettings
+import com.remoteci.mobile.data.classDisplayName
 import com.remoteci.mobile.data.effectiveClassPermissions
 import com.remoteci.mobile.data.parseLoginQrPayload
 import java.time.LocalDate
@@ -433,7 +434,7 @@ fun LoginScreen(
     }
 }
 
-/** 登录后的班级选择页：多班级账号先选一个进入，进入后可在左上角“账号与设置”中切换。 */
+/** 登录后的班级选择页：多班级账号先选一个进入，进入后可在课表页、控制页顶部或“账号与设置”中切换。 */
 @Composable
 fun ClassPickerScreen(onPicked: () -> Unit) {
     val classes by ConnectionManager.classes.collectAsState()
@@ -445,7 +446,7 @@ fun ClassPickerScreen(onPicked: () -> Unit) {
         ) {
             Text("选择进入的班级", style = MaterialTheme.typography.headlineSmall)
             Text(
-                "该账号拥有多个班级的访问权限，进入后可在左上角菜单中切换。",
+                "该账号拥有多个班级的访问权限，进入后可在课表页、控制页顶部或“账号与设置”中切换。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -759,7 +760,8 @@ fun ScheduleScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 FilterChip(selected = mineMode, onClick = { mineChoice = true }, label = { Text("我的日程") })
-                FilterChip(selected = !mineMode, onClick = { mineChoice = false }, label = { Text("本班课表") })
+                // 班级芯片显示真实班名；已在班级视图时再点一次展开班级菜单，直接换班。
+                ClassSwitcherChip(selected = !mineMode, onSelect = { mineChoice = false })
             }
         }
         if (mineMode) {
@@ -833,7 +835,7 @@ fun ScheduleScreen(
             val courses = day.courses.filter { it.enabled }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (bundle?.fromProfile == true) {
-                    PermissionHint("本班教室端尚未同步过课表，以下按班级档案推算，可能与实际课表不同；插件同步后自动改用实际课表，届时才能换课。")
+                    PermissionHint("${classDisplayName(classes, currentClassId)}教室端尚未同步过课表，以下按班级档案推算，可能与实际课表不同；插件同步后自动改用实际课表，届时才能换课。")
                 }
                 if (courses.isEmpty()) {
                     EmptyState("这一天没有课程", if (canPull) "管理员或班主任可拉取最新课表，或选择其他日期。" else "请选择其他日期。")
@@ -929,7 +931,7 @@ fun SwapScreen(date: String?, index: Int?, onBack: () -> Unit, snackbar: Snackba
             if (!canChange) {
                 PermissionHint("当前账号没有换课权限。")
             } else if (bundle?.fromProfile == true) {
-                PermissionHint("本班课表按班级档案推算，需等教室端插件同步实际课表后才能换课。")
+                PermissionHint("${classDisplayName(classes, currentClassId)}的课表按班级档案推算，需等教室端插件同步实际课表后才能换课。")
             } else if (day == null) {
                 EmptyState("没有可换课的日期", "请先同步课表。")
             } else {

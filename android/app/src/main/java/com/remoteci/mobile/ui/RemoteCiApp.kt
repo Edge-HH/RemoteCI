@@ -34,6 +34,7 @@ import com.remoteci.mobile.data.ConnectionManager
 import com.remoteci.mobile.data.EventHistory
 import com.remoteci.mobile.data.SettingsStore
 import com.remoteci.mobile.data.widgetUsesPersonalSchedule
+import com.remoteci.mobile.data.withNetworkStateFrom
 import com.remoteci.mobile.data.WatchSettings
 import com.remoteci.mobile.notif.NotificationHelper
 import kotlinx.coroutines.flow.collectLatest
@@ -155,9 +156,18 @@ fun RemoteCiApp(appContext: android.content.Context) {
     }
     LaunchedEffect(Unit) {
         ConnectionManager.discoveredSettings.collectLatest {
-            settings = it
-            store.save(it)
+            // 连接层只回传直连地址与班级选择；它持有的其余字段可能早于界面上的修改（如自动跟随开关），不能整份覆盖。
+            val merged = settings.withNetworkStateFrom(it)
+            settings = merged
+            store.save(merged)
         }
+    }
+    // 自动跟随任教班级的开关保存在本机设置中，冷启动与切换开关时都同步给连接层。
+    LaunchedEffect(settings.autoFollowTeachingClass) {
+        ConnectionManager.setAutoFollowTeachingClass(settings.autoFollowTeachingClass)
+    }
+    LaunchedEffect(Unit) {
+        ConnectionManager.autoClassSwitches.collect { notice -> snackbar.showSnackbar(notice) }
     }
 
     fun persist(next: WatchSettings) {

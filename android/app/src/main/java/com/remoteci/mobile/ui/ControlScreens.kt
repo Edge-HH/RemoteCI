@@ -51,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -109,8 +110,25 @@ fun ControlListScreen(embedded: Boolean, snackbar: androidx.compose.material3.Sn
     ).filter { it.visible }
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text("课堂控制", style = MaterialTheme.typography.titleLarge) },
+            title = {
+                // 副标题标明控制命令发往哪个班级；班级列表缺失（局域网镜像、旧服务端）时不显示。
+                val className = classes.firstOrNull { it.id == currentClassId }?.name?.takeIf(String::isNotBlank)
+                Column {
+                    Text("课堂控制", style = MaterialTheme.typography.titleLarge)
+                    className?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            },
             navigationIcon = { IconButton(onClick = { onBack?.invoke() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } },
+            // 单班级账号副标题已显示班名，不再重复放一个无法切换的芯片。
+            actions = { if (classes.size > 1) ClassSwitcherChip(Modifier.padding(end = 8.dp)) },
         )
         if (rows.isEmpty()) {
             EmptyState("没有可用的控制项", "这取决于账号权限，以及当前插件是否在线。")
