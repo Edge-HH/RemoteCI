@@ -1,0 +1,128 @@
+@page
+@model ProfileHistoryModel
+@{
+    ViewData["Title"] = "档案历史与设备差异";
+    var classProfiles = Model.Profiles.Where(x => x.ClassId is not null).ToList();
+}
+<link rel="stylesheet" href="~/operations.css" asp-append-version="true" />
+<div class="page-head">
+    <div>
+        <p class="eyebrow">档案</p>
+        <h1>历史版本与设备差异</h1>
+    </div>
+    <a class="button ghost" asp-page="@(Model.CurrentUser.Role == RemoteCI.Shared.UserRole.Admin ? "/Profiles" : "/ClassProfiles")">返回档案编辑</a>
+</div>
+<p class="muted ops-intro">每次保存都会留下一个版本，可查看改了哪些课、恢复到任一版本。设备差异检查会读取教室电脑当前的档案，与服务端班级档案比较时间表、课表和科目（不含临时层），找出在教室电脑本地被改过的地方。</p>
+
+@if (Model.CheckResults.Count > 0)
+{
+    <section class="panel">
+        <h2>本次检查结果</h2>
+        <ul class="ops-list">
+            @foreach (var result in Model.CheckResults)
+            {
+                <li><span class="ops-badge @(result.Success ? (result.ChangeCount > 0 ? "warn" : "ok") : "bad")">@(result.Success ? (result.ChangeCount > 0 ? "有差异" : "一致") : "未读取")</span>
+                    @(string.IsNullOrEmpty(result.ClassName) ? Model.ClassNames.GetValueOrDefault(result.ClassId) : result.ClassName)：@result.Message</li>
+            }
+        </ul>
+    </section>
+}
+
+@if (classProfiles.Count > 0)
+{
+    <section class="panel">
+        <h2>设备差异</h2>
+        <form method="post" asp-page-handler="CheckDrift" class="stack">
+            <input type="hidden" name="id" value="@Model.Id" />
+            <div class="ops-check-grid">
+                @foreach (var profile in classProfiles)
+                {
+                    var classId = profile.ClassId!.Value;
+                    Model.Drift.TryGetValue(classId, out var report);
+                    <div class="ops-check-item">
+                        <label class="check"><input type="checkbox" name="classIds" value="@classId" checked /> @Model.ClassNames.GetValueOrDefault(classId)</label>
+                        @if (report is null) { <small class="ops-sub">尚未检查</small> }
+                        else if (report.ChangeCount == 0) { <small class="ops-sub"><span class="ops-badge ok">一致</span> 检查于 @report.CheckedAt.ToLocalTime().ToString("MM-dd HH:mm")</small> }
+                        else
+                        {
+                            <details class="ops-details">
+                                <summary><span class="ops-badge warn">@report.ChangeCount 处差异</span> 检查于 @report.CheckedAt.ToLocalTime().ToString("MM-dd HH:mm")</summary>
+                                <p class="muted">箭头左边是服务端档案，右边是教室电脑上的档案。</p>
+                                <ul class="ops-list">@foreach (var change in report.Changes) { <li>@change.Text</li> }</ul>
+                            </details>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="row-actions">
+                <button type="submit">检查所选班级</button>
+                <span class="muted">只能检查在线且已升级插件的教室电脑。处理差异：在档案编辑页“从设备收集”以设备为准，或重新下发以服务端为准。</span>
+            </div>
+        </form>
+    </section>
+}
+
+<section class="panel">
+    <h2>版本历史</h2>
+    <form method="get" class="ops-filters">
+        <label>档案
+            <select name="id" onchange="this.form.submit()">
+                <option value="">请选择档案</option>
+                @foreach (var profile in Model.Profiles.OrderBy(x => x.ClassId is null ? 0 : 1).ThenBy(Model.ProfileTitle))
+                {
+                    <option value="@profile.Id" selected="@(Model.Id == profile.Id)">@Model.ProfileTitle(profile)</option>
+                }
+            </select>
+        </label>
+    </form>
+    @if (Model.Selected is { } selected)
+    {
+        <div class="profile-history">
+            <div class="ops-table-wrap">
+                <table class="user-account-table ops-table">
+                    <thead><tr><th>版本</th><th>时间</th><th>操作人</th><th>相比上一版</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var version in Model.Versions)
+                        {
+                            <tr class="@(Model.Diff?.Revision == version.Revision ? "ops-selected" : null)">
+                                <td>第 @version.Revision 版 @if (version.IsCurrent) { <span class="ops-badge ok">当前</span> } <small class="ops-sub">@version.OriginLabel</small></td>
+                                <td class="ops-nowrap">@version.SavedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                                <td>@version.SavedByName</td>
+                                <td>@(version.ChangeCount is { } count ? $"{count} 处变化" : "—")</td>
+                                <td>
+                                    <div class="row-actions">
+                                        <a class="button ghost" asp-page="/ProfileHistory" asp-route-id="@selected.Id" asp-route-revision="@version.Revision">改了什么</a>
+                                        @if (!version.IsCurrent)
+                                        {
+                                            <a class="button ghost" asp-page="/ProfileHistory" asp-route-id="@selected.Id" asp-route-revision="@version.Revision" asp-route-against="current">与当前对比</a>
+                                            <form method="post" asp-page-handler="Restore" onsubmit="return confirm('把档案恢复为第 @version.Revision 版并另存为新版本，确定继续？')">
+                                                <input type="hidden" name="id" value="@selected.Id" />
+                                                <input type="hidden" name="revision" value="@version.Revision" />
+                                                <input type="hidden" name="expectedRevision" value="@selected.Revision" />
+                                                <button type="submit" class="ghost">恢复此版本</button>
+                                            </form>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            @if (Model.Diff is { } diff)
+            {
+                <div class="profile-diff">
+                    <h3>第 @diff.Revision 版 @(diff.AgainstRevision is { } against ? $"与{diff.AgainstLabel}（第 {against} 版）相比" : "（最早的版本）")</h3>
+                    @if (diff.AgainstRevision is null) { <p class="muted">这是保留下来的最早版本，没有可对比的上一版本。</p> }
+                    else if (diff.Changes.Count == 0) { <p class="muted">时间表、课表、科目和临时层没有变化（可能只修改了名称以外的其他设置）。</p> }
+                    else
+                    {
+                        <ul class="ops-list">
+                            @foreach (var change in diff.Changes) { <li><span class="ops-badge">@change.Category</span> @change.Text</li> }
+                        </ul>
+                    }
+                </div>
+            }
+        </div>
+    }
+</section>

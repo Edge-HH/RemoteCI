@@ -1,0 +1,49 @@
+@model RemoteCI.Server.Services.BoardData
+@using RemoteCI.Server.Services
+<section class="board-now">
+    @if (Model.HolidayName is { } holiday)
+    {
+        <p class="board-label">今天</p>
+        <p class="board-subject">@holiday</p>
+    }
+    else if (Model.Current is { } current)
+    {
+        <p class="board-label">正在上课 · @current.Label</p>
+        <p class="board-subject">@current.Subject</p>
+        <p class="board-meta">@current.Time@if (current.Teacher is { Length: > 0 } teacher) { <text> · @teacher</text> }</p>
+        <div class="board-progress"><span style="width:@((Model.CurrentProgress * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></span></div>
+    }
+    else if (Model.Next is { } next)
+    {
+        <p class="board-label">下一节 · @next.Label · @Model.NextStartsIn</p>
+        <p class="board-subject">@next.Subject</p>
+        <p class="board-meta">@next.Time@if (next.Teacher is { Length: > 0 } teacher) { <text> · @teacher</text> }</p>
+    }
+    else
+    {
+        <p class="board-label">今天</p>
+        <p class="board-subject">@(Model.Lessons.Count == 0 ? "今天没有课" : "今天的课已全部结束")</p>
+    }
+    @if (Model.Current is not null && Model.Next is { } upcoming)
+    {
+        <p class="board-meta board-next">下一节：@upcoming.Label @upcoming.Subject（@upcoming.Time）</p>
+    }
+</section>
+@if (Model.Lessons.Count > 0)
+{
+    <ol class="board-lessons">
+        @foreach (var lesson in Model.Lessons)
+        {
+            <li class="@lesson.State.ToString().ToLowerInvariant()">
+                <span class="board-lesson-label">@lesson.Label</span>
+                <strong>@lesson.Subject</strong>
+                <span class="board-lesson-time">@lesson.Time</span>
+                @if (lesson.Teacher is { Length: > 0 } teacher) { <span class="board-lesson-teacher">@teacher</span> }
+            </li>
+        }
+    </ol>
+}
+@if (!Model.PluginOnline)
+{
+    <p class="board-offline">教室电脑未连接，显示的是最近一次同步的课表。</p>
+}

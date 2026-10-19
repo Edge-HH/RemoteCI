@@ -1007,6 +1007,80 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         Assert.True(calendar.Enabled);
     }
 
+    [Fact]
+    public async Task RestCommand_IsAuditedWithDeviceSessionSourceAndPluginResult()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
+        var admin = await _factory.LoginAsync();
+        var send = _factory.CreateClient().SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Post, "/api/commands", admin.AccessToken, new CommandMessage
+            {
+                Command = CommandKind.SendNotification,
+                Notification = new NotificationRequest { Title = "审计标题", Message = "审计正文" },
+            }));
+        var forwarded = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
+        await SendAsync(plugin, new Envelope
+        {
+            Type = Protocol.MessageTypeCommandResult, ReplyToMessageId = forwarded.MessageId,
+            Payload = new CommandResult { Success = true, Code = CommandResultCodes.Ok, Message = "已显示" },
+        });
+        (await send).EnsureSuccessStatusCode();
+
+        var entry = await WaitForAuditAsync(forwarded.MessageId);
+        Assert.Equal(CommandAuditSource.DeviceRest, entry.Source);
+        Assert.Equal("Integration Test", entry.SourceDetail);
+        Assert.Equal(TestWebApplicationFactory.DefaultClassName, entry.ClassName);
+        Assert.Equal((int)CommandKind.SendNotification, entry.Command);
+        Assert.Contains("审计标题", entry.Summary);
+        Assert.True(entry.Success);
+        Assert.Equal("已显示", entry.ResultMessage);
+    }
+
+    [Fact]
+    public async Task MobileSocketCommand_IsAuditedAsMobileWithFailureResult()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
+        using var mobile = await ConnectMobileAsync();
+        await ReceivePayloadAsync<AuthState>(mobile, Protocol.MessageTypeAuthState);
+        await SendAsync(mobile, Envelope.Command(new CommandMessage
+        {
+            Command = CommandKind.Power,
+            PowerAction = PowerActionKind.Shutdown,
+        }));
+        var forwarded = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
+        await SendAsync(plugin, new Envelope
+        {
+            Type = Protocol.MessageTypeCommandResult, ReplyToMessageId = forwarded.MessageId,
+            Payload = CommandResult.Failure(CommandResultCodes.InternalError, "关机被拒绝"),
+        });
+        await ReceiveEnvelopeAsync(mobile, Protocol.MessageTypeCommandResult);
+
+        var entry = await WaitForAuditAsync(forwarded.MessageId);
+        Assert.Equal(CommandAuditSource.Mobile, entry.Source);
+        Assert.Equal("电源：关机", entry.Summary);
+        Assert.False(entry.Success);
+        Assert.Equal("关机被拒绝", entry.ResultMessage);
+        Assert.NotNull(entry.ConnectionId);
+    }
+
+    /// <summary>审计由后台批量写库，等到这条命令的结果回填后再断言。</summary>
+    private async Task<CommandAuditEntry> WaitForAuditAsync(string messageId)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (true)
+        {
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var entry = await scope.ServiceProvider.GetRequiredService<AppDbContext>().CommandAuditEntries
+                    .AsNoTracking().SingleOrDefaultAsync(x => x.MessageId == messageId, timeout.Token);
+                if (entry?.Success is not null) return entry;
+            }
+            await Task.Delay(20, timeout.Token);
+        }
+    }
+
     private async Task<WebSocket> ConnectPluginAsync() => await ConnectAsync(await _factory.GetPluginTokenAsync());
 
     private async Task<WebSocket> ConnectWatchAsync(

@@ -567,8 +567,11 @@ public sealed class ScheduleSwapService(
         }
     }
 
-    private Task<CommandResult> SendChangeAsync(Guid classId, ScheduleChangeRequest change, Actor actor, CancellationToken ct) =>
-        commands.SendAsync(classId, new CommandMessage
+    private async Task<CommandResult> SendChangeAsync(Guid classId, ScheduleChangeRequest change, Actor actor, CancellationToken ct)
+    {
+        // 审批人或撤回人在哪个入口操作并不代表换课的来源，审计统一记为换课申请流程。
+        using var _ = CommandAuditContext.Begin(CommandAuditSource.SwapWorkflow);
+        return await commands.SendAsync(classId, new CommandMessage
         {
             Command = CommandKind.ChangeSchedule,
             ClassId = classId,
@@ -586,6 +589,7 @@ public sealed class ScheduleSwapService(
             },
             ScheduleChange = change,
         }, CommandTimeout, ct);
+    }
 
     // ---------- 校验与辅助 ----------
 

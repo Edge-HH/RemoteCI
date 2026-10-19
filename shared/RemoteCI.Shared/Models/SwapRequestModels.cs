@@ -226,6 +226,12 @@ public static class UserNotificationKinds
     public const string SwapRevoked = "swap_revoked";
     /// <summary>发给相关班主任：本班课表因换课申请发生临时变化。</summary>
     public const string SwapHomeroomInfo = "swap_homeroom_info";
+    /// <summary>教室电脑插件在在校时段连续离线超过阈值。</summary>
+    public const string DeviceOffline = "device_offline";
+    /// <summary>告警过的教室电脑重新上线。</summary>
+    public const string DeviceOnline = "device_online";
+    /// <summary>服务端自动化规则执行失败（发给规则创建者）。</summary>
+    public const string AutomationFailed = "automation_failed";
 }
 
 /// <summary>个人通知（user_notify 载荷与 /api/me/notifications 列表项）。</summary>
@@ -251,6 +257,16 @@ public sealed class UserNotificationView
 
     [JsonPropertyName("readAt")]
     public DateTimeOffset? ReadAt { get; set; }
+
+    /// <summary>相关班级（设备告警等）；旧客户端忽略。</summary>
+    [JsonPropertyName("classId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? ClassId { get; set; }
+
+    /// <summary>站内相对路径（如 /Devices），点击通知时打开；旧客户端忽略。</summary>
+    [JsonPropertyName("link")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Link { get; set; }
 }
 
 public sealed class MarkNotificationsReadRequest

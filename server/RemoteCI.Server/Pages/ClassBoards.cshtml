@@ -1,0 +1,69 @@
+@page
+@model ClassBoardsModel
+@{
+    ViewData["Title"] = "电子班牌";
+}
+<link rel="stylesheet" href="~/operations.css" asp-append-version="true" />
+<div class="page-head">
+    <div>
+        <p class="eyebrow">@Model.CurrentClass?.Name</p>
+        <h1>电子班牌</h1>
+    </div>
+</div>
+<p class="muted ops-intro">
+    为教室门口的班牌屏或走廊大屏生成一个私密链接，用浏览器打开即可全屏显示本班当前课程、下一节和今日课表，无需登录或安装应用。
+    任何拿到链接的人都能看到课表，请只在班牌设备上使用；不再使用时随时撤销。
+</p>
+@if (Model.Created is { } created)
+{
+    <section class="panel board-created">
+        <h2>新班牌链接</h2>
+        <p class="notice warning">链接只显示这一次，请现在复制或扫码。离开本页后无法再次查看，只能撤销后重新生成。</p>
+        <div class="board-created-body">
+            <div class="board-qr">@Html.Raw(created.QrSvg)</div>
+            <div class="stack">
+                <label>链接<input type="text" readonly value="@created.Url" onclick="this.select()" /></label>
+                <a class="button" href="@created.Url" target="_blank" rel="noopener noreferrer">在新窗口预览</a>
+            </div>
+        </div>
+    </section>
+}
+<section class="panel">
+    <h2>新建班牌链接</h2>
+    <form method="post" asp-page-handler="Create" class="stack system-config-form">
+        <label>名称<input asp-for="Name" maxlength="40" placeholder="教室门口班牌" /></label>
+        <label class="check"><input asp-for="ShowTeachers" /> 显示任课老师姓名</label>
+        <button type="submit">生成链接</button>
+    </form>
+</section>
+<section class="panel">
+    <h2>已生成的链接</h2>
+    @if (Model.Boards.Count == 0)
+    {
+        <p class="muted">还没有班牌链接。</p>
+    }
+    else
+    {
+        <div class="ops-table-wrap">
+            <table class="user-account-table ops-table">
+                <thead><tr><th>名称</th><th>创建时间</th><th>最近访问</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var board in Model.Boards)
+                    {
+                        <tr>
+                            <td>@board.Name<small class="ops-sub">@(board.ShowTeachers ? "显示任课老师" : "不显示任课老师")</small></td>
+                            <td class="ops-nowrap">@board.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                            <td class="ops-nowrap">@(board.LastSeenAt?.ToLocalTime().ToString("MM-dd HH:mm") ?? "从未打开")</td>
+                            <td>
+                                <form method="post" asp-page-handler="Revoke" onsubmit="return confirm('撤销后使用该链接的屏幕将无法再显示课表，确定继续？')">
+                                    <input type="hidden" name="id" value="@board.Id" />
+                                    <button type="submit" class="danger ghost">撤销</button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>

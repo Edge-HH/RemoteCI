@@ -146,6 +146,35 @@ public sealed class SystemMetadata
 
     /// <summary>自定义节假日数据源地址模板（含 {year}）；null 表示使用内置的 holiday-cn 镜像。</summary>
     public string? HolidaySourceUrlTemplate { get; set; }
+
+    /// <summary>命令审计记录保留天数（7-3650）；旧库升级后为 0，按默认 180 天处理。</summary>
+    public int AuditRetentionDays { get; set; } = CommandAuditLimits.DefaultRetentionDays;
+
+    // ---------- 设备离线告警 ----------
+
+    /// <summary>教室电脑插件离线超过阈值时推送个人通知；默认开启。</summary>
+    public bool DeviceAlertsEnabled { get; set; } = true;
+
+    /// <summary>连续离线多少分钟后告警（5-120）。</summary>
+    public int DeviceAlertThresholdMinutes { get; set; } = DeviceAlertDefaults.ThresholdMinutes;
+
+    public bool DeviceAlertNotifyAdmins { get; set; } = true;
+
+    public bool DeviceAlertNotifyClassHeads { get; set; } = true;
+
+    /// <summary>只在班级当天的在校时段告警，避免放学关机后整晚报警。</summary>
+    public bool DeviceAlertSchoolHoursOnly { get; set; } = true;
+
+    // ---------- 档案差异检查 ----------
+
+    /// <summary>每天定时读取在线教室电脑的档案，与服务端班级档案比对；默认开启。</summary>
+    public bool ProfileDriftCheckEnabled { get; set; } = true;
+
+    /// <summary>每日检查时刻（服务端本地时间 HH:mm），选在教室电脑通常开机的时段。</summary>
+    public string ProfileDriftCheckTime { get; set; } = "12:30";
+
+    /// <summary>最近一次自动检查的日期（服务端本地 yyyy-MM-dd），避免同一天重复检查。</summary>
+    public string? ProfileDriftLastCheckDate { get; set; }
 }
 
 /// <summary>登录页主题策略：跟随访客本地偏好，或由管理员强制浅色/深色。</summary>

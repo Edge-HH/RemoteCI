@@ -293,7 +293,7 @@ public sealed class ProfileLibraryTests
             var own = (await library.SaveAsync(actor, [ProfileTestData.New("备份班级", TestWebApplicationFactory.DefaultClassId, template.Id)]))[0];
             expected = [template, own];
             snapshot = await source.ServiceProvider.GetRequiredService<ConfigurationArchiveService>().CaptureAsync();
-            Assert.Equal(6, snapshot.Version);
+            Assert.Equal(7, snapshot.Version);
             var serialized = JsonSerializer.SerializeToNode(snapshot, JsonDefaults.Options)!;
             Assert.Equal(2, serialized["profiles"]!.AsArray().Count);
         }

@@ -12,8 +12,11 @@ namespace RemoteCI.Server.Pages;
 [Authorize]
 public sealed class MyScheduleModel(
     UserManager<AppUser> users,
-    PersonalScheduleService schedule) : WebPageModel(users)
+    PersonalScheduleService schedule,
+    LessonStatsService lessonStats) : WebPageModel(users)
 {
+    /// <summary>本人本月课时（按姓名匹配课时台账）；没有记录时为 null。</summary>
+    public TeacherLessonStats? MonthLessons { get; private set; }
     public MyScheduleResponse Schedule { get; private set; } = new();
     public List<PersonalCourseView> Courses { get; private set; } = [];
     public PersonalCourseView? Editing { get; private set; }
@@ -38,6 +41,9 @@ public sealed class MyScheduleModel(
     {
         if (await RequireAsync() is { } denied) return denied;
         await LoadAsync(ct);
+        var (from, to) = OperationsEndpoints.LessonStatsRange(null, null);
+        MonthLessons = (await lessonStats.GetAsync(null, from, to, teacher: CurrentUser.DisplayName, ct: ct)).Teachers
+            .FirstOrDefault(x => TeacherBindingService.Matches(CurrentUser.DisplayName, x.Teacher));
         Editing = Courses.FirstOrDefault(x => x.Id == edit);
         if (Editing is { } course)
         {

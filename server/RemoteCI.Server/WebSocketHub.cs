@@ -379,6 +379,16 @@ public static class WebSocketHub
         // A WebSocket request has a long-lived scope. Use a fresh unit of work for each event.
         await using var scope = session.Context.RequestServices.CreateAsyncScope();
         await scope.ServiceProvider.GetRequiredService<WebPushQueue>().ClassEventAsync(classId, value, session.CancellationToken);
+        try
+        {
+            // 自动化只登记任务，到期执行在后台服务中完成，不阻塞插件的消息循环。
+            await scope.ServiceProvider.GetRequiredService<AutomationEngine>()
+                .OnClassEventAsync(classId, value, DateTimeOffset.UtcNow, session.CancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            session.Logger.LogWarning(ex, "登记课表事件自动化失败");
+        }
     }
 
     private static async Task HandleSoftwareInventoryAsync(Envelope envelope, ConnectionSession session)
@@ -726,7 +736,7 @@ public static class WebSocketHub
         // 插件会再次鉴权，因此必须携带刚刚验证的班内权限，且不修改连接的全局身份。
         command.RequestedBy = session.Principal.User!.WithPermissions(classPermissions);
         envelope.Payload = command;
-        session.Registry.RegisterWatchCommand(envelope.MessageId, session.ConnectionId);
+        session.Registry.RegisterWatchCommand(envelope.MessageId, session.ConnectionId, command, classId);
         if (await session.Registry.SendToPluginAsync(classId, envelope, session.CancellationToken)) return;
 
         await session.Registry.CompleteCommandAsync(

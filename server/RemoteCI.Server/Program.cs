@@ -86,6 +86,10 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AllowAnonymousToPage("/Setup");
     options.Conventions.AllowAnonymousToPage("/WebLogin");
     options.Conventions.AllowAnonymousToPage("/StatusCode");
+    // 聊天卡片的一次性确认链接：凭令牌访问，不需要网页登录。
+    options.Conventions.AllowAnonymousToPage("/Act");
+    // 电子班牌：凭私密链接匿名查看本班课表。
+    options.Conventions.AllowAnonymousToPage("/Board");
 });
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IdentityCoordinator>();
@@ -144,6 +148,27 @@ builder.Services.AddSingleton(sp => new StateStore(sp.GetRequiredService<LessonO
 builder.Services.AddSingleton<ClassStateCacheService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ClassStateCacheService>());
 builder.Services.AddSingleton<IStateStore, PersistentStateStore>();
+builder.Services.AddHttpContextAccessor();
+// 命令审计：单例只负责入队，后台服务批量写库，命令热路径不访问数据库。
+builder.Services.AddSingleton<CommandAuditLog>();
+builder.Services.AddHostedService<CommandAuditWriter>();
+builder.Services.AddScoped<CommandAuditQueryService>();
+builder.Services.AddHostedService<DevicePresenceRecorder>();
+builder.Services.AddScoped<DeviceAlertEvaluator>();
+builder.Services.AddHostedService<DeviceAlertWorker>();
+builder.Services.AddScoped<DeviceHealthService>();
+builder.Services.AddScoped<OperationsSettings>();
+builder.Services.AddSingleton<AutomationSignal>();
+builder.Services.AddScoped<AutomationRuleService>();
+builder.Services.AddScoped<AutomationEngine>();
+builder.Services.AddHostedService<AutomationWorker>();
+builder.Services.AddScoped<ProfileDriftService>();
+builder.Services.AddHostedService<ProfileDriftWorker>();
+builder.Services.AddScoped<LessonLedgerRecorder>();
+builder.Services.AddHostedService<LessonLedgerWorker>();
+builder.Services.AddScoped<LessonStatsService>();
+builder.Services.AddScoped<ActionLinkService>();
+builder.Services.AddScoped<ClassBoardService>();
 builder.Services.AddSingleton<PeerRegistry>();
 builder.Services.AddSingleton<ScheduleSyncTaskTracker>();
 builder.Services.AddSingleton<ScheduleSyncService>();
@@ -1393,6 +1418,7 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "ok", protocolVersion 
 app.MapRazorPages();
 app.MapHolidayEndpoints();
 app.MapProfileEndpoints();
+app.MapOperationsEndpoints();
 app.Run();
 
 static async Task<AuthPrincipal?> AuthorizeAsync(HttpContext ctx, IdentityCoordinator identities, CancellationToken ct)
@@ -1404,9 +1430,10 @@ static async Task<AuthPrincipal?> AuthorizeAsync(HttpContext ctx, IdentityCoordi
         ? header[(Protocol.BearerScheme.Length + 1)..].Trim()
         : ctx.Request.Headers["X-API-Key"].ToString().Trim();
     if (string.IsNullOrWhiteSpace(token)) return null;
-    return token.StartsWith(IdentityCoordinator.ApiKeyPrefix, StringComparison.Ordinal)
+    // 记下本次请求的主体，命令审计据此区分 API Key 与手机/手表设备会话。
+    return CommandAuditContext.Remember(ctx, token.StartsWith(IdentityCoordinator.ApiKeyPrefix, StringComparison.Ordinal)
         ? await identities.ValidateApiKeyAsync(token, ct)
-        : await identities.ValidateAccessTokenAsync(token, ct);
+        : await identities.ValidateAccessTokenAsync(token, ct));
 }
 
 /// <summary>换课端点统一的鉴权与错误映射：SwapOperationException 转为带错误码的 JSON。</summary>

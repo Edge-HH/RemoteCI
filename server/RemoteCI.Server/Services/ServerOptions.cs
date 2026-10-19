@@ -27,4 +27,10 @@ public sealed class ServerOptions
 
     /// <summary>是否在后台定时拉取节假日数据；测试环境关闭以免访问外网。</summary>
     public bool HolidayAutoRefresh { get; set; } = true;
+
+    /// <summary>
+    /// 是否运行集控运维的定时后台任务（在线记录、离线告警、自动化、课时台账、每日档案差异检查）。
+    /// 生产环境保持开启；统计数据库命令数的性能回归测试关闭，以免后台查询干扰计数。
+    /// </summary>
+    public bool OperationsWorkers { get; set; } = true;
 }

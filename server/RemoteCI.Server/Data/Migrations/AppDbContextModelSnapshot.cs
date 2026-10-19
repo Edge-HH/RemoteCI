@@ -179,17 +179,46 @@ namespace RemoteCI.Server.Data.Migrations
                     b.ToTable("AccountRoles");
                 });
 
-            modelBuilder.Entity("RemoteCI.Server.Data.AppUser", b =>
+            modelBuilder.Entity("RemoteCI.Server.Data.ActionLinkToken", b =>
                 {
-                    b.Property<string>("ProtectedTotpKey")
+                    b.Property<string>("TokenHash")
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
-                    b.Property<long?>("LastTotpTimeStep")
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUnixMs")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("TwoFactorRecoveryHashes")
+                    b.Property<long>("ExpiresAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SecurityStamp")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid>("TargetId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("UsedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TokenHash");
+
+                    b.HasIndex("ExpiresAtUnixMs");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("ActionLinkTokens");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.AppUser", b =>
+                {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
@@ -222,6 +251,9 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Property<bool>("IsSystemOwner")
                         .HasColumnType("INTEGER");
 
+                    b.Property<long?>("LastTotpTimeStep")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("LockoutEnabled")
                         .HasColumnType("INTEGER");
 
@@ -248,6 +280,9 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Property<bool>("PhoneNumberConfirmed")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ProtectedTotpKey")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("Role")
                         .HasColumnType("INTEGER");
 
@@ -266,6 +301,9 @@ namespace RemoteCI.Server.Data.Migrations
 
                     b.Property<bool>("TwoFactorEnabled")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("TwoFactorRecoveryHashes")
+                        .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
@@ -291,6 +329,129 @@ namespace RemoteCI.Server.Data.Migrations
                     b.HasIndex("Version");
 
                     b.ToTable("AspNetUsers", (string)null);
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.AutomationRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ActionsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedByName")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastResult")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("LastRunAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool?>("LastSuccess")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TriggerJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ValidFrom")
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ValidTo")
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AutomationRules");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.AutomationRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ClassName")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DedupeKey")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DueAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("FinishedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Message")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RuleId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RuleName")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("StartedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TriggerText")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DedupeKey")
+                        .IsUnique();
+
+                    b.HasIndex("RuleId", "DueAtUnixMs");
+
+                    b.HasIndex("Status", "DueAtUnixMs");
+
+                    b.ToTable("AutomationRuns");
                 });
 
             modelBuilder.Entity("RemoteCI.Server.Data.BackupConfiguration", b =>
@@ -397,6 +558,47 @@ namespace RemoteCI.Server.Data.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("CalendarSubscriptions");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.ClassBoard", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("LastSeenAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("ShowTeachers")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClassId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.ToTable("ClassBoards");
                 });
 
             modelBuilder.Entity("RemoteCI.Server.Data.ClassGroup", b =>
@@ -524,6 +726,125 @@ namespace RemoteCI.Server.Data.Migrations
                     b.ToTable("Classrooms");
                 });
 
+            modelBuilder.Entity("RemoteCI.Server.Data.CommandAuditEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ActorName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ActorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ClassName")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Command")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("CompletedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("ConnectionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DeviceName")
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MessageId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResultCode")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResultMessage")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SourceDetail")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool?>("Success")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAtUnixMs");
+
+                    b.HasIndex("ActorUserId", "CreatedAtUnixMs");
+
+                    b.HasIndex("ClassId", "CreatedAtUnixMs");
+
+                    b.ToTable("CommandAuditEntries");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.DeviceAlertState", b =>
+                {
+                    b.Property<Guid>("CredentialId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("AlertedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("OfflineSinceUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("CredentialId");
+
+                    b.ToTable("DeviceAlertStates");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.DevicePresenceEvent", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("AtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CredentialId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Online")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AtUnixMs");
+
+                    b.HasIndex("CredentialId", "AtUnixMs");
+
+                    b.ToTable("DevicePresenceEvents");
+                });
+
             modelBuilder.Entity("RemoteCI.Server.Data.DeviceSession", b =>
                 {
                     b.Property<Guid>("Id")
@@ -649,6 +970,73 @@ namespace RemoteCI.Server.Data.Migrations
                     b.HasKey("Year");
 
                     b.ToTable("HolidayYearSnapshots");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.LessonLedgerEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ClassName")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Date")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DefaultTeacherName")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EndTime")
+                        .HasMaxLength(8)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Index")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsSubstitute")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("RecordedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StartTime")
+                        .HasMaxLength(8)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TeacherName")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Date");
+
+                    b.HasIndex("ClassId", "Date", "Index")
+                        .IsUnique();
+
+                    b.ToTable("LessonLedgerEntries");
                 });
 
             modelBuilder.Entity("RemoteCI.Server.Data.LessonTeacherOverride", b =>
@@ -855,6 +1243,29 @@ namespace RemoteCI.Server.Data.Migrations
                     b.ToTable("PluginPairingCodes");
                 });
 
+            modelBuilder.Entity("RemoteCI.Server.Data.ProfileDriftReport", b =>
+                {
+                    b.Property<Guid>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ChangeCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ChangesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CheckedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ProfileRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ClassId");
+
+                    b.ToTable("ProfileDriftReports");
+                });
+
             modelBuilder.Entity("RemoteCI.Server.Data.ScheduleSwapRequest", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1004,6 +1415,48 @@ namespace RemoteCI.Server.Data.Migrations
                     b.ToTable("StoredProfiles");
                 });
 
+            modelBuilder.Entity("RemoteCI.Server.Data.StoredProfileVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Origin")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("ProfileId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProfileJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("SavedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SavedByName")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SavedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProfileId", "Revision");
+
+                    b.ToTable("StoredProfileVersions");
+                });
+
             modelBuilder.Entity("RemoteCI.Server.Data.SystemMetadata", b =>
                 {
                     b.Property<int>("Id")
@@ -1011,6 +1464,9 @@ namespace RemoteCI.Server.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<long>("AccountVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AuditRetentionDays")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("AutoEnterVisitorPage")
@@ -1023,6 +1479,21 @@ namespace RemoteCI.Server.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("ClassAdminCanRename")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("DeviceAlertNotifyAdmins")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("DeviceAlertNotifyClassHeads")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("DeviceAlertSchoolHoursOnly")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("DeviceAlertThresholdMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("DeviceAlertsEnabled")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("ForceSenderInTitle")
@@ -1059,6 +1530,17 @@ namespace RemoteCI.Server.Data.Migrations
 
                     b.Property<string>("MobileServerUrl")
                         .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("ProfileDriftCheckEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ProfileDriftCheckTime")
+                        .IsRequired()
+                        .HasMaxLength(5)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProfileDriftLastCheckDate")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("SchedulePullIntervalMinutes")
@@ -1152,12 +1634,19 @@ namespace RemoteCI.Server.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ClassId")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Link")
+                        .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset?>("ReadAt")
@@ -1352,6 +1841,17 @@ namespace RemoteCI.Server.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("RemoteCI.Server.Data.ActionLinkToken", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.AppUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("RemoteCI.Server.Data.AppUser", b =>
                 {
                     b.HasOne("RemoteCI.Server.Data.AccountRole", "RoleDefinition")
@@ -1361,6 +1861,17 @@ namespace RemoteCI.Server.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("RoleDefinition");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.AutomationRun", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.AutomationRule", "Rule")
+                        .WithMany()
+                        .HasForeignKey("RuleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Rule");
                 });
 
             modelBuilder.Entity("RemoteCI.Server.Data.CalendarEventVersion", b =>
@@ -1383,6 +1894,17 @@ namespace RemoteCI.Server.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.ClassBoard", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.Classroom", "Classroom")
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Classroom");
                 });
 
             modelBuilder.Entity("RemoteCI.Server.Data.ClassGroup", b =>
@@ -1521,6 +2043,17 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Navigation("Classroom");
 
                     b.Navigation("SourceTemplate");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.StoredProfileVersion", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.StoredProfile", "Profile")
+                        .WithMany()
+                        .HasForeignKey("ProfileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Profile");
                 });
 
             modelBuilder.Entity("RemoteCI.Server.Data.UserApiKey", b =>

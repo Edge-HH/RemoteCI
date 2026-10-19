@@ -13,6 +13,10 @@
 </div>
 
 @if (Model.Error is not null) { <div class="notice warning" role="alert">@Model.Error</div> }
+@if (Model.MonthLessons is { } lessons)
+{
+    <div class="notice ok my-lessons">本月已上 <strong>@lessons.Total</strong> 节课@(lessons.Substitute > 0 ? $"，其中代课 {lessons.Substitute} 节" : "")@(lessons.Substituted > 0 ? $"，被代课 {lessons.Substituted} 节" : "")。</div>
+}
 <section class="panel">
     <h2>@(Model.Editing is null ? "添加自定义课程" : "修改自定义课程")</h2>
     <form method="post" asp-page-handler="Save" class="form-grid" data-personal-course-form>

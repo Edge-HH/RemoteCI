@@ -44,6 +44,13 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state, Sc
             .Contains(name, StringComparer.Ordinal);
     }
 
+    /// <summary>把教师字段拆成各位老师的姓名（课时统计按人计数）；空字段返回空列表。</summary>
+    public static IReadOnlyList<string> SplitNames(string? teacherField) =>
+        string.IsNullOrWhiteSpace(teacherField)
+            ? []
+            : teacherField.Split(NameSeparators, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .Distinct(StringComparer.Ordinal).ToList();
+
     /// <summary>老师显示名绑定的任教班级（至少有一节匹配课程），按班级创建顺序返回。</summary>
     public async Task<IReadOnlyList<TaughtClass>> GetTaughtClassesAsync(
         string? boundName, CancellationToken ct = default)

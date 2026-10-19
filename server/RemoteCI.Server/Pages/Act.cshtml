@@ -1,0 +1,96 @@
+@page "{token}"
+@model ActModel
+@using RemoteCI.Shared.Models
+@{
+    Layout = null;
+    var swap = Model.Result ?? Model.State.Swap;
+}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>RemoteCI · @Model.ActionLabel</title>
+    <style>
+        :root { color-scheme: light dark; --bg: #f8fafc; --surface: #fff; --line: #e3e8ef; --text: #101828; --muted: #74819a;
+            --accent: #4383ee; --danger: #ed3d32; --ok-bg: #eaf8ef; --ok: #21a55b; --bad-bg: #fff0ee; }
+        @@media (prefers-color-scheme: dark) {
+            :root { --bg: #0f1520; --surface: #171f2c; --line: #2a3545; --text: #f4f7fb; --muted: #9aa8bc; --ok-bg: #173426; --bad-bg: #3b2022; }
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100vh; padding: 24px 16px; background: var(--bg); color: var(--text);
+            font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+        main { max-width: 460px; margin: 0 auto; display: grid; gap: 14px; }
+        .card { padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+        h1 { margin: 0; font-size: 20px; }
+        .muted { color: var(--muted); font-size: 13px; }
+        dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 12px 0 0; }
+        dt { color: var(--muted); }
+        dd { margin: 0; overflow-wrap: anywhere; }
+        .status { padding: 12px 14px; border-radius: 12px; font-weight: 650; }
+        .status.ok { background: var(--ok-bg); color: var(--ok); }
+        .status.bad { background: var(--bad-bg); color: var(--danger); }
+        textarea { width: 100%; min-height: 72px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; }
+        button { width: 100%; min-height: 48px; border: 0; border-radius: 11px; background: var(--accent); color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+        button.danger { background: var(--danger); }
+        form { display: grid; gap: 10px; margin: 0; }
+    </style>
+</head>
+<body>
+<main>
+    <div>
+        <h1>@Model.ActionLabel</h1>
+        <p class="muted">RemoteCI 一次性确认链接 · 只能使用一次</p>
+    </div>
+    @if (Model.Result is not null)
+    {
+        <div class="status ok">已完成：@(Model.Result.Status switch
+        {
+            SwapRequestStatus.Approved => "已同意，课表已临时调整。",
+            SwapRequestStatus.Rejected => "已拒绝，申请人会收到通知。",
+            SwapRequestStatus.Revoked => "已撤回强制换课，课表已恢复。",
+            _ => "申请状态已更新。",
+        })</div>
+    }
+    else if (Model.Error is { } error)
+    {
+        <div class="status bad">@error</div>
+    }
+    else if (Model.State.Problem is { } problem)
+    {
+        <div class="status bad">@problem</div>
+    }
+    @if (swap is not null)
+    {
+        <section class="card">
+            <strong>@swap.RequesterName 的@(swap.Forced ? "强制换课" : "换课申请")</strong>
+            <span class="muted">编号 @swap.ShortId</span>
+            <dl>
+                @if (swap.Source is { } source)
+                {
+                    <dt>原课</dt><dd>@source.ClassName @source.Date @source.Label @source.Subject @(source.Teacher is null ? "" : $"（{source.Teacher}）")</dd>
+                }
+                <dt>@(swap.Source is null ? "课节" : "换到")</dt>
+                <dd>@swap.Target.ClassName @swap.Target.Date @swap.Target.Label @swap.Target.Subject @(swap.Target.Teacher is null ? "" : $"（{swap.Target.Teacher}）")</dd>
+                @if (!string.IsNullOrWhiteSpace(swap.SubjectName)) { <dt>改上</dt><dd>@swap.SubjectName</dd> }
+                @if (!string.IsNullOrWhiteSpace(swap.Reason)) { <dt>理由</dt><dd>@swap.Reason</dd> }
+            </dl>
+        </section>
+    }
+    @if (Model.Result is null && Model.State.Problem is null && Model.State.Token is not null)
+    {
+        <form method="post">
+            @if (Model.AllowsNote)
+            {
+                <label class="muted" for="note">备注（可选）</label>
+                <textarea id="note" name="Note" maxlength="200">@Model.Note</textarea>
+            }
+            <button type="submit" class="@(Model.State.Token.Action == RemoteCI.Server.Services.ActionLinkActions.SwapApprove ? "" : "danger")">确认@(Model.ActionLabel)</button>
+        </form>
+    }
+    <p class="muted">也可以在 RemoteCI 手机 App 或网页的“换课”中处理。</p>
+</main>
+</body>
+</html>

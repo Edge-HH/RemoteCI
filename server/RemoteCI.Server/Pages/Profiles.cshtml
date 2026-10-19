@@ -3,5 +3,5 @@
 @{
     ViewData["Title"] = "档案管理";
 }
-<div class="page-head"><div><h1>档案管理</h1><p class="muted">维护全局模板，或分别编辑各班档案后统一保存、下发。</p></div></div>
+<div class="page-head"><div><h1>档案管理</h1><p class="muted">维护全局模板，或分别编辑各班档案后统一保存、下发。</p></div><a class="button ghost" asp-page="/ProfileHistory">历史版本与设备差异</a></div>
 @await Html.PartialAsync("_ProfileEditor", Model.InitialJson)

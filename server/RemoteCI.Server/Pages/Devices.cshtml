@@ -1,0 +1,29 @@
+@page
+@model DevicesModel
+@{
+    ViewData["Title"] = "设备状态";
+}
+<link rel="stylesheet" href="~/operations.css" asp-append-version="true" />
+<div class="page-head">
+    <div>
+        <p class="eyebrow">服务端管理</p>
+        <h1>设备状态</h1>
+    </div>
+    <a class="button ghost" asp-page="/SystemConfig" asp-fragment="device-alerts">离线告警设置</a>
+</div>
+<form method="get" class="panel ops-filters device-filters" data-device-filters>
+    <label>分组
+        <select name="group" onchange="this.form.submit()">
+            <option value="">全部分组</option>
+            @foreach (var group in Model.GroupOptions)
+            {
+                <option value="@group" selected="@(Model.Group == group)">@group</option>
+            }
+        </select>
+    </label>
+    <label class="check"><input type="checkbox" name="offlineOnly" value="true" checked="@Model.OfflineOnly" onchange="this.form.submit()" /> 只看离线设备</label>
+</form>
+<div data-device-grid data-refresh-url="@Url.Page("/Devices", "Grid", new { group = Model.Group, offlineOnly = Model.OfflineOnly })">
+    <partial name="_DeviceGrid" model="Model" />
+</div>
+<script src="~/devices.js" asp-append-version="true"></script>

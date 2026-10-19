@@ -55,7 +55,10 @@ public sealed class ConfigurationArchiveService(
             x.Id, x.Name, x.ProfileJson, x.Revision, x.ClassId, x.SourceTemplateId, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
         var holidayOverrides = await db.HolidayMakeupOverrides.AsNoTracking().OrderBy(x => x.Date)
             .Select(x => new HolidayOverrideSnapshot(x.Date, x.FollowWeekday)).ToListAsync(ct);
-        return new ConfigurationSnapshot(6, DateTimeOffset.UtcNow, roles, users, plugins,
+        var automationRules = await db.AutomationRules.AsNoTracking().Select(x => new AutomationRuleSnapshot(
+            x.Id, x.Name, x.Enabled, x.TriggerJson, x.ActionsJson, x.TargetJson, x.ValidFrom, x.ValidTo,
+            x.CreatedByUserId, x.CreatedByName, x.CreatedAtUnixMs, x.UpdatedAtUnixMs)).ToListAsync(ct);
+        return new ConfigurationSnapshot(7, DateTimeOffset.UtcNow, roles, users, plugins,
             new MetadataSnapshot(
                 metadata.AccountVersion,
                 metadata.ForceSenderInTitle,
@@ -74,7 +77,12 @@ public sealed class ConfigurationArchiveService(
             null, extensionPolicies, extensionPreferences,
             classrooms, memberships, groups, apiKeys, profiles,
             new HolidaySettingsSnapshot(metadata.HolidayCalendarEnabled, metadata.HolidaySourceUrlTemplate, holidayOverrides),
-            extensionGroupPolicies);
+            extensionGroupPolicies,
+            new OperationsSettingsSnapshot(
+                metadata.AuditRetentionDays, metadata.DeviceAlertsEnabled, metadata.DeviceAlertThresholdMinutes,
+                metadata.DeviceAlertNotifyAdmins, metadata.DeviceAlertNotifyClassHeads, metadata.DeviceAlertSchoolHoursOnly,
+                metadata.ProfileDriftCheckEnabled, metadata.ProfileDriftCheckTime),
+            automationRules);
     }
 
     public async Task<BackupFileInfo> CreateLocalBackupAsync(string source, CancellationToken ct = default)
@@ -255,6 +263,30 @@ public sealed class ConfigurationArchiveService(
                 Date = x.Date, FollowWeekday = x.FollowWeekday, UpdatedAt = DateTimeOffset.UtcNow,
             }));
         }
+        // 旧配置包（schema 6 及以前）没有集控运维设置与自动化规则，保留当前值。
+        if (snapshot.Operations is { } operations)
+        {
+            metadata.AuditRetentionDays = CommandAuditRetention.Clamp(operations.AuditRetentionDays);
+            metadata.DeviceAlertsEnabled = operations.DeviceAlertsEnabled;
+            metadata.DeviceAlertThresholdMinutes = Math.Clamp(operations.DeviceAlertThresholdMinutes,
+                DeviceAlertDefaults.MinThresholdMinutes, DeviceAlertDefaults.MaxThresholdMinutes);
+            metadata.DeviceAlertNotifyAdmins = operations.DeviceAlertNotifyAdmins;
+            metadata.DeviceAlertNotifyClassHeads = operations.DeviceAlertNotifyClassHeads;
+            metadata.DeviceAlertSchoolHoursOnly = operations.DeviceAlertSchoolHoursOnly;
+            metadata.ProfileDriftCheckEnabled = operations.ProfileDriftCheckEnabled;
+            metadata.ProfileDriftCheckTime = OperationsSettings.NormalizeTime(operations.ProfileDriftCheckTime) ?? "12:30";
+        }
+        if (snapshot.AutomationRules is { } rules)
+        {
+            await db.AutomationRuns.ExecuteDeleteAsync(ct);
+            await db.AutomationRules.ExecuteDeleteAsync(ct);
+            db.AutomationRules.AddRange(rules.Select(x => new AutomationRule
+            {
+                Id = x.Id, Name = x.Name, Enabled = x.Enabled, TriggerJson = x.TriggerJson, ActionsJson = x.ActionsJson,
+                TargetJson = x.TargetJson, ValidFrom = x.ValidFrom, ValidTo = x.ValidTo, CreatedByUserId = x.CreatedByUserId,
+                CreatedByName = x.CreatedByName, CreatedAtUnixMs = x.CreatedAtUnixMs, UpdatedAtUnixMs = x.UpdatedAtUnixMs,
+            }));
+        }
         var backup = await db.BackupConfigurations.SingleAsync(x => x.Id == 1, ct);
         backup.Enabled=snapshot.Backup.Enabled; backup.Cadence=snapshot.Backup.Cadence; backup.TimeOfDay=snapshot.Backup.TimeOfDay; backup.DayOfWeek=snapshot.Backup.DayOfWeek; backup.MaxBackups=Math.Clamp(snapshot.Backup.MaxBackups,1,100); backup.LastScheduledAt=null; backup.LastSucceededAt=null; backup.LastError=null;
         await db.SaveChangesAsync(ct);
@@ -285,7 +317,7 @@ public sealed class ConfigurationArchiveService(
             : permissions;
     private static void Validate(ConfigurationSnapshot value)
     {
-        if(value.Version is not (1 or 2 or 3 or 4 or 5 or 6) || value.Roles.Count==0 || value.Users.Count==0) throw new InvalidDataException("Invalid backup schema");
+        if(value.Version is not (1 or 2 or 3 or 4 or 5 or 6 or 7) || value.Roles.Count==0 || value.Users.Count==0) throw new InvalidDataException("Invalid backup schema");
         if (value.Users.Any(x => x.TwoFactorEnabled && x.ProtectedTotpKey is null && x.TotpSecret is null))
             throw new InvalidDataException("Two-factor key missing from backup");
         var roleIds=value.Roles.Select(x=>x.Id).ToHashSet();
@@ -310,6 +342,17 @@ public sealed class ConfigurationArchiveService(
                 ProfileDocument.Validate(profile.ProfileJson).Count>0)
                 throw new InvalidDataException("Invalid stored profile");
         }
+        var rules=value.AutomationRules??[];
+        if(rules.Select(x=>x.Id).Distinct().Count()!=rules.Count) throw new InvalidDataException("Duplicate automation rule");
+        foreach(var rule in rules)
+        {
+            try
+            {
+                var dto=AutomationRuleService.ToDto(new AutomationRule { Name=rule.Name, TriggerJson=rule.TriggerJson, ActionsJson=rule.ActionsJson, TargetJson=rule.TargetJson, ValidFrom=rule.ValidFrom, ValidTo=rule.ValidTo });
+                AutomationRules.Validate(dto);
+            }
+            catch (Exception ex) when (ex is JsonException or ArgumentException) { throw new InvalidDataException("Invalid automation rule"); }
+        }
         if(value.Holidays is { } holidays)
         {
             try { HolidaySettingsStore.NormalizeTemplate(holidays.SourceUrlTemplate); }
@@ -327,7 +370,9 @@ public sealed class ConfigurationArchiveService(
 }
 
 public sealed record BackupFileInfo(string Name, DateTimeOffset CreatedAt, long Size, string Source);
-public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null, List<ClassroomSnapshot>? Classrooms = null, List<MembershipSnapshot>? Memberships = null, List<GroupSnapshot>? ClassGroups = null, List<ApiKeySnapshot>? ApiKeys = null, List<StoredProfileSnapshot>? Profiles = null, HolidaySettingsSnapshot? Holidays = null, List<ExtensionGroupPolicySnapshot>? ExtensionGroupPolicies = null);
+public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null, List<ClassroomSnapshot>? Classrooms = null, List<MembershipSnapshot>? Memberships = null, List<GroupSnapshot>? ClassGroups = null, List<ApiKeySnapshot>? ApiKeys = null, List<StoredProfileSnapshot>? Profiles = null, HolidaySettingsSnapshot? Holidays = null, List<ExtensionGroupPolicySnapshot>? ExtensionGroupPolicies = null, OperationsSettingsSnapshot? Operations = null, List<AutomationRuleSnapshot>? AutomationRules = null);
+public sealed record OperationsSettingsSnapshot(int AuditRetentionDays, bool DeviceAlertsEnabled, int DeviceAlertThresholdMinutes, bool DeviceAlertNotifyAdmins, bool DeviceAlertNotifyClassHeads, bool DeviceAlertSchoolHoursOnly, bool ProfileDriftCheckEnabled = true, string? ProfileDriftCheckTime = null);
+public sealed record AutomationRuleSnapshot(Guid Id, string Name, bool Enabled, string TriggerJson, string ActionsJson, string TargetJson, string? ValidFrom, string? ValidTo, Guid CreatedByUserId, string CreatedByName, long CreatedAtUnixMs, long UpdatedAtUnixMs);
 public sealed record HolidaySettingsSnapshot(bool Enabled, string? SourceUrlTemplate, List<HolidayOverrideSnapshot> Overrides);
 public sealed record HolidayOverrideSnapshot(DateOnly Date, int? FollowWeekday);
 public sealed record StoredProfileSnapshot(Guid Id, string Name, string ProfileJson, long Revision, Guid? ClassId, Guid? SourceTemplateId, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);

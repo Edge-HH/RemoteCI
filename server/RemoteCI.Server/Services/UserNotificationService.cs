@@ -19,7 +19,7 @@ public sealed class UserNotificationService(
 
     public async Task PublishAsync(
         IEnumerable<Guid> userIds, string kind, string title, string body, Guid? swapRequestId,
-        CancellationToken ct = default, DateTimeOffset? expiresAt = null)
+        CancellationToken ct = default, DateTimeOffset? expiresAt = null, Guid? classId = null, string? link = null)
     {
         var recipients = userIds.Distinct().ToList();
         if (recipients.Count == 0) return;
@@ -33,6 +33,8 @@ public sealed class UserNotificationService(
             Body = Truncate(body, 1000),
             SwapRequestId = swapRequestId,
             CreatedAt = now,
+            ClassId = classId,
+            Link = link,
         }).ToList();
         await using var transaction = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         db.UserNotifications.AddRange(rows);
@@ -42,7 +44,7 @@ public sealed class UserNotificationService(
             var view = ToView(row);
             foreach (var subscription in subscriptions.Where(x => x.UserId == row.UserId))
                 queue.Add(subscription, "personal:" + row.Id, new { title = view.Title, body = view.Body,
-                    kind = view.Kind, id = view.Id, url = view.Kind.StartsWith("personal_course_", StringComparison.Ordinal) ? "/MySchedule" : "/SwapRequests" },
+                    kind = view.Kind, id = view.Id, url = view.Link ?? (view.Kind.StartsWith("personal_course_", StringComparison.Ordinal) ? "/MySchedule" : "/SwapRequests") },
                     expiresAt ?? (view.Kind.StartsWith("personal_course_", StringComparison.Ordinal) ? now.AddMinutes(5) : now.AddHours(24)), notificationId: row.Id);
         }
         await db.SaveChangesAsync(ct);
@@ -146,6 +148,8 @@ public sealed class UserNotificationService(
         SwapRequestId = row.SwapRequestId,
         CreatedAt = row.CreatedAt,
         ReadAt = row.ReadAt,
+        ClassId = row.ClassId,
+        Link = row.Link,
     };
 
     private async Task TrimAsync(IReadOnlyList<Guid> userIds, CancellationToken ct)

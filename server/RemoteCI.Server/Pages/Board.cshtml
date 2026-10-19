@@ -1,0 +1,29 @@
+@page "{token}"
+@model BoardModel
+@{
+    Layout = null;
+}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>@Model.Data.ClassName · 电子班牌</title>
+    <link rel="stylesheet" href="~/board.css" asp-append-version="true" />
+</head>
+<body>
+<main class="board" data-board data-refresh-url="@Url.Page("/Board", "Content", new { token = Model.Token })"
+      data-server-now="@Model.Data.LocalNow.ToUnixTimeMilliseconds()" data-offset-minutes="@((int)Model.Data.LocalNow.Offset.TotalMinutes)">
+    <header class="board-head">
+        <h1>@Model.Data.ClassName</h1>
+        <div class="board-clock"><strong data-clock>@Model.Data.LocalNow.ToString("HH:mm")</strong><span>@Model.Data.DateText</span></div>
+    </header>
+    <div data-board-content>
+        <partial name="_BoardContent" model="Model.Data" />
+    </div>
+</main>
+<script src="~/board.js" asp-append-version="true"></script>
+</body>
+</html>

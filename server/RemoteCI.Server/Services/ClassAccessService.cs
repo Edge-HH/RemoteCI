@@ -168,6 +168,22 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
                 .AnyAsync(kind => kind == AccountRoleKind.ClassAdministrator, ct);
 
     /// <summary>
+    /// 集控运维页面（操作记录、设备状态、课时统计）的可见班级：系统管理员返回 null 表示全部；
+    /// 其他账号返回自己担任班主任的班级，可能为空。
+    /// </summary>
+    public async Task<IReadOnlyList<Guid>?> GetClassHeadScopeAsync(Guid userId, UserRole role, CancellationToken ct = default)
+    {
+        if (role == UserRole.Admin) return null;
+        return await db.ClassMemberships.AsNoTracking()
+            .Where(x => x.UserId == userId)
+            .Join(db.AccountRoles, x => x.RoleDefinitionId, y => y.Id, (x, y) => new { x.ClassroomId, y.Kind })
+            .Where(x => x.Kind == AccountRoleKind.ClassAdministrator)
+            .Select(x => x.ClassroomId)
+            .Distinct()
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
     /// 用户在指定班级可以自行完成的班级管理操作：系统管理员全部允许；
     /// 本班班主任按系统管理员统一设置的班级自治策略；其他账号全部禁止。
     /// </summary>

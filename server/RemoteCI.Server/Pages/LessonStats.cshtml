@@ -1,0 +1,68 @@
+@page
+@model LessonStatsModel
+@{
+    ViewData["Title"] = "课时统计";
+    var (from, to) = Model.Range();
+}
+<link rel="stylesheet" href="~/operations.css" asp-append-version="true" />
+<div class="page-head">
+    <div>
+        <p class="eyebrow">@(Model.IsAdmin ? "服务端管理" : "班级管理")</p>
+        <h1>课时统计</h1>
+    </div>
+    <a class="button ghost" asp-page="/LessonStats" asp-all-route-data="Model.ExportRouteValues">导出 Excel</a>
+</div>
+<p class="muted ops-intro">
+    每节课结束后，服务端把实际上课的老师记入课时台账（包括换课申请产生的临时任课老师），之后不再改动。
+    代课指实际老师与该科目默认老师不同的课；服务端停机期间结束的课无法补录。@(Model.IsAdmin ? "" : "你只能看到自己担任班主任的班级。")
+</p>
+@if (Model.Error is { } error)
+{
+    <div class="flash error" role="alert">@error</div>
+}
+<form method="get" class="panel ops-filters">
+    <label>开始日期<input type="date" name="from" value="@from.ToString("yyyy-MM-dd")" /></label>
+    <label>结束日期<input type="date" name="to" value="@to.ToString("yyyy-MM-dd")" /></label>
+    <label>班级
+        <select name="class">
+            <option value="">@(Model.IsAdmin ? "全部班级" : "我的全部班级")</option>
+            @foreach (var option in Model.ClassOptions)
+            {
+                <option value="@option.Id" selected="@(Model.ClassFilter == option.Id)">@option.Name</option>
+            }
+        </select>
+    </label>
+    <label>教师<input type="search" name="teacher" value="@Model.Teacher" placeholder="姓名" maxlength="40" /></label>
+    <label class="check ops-inline-check"><input type="checkbox" name="includeProfile" value="true" checked="@Model.IncludeProfile" /> 包含按档案推算的课</label>
+    <div class="ops-filter-actions">
+        <button type="submit">统计</button>
+        <a class="button ghost" asp-page="/LessonStats">本月</a>
+    </div>
+</form>
+<section class="panel">
+    <h2>@Model.Report.From 至 @Model.Report.To · 共 @Model.Report.LessonCount 节课</h2>
+    @if (Model.Report.Teachers.Count == 0)
+    {
+        <p class="muted">这段时间没有台账记录。台账从升级后开始逐节累积；课表里没有填写任课教师的科目不计入任何老师。</p>
+    }
+    else
+    {
+        <div class="ops-table-wrap">
+            <table class="user-account-table ops-table">
+                <thead><tr><th>教师</th><th>实际课时</th><th>其中代课</th><th>被代课</th><th>分班级</th></tr></thead>
+                <tbody>
+                    @foreach (var teacher in Model.Report.Teachers)
+                    {
+                        <tr>
+                            <td><strong>@teacher.Teacher</strong></td>
+                            <td>@teacher.Total</td>
+                            <td>@(teacher.Substitute > 0 ? teacher.Substitute.ToString() : "—")</td>
+                            <td>@(teacher.Substituted > 0 ? teacher.Substituted.ToString() : "—")</td>
+                            <td><small>@string.Join("，", teacher.Classes.Select(x => $"{x.ClassName} {x.Total}"))</small></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>

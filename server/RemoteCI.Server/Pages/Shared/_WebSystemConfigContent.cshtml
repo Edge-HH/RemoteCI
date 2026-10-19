@@ -82,6 +82,22 @@
     </form>
 </section>
 
+<section class="panel" id="device-alerts">
+    <h2>集控运维</h2>
+    <p class="muted">设备离线告警推送给系统管理员和该班班主任（个人通知、浏览器推送与 AstrBot）；操作记录保存下发到教室电脑的每一条命令。</p>
+    <form method="post" asp-page-handler="SaveOperationsSettings" class="stack system-config-form">
+        <label class="check"><input asp-for="OperationsOptions.DeviceAlertsEnabled" /> 启用设备离线告警</label>
+        <label>连续离线多少分钟后告警<input asp-for="OperationsOptions.DeviceAlertThresholdMinutes" type="number" min="5" max="120" /></label>
+        <label class="check"><input asp-for="OperationsOptions.DeviceAlertSchoolHoursOnly" /> 只在班级当天在校时段告警（第一节课前 30 分钟至最后一节下课）</label>
+        <label class="check"><input asp-for="OperationsOptions.DeviceAlertNotifyAdmins" /> 通知系统管理员</label>
+        <label class="check"><input asp-for="OperationsOptions.DeviceAlertNotifyClassHeads" /> 通知该班班主任</label>
+        <label>操作记录保留天数<input asp-for="OperationsOptions.AuditRetentionDays" type="number" min="7" max="3650" /></label>
+        <label class="check"><input asp-for="OperationsOptions.ProfileDriftCheckEnabled" /> 每天检查教室电脑档案是否与服务端一致</label>
+        <label>每日检查时间（服务端本地时间，选在教室电脑通常开机的时段）<input asp-for="OperationsOptions.ProfileDriftCheckTime" type="time" /></label>
+        <button type="submit">保存集控运维设置</button>
+    </form>
+</section>
+
 <section class="panel mobile-desktop-only">
     <h2>手机扫码登录</h2>
     <p class="muted">仅修改概览页登录二维码中的服务器地址（例如反向代理后的公网地址），不影响服务端监听。留空则使用当前访问地址。</p>

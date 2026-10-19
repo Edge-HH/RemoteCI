@@ -1,0 +1,39 @@
+/* 电子班牌：横屏（走廊大屏）与竖屏（门口班牌）都能一眼看清；深浅色跟随系统。 */
+:root {
+    color-scheme: light dark;
+    --bg: #f4f7fb; --surface: #fff; --line: #e3e8ef; --text: #101828; --muted: #6b7890;
+    --accent: #2e6fd7; --accent-soft: #dbeafe; --done: #9aa8bc; --warn-bg: #fff7e6; --warn: #a96800;
+}
+@media (prefers-color-scheme: dark) {
+    :root { --bg: #0b111b; --surface: #151d2a; --line: #273244; --text: #f4f7fb; --muted: #9aa8bc;
+        --accent: #6ca2ff; --accent-soft: #1d3355; --done: #5c6a80; --warn-bg: #3b301c; --warn: #f2c46d; }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+body { font: 16px/1.5 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+.board { display: grid; gap: clamp(14px, 2.4vmin, 28px); min-height: 100vh; padding: clamp(16px, 4vmin, 48px); align-content: start; }
+.board-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px; }
+.board-head h1 { margin: 0; font-size: clamp(32px, 7vmin, 84px); letter-spacing: .02em; }
+.board-clock { display: grid; justify-items: end; color: var(--muted); }
+.board-clock strong { color: var(--text); font-size: clamp(28px, 6vmin, 72px); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.board-clock span { font-size: clamp(14px, 2.4vmin, 26px); }
+[data-board-content] { display: grid; gap: clamp(14px, 2.4vmin, 28px); }
+.board-now { padding: clamp(18px, 3.6vmin, 40px); border: 1px solid var(--line); border-radius: clamp(14px, 2vmin, 24px); background: var(--surface); }
+.board-label { margin: 0; color: var(--accent); font-size: clamp(15px, 2.6vmin, 30px); font-weight: 700; }
+.board-subject { margin: 4px 0 0; font-size: clamp(44px, 11vmin, 140px); font-weight: 800; line-height: 1.1; }
+.board-meta { margin: 8px 0 0; color: var(--muted); font-size: clamp(15px, 2.6vmin, 30px); }
+.board-next { margin-top: 14px; }
+.board-progress { height: clamp(6px, 1vmin, 12px); margin-top: 16px; overflow: hidden; border-radius: 999px; background: var(--accent-soft); }
+.board-progress span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .6s ease; }
+.board-lessons { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.board-lessons li { display: grid; gap: 2px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.board-lessons strong { font-size: clamp(18px, 3vmin, 32px); }
+.board-lesson-label, .board-lesson-time, .board-lesson-teacher { color: var(--muted); font-size: clamp(13px, 1.9vmin, 20px); }
+.board-lessons li.done { opacity: .55; }
+.board-lessons li.done strong { color: var(--done); }
+.board-lessons li.current { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+.board-offline { margin: 0; padding: 10px 14px; border-radius: 12px; background: var(--warn-bg); color: var(--warn); font-size: clamp(13px, 1.9vmin, 20px); }
+@media (orientation: portrait) {
+    .board-head { flex-direction: column; align-items: flex-start; }
+    .board-clock { justify-items: start; }
+}

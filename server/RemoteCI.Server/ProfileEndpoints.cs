@@ -35,6 +35,7 @@ public static class ProfileEndpoints
     public static void MapProfileEndpoints(this WebApplication app)
     {
         var profiles = app.MapGroup("/api/profiles");
+        MapHistoryEndpoints(profiles);
 
         // 不带 classId：管理员得到全部档案，班主任得到自己可管理班级的档案。列表不含完整 JSON。
         profiles.MapGet("", (Guid? classId, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
@@ -84,6 +85,35 @@ public static class ProfileEndpoints
                 results,
                 message = $"完成 {results.Count(x => x.Success)} 台，失败 {results.Count(x => !x.Success)} 台。",
             });
+        }));
+    }
+
+    private static void MapHistoryEndpoints(RouteGroupBuilder profiles)
+    {
+        profiles.MapGet("/{id:guid}/versions", (Guid id, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
+            Results.Ok(await services.GetRequiredService<ProfileLibraryService>().ListVersionsAsync(actor, id, ct: ct))));
+
+        profiles.MapGet("/{id:guid}/versions/{revision:long}/diff", (Guid id, long revision, string? against, HttpContext ctx, CancellationToken ct) =>
+            RunAsync(ctx, ct, async (actor, services) => Results.Ok(await services.GetRequiredService<ProfileLibraryService>()
+                .DiffVersionAsync(actor, id, revision, string.Equals(against, "current", StringComparison.OrdinalIgnoreCase), ct: ct))));
+
+        // 恢复历史版本：另存为新修订，请求体的 revision 是调用方看到的当前修订号。
+        profiles.MapPost("/{id:guid}/versions/{revision:long}/restore", (Guid id, long revision, ProfileIdRequest body, HttpContext ctx, CancellationToken ct) =>
+            RunAsync(ctx, ct, async (actor, services) => Results.Ok(await services.GetRequiredService<ProfileLibraryService>()
+                .RestoreVersionAsync(actor, id, revision, body.Revision, ct: ct))));
+
+        // 档案差异检查：读取所选班级教室电脑的当前档案，与服务端班级档案比较。
+        profiles.MapPost("/drift", (ProfileCollectRequest body, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
+            Results.Ok(await services.GetRequiredService<ProfileDriftService>().CheckAsync(actor, body.ClassIds ?? [], ct: ct))));
+
+        profiles.MapGet("/drift", (HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
+        {
+            var library = services.GetRequiredService<ProfileLibraryService>();
+            var latest = await services.GetRequiredService<ProfileDriftService>().LatestAsync(ct: ct);
+            var visible = new List<ProfileDriftView>();
+            foreach (var view in latest.Values)
+                if (await library.CanManageClassAsync(actor, view.ClassId, ct)) visible.Add(view);
+            return Results.Ok(visible.OrderBy(x => x.ClassName, StringComparer.CurrentCulture));
         }));
     }
 

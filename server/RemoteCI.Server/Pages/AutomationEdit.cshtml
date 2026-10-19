@@ -1,0 +1,160 @@
+@page
+@model AutomationEditModel
+@using RemoteCI.Server.Services
+@using RemoteCI.Shared
+@using RemoteCI.Shared.Models
+@{
+    ViewData["Title"] = Model.Id is null ? "新建自动化规则" : "编辑自动化规则";
+    var input = Model.Input;
+}
+<link rel="stylesheet" href="~/operations.css" asp-append-version="true" />
+<div class="page-head">
+    <div>
+        <p class="eyebrow">自动化</p>
+        <h1>@(Model.Id is null ? "新建规则" : "编辑规则")</h1>
+    </div>
+    <a class="button ghost" asp-page="/Automation">返回列表</a>
+</div>
+@if (Model.Error is { } error)
+{
+    <div class="flash error" role="alert">@error</div>
+}
+<form method="post" class="automation-form" data-automation-form>
+    <input type="hidden" name="id" value="@Model.Id" />
+    <section class="panel stack">
+        <h2>基本信息</h2>
+        <label>规则名称<input asp-for="Input.Name" maxlength="60" required /></label>
+        <label class="check"><input asp-for="Input.Enabled" /> 启用</label>
+        <div class="ops-filters">
+            <label>生效开始日期（可选）<input asp-for="Input.ValidFrom" type="date" /></label>
+            <label>生效结束日期（可选）<input asp-for="Input.ValidTo" type="date" /></label>
+        </div>
+    </section>
+
+    <section class="panel stack">
+        <h2>触发条件</h2>
+        <label>触发方式
+            <select asp-for="Input.TriggerKind" data-trigger-kind>
+                <option value="@((int)AutomationTriggerKind.Schedule)">定时</option>
+                <option value="@((int)AutomationTriggerKind.ClassEvent)">课表事件</option>
+                <option value="@((int)AutomationTriggerKind.DeviceOnline)">教室电脑上线</option>
+            </select>
+        </label>
+        <div class="stack" data-trigger="@((int)AutomationTriggerKind.Schedule)">
+            <fieldset class="automation-weekdays">
+                <legend>星期</legend>
+                @for (var day = 1; day <= 7; day++)
+                {
+                    <label class="check"><input type="checkbox" name="Input.Weekdays" value="@day" checked="@input.Weekdays.Contains(day)" /> @AutomationRules.WeekdayNames[day]</label>
+                }
+            </fieldset>
+            <label>时间（教室电脑本地时间）<input asp-for="Input.Time" type="time" /></label>
+            <label class="check"><input asp-for="Input.SchoolDaysOnly" /> 仅上学日（放假日跳过，调休上学日照常）</label>
+        </div>
+        <div class="stack" data-trigger="@((int)AutomationTriggerKind.ClassEvent)">
+            <label>事件
+                <select asp-for="Input.Event">
+                    <option value="@((int)ClassEventKind.OnClass)">上课</option>
+                    <option value="@((int)ClassEventKind.OnBreaking)">下课</option>
+                    <option value="@((int)ClassEventKind.OnAfterSchool)">放学</option>
+                </select>
+            </label>
+            <label>只匹配科目（可选）<input asp-for="Input.Subject" maxlength="40" placeholder="例如：体育" /></label>
+            <label>延迟分钟（0-180）<input asp-for="Input.DelayMinutes" type="number" min="0" max="180" /></label>
+        </div>
+        <div class="stack" data-trigger="@((int)AutomationTriggerKind.DeviceOnline)">
+            <label>上线后延迟秒数（0-600）<input asp-for="Input.DelaySeconds" type="number" min="0" max="600" /></label>
+        </div>
+    </section>
+
+    <section class="panel stack">
+        <h2>目标</h2>
+        <p class="muted">班级与分组可同时选择；每个班级只发给最早接入的在线教室电脑。</p>
+        @if (Model.Groups.Count > 0)
+        {
+            <fieldset class="automation-targets">
+                <legend>分组</legend>
+                @foreach (var group in Model.Groups)
+                {
+                    <label class="check"><input type="checkbox" name="Input.GroupIds" value="@group.Id" checked="@input.GroupIds.Contains(group.Id)" /> @group.Name</label>
+                }
+            </fieldset>
+        }
+        <fieldset class="automation-targets">
+            <legend>班级</legend>
+            @foreach (var classroom in Model.Classes)
+            {
+                <label class="check"><input type="checkbox" name="Input.ClassIds" value="@classroom.Id" checked="@input.ClassIds.Contains(classroom.Id)" /> @classroom.Name</label>
+            }
+        </fieldset>
+    </section>
+
+    <section class="panel stack">
+        <h2>动作</h2>
+        <p class="muted">按顺序执行，前一个动作失败不会阻止后面的动作。</p>
+        @for (var i = 0; i < input.Actions.Count; i++)
+        {
+            var action = input.Actions[i];
+            <fieldset class="automation-action stack" data-action>
+                <legend>动作 @(i + 1)</legend>
+                <label>类型
+                    <select name="Input.Actions[@i].Kind" data-action-kind>
+                        <option value="0" selected="@((int)action.Kind == 0)">不使用</option>
+                        <option value="@((int)AutomationActionKind.Notification)" selected="@(action.Kind == AutomationActionKind.Notification)">发送通知</option>
+                        <option value="@((int)AutomationActionKind.ClearNotifications)" selected="@(action.Kind == AutomationActionKind.ClearNotifications)">清除提醒</option>
+                        <option value="@((int)AutomationActionKind.MainMenu)" selected="@(action.Kind == AutomationActionKind.MainMenu)">主界面显隐</option>
+                        <option value="@((int)AutomationActionKind.Volume)" selected="@(action.Kind == AutomationActionKind.Volume)">音量</option>
+                        <option value="@((int)AutomationActionKind.Power)" selected="@(action.Kind == AutomationActionKind.Power)">电源</option>
+                        <option value="@((int)AutomationActionKind.Extension)" selected="@(action.Kind == AutomationActionKind.Extension)">运行扩展</option>
+                        <option value="@((int)AutomationActionKind.TempLayers)" selected="@(action.Kind == AutomationActionKind.TempLayers)">下发班级档案临时层</option>
+                    </select>
+                </label>
+                <div class="stack" data-action-fields="@((int)AutomationActionKind.Notification)">
+                    <label>标题<input name="Input.Actions[@i].Title" value="@action.Title" maxlength="60" /></label>
+                    <label>正文<textarea name="Input.Actions[@i].Message" maxlength="500" rows="3">@action.Message</textarea></label>
+                    <label>显示秒数<input name="Input.Actions[@i].DurationSeconds" type="number" min="1" max="3600" value="@action.DurationSeconds" /></label>
+                    <div class="automation-checks">
+                        <label class="check"><input type="checkbox" name="Input.Actions[@i].Effect" value="true" checked="@action.Effect" /><input type="hidden" name="Input.Actions[@i].Effect" value="false" /> 强调特效</label>
+                        <label class="check"><input type="checkbox" name="Input.Actions[@i].Sound" value="true" checked="@action.Sound" /><input type="hidden" name="Input.Actions[@i].Sound" value="false" /> 提醒音效</label>
+                        <label class="check"><input type="checkbox" name="Input.Actions[@i].Speech" value="true" checked="@action.Speech" /><input type="hidden" name="Input.Actions[@i].Speech" value="false" /> 语音朗读</label>
+                    </div>
+                </div>
+                <div class="stack" data-action-fields="@((int)AutomationActionKind.MainMenu)">
+                    <label>主界面
+                        <select name="Input.Actions[@i].ShowMainMenu">
+                            <option value="true" selected="@action.ShowMainMenu">显示</option>
+                            <option value="false" selected="@(!action.ShowMainMenu)">隐藏</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="stack" data-action-fields="@((int)AutomationActionKind.Volume)">
+                    <label>音量（0-100）<input name="Input.Actions[@i].VolumeLevel" type="number" min="0" max="100" value="@action.VolumeLevel" /></label>
+                    <label class="check"><input type="checkbox" name="Input.Actions[@i].Mute" value="true" checked="@action.Mute" /><input type="hidden" name="Input.Actions[@i].Mute" value="false" /> 改为静音</label>
+                </div>
+                <div class="stack" data-action-fields="@((int)AutomationActionKind.Power)">
+                    <label>电源操作
+                        <select name="Input.Actions[@i].PowerAction">
+                            <option value="@((int)PowerActionKind.Shutdown)" selected="@(action.PowerAction == PowerActionKind.Shutdown)">关机</option>
+                            <option value="@((int)PowerActionKind.Restart)" selected="@(action.PowerAction == PowerActionKind.Restart)">重启</option>
+                            <option value="@((int)PowerActionKind.Sleep)" selected="@(action.PowerAction == PowerActionKind.Sleep)">睡眠</option>
+                            <option value="@((int)PowerActionKind.Hibernate)" selected="@(action.PowerAction == PowerActionKind.Hibernate)">休眠</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="stack" data-action-fields="@((int)AutomationActionKind.Extension)">
+                    <label>扩展 Id<input name="Input.Actions[@i].ExtensionId" value="@action.ExtensionId" maxlength="200" /></label>
+                    <label>参数（每行一个 key=value）<textarea name="Input.Actions[@i].ExtensionArgs" rows="3">@action.ExtensionArgs</textarea></label>
+                </div>
+                <div class="stack" data-action-fields="@((int)AutomationActionKind.TempLayers)">
+                    <p class="muted">下发该班服务端档案里的全部临时层；设备同日已有临时层时默认拒绝。</p>
+                    <label class="check"><input type="checkbox" name="Input.Actions[@i].ReplaceTempLayers" value="true" checked="@action.ReplaceTempLayers" /><input type="hidden" name="Input.Actions[@i].ReplaceTempLayers" value="false" /> 替换设备同日已有的临时层</label>
+                </div>
+            </fieldset>
+        }
+    </section>
+    <div class="row-actions">
+        <button type="submit">保存规则</button>
+        <a class="button ghost" asp-page="/Automation">取消</a>
+    </div>
+</form>
+<script src="~/automation.js" asp-append-version="true"></script>

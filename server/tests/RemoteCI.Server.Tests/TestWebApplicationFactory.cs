@@ -55,11 +55,17 @@ public sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
         IReadOnlyDictionary<string, string?>? extraConfiguration = null) =>
         new(databasePath, extraConfiguration, null);
 
+    /// <summary>
+    /// 统计数据库命令数的性能回归测试使用：关闭集控运维的定时后台任务，计数只反映被测的消息路径。
+    /// </summary>
     public static TestWebApplicationFactory ForDatabaseAndLogger(
         string databasePath,
         ILoggerProvider loggerProvider,
         IReadOnlyDictionary<string, string?>? extraConfiguration = null) =>
-        new(databasePath, extraConfiguration, loggerProvider);
+        new(databasePath, new Dictionary<string, string?>(extraConfiguration ?? new Dictionary<string, string?>())
+        {
+            ["Server:OperationsWorkers"] = "false",
+        }, loggerProvider);
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {

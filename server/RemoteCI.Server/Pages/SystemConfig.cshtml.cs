@@ -24,8 +24,10 @@ public sealed class SystemConfigModel(
     ConfigurationArchiveService archives,
     PeerRegistry peers,
     IdentityCoordinator identities,
-    MobileLoginSettings mobileLogin) : WebPageModel(users)
+    MobileLoginSettings mobileLogin,
+    OperationsSettings operations) : WebPageModel(users)
 {
+    [BindProperty] public OperationsInput OperationsOptions { get; set; } = new();
     [BindProperty] public UpdateInput UpdateOptions { get; set; } = new();
     [BindProperty] public BackupInput BackupOptions { get; set; } = new();
     [BindProperty] public ExportInput ExportOptions { get; set; } = new();
@@ -56,7 +58,20 @@ public sealed class SystemConfigModel(
         await LoadBackupAsync();
         ForceSenderInTitle = await identities.GetForceSenderInTitleAsync();
         MobileServerUrl = await mobileLogin.GetServerUrlAsync();
+        OperationsOptions = OperationsInput.From(await operations.GetAsync());
         return Page();
+    }
+
+    public async Task<IActionResult> OnPostSaveOperationsSettingsAsync(CancellationToken ct)
+    {
+        if (await RequireAdminAsync() is { } denied) return denied;
+        try
+        {
+            await operations.SetAsync(OperationsOptions.ToValues(), ct);
+            TempData["Message"] = "集控运维设置已保存";
+        }
+        catch (ArgumentException ex) { TempData["Error"] = ex.Message; }
+        return RedirectToPage(null, null, "device-alerts");
     }
 
     public async Task<IActionResult> OnPostSaveMobileLoginSettingsAsync(CancellationToken ct)
@@ -308,6 +323,35 @@ public sealed class SystemConfigModel(
         public TimeSpan TimeOfDay { get; set; } = TimeSpan.FromHours(2);
         public DayOfWeek DayOfWeek { get; set; } = DayOfWeek.Monday;
         [Range(1, 100)] public int MaxBackups { get; set; } = 7;
+    }
+    public sealed class OperationsInput
+    {
+        [Range(CommandAuditRetention.Min, CommandAuditRetention.Max)] public int AuditRetentionDays { get; set; } = CommandAuditRetention.Default;
+        public bool DeviceAlertsEnabled { get; set; } = true;
+        [Range(DeviceAlertDefaults.MinThresholdMinutes, DeviceAlertDefaults.MaxThresholdMinutes)]
+        public int DeviceAlertThresholdMinutes { get; set; } = DeviceAlertDefaults.ThresholdMinutes;
+        public bool DeviceAlertNotifyAdmins { get; set; } = true;
+        public bool DeviceAlertNotifyClassHeads { get; set; } = true;
+        public bool DeviceAlertSchoolHoursOnly { get; set; } = true;
+        public bool ProfileDriftCheckEnabled { get; set; } = true;
+        public string ProfileDriftCheckTime { get; set; } = "12:30";
+
+        public static OperationsInput From(OperationsSettingsValues values) => new()
+        {
+            AuditRetentionDays = values.AuditRetentionDays,
+            DeviceAlertsEnabled = values.DeviceAlertsEnabled,
+            DeviceAlertThresholdMinutes = values.DeviceAlertThresholdMinutes,
+            DeviceAlertNotifyAdmins = values.DeviceAlertNotifyAdmins,
+            DeviceAlertNotifyClassHeads = values.DeviceAlertNotifyClassHeads,
+            DeviceAlertSchoolHoursOnly = values.DeviceAlertSchoolHoursOnly,
+            ProfileDriftCheckEnabled = values.ProfileDriftCheckEnabled,
+            ProfileDriftCheckTime = values.ProfileDriftCheckTime,
+        };
+
+        public OperationsSettingsValues ToValues() => new(
+            AuditRetentionDays, DeviceAlertsEnabled, DeviceAlertThresholdMinutes,
+            DeviceAlertNotifyAdmins, DeviceAlertNotifyClassHeads, DeviceAlertSchoolHoursOnly,
+            ProfileDriftCheckEnabled, ProfileDriftCheckTime);
     }
     public sealed class ExportInput { public string Password { get; set; } = string.Empty; public string ConfirmPassword { get; set; } = string.Empty; }
     public sealed class ImportInput { public IFormFile? File { get; set; } public string Password { get; set; } = string.Empty; }

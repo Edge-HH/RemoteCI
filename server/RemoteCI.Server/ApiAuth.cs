@@ -17,9 +17,9 @@ internal static class ApiAuth
             ? header[(Protocol.BearerScheme.Length + 1)..].Trim()
             : ctx.Request.Headers["X-API-Key"].ToString().Trim();
         if (string.IsNullOrWhiteSpace(token)) return null;
-        return token.StartsWith(IdentityCoordinator.ApiKeyPrefix, StringComparison.Ordinal)
+        return CommandAuditContext.Remember(ctx, token.StartsWith(IdentityCoordinator.ApiKeyPrefix, StringComparison.Ordinal)
             ? await identities.ValidateApiKeyAsync(token, ct)
-            : await identities.ValidateAccessTokenAsync(token, ct);
+            : await identities.ValidateAccessTokenAsync(token, ct));
     }
 
     public static IResult Error(string code, string message, int status) =>

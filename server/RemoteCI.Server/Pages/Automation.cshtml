@@ -1,0 +1,110 @@
+@page
+@model AutomationModel
+@{
+    ViewData["Title"] = "自动化";
+}
+<link rel="stylesheet" href="~/operations.css" asp-append-version="true" />
+<div class="page-head">
+    <div>
+        <p class="eyebrow">服务端管理</p>
+        <h1>自动化</h1>
+    </div>
+    <a class="button" asp-page="/AutomationEdit">新建规则</a>
+</div>
+<p class="muted ops-intro">
+    按时间、课表事件或设备上线，自动向班级下发通知、音量、电源、扩展等操作。时间按各班教室电脑的本地时间计算；
+    规则以最后保存它的系统管理员身份执行，并记入操作记录。
+</p>
+<section class="panel">
+    <h2>从模板开始</h2>
+    <div class="automation-templates">
+        <a class="button ghost" asp-page="/AutomationEdit" asp-route-template="shutdown">放学 30 分钟后关机</a>
+        <a class="button ghost" asp-page="/AutomationEdit" asp-route-template="friday">周五放学安全提醒</a>
+        <a class="button ghost" asp-page="/AutomationEdit" asp-route-template="noon">午休降低音量</a>
+        <a class="button ghost" asp-page="/AutomationEdit" asp-route-template="volume">开机后恢复音量</a>
+    </div>
+</section>
+<section class="panel">
+    <h2>规则</h2>
+    @if (Model.Rules.Count == 0)
+    {
+        <p class="muted">还没有自动化规则。</p>
+    }
+    else
+    {
+        <div class="ops-table-wrap">
+            <table class="user-account-table ops-table">
+                <thead><tr><th>规则</th><th>目标</th><th>最近执行</th><th>状态</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var rule in Model.Rules)
+                    {
+                        <tr>
+                            <td><strong>@rule.Name</strong><small class="ops-sub">@rule.Description</small>
+                                @if (rule.ValidFrom is not null || rule.ValidTo is not null) { <small class="ops-sub">生效 @(rule.ValidFrom ?? "不限") 至 @(rule.ValidTo ?? "不限")</small> }</td>
+                            <td>@Model.DescribeTarget(rule.Target)</td>
+                            <td class="ops-nowrap">
+                                @if (rule.LastRunAt is { } last)
+                                {
+                                    <span class="ops-badge @(rule.LastSuccess == true ? "ok" : "bad")">@(rule.LastSuccess == true ? "成功" : "失败")</span>
+                                    <small class="ops-sub">@last.ToLocalTime().ToString("MM-dd HH:mm")</small>
+                                }
+                                else { <span class="muted">尚未执行</span> }
+                            </td>
+                            <td>
+                                <form method="post" asp-page-handler="Toggle" class="inline-form">
+                                    <input type="hidden" name="id" value="@rule.Id" />
+                                    <input type="hidden" name="enabled" value="@((!rule.Enabled).ToString().ToLowerInvariant())" />
+                                    <button type="submit" class="ghost">@(rule.Enabled ? "停用" : "启用")</button>
+                                </form>
+                                <small class="ops-sub">@(rule.Enabled ? "已启用" : "已停用")</small>
+                            </td>
+                            <td>
+                                <div class="row-actions">
+                                    <a class="button ghost" asp-page="/AutomationEdit" asp-route-id="@rule.Id">编辑</a>
+                                    <form method="post" asp-page-handler="Run" onsubmit="return confirm('立即对全部目标班级执行一次，确定继续？')">
+                                        <input type="hidden" name="id" value="@rule.Id" />
+                                        <button type="submit" class="ghost">立即运行</button>
+                                    </form>
+                                    <form method="post" asp-page-handler="Delete" onsubmit="return confirm('删除规则及其执行记录，确定继续？')">
+                                        <input type="hidden" name="id" value="@rule.Id" />
+                                        <button type="submit" class="danger ghost">删除</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+<section class="panel">
+    <h2>最近执行</h2>
+    @if (Model.Runs.Count == 0)
+    {
+        <p class="muted">暂无执行记录。</p>
+    }
+    else
+    {
+        <div class="ops-table-wrap">
+            <table class="user-account-table ops-table">
+                <thead><tr><th>时间</th><th>规则</th><th>班级</th><th>触发</th><th>结果</th></tr></thead>
+                <tbody>
+                    @foreach (var run in Model.Runs)
+                    {
+                        <tr>
+                            <td class="ops-nowrap">@run.DueAt.ToLocalTime().ToString("MM-dd HH:mm")</td>
+                            <td>@run.RuleName</td>
+                            <td>@run.ClassName</td>
+                            <td>@run.Trigger</td>
+                            <td>
+                                <span class="ops-badge @(run.Status switch { "Succeeded" => "ok", "Failed" => "bad", _ => "wait" })">@run.StatusLabel</span>
+                                @if (!string.IsNullOrEmpty(run.Message)) { <small class="ops-sub">@run.Message</small> }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>

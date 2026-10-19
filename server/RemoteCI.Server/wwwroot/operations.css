@@ -1,0 +1,73 @@
+/* 集控运维页面（操作记录、设备状态、自动化、课时统计）共用样式，沿用 app.css 的颜色变量。 */
+.ops-intro { margin: -6px 0 16px; max-width: 760px; line-height: 1.6; }
+.ops-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px 14px; align-items: end; }
+.ops-filters label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 650; }
+.ops-filter-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ops-table-wrap { overflow-x: auto; margin: -4px; padding: 4px; }
+.ops-table { min-width: 760px; }
+.ops-table td { vertical-align: top; }
+.ops-nowrap { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ops-summary { max-width: 420px; overflow-wrap: anywhere; }
+.ops-sub { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.ops-badge { display: inline-flex; min-height: 24px; align-items: center; padding: 2px 9px; border-radius: 12px; background: var(--surface-soft); color: var(--muted); font-size: 12px; font-weight: 750; white-space: nowrap; }
+.ops-badge.ok { background: var(--success-soft); color: var(--success); }
+.ops-badge.bad { background: var(--danger-soft); color: var(--danger); }
+.ops-badge.wait, .ops-badge.warn { background: var(--warning-soft); color: var(--warning); }
+.ops-more { display: flex; justify-content: center; margin: 16px 0 0; }
+
+.ops-inline-check { display: flex !important; align-items: center; gap: 8px; min-height: 44px; color: var(--text) !important; }
+
+/* 设备状态 */
+.device-filters { grid-template-columns: minmax(180px, 260px) auto; justify-content: start; }
+.device-filters .check { display: flex; align-items: center; gap: 8px; min-height: 44px; color: var(--text); }
+.device-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.device-card { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
+.device-card.offline { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
+.device-card header { display: flex; align-items: center; gap: 10px; }
+.device-card header > div { display: grid; min-width: 0; flex: 1; }
+.device-card header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-card header small { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.device-dot { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 4px var(--success-soft); }
+.device-card.offline .device-dot { background: var(--danger); box-shadow: 0 0 0 4px var(--danger-soft); }
+.device-course { margin: 0; min-height: 20px; color: var(--text); font-weight: 650; }
+.device-card.offline .device-course { color: var(--danger); }
+.device-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin: 0; }
+.device-facts div { min-width: 0; }
+.device-facts dt { color: var(--muted); font-size: 11px; font-weight: 750; }
+.device-facts dd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 2px 0 0; overflow-wrap: anywhere; font-size: 13px; }
+.device-timeline { position: relative; height: 8px; overflow: hidden; border-radius: 4px; background: var(--surface-soft); }
+.device-timeline span { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--success); }
+.device-updated { margin-top: 12px; font-size: 12px; }
+
+/* 档案历史与设备差异 */
+.ops-list { display: grid; gap: 6px; margin: 8px 0 0; padding-left: 18px; line-height: 1.55; }
+.ops-check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.ops-check-item { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
+.ops-check-item .check { display: inline-flex; align-items: center; gap: 8px; font-weight: 650; }
+.ops-details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.ops-selected td { background: var(--accent-faint); }
+.profile-history { display: grid; gap: 16px; margin-top: 14px; }
+.profile-diff { padding: 14px 16px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-soft); }
+.profile-diff h3 { margin: 0 0 6px; font-size: 15px; }
+
+/* 电子班牌管理 */
+.board-created-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 18px; align-items: start; }
+.board-qr { padding: 10px; border-radius: 12px; background: #fff; }
+.board-qr svg { display: block; width: 100%; height: auto; }
+@media (max-width: 720px) { .board-created-body { grid-template-columns: 1fr; } .board-qr { max-width: 220px; } }
+
+/* 自动化 */
+.automation-templates { display: flex; flex-wrap: wrap; gap: 8px; }
+.automation-form fieldset { margin: 0; padding: 14px; border: 1px solid var(--line); border-radius: 11px; min-width: 0; }
+.automation-form legend { padding: 0 6px; color: var(--muted); font-size: 13px; font-weight: 750; }
+.automation-weekdays, .automation-targets, .automation-checks { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.automation-targets { max-height: 260px; overflow-y: auto; }
+.automation-form .check { display: inline-flex; align-items: center; gap: 8px; }
+.automation-action { background: var(--surface-soft); }
+.automation-form [hidden] { display: none !important; }
+
+@media (max-width: 720px) {
+    .ops-filters { grid-template-columns: 1fr 1fr; }
+    .ops-filter-actions { grid-column: 1 / -1; }
+    .device-filters { grid-template-columns: 1fr; }
+}

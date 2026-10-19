@@ -36,10 +36,106 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<WebPushJob> WebPushJobs => Set<WebPushJob>();
     public DbSet<CalendarSubscription> CalendarSubscriptions => Set<CalendarSubscription>();
     public DbSet<CalendarEventVersion> CalendarEventVersions => Set<CalendarEventVersion>();
+    public DbSet<CommandAuditEntry> CommandAuditEntries => Set<CommandAuditEntry>();
+    public DbSet<DevicePresenceEvent> DevicePresenceEvents => Set<DevicePresenceEvent>();
+    public DbSet<DeviceAlertState> DeviceAlertStates => Set<DeviceAlertState>();
+    public DbSet<AutomationRule> AutomationRules => Set<AutomationRule>();
+    public DbSet<AutomationRun> AutomationRuns => Set<AutomationRun>();
+    public DbSet<StoredProfileVersion> StoredProfileVersions => Set<StoredProfileVersion>();
+    public DbSet<ProfileDriftReport> ProfileDriftReports => Set<ProfileDriftReport>();
+    public DbSet<LessonLedgerEntry> LessonLedgerEntries => Set<LessonLedgerEntry>();
+    public DbSet<ActionLinkToken> ActionLinkTokens => Set<ActionLinkToken>();
+    public DbSet<ClassBoard> ClassBoards => Set<ClassBoard>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+        builder.Entity<DevicePresenceEvent>(entity =>
+        {
+            entity.HasIndex(x => new { x.CredentialId, x.AtUnixMs });
+            entity.HasIndex(x => x.AtUnixMs);
+        });
+        builder.Entity<StoredProfileVersion>(entity =>
+        {
+            entity.HasIndex(x => new { x.ProfileId, x.Revision });
+            entity.Property(x => x.Name).HasMaxLength(100);
+            entity.Property(x => x.SavedByName).HasMaxLength(40);
+            entity.HasOne(x => x.Profile).WithMany().HasForeignKey(x => x.ProfileId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ClassBoard>(entity =>
+        {
+            entity.HasIndex(x => x.TokenHash).IsUnique();
+            entity.HasIndex(x => x.ClassId);
+            entity.Property(x => x.TokenHash).HasMaxLength(64);
+            entity.Property(x => x.Name).HasMaxLength(40);
+            entity.HasOne(x => x.Classroom).WithMany().HasForeignKey(x => x.ClassId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ActionLinkToken>(entity =>
+        {
+            entity.HasKey(x => x.TokenHash);
+            entity.Property(x => x.TokenHash).HasMaxLength(64);
+            entity.Property(x => x.Action).HasMaxLength(40);
+            entity.HasIndex(x => x.ExpiresAtUnixMs);
+            entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<LessonLedgerEntry>(entity =>
+        {
+            entity.HasIndex(x => new { x.ClassId, x.Date, x.Index }).IsUnique();
+            entity.HasIndex(x => x.Date);
+            entity.Property(x => x.ClassName).HasMaxLength(40);
+            entity.Property(x => x.Date).HasMaxLength(10);
+            entity.Property(x => x.Label).HasMaxLength(40);
+            entity.Property(x => x.Subject).HasMaxLength(100);
+            entity.Property(x => x.StartTime).HasMaxLength(8);
+            entity.Property(x => x.EndTime).HasMaxLength(8);
+            entity.Property(x => x.TeacherName).HasMaxLength(100);
+            entity.Property(x => x.DefaultTeacherName).HasMaxLength(100);
+        });
+        builder.Entity<ProfileDriftReport>(entity =>
+        {
+            entity.HasKey(x => x.ClassId);
+            entity.Property(x => x.ClassId).ValueGeneratedNever();
+        });
+        builder.Entity<SystemMetadata>(entity => entity.Property(x => x.ProfileDriftCheckTime).HasMaxLength(5));
+        builder.Entity<AutomationRule>(entity =>
+        {
+            entity.Property(x => x.Name).HasMaxLength(60);
+            entity.Property(x => x.CreatedByName).HasMaxLength(40);
+            entity.Property(x => x.ValidFrom).HasMaxLength(10);
+            entity.Property(x => x.ValidTo).HasMaxLength(10);
+            entity.Property(x => x.LastResult).HasMaxLength(200);
+        });
+        builder.Entity<AutomationRun>(entity =>
+        {
+            entity.HasIndex(x => x.DedupeKey).IsUnique();
+            entity.HasIndex(x => new { x.Status, x.DueAtUnixMs });
+            entity.HasIndex(x => new { x.RuleId, x.DueAtUnixMs });
+            entity.Property(x => x.DedupeKey).HasMaxLength(160);
+            entity.Property(x => x.RuleName).HasMaxLength(60);
+            entity.Property(x => x.ClassName).HasMaxLength(40);
+            entity.Property(x => x.TriggerText).HasMaxLength(100);
+            entity.Property(x => x.Message).HasMaxLength(1000);
+            entity.HasOne(x => x.Rule).WithMany().HasForeignKey(x => x.RuleId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<DeviceAlertState>(entity =>
+        {
+            entity.HasKey(x => x.CredentialId);
+            entity.Property(x => x.CredentialId).ValueGeneratedNever();
+        });
+        builder.Entity<CommandAuditEntry>(entity =>
+        {
+            entity.HasIndex(x => x.CreatedAtUnixMs);
+            entity.HasIndex(x => new { x.ClassId, x.CreatedAtUnixMs });
+            entity.HasIndex(x => new { x.ActorUserId, x.CreatedAtUnixMs });
+            entity.Property(x => x.MessageId).HasMaxLength(64);
+            entity.Property(x => x.ActorName).HasMaxLength(100);
+            entity.Property(x => x.SourceDetail).HasMaxLength(100);
+            entity.Property(x => x.ClassName).HasMaxLength(40);
+            entity.Property(x => x.DeviceName).HasMaxLength(80);
+            entity.Property(x => x.Summary).HasMaxLength(CommandAuditLimits.TextLength);
+            entity.Property(x => x.ResultCode).HasMaxLength(40);
+            entity.Property(x => x.ResultMessage).HasMaxLength(CommandAuditLimits.TextLength);
+        });
         builder.Entity<WebPushSubscription>().Property(x => x.BrowserId).HasMaxLength(64);
         builder.Entity<WebPushJob>(entity =>
         {
@@ -235,6 +331,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.Property(x => x.Kind).HasMaxLength(40);
             entity.Property(x => x.Title).HasMaxLength(120);
             entity.Property(x => x.Body).HasMaxLength(1000);
+            entity.Property(x => x.Link).HasMaxLength(200);
             entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<WebPushSubscription>(entity =>

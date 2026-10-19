@@ -1,0 +1,55 @@
+@model RemoteCI.Server.Pages.DevicesModel
+@using RemoteCI.Server.Services
+@{
+    var overview = Model.Overview;
+}
+<div class="metric-grid device-metrics">
+    <article class="metric-card"><span class="metric-label">在线</span><strong class="metric-value">@overview.OnlineCount</strong><span class="metric-chip positive">共 @overview.Devices.Count 台</span></article>
+    <article class="metric-card"><span class="metric-label">离线</span><strong class="metric-value">@overview.OfflineCount</strong>@if (overview.OfflineCount > 0) { <span class="metric-chip danger">需要检查</span> }</article>
+    <article class="metric-card"><span class="metric-label">插件待升级</span><strong class="metric-value">@overview.OutdatedCount</strong><span class="metric-chip">服务端 @overview.ServerVersion.Split('+')[0]</span></article>
+    <article class="metric-card"><span class="metric-label">档案不一致</span><strong class="metric-value">@overview.DriftCount</strong><span class="metric-chip">设备与服务端档案</span></article>
+</div>
+@if (Model.Visible.Count == 0)
+{
+    <section class="panel"><p class="muted">@(overview.Devices.Count == 0 ? "还没有已分配到班级的教室电脑。在概览页生成配对码即可接入。" : "没有符合筛选条件的设备。")</p></section>
+}
+else
+{
+    <div class="device-grid">
+        @foreach (var device in Model.Visible)
+        {
+            <article class="device-card @(device.Online ? "online" : "offline")">
+                <header>
+                    <span class="device-dot" aria-hidden="true"></span>
+                    <div>
+                        <strong>@device.ClassName</strong>
+                        <small>@device.DeviceName@if (device.GroupNames.Count > 0) { <text> · @string.Join("、", device.GroupNames)</text> }</small>
+                    </div>
+                    <span class="ops-badge @(device.Online ? "ok" : "bad")">@(device.Online ? "在线" : "离线")</span>
+                </header>
+                <p class="device-course">
+                    @if (device.Online) { @(device.CurrentCourse ?? "暂无课堂状态") }
+                    else if (device.OfflineSince is { } since) { <text>已离线 @DeviceAlertEvaluator.FormatDuration(overview.GeneratedAt - since) · 最后在线 @since.ToLocalTime().ToString("MM-dd HH:mm")</text> }
+                    else { <text>尚无在线记录</text> }
+                </p>
+                <dl class="device-facts">
+                    <div><dt>插件</dt><dd>@device.PluginVersion@if (device.Outdated) { <span class="ops-badge warn">待升级</span> }</dd></div>
+                    <div><dt>ClassIsland</dt><dd>@device.ClassIslandVersion</dd></div>
+                    <div><dt>音量</dt><dd>@(device.VolumePercent is { } volume ? (device.Muted == true ? $"{volume}（静音）" : volume.ToString()) : "—")</dd></div>
+                    @if (device.ProfileDriftCount > 0)
+                    {
+                        <div><dt>档案</dt><dd><a asp-page="/Profiles">与服务端不一致 @device.ProfileDriftCount 处</a></dd></div>
+                    }
+                </dl>
+                <div class="device-timeline" title="今日在线时间（0 点至现在）">
+                    @foreach (var segment in device.Timeline)
+                    {
+                        var (left, width) = Model.Position(segment);
+                        <span style="left:@(left)%;width:@(width)%"></span>
+                    }
+                </div>
+            </article>
+        }
+    </div>
+}
+<p class="muted device-updated">更新于 @overview.GeneratedAt.ToLocalTime().ToString("HH:mm:ss")，每 15 秒自动刷新。</p>

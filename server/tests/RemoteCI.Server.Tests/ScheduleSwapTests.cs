@@ -270,6 +270,40 @@ public sealed class ScheduleSwapTests : IDisposable
             WebPushSender.Base64UrlDecode(parts[2]), HashAlgorithmName.SHA256));
     }
 
+    [Fact]
+    public async Task ActionLink_ShowsConfirmPage_ApprovesOnce_AndRejectsNonApprovers()
+    {
+        var classId = await SeedClassAsync("链接班", ("数学", "王老师"), ("英语", "李老师"));
+        await CreateTeacherAsync("link.wang", "王老师");
+        await CreateTeacherAsync("link.li", "李老师");
+        var wangToken = await TokenAsync("link.wang");
+        var liToken = await TokenAsync("link.li");
+        var created = await PostAsync<SwapRequestView>(wangToken, "/api/swap-requests", Exchange(classId, _today, 0, classId, _today, 1));
+
+        // 申请人不是审批人，不能为“同意”签发链接。
+        var denied = await SendAsync(wangToken, HttpMethod.Post, "/api/me/action-links",
+            new ActionLinkRequest { Action = ActionLinkActions.SwapApprove, TargetId = created.Id });
+        Assert.Equal(HttpStatusCode.BadRequest, denied.StatusCode);
+
+        var link = await PostAsync<ActionLinkResponse>(liToken, "/api/me/action-links",
+            new ActionLinkRequest { Action = ActionLinkActions.SwapApprove, TargetId = created.Id });
+        Assert.StartsWith("/Act/", link.Path);
+        var anonymous = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        // 打开链接只展示确认页（聊天软件预览链接也不会执行）。
+        var page = WebUtility.HtmlDecode(await anonymous.GetStringAsync(link.Path));
+        Assert.Contains("确认同意换课", page);
+        Assert.Equal(SwapRequestStatus.Pending, (await GetAsync<SwapRequestView>(liToken, $"/api/swap-requests/{created.Id}")).Status);
+
+        var confirm = await anonymous.PostAsync(link.Path, new FormUrlEncodedContent(new Dictionary<string, string> { ["Note"] = "可以" }));
+        Assert.Contains("已同意", WebUtility.HtmlDecode(await confirm.Content.ReadAsStringAsync()));
+        Assert.Equal(SwapRequestStatus.Approved, (await GetAsync<SwapRequestView>(liToken, $"/api/swap-requests/{created.Id}")).Status);
+
+        var again = await anonymous.PostAsync(link.Path, new FormUrlEncodedContent(new Dictionary<string, string>()));
+        Assert.Contains("这个链接已经使用过", WebUtility.HtmlDecode(await again.Content.ReadAsStringAsync()));
+        Assert.Contains("链接无效或已过期", WebUtility.HtmlDecode(await anonymous.GetStringAsync("/Act/not-a-real-token")));
+    }
+
     // ---------- 辅助 ----------
 
     private CreateSwapRequest Exchange(Guid sourceClass, string sourceDate, int sourceIndex, Guid targetClass, string targetDate, int targetIndex) => new()

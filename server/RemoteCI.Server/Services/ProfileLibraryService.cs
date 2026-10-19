@@ -52,7 +52,8 @@ public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService ac
     }
 
     public async Task<IReadOnlyList<StoredProfileDto>> SaveAsync(
-        AppUser actor, IReadOnlyList<ProfileSaveItem> items, Guid? onlyClass = null, CancellationToken ct = default)
+        AppUser actor, IReadOnlyList<ProfileSaveItem> items, Guid? onlyClass = null, CancellationToken ct = default,
+        ProfileVersionOrigin origin = ProfileVersionOrigin.Save)
     {
         if (items.Count is < 1 or > 100) throw new ArgumentException("每次请选择 1 至 100 份档案保存。");
         if (items.Where(x => x.Id is not null).GroupBy(x => x.Id).Any(x => x.Count() > 1) ||
@@ -92,6 +93,7 @@ public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService ac
                     row = await FindAuthorizedAsync(actor, id, onlyClass, ct);
                     if (row.ClassId != item.ClassId) throw new ArgumentException("不能改变已有档案所属班级。");
                     RequireRevision(row, item.Revision);
+                    await EnsureBaselineAsync(row, ct);
                 }
                 else
                 {
@@ -121,6 +123,20 @@ public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService ac
             }
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) { throw Conflict(); }
+            var savedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            db.StoredProfileVersions.AddRange(saved.Select(row => new StoredProfileVersion
+            {
+                ProfileId = row.Id,
+                Revision = row.Revision,
+                Name = row.Name,
+                ProfileJson = row.ProfileJson,
+                SavedByUserId = actor.Id,
+                SavedByName = actor.DisplayName,
+                SavedAtUnixMs = savedAt,
+                Origin = origin,
+            }));
+            await db.SaveChangesAsync(ct);
+            await PruneVersionsAsync(saved.Select(x => x.Id).ToList(), ct);
             await transaction.CommitAsync(ct);
             // 插件从未同步过课表的班级，手机/手表的课表按班级档案推算：保存后立即推送新课表。
             await scheduleViews.PublishProfileSchedulesAsync(
@@ -145,7 +161,104 @@ public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService ac
         {
             Name = string.IsNullOrWhiteSpace(input.Name) ? $"{original.Name} 副本" : input.Name,
             ProfileJson = original.ProfileJson,
-        }], ct: ct))[0];
+        }], ct: ct, origin: ProfileVersionOrigin.Copy))[0];
+    }
+
+    // ---------- 版本历史 ----------
+
+    /// <summary>按修订号倒序列出版本；每个版本附与上一版本相比的变化数。升级前从未保存过的档案以当前内容作为唯一版本。</summary>
+    public async Task<IReadOnlyList<ProfileVersionView>> ListVersionsAsync(
+        AppUser actor, Guid profileId, Guid? onlyClass = null, CancellationToken ct = default)
+    {
+        var row = await FindAuthorizedAsync(actor, profileId, onlyClass, ct);
+        var versions = await LoadVersionsAsync(row, ct);
+        var result = new List<ProfileVersionView>();
+        for (var i = 0; i < versions.Count; i++)
+        {
+            var version = versions[i];
+            int? changes = i + 1 < versions.Count ? SafeDiff(versions[i + 1].ProfileJson, version.ProfileJson).Count : null;
+            result.Add(ProfileVersionView.From(version, changes, version.Revision == row.Revision));
+        }
+        return result;
+    }
+
+    /// <summary>某个版本与上一版本（against=previous）或与当前内容（against=current）的差异。</summary>
+    public async Task<ProfileVersionDiff> DiffVersionAsync(
+        AppUser actor, Guid profileId, long revision, bool againstCurrent, Guid? onlyClass = null, CancellationToken ct = default)
+    {
+        var row = await FindAuthorizedAsync(actor, profileId, onlyClass, ct);
+        var versions = await LoadVersionsAsync(row, ct);
+        var index = versions.FindIndex(x => x.Revision == revision);
+        if (index < 0) throw new KeyNotFoundException("该版本不存在或已被清理。");
+        var version = versions[index];
+        if (againstCurrent)
+            return new ProfileVersionDiff(version.Revision, row.Revision, "当前版本", SafeDiff(version.ProfileJson, row.ProfileJson));
+        if (index + 1 >= versions.Count)
+            return new ProfileVersionDiff(version.Revision, null, "上一版本", []);
+        var previous = versions[index + 1];
+        return new ProfileVersionDiff(version.Revision, previous.Revision, "上一版本", SafeDiff(previous.ProfileJson, version.ProfileJson));
+    }
+
+    /// <summary>把历史版本另存为新的修订；仍校验当前修订号，避免覆盖别人刚保存的内容。</summary>
+    public async Task<StoredProfileDto> RestoreVersionAsync(
+        AppUser actor, Guid profileId, long revision, long expectedRevision, Guid? onlyClass = null, CancellationToken ct = default)
+    {
+        var row = await FindAuthorizedAsync(actor, profileId, onlyClass, ct);
+        var version = (await LoadVersionsAsync(row, ct)).FirstOrDefault(x => x.Revision == revision)
+            ?? throw new KeyNotFoundException("该版本不存在或已被清理。");
+        return (await SaveAsync(actor, [new ProfileSaveItem
+        {
+            Id = row.Id,
+            ClassId = row.ClassId,
+            SourceTemplateId = row.SourceTemplateId,
+            Revision = expectedRevision,
+            Name = version.Name,
+            ProfileJson = version.ProfileJson,
+        }], onlyClass, ct, ProfileVersionOrigin.Restore))[0];
+    }
+
+    private async Task<List<StoredProfileVersion>> LoadVersionsAsync(StoredProfile row, CancellationToken ct)
+    {
+        var versions = await db.StoredProfileVersions.AsNoTracking().Where(x => x.ProfileId == row.Id)
+            .OrderByDescending(x => x.Revision).ToListAsync(ct);
+        if (versions.Count == 0 || versions[0].Revision != row.Revision)
+            versions.Insert(0, Baseline(row));
+        return versions;
+    }
+
+    /// <summary>升级前已有的档案没有版本记录：第一次修改前先把旧内容存为基线，才能对比和回滚。</summary>
+    private async Task EnsureBaselineAsync(StoredProfile row, CancellationToken ct)
+    {
+        if (await db.StoredProfileVersions.AnyAsync(x => x.ProfileId == row.Id && x.Revision == row.Revision, ct)) return;
+        db.StoredProfileVersions.Add(Baseline(row));
+    }
+
+    private static StoredProfileVersion Baseline(StoredProfile row) => new()
+    {
+        ProfileId = row.Id,
+        Revision = row.Revision,
+        Name = row.Name,
+        ProfileJson = row.ProfileJson,
+        SavedByName = "历史版本",
+        SavedAtUnixMs = row.UpdatedAt.ToUnixTimeMilliseconds(),
+        Origin = ProfileVersionOrigin.Baseline,
+    };
+
+    private async Task PruneVersionsAsync(IReadOnlyList<Guid> profileIds, CancellationToken ct)
+    {
+        foreach (var profileId in profileIds)
+        {
+            var stale = await db.StoredProfileVersions.Where(x => x.ProfileId == profileId)
+                .OrderByDescending(x => x.Revision).Skip(StoredProfileVersion.MaxPerProfile).Select(x => x.Id).ToListAsync(ct);
+            if (stale.Count > 0) await db.StoredProfileVersions.Where(x => stale.Contains(x.Id)).ExecuteDeleteAsync(ct);
+        }
+    }
+
+    /// <summary>历史版本可能是旧格式或已不满足当前校验，差异计算失败时按“无法比较”处理而不是报错。</summary>
+    internal static IReadOnlyList<ProfileChange> SafeDiff(string before, string after, bool includeTempLayers = true)
+    {
+        try { return ProfileDocument.Diff(before, after, includeTempLayers); }
+        catch (ArgumentException ex) { return [new ProfileChange("错误", $"无法比较：{ex.Message}")]; }
     }
 
     public async Task DeleteAsync(AppUser actor, ProfileIdRequest input, Guid? onlyClass = null, CancellationToken ct = default)
@@ -194,6 +307,23 @@ public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService ac
 
 public sealed class ProfileRevisionException(string message) : Exception(message);
 public sealed record StoredProfileDto(Guid Id, string Name, Guid? ClassId, Guid? SourceTemplateId, long Revision, string ProfileJson, DateTimeOffset UpdatedAt);
+public sealed record ProfileVersionView(
+    Guid? Id, long Revision, string Name, string SavedByName, DateTimeOffset SavedAt, string Origin, string OriginLabel,
+    int? ChangeCount, bool IsCurrent)
+{
+    public static ProfileVersionView From(StoredProfileVersion row, int? changeCount, bool isCurrent) => new(
+        row.Id == Guid.Empty ? null : row.Id, row.Revision, row.Name, row.SavedByName,
+        DateTimeOffset.FromUnixTimeMilliseconds(row.SavedAtUnixMs), row.Origin.ToString(),
+        row.Origin switch
+        {
+            ProfileVersionOrigin.Copy => "复制",
+            ProfileVersionOrigin.Restore => "恢复",
+            ProfileVersionOrigin.Baseline => "历史",
+            _ => "保存",
+        },
+        changeCount, isCurrent);
+}
+public sealed record ProfileVersionDiff(long Revision, long? AgainstRevision, string AgainstLabel, IReadOnlyList<ProfileChange> Changes);
 public sealed record ProfilePreview(string Name, int TimeLayoutCount, int ClassPlanCount, int SubjectCount, IReadOnlyList<string> Errors);
 public sealed class ProfileSaveItem
 {

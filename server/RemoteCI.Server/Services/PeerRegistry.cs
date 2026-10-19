@@ -13,6 +13,7 @@ namespace RemoteCI.Server.Services;
 public sealed class PeerRegistry(
     IServiceScopeFactory scopeFactory,
     TimeProvider timeProvider,
+    CommandAuditLog audit,
     ILogger<PeerRegistry> logger)
 {
     private static readonly TimeSpan WatchCommandTimeout = TimeSpan.FromSeconds(15);
@@ -49,11 +50,29 @@ public sealed class PeerRegistry(
             .Select(x => (x.Id, x.Principal.ClassId!.Value))
             .ToList();
 
+    /// <summary>插件连接接入或断开；设备状态页与离线告警据此记录在线时间线。处理方不得阻塞或抛出。</summary>
+    public event Action<PluginPresenceChange>? PluginPresenceChanged;
+
     public Guid Register(WebSocket socket, string token, AuthPrincipal principal)
     {
         var id = Guid.NewGuid();
         TableFor(principal.PeerRole)[id] = new WsPeer(id, token, principal, socket);
+        if (principal.IsPlugin) RaisePresence(id, principal, online: true);
         return id;
+    }
+
+    private void RaisePresence(Guid connectionId, AuthPrincipal principal, bool online)
+    {
+        if (principal.PluginCredentialId is not { } credentialId) return;
+        try
+        {
+            PluginPresenceChanged?.Invoke(new PluginPresenceChange(
+                connectionId, credentialId, principal.ClassId, online, timeProvider.GetUtcNow()));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "处理插件上下线事件失败：{ConnectionId}", connectionId);
+        }
     }
 
     /// <summary>保留最近一次插件协议错误，连接断开后 WebUI 仍能解释为什么显示离线。</summary>
@@ -275,11 +294,14 @@ public sealed class PeerRegistry(
             : null;
         if (peer is null) return;
         var wasPlugin = peer.Principal.IsPlugin;
+        if (wasPlugin) RaisePresence(connectionId, peer.Principal, online: false);
 
         foreach (var pending in _pendingCommands.Where(x => x.Value.WatchConnectionId == connectionId).ToList())
         {
-            if (_pendingCommands.TryRemove(pending.Key, out var removed))
-                removed.Completion?.TrySetResult(CommandResult.Failure(CommandResultCodes.Unauthorized, "连接已断开"));
+            if (!_pendingCommands.TryRemove(pending.Key, out var removed)) continue;
+            var disconnected = CommandResult.Failure(CommandResultCodes.Unauthorized, "连接已断开");
+            removed.Completion?.TrySetResult(disconnected);
+            CompleteAudit(removed, disconnected);
         }
 
         var sendLockHeld = false;
@@ -460,9 +482,15 @@ public sealed class PeerRegistry(
             await TrySendAsync(peer, envelope, ct);
     }
 
-    public void RegisterWatchCommand(string messageId, Guid connectionId)
+    /// <summary>登记手机或手表经 WebSocket 下发的命令，回执到达后转发给发起连接，并写入命令审计。</summary>
+    public void RegisterWatchCommand(string messageId, Guid connectionId, CommandMessage command, Guid classId)
     {
-        _pendingCommands[messageId] = new PendingCommand(connectionId, null);
+        var origin = FindPeer(connectionId)?.Principal is { } principal
+            ? CommandAuditContext.FromSocket(principal)
+            : new CommandAuditOrigin(CommandAuditSource.Watch);
+        var plugin = PluginPeersFor(classId).FirstOrDefault();
+        var auditId = audit.Start(command, messageId, classId, plugin?.Id, DeviceNameOf(plugin), origin);
+        _pendingCommands[messageId] = new PendingCommand(connectionId, null, auditId);
         _ = ExpireWatchCommandAsync(messageId, connectionId);
     }
 
@@ -472,11 +500,13 @@ public sealed class PeerRegistry(
         await Task.Delay(WatchCommandTimeout);
         if (!_pendingCommands.TryRemove(messageId, out var pending)) return;
         if (pending.WatchConnectionId != connectionId || pending.Completion is not null) return;
+        var timeout = CommandResult.Failure(CommandResultCodes.Timeout, "等待插件回执超时，操作结果未知");
+        CompleteAudit(pending, timeout);
         await SendToWatchAsync(connectionId, new Envelope
         {
             Type = Protocol.MessageTypeCommandResult,
             ReplyToMessageId = messageId,
-            Payload = CommandResult.Failure(CommandResultCodes.Timeout, "等待插件回执超时，操作结果未知"),
+            Payload = timeout,
         });
     }
 
@@ -486,6 +516,17 @@ public sealed class PeerRegistry(
 
     public async Task<CommandResult> SendCommandAndWaitAsync(
         CommandMessage command, Guid classId, TimeSpan timeout, CancellationToken ct = default)
+    {
+        var envelope = Envelope.Command(command);
+        var plugin = PluginPeersFor(classId).FirstOrDefault();
+        var auditId = audit.Start(command, envelope.MessageId, classId, plugin?.Id, DeviceNameOf(plugin));
+        var result = await SendCommandAndWaitCoreAsync(envelope, command, classId, timeout, ct);
+        audit.Complete(auditId, result);
+        return result;
+    }
+
+    private async Task<CommandResult> SendCommandAndWaitCoreAsync(
+        Envelope envelope, CommandMessage command, Guid classId, TimeSpan timeout, CancellationToken ct)
     {
         if (command.Command == CommandKind.SendVoiceMessage && !VoiceMessageRequest.TryDecode(command.VoiceMessage, out _))
             return CommandResult.Failure(CommandResultCodes.InvalidRequest, "语音格式无效或超过 60 秒");
@@ -497,7 +538,6 @@ public sealed class PeerRegistry(
             return CommandResult.Failure(
                 CommandResultCodes.CapabilityUnsupported,
                 $"当前班级的插件未声明能力 {capability}");
-        var envelope = Envelope.Command(command);
         var completion = new TaskCompletionSource<CommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pendingCommands[envelope.MessageId] = new PendingCommand(null, completion);
         if (!await SendToPluginAsync(classId, envelope, ct))
@@ -527,6 +567,22 @@ public sealed class PeerRegistry(
         TimeSpan timeout,
         CancellationToken ct = default)
     {
+        var envelope = Envelope.Command(command);
+        _pluginPeers.TryGetValue(connectionId, out var target);
+        var auditId = audit.Start(
+            command, envelope.MessageId, target?.Principal.ClassId, connectionId, DeviceNameOf(target));
+        var result = await SendCommandAndWaitToConnectionCoreAsync(envelope, command, connectionId, timeout, ct);
+        audit.Complete(auditId, result);
+        return result;
+    }
+
+    private async Task<CommandResult> SendCommandAndWaitToConnectionCoreAsync(
+        Envelope envelope,
+        CommandMessage command,
+        Guid connectionId,
+        TimeSpan timeout,
+        CancellationToken ct)
+    {
         if (GetNotificationError(command) is { } notificationError)
             return CommandResult.Failure(CommandResultCodes.InvalidRequest, notificationError);
         if (!_pluginPeers.TryGetValue(connectionId, out var peer) || !IsLocallyAuthorized(peer))
@@ -537,7 +593,6 @@ public sealed class PeerRegistry(
                 CommandResultCodes.CapabilityUnsupported,
                 $"当前设备插件未声明能力 {capability}");
 
-        var envelope = Envelope.Command(command);
         var completion = new TaskCompletionSource<CommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pendingCommands[envelope.MessageId] = new PendingCommand(null, completion);
         if (!await SendToPluginConnectionAsync(connectionId, envelope, ct))
@@ -563,6 +618,7 @@ public sealed class PeerRegistry(
             return false;
 
         pending.Completion?.TrySetResult(result);
+        CompleteAudit(pending, result);
         if (pending.WatchConnectionId is not { } connectionId) return true;
         await SendToWatchAsync(connectionId, new Envelope
         {
@@ -808,7 +864,22 @@ public sealed class PeerRegistry(
         }
     }
 
-    private sealed record PendingCommand(Guid? WatchConnectionId, TaskCompletionSource<CommandResult>? Completion);
+    /// <summary>
+    /// 只有手机/手表 WebSocket 命令在这里回填审计；服务端代发的命令由调用方拿到最终结果
+    /// （含超时）后统一回填，避免同一条记录写两次。
+    /// </summary>
+    private void CompleteAudit(PendingCommand pending, CommandResult result)
+    {
+        if (pending.AuditId is { } auditId) audit.Complete(auditId, result);
+    }
+
+    private static string? DeviceNameOf(WsPeer? peer) =>
+        peer is null ? null : peer.SoftwareInventory?.DeviceName is { Length: > 0 } name ? name : "ClassIsland 插件";
+
+    private sealed record PendingCommand(
+        Guid? WatchConnectionId,
+        TaskCompletionSource<CommandResult>? Completion,
+        Guid? AuditId = null);
 
     private sealed class WsPeer(Guid id, string token, AuthPrincipal principal, WebSocket socket)
     {
@@ -827,6 +898,13 @@ public sealed class PeerRegistry(
         public long RegisteredAt { get; } = DateTime.UtcNow.Ticks;
     }
 }
+
+public sealed record PluginPresenceChange(
+    Guid ConnectionId,
+    Guid CredentialId,
+    Guid? ClassId,
+    bool Online,
+    DateTimeOffset At);
 
 public sealed record PluginDeviceSnapshot(
     Guid ConnectionId,

@@ -77,6 +77,10 @@ public sealed class UserNotification
     public Guid? SwapRequestId { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? ReadAt { get; set; }
+    /// <summary>相关班级（设备告警等），可空。</summary>
+    public Guid? ClassId { get; set; }
+    /// <summary>点击通知打开的站内相对路径；为空时按通知种类选择默认页面。</summary>
+    public string? Link { get; set; }
 }
 
 /// <summary>浏览器 Web Push 订阅；关闭网页后仍可收到系统通知。</summary>

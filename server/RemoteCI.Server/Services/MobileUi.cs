@@ -25,7 +25,8 @@ public static class MobileUi
         ["/Account"] = "/Mobile/Account", ["/Inbox"] = "/Mobile/Inbox", ["/SystemConfig"] = "/Mobile/SystemConfig",
     };
     private static readonly HashSet<string> DesktopOnly = new(StringComparer.OrdinalIgnoreCase)
-    { "/Profiles", "/ClassProfiles", "/BatchControl", "/Classes", "/ExtensionSettings", "/ClassExtensions", "/Holidays", "/LoginSettings" };
+    { "/Profiles", "/ClassProfiles", "/BatchControl", "/Classes", "/ExtensionSettings", "/ClassExtensions", "/Holidays", "/LoginSettings",
+      "/Devices", "/Automation", "/AutomationEdit", "/AuditLog", "/LessonStats", "/ProfileHistory", "/ClassBoards" };
     public static string SafeDesktopPage(string? path) => path is not null && DesktopOnly.Contains(path) ? path : "/Index";
     public static bool IsPhone(HttpRequest request) => request.Headers["Sec-CH-UA-Mobile"] == "?1" ||
         System.Text.RegularExpressions.Regex.IsMatch(request.Headers.UserAgent.ToString(), "iPhone|iPod|Android.*Mobile|Windows Phone", System.Text.RegularExpressions.RegexOptions.IgnoreCase);

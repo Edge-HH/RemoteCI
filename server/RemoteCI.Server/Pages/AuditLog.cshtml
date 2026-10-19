@@ -1,0 +1,87 @@
+@page
+@model AuditLogModel
+@using RemoteCI.Server.Services
+@{
+    ViewData["Title"] = "操作记录";
+}
+<link rel="stylesheet" href="~/operations.css" asp-append-version="true" />
+<div class="page-head">
+    <div>
+        <p class="eyebrow">@(Model.IsAdmin ? "服务端管理" : "班级管理")</p>
+        <h1>操作记录</h1>
+    </div>
+    <a class="button ghost" asp-page="/AuditLog" asp-all-route-data="Model.ExportRouteValues">导出 Excel</a>
+</div>
+<p class="muted ops-intro">
+    记录经服务端下发到教室电脑的每一条命令：谁、从哪个入口、对哪台设备、做了什么、结果如何。
+    语音、文件内容和档案 JSON 不会保存。@(Model.IsAdmin ? "" : "你只能看到自己担任班主任的班级。")
+</p>
+<form method="get" class="panel ops-filters">
+    <label>开始日期<input type="date" name="from" value="@Model.From?.ToString("yyyy-MM-dd")" /></label>
+    <label>结束日期<input type="date" name="to" value="@Model.To?.ToString("yyyy-MM-dd")" /></label>
+    <label>班级
+        <select name="class">
+            <option value="">全部班级</option>
+            @foreach (var option in Model.ClassOptions)
+            {
+                <option value="@option.Id" selected="@(Model.ClassFilter == option.Id)">@option.Name</option>
+            }
+        </select>
+    </label>
+    <label>操作
+        <select name="command">
+            <option value="">全部操作</option>
+            @foreach (var kind in AuditLogModel.CommandOptions)
+            {
+                <option value="@((int)kind)" selected="@(Model.Command == (int)kind)">@CommandAuditSummary.Label(kind)</option>
+            }
+        </select>
+    </label>
+    <label>结果
+        <select name="result">
+            <option value="">全部</option>
+            <option value="success" selected="@(Model.Result == "success")">成功</option>
+            <option value="failed" selected="@(Model.Result == "failed")">失败或未完成</option>
+        </select>
+    </label>
+    <div class="ops-filter-actions">
+        <button type="submit">筛选</button>
+        <a class="button ghost" asp-page="/AuditLog">重置</a>
+    </div>
+</form>
+<section class="panel">
+    @if (Model.Records.Items.Count == 0)
+    {
+        <p class="muted">没有符合条件的记录。</p>
+    }
+    else
+    {
+        <div class="ops-table-wrap">
+            <table class="user-account-table ops-table">
+                <thead>
+                    <tr><th>时间</th><th>操作人</th><th>入口</th><th>班级 · 设备</th><th>操作</th><th>结果</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in Model.Records.Items)
+                    {
+                        <tr>
+                            <td class="ops-nowrap">@row.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss")</td>
+                            <td>@row.ActorName</td>
+                            <td>@row.SourceLabel@if (!string.IsNullOrEmpty(row.SourceDetail)) { <small class="ops-sub">@row.SourceDetail</small> }</td>
+                            <td>@(row.ClassName ?? "未分配")@if (!string.IsNullOrEmpty(row.DeviceName)) { <small class="ops-sub">@row.DeviceName</small> }</td>
+                            <td class="ops-summary">@row.Summary</td>
+                            <td>
+                                <span class="ops-badge @(row.Success switch { true => "ok", false => "bad", null => "wait" })">@CommandAuditQueryService.ResultLabel(row.Success)</span>
+                                @if (!string.IsNullOrEmpty(row.ResultMessage)) { <small class="ops-sub">@row.ResultMessage</small> }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (Model.Records.NextBefore is { } next)
+        {
+            <p class="ops-more"><a class="button ghost" asp-page="/AuditLog" asp-all-route-data="Model.RouteValues(next)">下一页</a></p>
+        }
+    }
+</section>
