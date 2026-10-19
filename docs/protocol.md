@@ -217,7 +217,7 @@ WebUI 的档案读写通过带 Cookie 与防伪令牌的 Razor Page handlers 完
 
 插件在 UI 线程验证、应用并保存档案，失败恢复原状态，成功后立即重新同步七日课表。创建并启用新档案时插件按宿主实际签名调用 `SettingsService.SaveSettings(string)` 保存档案选择（ClassIsland 2.1 没有无参重载）。旧命令 17 `DistributeProfile`、18 `UpdateTimeLayout` 的编号、载荷、管理员权限和既有语义继续保留，档案页面使用命令 25。
 
-配置备份 schema 升为 5，包含全局档案库与班级工作副本；恢复旧备份时缺少档案数据按空库处理。设备本地修改不会自动回写服务端；首次使用档案管理可从设备收集、上传或新建档案。
+配置备份 schema 升为 5，包含全局档案库与班级工作副本；恢复旧备份时缺少档案数据按空库处理。schema 7 起再包含集控运维设置（操作记录保留天数、离线告警、每日档案差异检查）与自动化规则；恢复 schema 6 及更早的配置包时保留当前的这些设置与规则。操作记录、在线记录、课时台账与档案版本属于运行数据，不进入配置包，完整数据库备份会保留它们。设备本地修改不会自动回写服务端；首次使用档案管理可从设备收集、上传或新建档案。
 
 ### 收集设备档案
 
@@ -232,6 +232,22 @@ ClassIsland 的临时层是 `ClassPlans` 中 `IsOverlay=true` 的课表：`Overl
 - 插件逐个写入：早于设备今天的跳过并计数，全部过期时失败；设备同日已有临时层或预定课表时，未设置 `replaceExistingTempLayers` 则整台设备拒绝并列出日期，设置后删除该日条目及不再被引用的旧临时层。科目和课表群只补缺，不覆盖设备现有对象；时间表在设备有同 ID 且时段一致时直接引用，否则以新 ID 写入临时层时间表副本，不改动设备的常规时间表。临时层课表以新 ID 写入，来源课表在设备上不存在时 `OverlaySourceId` 置空，并按来源课表重算 `IsChangedClass`。写入后总是打开 `IsOverlayClassPlanEnabled`（与宿主 `CreateTempClassPlan` 一致，否则未来日期的临时层不会生效），日期为今天时同时设置 `OverlayClassPlanId`。回执消息为“已下发 N 个临时层（，跳过 M 个已过期的临时层）”。
 - 校验同时拒绝 `OrderedSchedules` 中同一天出现多个条目（例如带与不带时区后缀的同一日期）。
 - WebUI 按各班最近状态快照上报的时区偏移计算教室端“今天”（无快照时用服务端本地时区），据此标注临时层“今天生效/已过期”；模板没有班级时用浏览器日期。设备写入时仍以设备自身日期跳过过期项。
+
+### 档案版本历史与设备差异
+
+每次保存（含复制、恢复）都会在同一事务内写入一个版本快照（`StoredProfileVersions`：修订号、名称、完整 JSON、操作人、时间、来源），每份档案保留最近 50 个。升级前已有的档案在第一次修改前自动补一个“历史”基线版本，因此第一次修改也能对比和回滚。
+
+差异按语义比较（`ProfileDocument.Diff`，位于共享库）：科目的增删、改名与任课教师，时间表时段的增删与起止时间，课表每节课的科目、星期与关联时间表，以及按日期的临时层。对象先按 ID 配对，ID 对不上时按名称配对（设备档案可能来自别处导入）。单次最多列出 200 处，其余合并为一条。
+
+- `GET /api/profiles/{id}/versions`：版本列表，每项含 `revision`、`savedByName`、`savedAt`、`originLabel`、`changeCount`（相比上一版本）与 `isCurrent`。
+- `GET /api/profiles/{id}/versions/{revision}/diff?against=previous|current`：该版本与上一版本或当前内容的差异 `{revision, againstRevision, againstLabel, changes:[{category, text}]}`。
+- `POST /api/profiles/{id}/versions/{revision}/restore`：请求体 `{ "revision": 当前修订号 }`，把历史版本另存为新修订；修订号不一致返回 409，不覆盖别人刚保存的内容。设备档案不会随之改变，需要时重新下发。
+
+设备差异检查复用 `ReadProfile`：读取教室电脑当前档案，与服务端班级档案比较时间表、课表和科目（不含临时层），每班保存最新一份结果；服务端档案在检查后又保存过时，旧结果不再返回。差异只记录不处理，以设备为准用“从设备收集”，以服务端为准重新下发。
+
+- `POST /api/profiles/drift`：请求体 `{ "classIds": [...] }`，逐班返回 `{classId, className, success, message, changeCount}`。
+- `GET /api/profiles/drift`：调用者可管理班级的最新结果 `[{classId, className, checkedAt, changeCount, changes}]`。
+- 每日自动检查：系统配置“集控运维”可开关并设定时刻（默认 12:30，服务端本地时间），以第一位启用的系统管理员身份读取全部在线且有班级档案的设备；审计来源记为“档案差异检查”。
 
 ## 远程终端与文件分发
 
@@ -294,6 +310,54 @@ ClassIsland 的临时层是 `ClassPlans` 中 `IsOverlay=true` 的课表：`Overl
 
 WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebUI 有未保存编辑时保留表单。AstrBot 通过个人通知通道转发提醒，专用 `remoteci_personal_courses` / `remoteci_save_personal_course` / `remoteci_delete_personal_course` 工具仅允许私聊；个人日程与个人通知也不可通过通用 API 工具向群聊输出。
 
+## 集控运维（服务端功能）
+
+以下功能全部在服务端实现，只新增 REST 接口和个人通知种类，不改 WebSocket 协议、不新增插件能力或权限位，旧客户端不受影响。可见范围统一为：系统管理员看全部；班主任（班内角色为“班主任”）只看自己担任班主任的班级；其他账号返回 403。
+
+### 操作记录（命令审计）
+
+所有经服务端下发到教室端插件的命令（含手机/手表 WebSocket 命令、REST、WebUI、批量控制、换课执行、档案下发与收集、自动化）都会记录：时间、操作人（`requestedBy` 的显示名）、入口（`source`：`WebUi`、`Mobile`、`Watch`、`ApiKey`、`DeviceRest`、`Automation`、`SwapWorkflow`、`DriftCheck`、`System`）、入口详情（API Key 名称、设备会话名称、自动化规则名）、班级、设备、命令与结果。摘要只保留必要信息：通知标题与正文开头、电源/音量动作、扩展 Id 与参数、终端命令前 200 字、文件名与大小；不保存语音、文件内容或档案 JSON。因离线或能力不足未执行的命令同样记录失败结果；在服务端鉴权前就被拒绝的请求不记录。记录写入在后台批量完成，不阻塞命令下发；默认保留 180 天（系统配置 7–3650 天）。
+
+- `GET /api/audit?from=&to=&classId=&userId=&command=&success=&before=&limit=`：按时间倒序分页，返回 `{items:[{id, createdAt, completedAt, actorUserId, actorName, source, sourceLabel, sourceDetail, classId, className, deviceName, command, commandLabel, summary, success, resultCode, resultMessage}], nextBefore}`；下一页把 `nextBefore` 作为 `before` 传回。`success=false` 包含失败与仍在等待回执的记录。
+- `GET /api/audit/export`：同样的筛选条件导出 Excel（最多 10000 行）。
+
+### 设备状态与离线告警
+
+- `GET /api/devices/health`：已分配班级的教室电脑列表 `[{credentialId, classId, className, groupNames, deviceName, online, lastSeenAt, offlineSince, pluginVersion, classIslandVersion, outdated, currentCourse, volumePercent, muted, profileDriftCount, timeline:[{start, end}]}]`。`outdated` 表示插件版本低于服务端版本；`timeline` 是服务端本地今天 0 点至今的在线时段；`profileDriftCount` 为最近一次设备差异检查的差异数。
+- 插件上下线写入在线记录（保留 30 天）。每分钟检查一次：设备在班级“在校时段”（当天第一节课前 30 分钟至最后一节下课，按教室端时区；放假或没有课时不算）连续离线超过阈值（默认 10 分钟，5–120）时，向系统管理员和该班班主任发送个人通知 `device_offline`；告警过的设备重新上线后发送 `device_online`。每次离线只告警一次，状态落库，服务端重启后不重复也不漏发。可在系统配置关闭告警、只通知其中一类人，或取消“只在在校时段告警”。
+
+### 自动化规则
+
+系统管理员可创建规则，按以下触发对所选班级/分组执行 1–5 个动作：
+
+- 触发：`kind=1` 定时（`weekdays` 1=周一…7=周日、`time` HH:mm，按各班教室端本地时间；`schoolDaysOnly` 为真时放假日跳过、调休上学日照常）；`kind=2` 课表事件（`event` 1 上课、2 下课、3 放学，可选 `subject` 只匹配某科目，`delayMinutes` 0–180）；`kind=3` 教室电脑上线（`delaySeconds` 0–600）。可选生效日期 `validFrom`/`validTo`。
+- 动作：`kind=1` 发送通知（`notification` 同 `NotificationRequest`，署名开关仍按全局设置）、2 清除提醒、3 主界面显隐（`mainMenuVisible`）、4 音量（`volume`）、5 电源（`powerAction`）、6 运行扩展（`extensionId`、`extensionArgs`）、7 下发该班服务端档案的临时层（`replaceExistingTempLayers`）。不开放语音、终端、文件、升级与插件安装。
+- 执行：规则以最后保存它的系统管理员身份执行（该账号停用或不再是系统管理员时执行失败并提示重新保存）；每班每次触发只执行一次（去重键）；定时触发错过 5 分钟以上、延迟任务积压 30 分钟以上记为“已错过”，不补跑。任一班级失败时向规则保存人发送个人通知 `automation_failed`。执行结果保留 90 天，审计来源为 `Automation`、入口详情为规则名。
+- `GET/POST /api/automation/rules`、`GET/PUT/DELETE /api/automation/rules/{id}`：规则对象 `{id, name, enabled, trigger, actions, target:{classIds, groupIds}, validFrom, validTo, createdByName, updatedAt, lastRunAt, lastSuccess, lastResult, description}`；`PUT` 为整体保存。
+- `POST /api/automation/rules/{id}/run`：立即对全部目标班级执行一次（忽略触发条件与生效日期），返回各班执行记录。
+- `GET /api/automation/runs?ruleId=&limit=`：执行记录 `[{id, ruleId, ruleName, classId, className, trigger, dueAt, finishedAt, status, statusLabel, message}]`，`status` 为 `Pending`、`Running`、`Succeeded`、`Failed`、`Missed`。
+
+### 课时台账与统计
+
+服务端每 5 分钟把已经结束的课写入课时台账：班级、日期、节次、科目、实际老师（已叠加换课产生的单节临时任课老师）、默认老师、是否代课、来源（教室端或按档案推算）。一节课结束后不再修改；服务端停机期间结束的课无法补录。统计时教师字段按“我的日程”的分隔规则拆分，多位老师合上的课各计一节：`total` 实际课时（含代课）、`substitute` 其中代别人上的、`substituted` 本该自己上而被代的。默认不统计按档案推算的课。
+
+- `GET /api/lesson-stats?from=&to=&classId=&teacher=&includeProfile=`：`{from, to, includesProfile, lessonCount, teachers:[{teacher, total, substitute, substituted, classes:[{classId, className, total}]}]}`；日期为教室端本地日期，省略时为本月 1 日至今天，区间最长 400 天。
+- `GET /api/lesson-stats/export`：导出 Excel（汇总与明细两个工作表）。
+- `GET /api/me/lesson-stats?from=&to=`：按本人显示名在全部班级统计，任何已登录账号可用。
+
+### 一次性确认链接（聊天卡片按钮）
+
+- `POST /api/me/action-links`：请求体 `{ "action": "swap.approve" | "swap.reject" | "swap.revoke", "targetId": 换课申请 Id }`，返回 `{url, path, expiresAt}`。签发时校验调用者当前确实能执行该动作（审批人才能同意/拒绝，被强制换课的对方才能撤回），否则返回 400。
+- 链接 `/Act/{token}` 匿名访问、24 小时有效、只能成功使用一次；数据库只保存令牌 SHA-256 摘要，账号停用或安全戳变化后失效。打开链接（GET）只显示申请详情和确认按钮，聊天软件预览链接不会执行；确认提交（POST）后经换课服务执行，通知与审计与其他入口一致。执行失败（例如教室电脑离线）时链接恢复可用。页面返回 `Cache-Control: no-store`、`Referrer-Policy: no-referrer` 与 `X-Robots-Tag: noindex`。
+
+### 电子班牌
+
+系统管理员或本班班主任在 WebUI“电子班牌”页生成私密链接 `/Board/{token}`（每班最多 10 个，令牌只在生成时显示一次，可撤销）。页面匿名、全屏显示班名、教室端本地时钟、当前课程及进度、下一节和今日课表，每 15 秒刷新 `?handler=Content`，可选择不显示任课老师。撤销后返回 404；配置包恢复会删除班级及其班牌链接，需要重新生成。
+
+### 个人通知新增字段与种类
+
+`UserNotificationView` 新增可选字段 `classId`（相关班级）与 `link`（点击打开的站内相对路径，如 `/Devices`、`/Automation`），旧客户端忽略。新增种类：`device_offline`、`device_online`（浏览器推送 1 小时后过期）与 `automation_failed`（12 小时）。AstrBot 等外部客户端照常轮询 `GET /api/me/notifications`。
+
 ## REST API
 
 主要端点：
@@ -319,6 +383,11 @@ WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebU
 - `GET/PUT /api/settings/notifications`（读取需登录，修改仅系统管理员）、`GET/PUT /api/settings/schedule-pull`
 - `GET/PUT /api/extensions`
 - `GET /api/admin/system`、`POST /api/admin/updates/check`、`POST /api/admin/updates/upload`（请求体为服务端发布包 zip，调试用，安装后自动重启）、`GET/POST/DELETE /api/admin/backups`
+- `GET /api/audit`、`GET /api/audit/export`、`GET /api/devices/health`（见“集控运维”）
+- `GET/POST /api/automation/rules`、`GET/PUT/DELETE /api/automation/rules/{id}`、`POST /api/automation/rules/{id}/run`、`GET /api/automation/runs`
+- `GET /api/lesson-stats`、`GET /api/lesson-stats/export`、`GET /api/me/lesson-stats`
+- `POST /api/me/action-links`
+- `GET /api/profiles/{id}/versions`、`GET /api/profiles/{id}/versions/{revision}/diff`、`POST /api/profiles/{id}/versions/{revision}/restore`、`GET/POST /api/profiles/drift`
 
 REST 手表请求使用 `Authorization: Bearer <accessToken>`。Razor WebUI 使用 HttpOnly、SameSite Cookie 和表单防伪令牌，不把令牌放入浏览器存储。
 

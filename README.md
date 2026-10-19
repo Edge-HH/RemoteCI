@@ -22,6 +22,8 @@ RemoteCI 是面向 ClassIsland 2.x 的跨设备联动系统，由 ClassIsland �
 - **细粒度权限**：按账号分别控制概览、人员管理、通知、换课、扩展、主界面和电源等能力，命令会在服务端与插件端再次鉴权；系统管理员可统一决定班主任能否自行改班名、改头像、拉取课表和修改扩展设置。
 - **局域网与云端连接**：手表可优先局域网直连，也可通过云端中转；局域网认证使用一次性 HMAC 挑战，不传输账号密码或云端访问令牌。
 - **二步验证**：用户可在个人账号中绑定 TOTP 认证器，登录后输入一次性验证码；支持恢复码、关闭验证和跨端登录，详见 [二步验证](docs/two-factor.md)。
+- **集控运维**：设备状态大屏与在校时段离线告警；按时间、上下课或开机自动下发通知、音量、关机等操作；记录每条下发命令的操作记录；课时与代课统计导出 Excel；档案版本历史、差异对比与教室电脑档案差异检查；电子班牌私密链接。详见 [集控运维](docs/operations.md)。
+- **自动跟随任教班级**：Android 与 Wear OS 可开启“上课时自动切换到任教班级”，课表页和控制页也能直接切换班级。
 - **插件扩展能力**：其他 ClassIsland 插件可以注册带参数表单的远程操作和插件设置页；各班安装同一插件后，WebUI 控制与批量控制按插件分组展示，管理员可批量执行并统一下发插件设置。
 - **多平台部署与更新**：服务端支持 Windows、Linux、Docker 与 fnOS；WebUI 和手表支持正式版/Beta 渠道，插件由 ClassIsland 插件市场管理。
 
@@ -132,6 +134,7 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Build-Latest-Cipx
 - [通信协议 V3](docs/protocol.md)
 - [平台说明](docs/platform-notes.md)
 - [手机 WebUI、PWA 通知与系统日历](docs/mobile-web.md)
+- [集控运维：设备状态、自动化、操作记录、课时统计、档案历史与电子班牌](docs/operations.md)
 - [ClassIsland 插件与扩展开发](plugin/RemoteCI.Plugin/README.md)
 - [fnOS 安装、更新与打包](fnos/README.md)
 - [贡献指南](CONTRIBUTING.md)
