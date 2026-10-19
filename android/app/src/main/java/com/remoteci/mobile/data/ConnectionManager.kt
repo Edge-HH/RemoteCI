@@ -281,6 +281,12 @@ object ConnectionManager {
         sessions = storage
     }
 
+    /**
+     * 仅供 JVM 单元测试关闭登录后的未读通知轮询：MockWebServer 按入队顺序应答，
+     * 轮询请求会抢走为 WebSocket 升级准备的响应，使连接流程测试随机超时。
+     */
+    @Volatile internal var swapInboxPollingEnabledForTest = true
+
     fun hasSavedSession(): Boolean = ::sessions.isInitialized && sessions.load() != null
     fun restBaseUrl(): String? = desiredSettings?.cloudServerUrl?.let(::normalizeServerUrl)
     fun restToken(): String? = issuedAuth?.takeIf { it.serverUrl == restBaseUrl() }?.response?.accessToken
@@ -386,7 +392,7 @@ object ConnectionManager {
         swapInboxJob?.cancel()
         swapInboxUserId = userId
         pendingSwapCount.value = 0
-        if (userId == null) return
+        if (userId == null || !swapInboxPollingEnabledForTest) return
         swapInboxJob = scope.launch {
             while (kotlin.coroutines.coroutineContext.isActive) {
                 refreshSwapInbox()

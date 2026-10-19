@@ -71,6 +71,8 @@ class ConnectionManagerFlowTest {
 
     @BeforeTest
     fun setUp() {
+        // 这里只验证连接流程；登录后的未读通知轮询会打乱 MockWebServer 的应答顺序。
+        ConnectionManager.swapInboxPollingEnabledForTest = false
         server = MockWebServer()
         server.start()
     }
@@ -78,6 +80,7 @@ class ConnectionManagerFlowTest {
     @AfterTest
     fun tearDown() {
         ConnectionManager.disconnect(clearUser = true)
+        ConnectionManager.swapInboxPollingEnabledForTest = true
         server.close()
     }
 
