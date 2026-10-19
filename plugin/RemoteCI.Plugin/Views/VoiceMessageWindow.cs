@@ -60,7 +60,8 @@ internal sealed class VoiceMessageWindow : Window
         // Avalonia 12 把装饰枚举改名为 WindowDecorations，改用兼容层设置无装饰窗口。
         HostApiCompat.RemoveWindowDecorations(this);
         Background = Brushes.Transparent;
-        TransparencyLevelHint = [WindowTransparencyLevel.AcrylicBlur, WindowTransparencyLevel.Transparent];
+        // 亚克力材质会铺满整个窗口矩形，不透明圆角表面盖不住的四角会露出深色底；只要透明即可。
+        TransparencyLevelHint = [WindowTransparencyLevel.Transparent];
         HostApiCompat.BindDynamicResource(this, FontFamilyProperty, "ContentControlThemeFontFamily");
         HostApiCompat.BindDynamicResource(this, ForegroundProperty, "TextFillColorPrimaryBrush");
         // Fluent Slider 默认在 20 高的滑块上下各预留 15，紧凑高度下会裁掉滑块底部。
