@@ -1,0 +1,125 @@
+@page
+@model AppGuardModel
+@using RemoteCI.Shared.Models
+@{
+    ViewData["Title"] = "应用守护";
+}
+@functions {
+    private void PolicyFields(string prefix, AppGuardModel.PolicyInput input)
+    {
+        <label class="check"><input type="checkbox" name="@(prefix).Enabled" value="true" checked="@input.Enabled" /> 启用应用守护（在教室电脑上部署 RemoteCI 守护进程，登录 Windows 后自动运行）</label>
+        <input type="hidden" name="@(prefix).Enabled" value="false" />
+        <label class="check"><input type="checkbox" name="@(prefix).RestartAfterExit" value="true" checked="@input.RestartAfterExit" /> 退出自启：ClassIsland 被正常退出后自动启动</label>
+        <input type="hidden" name="@(prefix).RestartAfterExit" value="false" />
+        <label>退出后延时多少分钟启动（0 为立即启动，最多 @AppGuardPolicy.MaxRestartDelayMinutes）
+            <input type="number" name="@(prefix).RestartAfterExitDelayMinutes" value="@input.RestartAfterExitDelayMinutes" min="0" max="@AppGuardPolicy.MaxRestartDelayMinutes" />
+        </label>
+        <label class="check"><input type="checkbox" name="@(prefix).RestartOnCrash" value="true" checked="@input.RestartOnCrash" /> 检测到程序意外退出（崩溃、被结束进程）时立即重新启动</label>
+        <input type="hidden" name="@(prefix).RestartOnCrash" value="false" />
+        <label class="check"><input type="checkbox" name="@(prefix).PreventDeletion" value="true" checked="@input.PreventDeletion" /> 禁止删除：定时备份 ClassIsland，发现被删除后自动恢复并启动</label>
+        <input type="hidden" name="@(prefix).PreventDeletion" value="false" />
+        <label>备份间隔（小时，@AppGuardPolicy.MinBackupIntervalHours-@AppGuardPolicy.MaxBackupIntervalHours；ClassIsland 版本变化时也会立即备份）
+            <input type="number" name="@(prefix).BackupIntervalHours" value="@input.BackupIntervalHours" min="@AppGuardPolicy.MinBackupIntervalHours" max="@AppGuardPolicy.MaxBackupIntervalHours" />
+        </label>
+    }
+}
+<link rel="stylesheet" href="~/operations.css" asp-append-version="true" />
+<div class="page-head">
+    <div>
+        <p class="eyebrow">服务端管理</p>
+        <h1>应用守护</h1>
+    </div>
+    <a class="button ghost" asp-page="/SystemConfig" asp-fragment="organization">组织名设置</a>
+</div>
+<section class="panel">
+    <h2>全局策略</h2>
+    <p class="muted">对所有教室电脑生效（单独设置过的设备除外）。守护进程与备份位于教室电脑的 <code>%LOCALAPPDATA%\RemoteCI\Guard</code>；恢复后 ClassIsland 会弹窗提示“@AppGuardPolicy.RestoredNotice(Model.OrganizationName)”</p>
+    <form method="post" asp-page-handler="Global" class="stack">
+        @{ PolicyFields(nameof(AppGuardModel.Global), Model.Global); }
+        <button type="submit">保存并下发</button>
+    </form>
+</section>
+@if (Model.Editing is { } editing)
+{
+    <section class="panel" id="device-override">
+        <h2>单独设置：@editing.DeviceName <small class="muted">@editing.ClassName</small></h2>
+        <p class="muted">保存后该设备不再跟随全局策略，直到点击“恢复沿用全局”。</p>
+        <form method="post" asp-page-handler="Device" asp-route-credentialId="@editing.CredentialId" class="stack">
+            @{ PolicyFields(nameof(AppGuardModel.Device), Model.Device); }
+            <div class="ops-filter-actions">
+                <button type="submit">保存该设备设置</button>
+                <a class="button ghost" asp-page="/AppGuard">取消</a>
+            </div>
+        </form>
+    </section>
+}
+<section class="panel">
+    <h2>设备</h2>
+    @if (Model.Devices.Count == 0)
+    {
+        <p class="muted">还没有已配对的教室电脑。</p>
+    }
+    else
+    {
+        <div class="ops-table-wrap">
+            <table class="user-account-table ops-table">
+                <thead>
+                    <tr><th>班级 · 设备</th><th>状态</th><th>策略来源</th><th>生效策略</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in Model.Devices)
+                    {
+                        <tr>
+                            <td>@row.ClassName<small class="ops-sub">@row.DeviceName</small></td>
+                            <td>
+                                @if (!row.Online) { <span class="ops-badge wait">离线</span> }
+                                else if (row.Supported == true) { <span class="ops-badge ok">在线</span> }
+                                else { <span class="ops-badge bad">插件版本过旧</span> }
+                            </td>
+                            <td>@(row.Override is null ? "沿用全局" : "单独设置")</td>
+                            <td class="ops-summary">@row.Effective.Describe()</td>
+                            <td class="ops-nowrap">
+                                <a class="button ghost" asp-page="/AppGuard" asp-route-edit="@row.CredentialId" asp-fragment="device-override">单独设置</a>
+                                @if (row.Override is not null)
+                                {
+                                    <form method="post" asp-page-handler="ClearDevice" asp-route-credentialId="@row.CredentialId" style="display:inline">
+                                        <button type="submit" class="secondary">恢复沿用全局</button>
+                                    </form>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+<section class="panel">
+    <h2>最近守护事件</h2>
+    @if (Model.Events.Count == 0)
+    {
+        <p class="muted">暂无事件。自动恢复、崩溃重启和备份结果会在设备连上服务端后上报到这里，保留 90 天。</p>
+    }
+    else
+    {
+        <div class="ops-table-wrap">
+            <table class="user-account-table ops-table">
+                <thead>
+                    <tr><th>时间</th><th>设备</th><th>事件</th><th>详情</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in Model.Events)
+                    {
+                        var bad = item.Kind is AppGuardEventKinds.RestoreFailed or AppGuardEventKinds.BackupFailed or AppGuardEventKinds.CrashLoopPaused;
+                        <tr>
+                            <td class="ops-nowrap">@DateTimeOffset.FromUnixTimeMilliseconds(item.AtUnixMs).ToLocalTime().ToString("MM-dd HH:mm:ss")</td>
+                            <td>@item.DeviceName</td>
+                            <td><span class="ops-badge @(bad ? "bad" : "ok")">@item.KindName</span></td>
+                            <td class="ops-summary">@item.Detail</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>

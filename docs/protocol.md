@@ -74,6 +74,8 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | `user_notify` | 服务端 → 手机/手表 | 面向当前账号的个人通知 `UserNotificationView {id, kind, title, body, swapRequestId?, createdAt, readAt?}`，投递给该账号全部在线连接，不按班级过滤；旧客户端忽略未知类型 |
 | `holiday_calendar` | 服务端 → 插件 | 调休日历 `HolidayCalendar {enabled, generatedAt, days[]}`，见下文“调休”；只发给声明了 `schedule.holiday-calendar` 能力的插件 |
 | `file_transfer_progress` | 插件 → 服务端 | 中转文件的下载进度与最终结果，见下文“文件分发（中转方式）” |
+| `app_guard_policy` | 服务端 → 插件 | 该设备的应用守护生效策略 `AppGuardPolicy`，见下文“应用守护”；只发给声明了 `host.app-guard` 能力的插件 |
+| `app_guard_event` | 插件 → 服务端 | 守护进程记录的事件 `AppGuardEventBatch {events:[{kind, atUnixMs, detail?}]}`，未分配班级的设备也会上报 |
 
 ## 局域网设备发现
 
@@ -95,7 +97,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 ## 能力协商
 
-V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings`、`schedule.holiday-calendar`、`profile.read` 和 `profile.temp-layer` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
+V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings`、`schedule.holiday-calendar`、`profile.read`、`profile.temp-layer`、`file.transfer` 和 `host.app-guard` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
 
 WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手机的有效能力是“本地 ∩ 服务端 ∩ 当前班级主插件”。服务端在 `capabilities_sync.classPlugins` 中按接收方可访问的班级逐个下发主插件能力，客户端切换班级时按新班级重算；没有对应条目表示该班插件离线。旧服务端没有该字段时客户端退回 `plugin`。多插件时，当前主插件仍是最早接入的健康插件；主插件切换、断开或能力更新后，服务端重新广播能力快照。界面应隐藏缺失能力的入口，服务端转发命令前仍需按统一映射复核主插件能力，缺少能力时返回 `CAPABILITY_UNSUPPORTED`。能力声明不能绕过账号权限或扩展策略检查。
 
@@ -144,6 +146,48 @@ WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手
 插件把日历缓存到本地，断网时继续生效：放假日把宿主 `LessonsService.IsClassPlanEnabled` 设为 `false`，并且只恢复自己关掉的开关；调休上学日在今天起 7 天内用 `CreateTempClassPlan` 复制该周对应工作日的课表作为临时课表，已有他人安排的预定课表时不覆盖。
 
 插件上报的 `ScheduleDay` 新增可选字段 `dayKind`（`holiday` / `makeup`）和 `holidayName`，普通日期不输出。放假日 `enabled` 为 `false` 且不含课程，因此换课会被拒绝。
+
+## 应用守护
+
+系统管理员在 WebUI“应用守护”页设置全局默认策略，可对单台设备（插件凭据）整体覆盖；使用说明见 [应用守护](app-guard.md)。服务端按“有覆盖用覆盖，否则用全局”算出每台设备的生效策略，向声明了 `host.app-guard` 能力的插件发送 `app_guard_policy`。每台设备的策略可能不同，所以逐个连接发送，不使用同一份广播：
+
+- 插件上报能力后立即发送一次。未启用时也发送，插件据此注销已部署的守护进程。
+- 修改全局策略或系统配置中的组织名后，发给全部此类在线插件。
+- 修改某台设备的覆盖后，只发给该设备。
+
+载荷 `AppGuardPolicy`：
+
+| 字段 | 说明 |
+| --- | --- |
+| `enabled` | 总开关 |
+| `restartAfterExit` | 正常退出后自动启动 |
+| `restartAfterExitDelayMinutes` | 退出后延时分钟数，0–1440；0 为立即 |
+| `restartOnCrash` | 意外退出时重启 |
+| `preventDeletion` | 定时备份，被删除后恢复 |
+| `backupIntervalHours` | 备份间隔小时数，1–168，默认 24 |
+| `organizationName` | 系统配置中的组织名，未设置时为 `RemoteCI` |
+
+越界数值由服务端与插件各自截断。插件把策略缓存为 `AppGuardPolicy.json`，并部署设备外的守护进程 `%LOCALAPPDATA%\RemoteCI\Guard\RemoteCI.Guard.exe`。
+
+守护进程记录的事件由插件以 `app_guard_event` 上报，`kind` 取值：
+
+- `restored`：已自动恢复；
+- `restore-failed`：恢复失败；
+- `crash-restarted`：意外退出后重启；
+- `exit-restarted`：退出后自启；
+- `crash-loop-paused`：频繁崩溃，暂停重启；
+- `backup-completed`：备份完成；
+- `backup-failed`：备份失败。
+
+服务端按插件凭据记录这些事件，保留 90 天。`restored` 与 `restore-failed` 另向全部系统管理员发送个人通知 `app_guard`，`link` 为 `/AppGuard`。
+
+REST 接口全部仅限系统管理员，其他账号返回 403：
+
+- `GET/PUT /api/settings/app-guard`：全局策略，请求体与响应都是 `AppGuardPolicy`。`organizationName` 为只读，在系统配置中修改。
+- `GET/PUT/DELETE /api/devices/{credentialId}/app-guard`：单台设备。响应为 `{credentialId, overridden, policy}`。`PUT` 设置覆盖，`DELETE` 恢复沿用全局；设备不存在返回 404。
+- `GET /api/app-guard/events?credentialId=&limit=`：最近事件，按时间倒序，`limit` 默认 100、最大 500。每条为 `[{credentialId, deviceName, kind, kindName, detail, atUnixMs}]`。
+
+全局策略、组织名与设备覆盖随配置包导出与恢复；守护事件不进入配置包。
 
 ## 换课申请
 
@@ -378,7 +422,7 @@ WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebU
 
 ### 个人通知新增字段与种类
 
-`UserNotificationView` 新增可选字段 `classId`（相关班级）与 `link`（点击打开的站内相对路径，如 `/Devices`、`/Automation`），旧客户端忽略。新增种类：`device_offline`、`device_online`（浏览器推送 1 小时后过期）与 `automation_failed`（12 小时）。AstrBot 等外部客户端照常轮询 `GET /api/me/notifications`。
+`UserNotificationView` 新增可选字段 `classId`（相关班级）与 `link`（点击打开的站内相对路径，如 `/Devices`、`/Automation`），旧客户端忽略。新增种类：`device_offline`、`device_online`（浏览器推送 1 小时后过期）、`automation_failed`（12 小时）与 `app_guard`（应用守护自动恢复或恢复失败，见“应用守护”）。AstrBot 等外部客户端照常轮询 `GET /api/me/notifications`。
 
 ## REST API
 
@@ -407,6 +451,7 @@ WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebU
 - `GET/PUT /api/extensions`
 - `GET /api/admin/system`、`POST /api/admin/updates/check`、`POST /api/admin/updates/upload`（请求体为服务端发布包 zip，调试用，安装后自动重启）、`GET/POST/DELETE /api/admin/backups`
 - `GET /api/audit`、`GET /api/audit/export`、`GET /api/devices/health`（见“集控运维”）
+- `GET/PUT /api/settings/app-guard`、`GET/PUT/DELETE /api/devices/{credentialId}/app-guard`、`GET /api/app-guard/events`（见“应用守护”）
 - `GET/POST /api/automation/rules`、`GET/PUT/DELETE /api/automation/rules/{id}`、`POST /api/automation/rules/{id}/run`、`GET /api/automation/runs`
 - `GET /api/lesson-stats`、`GET /api/lesson-stats/export`、`GET /api/me/lesson-stats`
 - `POST /api/me/action-links`

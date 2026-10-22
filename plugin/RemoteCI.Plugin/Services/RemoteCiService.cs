@@ -24,6 +24,7 @@ public sealed class RemoteCiService : IDisposable
     private readonly SoftwareInventoryService _softwareInventory;
     private readonly HolidayCalendarStore _holidayCalendar;
     private readonly HolidayScheduleApplier _holidayApplier;
+    private readonly AppGuardService _appGuard;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<RemoteCiService> _logger;
     private LanServer? _lanServer;
@@ -47,8 +48,10 @@ public sealed class RemoteCiService : IDisposable
         SoftwareInventoryService softwareInventory,
         HolidayCalendarStore holidayCalendar,
         HolidayScheduleApplier holidayApplier,
+        AppGuardService appGuard,
         ILoggerFactory loggerFactory)
     {
+        _appGuard = appGuard;
         _holidayCalendar = holidayCalendar;
         _holidayApplier = holidayApplier;
         _collector = collector;
@@ -73,6 +76,9 @@ public sealed class RemoteCiService : IDisposable
 
     /// <summary>插件归属班级名称（来自按班级生成的授权镜像）；旧版服务端为 null。</summary>
     public string? CurrentClassName => _accounts.ClassName;
+
+    /// <summary>设置页显示的应用守护状态。</summary>
+    public string AppGuardSummary => _appGuard.Summary;
 
     public void Start()
     {
@@ -125,6 +131,11 @@ public sealed class RemoteCiService : IDisposable
         _cloudClient.Connected += OnCloudConnected;
         _cloudClient.ConnectionStatusChanged += OnCloudConnectionStatusChanged;
         _cloudClient.HolidayCalendarReceived += _holidayCalendar.Apply;
+        _cloudClient.AppGuardPolicyReceived += _appGuard.ApplyPolicy;
+        _softwareInventory.ClassIslandUpdateRestarting += _appGuard.MarkUpdating;
+        var cloudForGuard = _cloudClient;
+        _appGuard.EventSender = batch => cloudForGuard.SendAppGuardEventsAsync(batch);
+        _appGuard.Start();
         _holidayCalendar.Changed += RunHolidayApply;
         // 每分钟检查一次本地日期，跨天后（含睡眠唤醒）重新应用；启动时立即应用一次缓存的日历。
         _holidayTimer = new Timer(_ => { if (DateTime.Today != _holidayAppliedDate) RunHolidayApply(); },
@@ -142,7 +153,14 @@ public sealed class RemoteCiService : IDisposable
         _holidayTimer = null;
         _commandHandler.Files.CancelAll();
         _holidayCalendar.Changed -= RunHolidayApply;
-        if (_cloudClient is not null) _cloudClient.HolidayCalendarReceived -= _holidayCalendar.Apply;
+        if (_cloudClient is not null)
+        {
+            _cloudClient.HolidayCalendarReceived -= _holidayCalendar.Apply;
+            _cloudClient.AppGuardPolicyReceived -= _appGuard.ApplyPolicy;
+        }
+        _softwareInventory.ClassIslandUpdateRestarting -= _appGuard.MarkUpdating;
+        _appGuard.EventSender = null;
+        _appGuard.Stop();
         _collector.Stop();
         _collector.SnapshotPushed -= OnSnapshotPushed;
         _collector.SchedulePushed -= OnSchedulePushed;
@@ -329,6 +347,7 @@ public sealed class RemoteCiService : IDisposable
         PublishExtensions();
         PublishGroups();
         PublishSoftwareInventory();
+        Observe(_appGuard.FlushEventsAsync(), "应用守护事件");
     }
 
     private void OnSoftwareInventoryChanged() => PublishSoftwareInventory();

@@ -23,7 +23,7 @@ $resolvedChecksumPath = (Resolve-Path -LiteralPath $ChecksumPath).Path
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [System.IO.Compression.ZipFile]::OpenRead($resolvedPackagePath)
 try {
-    $requiredEntries = @('manifest.yml', 'README.md', 'icon.png')
+    $requiredEntries = @('manifest.yml', 'README.md', 'icon.png', 'RemoteCI.Guard.exe')
     foreach ($requiredEntry in $requiredEntries) {
         if (-not ($archive.Entries | Where-Object FullName -eq $requiredEntry)) {
             throw "ClassIsland 市场包缺少必需文件：$requiredEntry"

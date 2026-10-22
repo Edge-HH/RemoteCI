@@ -175,6 +175,25 @@ public sealed class SystemMetadata
 
     /// <summary>最近一次自动检查的日期（服务端本地 yyyy-MM-dd），避免同一天重复检查。</summary>
     public string? ProfileDriftLastCheckDate { get; set; }
+
+    /// <summary>组织名（如学校名称），用于应用守护恢复提示“当前ClassIsland由xx统一管理”；null 时显示 RemoteCI。</summary>
+    public string? OrganizationName { get; set; }
+
+    // ---------- 应用守护（全局默认策略，单设备可在 AppGuardOverride 中覆盖） ----------
+
+    public bool AppGuardEnabled { get; set; }
+
+    public bool AppGuardRestartAfterExit { get; set; }
+
+    /// <summary>正常退出后延时启动的分钟数（0-1440）；0 表示立即启动。</summary>
+    public int AppGuardRestartDelayMinutes { get; set; }
+
+    public bool AppGuardRestartOnCrash { get; set; } = true;
+
+    public bool AppGuardPreventDeletion { get; set; }
+
+    /// <summary>防删除定时备份间隔小时数（1-168）。</summary>
+    public int AppGuardBackupIntervalHours { get; set; } = RemoteCI.Shared.Models.AppGuardPolicy.DefaultBackupIntervalHours;
 }
 
 /// <summary>登录页主题策略：跟随访客本地偏好，或由管理员强制浅色/深色。</summary>

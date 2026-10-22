@@ -232,6 +232,8 @@ public static class UserNotificationKinds
     public const string DeviceOnline = "device_online";
     /// <summary>服务端自动化规则执行失败（发给规则创建者）。</summary>
     public const string AutomationFailed = "automation_failed";
+    /// <summary>应用守护检测到 ClassIsland 被删除并已自动恢复（或恢复失败），发给系统管理员。</summary>
+    public const string AppGuard = "app_guard";
 }
 
 /// <summary>个人通知（user_notify 载荷与 /api/me/notifications 列表项）。</summary>

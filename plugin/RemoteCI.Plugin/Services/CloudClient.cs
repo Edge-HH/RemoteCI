@@ -47,6 +47,9 @@ public sealed class CloudClient : IDisposable, IFileTransferChannel
     /// <summary>收到服务端下发的调休日历时触发（在接收线程上，订阅方自行切换到 UI 线程）。</summary>
     public event Action<HolidayCalendar>? HolidayCalendarReceived;
 
+    /// <summary>收到服务端下发的应用守护策略时触发（在接收线程上）。</summary>
+    public event Action<AppGuardPolicy>? AppGuardPolicyReceived;
+
     public CloudConnectionStatus CurrentStatus => Volatile.Read(ref _currentStatus);
 
     internal CloudClient(
@@ -118,6 +121,7 @@ public sealed class CloudClient : IDisposable, IFileTransferChannel
     public Task SendExtensionsAsync(IReadOnlyList<ExtensionDefinition> value) => SendAsync(Envelope.ExtensionsSync(value));
     public Task SendExtensionGroupsAsync(IReadOnlyList<ExtensionGroupDefinition> value) => SendAsync(Envelope.ExtensionGroupsSync(value));
     public Task SendSoftwareInventoryAsync(SoftwareInventory value) => SendAsync(Envelope.SoftwareInventory(value));
+    public Task<bool> SendAppGuardEventsAsync(AppGuardEventBatch value) => TrySendAsync(Envelope.AppGuardEvents(value));
 
     /// <summary>以插件长期凭据从服务端文件中转下载；offset &gt; 0 时按 Range 续传。</summary>
     public Task<HttpResponseMessage> RequestFileAsync(
@@ -379,6 +383,12 @@ public sealed class CloudClient : IDisposable, IFileTransferChannel
         if (HolidayCalendarMessage.TryRead(envelope, out var holidayCalendar))
         {
             HolidayCalendarReceived?.Invoke(holidayCalendar);
+            return;
+        }
+
+        if (AppGuardPolicyMessage.TryRead(envelope, out var appGuardPolicy))
+        {
+            AppGuardPolicyReceived?.Invoke(appGuardPolicy);
             return;
         }
 

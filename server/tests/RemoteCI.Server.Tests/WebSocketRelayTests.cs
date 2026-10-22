@@ -1008,6 +1008,51 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     }
 
     [Fact]
+    public async Task AppGuardPolicy_IsSentAfterCapability_AndEachDeviceGetsItsOwnEffectivePolicy()
+    {
+        var credentialId = await AppGuardTests.PluginCredentialIdAsync(_factory);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var guard = scope.ServiceProvider.GetRequiredService<AppGuardService>();
+            await guard.ClearOverrideAsync(credentialId);
+            await guard.SetGlobalAsync(new AppGuardPolicy { Enabled = true, RestartAfterExit = true, RestartAfterExitDelayMinutes = 40 });
+        }
+        using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities
+        {
+            SoftwareVersion = "3.3.0",
+            Capabilities = RemoteCiCapabilities.Current,
+        }));
+        var initial = await ReceivePayloadAsync<AppGuardPolicy>(plugin, Protocol.MessageTypeAppGuardPolicy);
+        Assert.True(initial.Enabled);
+        Assert.Equal(40, initial.RestartAfterExitDelayMinutes);
+
+        var admin = await _factory.LoginAsync();
+        var update = await _factory.CreateClient().SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Put,
+            $"/api/devices/{credentialId}/app-guard", admin.AccessToken, new AppGuardPolicy { Enabled = false }));
+        update.EnsureSuccessStatusCode();
+        var changed = await ReceivePayloadAsync<AppGuardPolicy>(plugin, Protocol.MessageTypeAppGuardPolicy);
+        Assert.False(changed.Enabled);
+
+        await SendAsync(plugin, Envelope.AppGuardEvents(new AppGuardEventBatch
+        {
+            Events = [new AppGuardEvent { Kind = AppGuardEventKinds.ExitRestarted, AtUnixMs = 1_700_000_000_000, Detail = "退出 40 分钟后自动启动" }],
+        }));
+        IReadOnlyList<AppGuardEventView> events = [];
+        for (var attempt = 0; attempt < 50 && events.Count == 0; attempt++)
+        {
+            await Task.Delay(100);
+            using var scope = _factory.Services.CreateScope();
+            events = await scope.ServiceProvider.GetRequiredService<AppGuardService>().GetRecentEventsAsync(credentialId);
+        }
+        Assert.Equal(AppGuardEventKinds.ExitRestarted, Assert.Single(events).Kind);
+
+        using (var scope = _factory.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<AppGuardService>().ClearOverrideAsync(credentialId);
+    }
+
+    [Fact]
     public async Task RestCommand_IsAuditedWithDeviceSessionSourceAndPluginResult()
     {
         using var plugin = await ConnectPluginAsync();

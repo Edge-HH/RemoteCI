@@ -31,6 +31,10 @@ public static class Protocol
     public const string MessageTypeHolidayCalendar = "holiday_calendar";
     /// <summary>插件向服务端报告大文件分发的下载进度与最终结果（file.transfer 能力）。</summary>
     public const string MessageTypeFileTransferProgress = "file_transfer_progress";
+    /// <summary>服务端发给插件的应用守护生效策略（全局默认 + 单设备覆盖），插件据此部署或注销守护进程。</summary>
+    public const string MessageTypeAppGuardPolicy = "app_guard_policy";
+    /// <summary>插件上报守护进程记录的事件（自动恢复、崩溃重启、备份结果等）。</summary>
+    public const string MessageTypeAppGuardEvent = "app_guard_event";
 
     public const int LanDiscoveryPort = 48765;
     public const string LanDiscoveryRequest = "REMOTECI_DISCOVER_V3";
@@ -272,6 +276,8 @@ public static class RemoteCiCapabilities
     public const string ProfileTempLayer = "profile.temp-layer";
     /// <summary>接收调休日历并在放假日关闭课表、调休上学日建立临时课表。</summary>
     public const string HolidayCalendar = "schedule.holiday-calendar";
+    /// <summary>接收应用守护策略：退出自启、意外退出重启、防删除备份与恢复。</summary>
+    public const string AppGuard = "host.app-guard";
 
     /// <summary>没有上报能力列表的旧 V3 端自动获得的基础能力。</summary>
     public static IReadOnlyList<string> Baseline { get; } =
@@ -294,7 +300,7 @@ public static class RemoteCiCapabilities
         [.. Baseline, VoiceMessageSend, SoftwareInventory, SoftwareUpgradePlugins, SoftwareUpgradeClassIsland,
             PluginInstall, PluginUninstall, PluginEnable, PluginManagementPolicy, ProfileDistribute, TimeLayoutUpdate, ManagementJoin,
             ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings, ProfileApply, HolidayCalendar,
-            ProfileRead, ProfileTempLayer, FileTransfer];
+            ProfileRead, ProfileTempLayer, FileTransfer, AppGuard];
 
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
@@ -330,6 +336,7 @@ public static class RemoteCiCapabilities
         ProfileRead => "读取设备档案",
         ProfileTempLayer => "下发临时层",
         HolidayCalendar => "调休自动适配",
+        AppGuard => "应用守护",
         _ => "未知能力",
     };
 

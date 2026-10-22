@@ -69,6 +69,13 @@ public class Plugin : PluginBase
             sp.GetRequiredService<IHolidayHostOperations>(),
             new HolidayStateFile(Path.Combine(PluginConfigFolder, "HolidayState.json")),
             sp.GetRequiredService<ILogger<HolidayScheduleApplier>>()));
+        // 应用守护：按服务端策略部署 ClassIsland 之外的守护进程（退出自启、意外退出重启、防删除）。
+        services.AddSingleton(new AppGuardStore(Path.Combine(PluginConfigFolder, "AppGuardPolicy.json")));
+        services.AddSingleton<IAppGuardHost, ClassIslandAppGuardHost>();
+        services.AddSingleton(sp => new AppGuardService(
+            sp.GetRequiredService<AppGuardStore>(),
+            sp.GetRequiredService<IAppGuardHost>(),
+            sp.GetRequiredService<ILogger<AppGuardService>>()));
         // 课表读取防腐层:隔离 ClassIsland 服务接口(含 internal 成员),使核心逻辑可单元测试。
         services.AddSingleton<IScheduleBackend, ScheduleBackendAdapter>();
         services.AddSingleton<IProfileWriteOperations, ProfileWriteAdapter>();
@@ -120,7 +127,13 @@ public class Plugin : PluginBase
                 }
             }
         };
-        app.AppStopping += (_, _) => _service?.Stop();
+        app.AppStopping += (_, _) =>
+        {
+            // 先告诉守护进程这是正常退出（按“退出自启”延时处理），再停止服务。
+            try { IAppHost.GetService<AppGuardService>().MarkExiting(); }
+            catch (Exception ex) { Console.Error.WriteLine($"RemoteCI 应用守护退出标记写入失败：{ex.Message}"); }
+            _service?.Stop();
+        };
     }
 
     internal static bool ShouldRegisterDeveloperSettingsPage(PluginSettings settings) =>

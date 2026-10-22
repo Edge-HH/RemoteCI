@@ -46,6 +46,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<LessonLedgerEntry> LessonLedgerEntries => Set<LessonLedgerEntry>();
     public DbSet<ActionLinkToken> ActionLinkTokens => Set<ActionLinkToken>();
     public DbSet<ClassBoard> ClassBoards => Set<ClassBoard>();
+    public DbSet<AppGuardOverride> AppGuardOverrides => Set<AppGuardOverride>();
+    public DbSet<AppGuardEventRecord> AppGuardEvents => Set<AppGuardEventRecord>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -116,6 +118,20 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.Property(x => x.TriggerText).HasMaxLength(100);
             entity.Property(x => x.Message).HasMaxLength(1000);
             entity.HasOne(x => x.Rule).WithMany().HasForeignKey(x => x.RuleId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<AppGuardOverride>(entity =>
+        {
+            entity.HasKey(x => x.CredentialId);
+            entity.Property(x => x.CredentialId).ValueGeneratedNever();
+            entity.HasOne(x => x.Credential).WithMany().HasForeignKey(x => x.CredentialId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<AppGuardEventRecord>(entity =>
+        {
+            entity.HasIndex(x => x.AtUnixMs);
+            entity.HasIndex(x => new { x.CredentialId, x.AtUnixMs });
+            entity.Property(x => x.DeviceName).HasMaxLength(200);
+            entity.Property(x => x.Kind).HasMaxLength(40);
+            entity.Property(x => x.Detail).HasMaxLength(1000);
         });
         builder.Entity<DeviceAlertState>(entity =>
         {

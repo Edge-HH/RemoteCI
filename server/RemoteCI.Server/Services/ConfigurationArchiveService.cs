@@ -55,6 +55,9 @@ public sealed class ConfigurationArchiveService(
             x.Id, x.Name, x.ProfileJson, x.Revision, x.ClassId, x.SourceTemplateId, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
         var holidayOverrides = await db.HolidayMakeupOverrides.AsNoTracking().OrderBy(x => x.Date)
             .Select(x => new HolidayOverrideSnapshot(x.Date, x.FollowWeekday)).ToListAsync(ct);
+        var appGuardOverrides = await db.AppGuardOverrides.AsNoTracking().Select(x => new AppGuardOverrideSnapshot(
+            x.CredentialId, x.Enabled, x.RestartAfterExit, x.RestartDelayMinutes, x.RestartOnCrash, x.PreventDeletion,
+            x.BackupIntervalHours, x.UpdatedAt)).ToListAsync(ct);
         var automationRules = await db.AutomationRules.AsNoTracking().Select(x => new AutomationRuleSnapshot(
             x.Id, x.Name, x.Enabled, x.TriggerJson, x.ActionsJson, x.TargetJson, x.ValidFrom, x.ValidTo,
             x.CreatedByUserId, x.CreatedByName, x.CreatedAtUnixMs, x.UpdatedAtUnixMs)).ToListAsync(ct);
@@ -82,7 +85,11 @@ public sealed class ConfigurationArchiveService(
                 metadata.AuditRetentionDays, metadata.DeviceAlertsEnabled, metadata.DeviceAlertThresholdMinutes,
                 metadata.DeviceAlertNotifyAdmins, metadata.DeviceAlertNotifyClassHeads, metadata.DeviceAlertSchoolHoursOnly,
                 metadata.ProfileDriftCheckEnabled, metadata.ProfileDriftCheckTime),
-            automationRules);
+            automationRules,
+            new AppGuardSettingsSnapshot(
+                metadata.OrganizationName, metadata.AppGuardEnabled, metadata.AppGuardRestartAfterExit,
+                metadata.AppGuardRestartDelayMinutes, metadata.AppGuardRestartOnCrash, metadata.AppGuardPreventDeletion,
+                metadata.AppGuardBackupIntervalHours, appGuardOverrides));
     }
 
     public async Task<BackupFileInfo> CreateLocalBackupAsync(string source, CancellationToken ct = default)
@@ -177,6 +184,8 @@ public sealed class ConfigurationArchiveService(
         await db.ExtensionGroupPolicies.ExecuteDeleteAsync(ct);
         await db.Users.ExecuteDeleteAsync(ct);
         await db.AccountRoles.ExecuteDeleteAsync(ct);
+        await db.AppGuardOverrides.ExecuteDeleteAsync(ct);
+        await db.AppGuardEvents.ExecuteDeleteAsync(ct);
         await db.PluginCredentials.ExecuteDeleteAsync(ct);
         await db.ClassMemberships.ExecuteDeleteAsync(ct);
         await db.Classrooms.ExecuteDeleteAsync(ct);
@@ -276,6 +285,35 @@ public sealed class ConfigurationArchiveService(
             metadata.ProfileDriftCheckEnabled = operations.ProfileDriftCheckEnabled;
             metadata.ProfileDriftCheckTime = OperationsSettings.NormalizeTime(operations.ProfileDriftCheckTime) ?? "12:30";
         }
+        // 旧配置包没有应用守护设置时保持默认（关闭），单设备覆盖只恢复仍存在的插件凭据。
+        if (snapshot.AppGuard is { } guard)
+        {
+            var normalized = new AppGuardPolicy
+            {
+                Enabled = guard.Enabled, RestartAfterExit = guard.RestartAfterExit,
+                RestartAfterExitDelayMinutes = guard.RestartDelayMinutes, RestartOnCrash = guard.RestartOnCrash,
+                PreventDeletion = guard.PreventDeletion, BackupIntervalHours = guard.BackupIntervalHours,
+            }.Normalized();
+            metadata.OrganizationName = string.IsNullOrWhiteSpace(guard.OrganizationName) ? null : guard.OrganizationName.Trim();
+            metadata.AppGuardEnabled = normalized.Enabled;
+            metadata.AppGuardRestartAfterExit = normalized.RestartAfterExit;
+            metadata.AppGuardRestartDelayMinutes = normalized.RestartAfterExitDelayMinutes;
+            metadata.AppGuardRestartOnCrash = normalized.RestartOnCrash;
+            metadata.AppGuardPreventDeletion = normalized.PreventDeletion;
+            metadata.AppGuardBackupIntervalHours = normalized.BackupIntervalHours;
+            var pluginIds = snapshot.Plugins.Select(x => x.Id).ToHashSet();
+            db.AppGuardOverrides.AddRange((guard.Overrides ?? [])
+                .Where(x => pluginIds.Contains(x.CredentialId))
+                .DistinctBy(x => x.CredentialId)
+                .Select(x => new AppGuardOverride
+                {
+                    CredentialId = x.CredentialId, Enabled = x.Enabled, RestartAfterExit = x.RestartAfterExit,
+                    RestartDelayMinutes = Math.Clamp(x.RestartDelayMinutes, 0, AppGuardPolicy.MaxRestartDelayMinutes),
+                    RestartOnCrash = x.RestartOnCrash, PreventDeletion = x.PreventDeletion,
+                    BackupIntervalHours = Math.Clamp(x.BackupIntervalHours, AppGuardPolicy.MinBackupIntervalHours, AppGuardPolicy.MaxBackupIntervalHours),
+                    UpdatedAt = x.UpdatedAt,
+                }));
+        }
         if (snapshot.AutomationRules is { } rules)
         {
             await db.AutomationRuns.ExecuteDeleteAsync(ct);
@@ -370,7 +408,9 @@ public sealed class ConfigurationArchiveService(
 }
 
 public sealed record BackupFileInfo(string Name, DateTimeOffset CreatedAt, long Size, string Source);
-public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null, List<ClassroomSnapshot>? Classrooms = null, List<MembershipSnapshot>? Memberships = null, List<GroupSnapshot>? ClassGroups = null, List<ApiKeySnapshot>? ApiKeys = null, List<StoredProfileSnapshot>? Profiles = null, HolidaySettingsSnapshot? Holidays = null, List<ExtensionGroupPolicySnapshot>? ExtensionGroupPolicies = null, OperationsSettingsSnapshot? Operations = null, List<AutomationRuleSnapshot>? AutomationRules = null);
+public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null, List<ClassroomSnapshot>? Classrooms = null, List<MembershipSnapshot>? Memberships = null, List<GroupSnapshot>? ClassGroups = null, List<ApiKeySnapshot>? ApiKeys = null, List<StoredProfileSnapshot>? Profiles = null, HolidaySettingsSnapshot? Holidays = null, List<ExtensionGroupPolicySnapshot>? ExtensionGroupPolicies = null, OperationsSettingsSnapshot? Operations = null, List<AutomationRuleSnapshot>? AutomationRules = null, AppGuardSettingsSnapshot? AppGuard = null);
+public sealed record AppGuardSettingsSnapshot(string? OrganizationName, bool Enabled, bool RestartAfterExit, int RestartDelayMinutes, bool RestartOnCrash, bool PreventDeletion, int BackupIntervalHours, List<AppGuardOverrideSnapshot>? Overrides);
+public sealed record AppGuardOverrideSnapshot(Guid CredentialId, bool Enabled, bool RestartAfterExit, int RestartDelayMinutes, bool RestartOnCrash, bool PreventDeletion, int BackupIntervalHours, DateTimeOffset UpdatedAt);
 public sealed record OperationsSettingsSnapshot(int AuditRetentionDays, bool DeviceAlertsEnabled, int DeviceAlertThresholdMinutes, bool DeviceAlertNotifyAdmins, bool DeviceAlertNotifyClassHeads, bool DeviceAlertSchoolHoursOnly, bool ProfileDriftCheckEnabled = true, string? ProfileDriftCheckTime = null);
 public sealed record AutomationRuleSnapshot(Guid Id, string Name, bool Enabled, string TriggerJson, string ActionsJson, string TargetJson, string? ValidFrom, string? ValidTo, Guid CreatedByUserId, string CreatedByName, long CreatedAtUnixMs, long UpdatedAtUnixMs);
 public sealed record HolidaySettingsSnapshot(bool Enabled, string? SourceUrlTemplate, List<HolidayOverrideSnapshot> Overrides);

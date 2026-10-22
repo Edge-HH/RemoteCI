@@ -82,6 +82,12 @@ public sealed class Envelope
     public static Envelope HolidayCalendar(HolidayCalendar payload) =>
         New(Protocol.MessageTypeHolidayCalendar, payload);
 
+    public static Envelope AppGuardPolicy(AppGuardPolicy payload) =>
+        New(Protocol.MessageTypeAppGuardPolicy, payload);
+
+    public static Envelope AppGuardEvents(AppGuardEventBatch payload) =>
+        New(Protocol.MessageTypeAppGuardEvent, payload);
+
     public static Envelope FileTransferProgress(FileTransferProgress payload) =>
         New(Protocol.MessageTypeFileTransferProgress, payload);
 

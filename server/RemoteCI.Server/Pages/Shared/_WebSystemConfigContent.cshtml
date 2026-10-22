@@ -73,6 +73,15 @@
     }
 </section>
 
+<section class="panel" id="organization">
+    <h2>组织信息</h2>
+    <p class="muted">组织名（如学校名称）会显示在应用守护的恢复提示中：“当前ClassIsland由<strong>组织名</strong>统一管理”。留空时显示 RemoteCI。</p>
+    <form method="post" asp-page-handler="SaveOrganization" class="stack system-config-form">
+        <label>组织名<input asp-for="OrganizationName" maxlength="60" placeholder="RemoteCI" autocomplete="off" /></label>
+        <button type="submit">保存组织信息</button>
+    </form>
+</section>
+
 <section class="panel">
     <h2>通知人显示</h2>
     <p class="muted">自定义通知的标题是否附带发送人，对所有班级生效。</p>

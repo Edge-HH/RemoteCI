@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using RemoteCI.Server.Data;
 using RemoteCI.Server.Services;
+using RemoteCI.Shared;
 using RemoteCI.Shared.Models;
 
 namespace RemoteCI.Server;
@@ -141,6 +142,43 @@ public static class OperationsEndpoints
             var overview = await services.GetRequiredService<DeviceHealthService>().GetOverviewAsync(scope, ct);
             return Results.Ok(overview.Devices);
         }));
+
+        // 应用守护：全局默认策略与单设备覆盖，只允许系统管理员读写；组织名在系统配置中设置，这里只读。
+        app.MapGet("/api/settings/app-guard", (HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
+        {
+            RequireAdmin(actor, "只有系统管理员可以查看应用守护设置");
+            return Results.Ok(await services.GetRequiredService<AppGuardService>().GetGlobalAsync(ct));
+        }));
+        app.MapPut("/api/settings/app-guard", (AppGuardPolicy body, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
+        {
+            RequireAdmin(actor, "只有系统管理员可以修改应用守护设置");
+            return Results.Ok(await services.GetRequiredService<AppGuardService>().SetGlobalAsync(body, ct));
+        }));
+        app.MapGet("/api/devices/{credentialId:guid}/app-guard", (Guid credentialId, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
+        {
+            RequireAdmin(actor, "只有系统管理员可以查看应用守护设置");
+            return Results.Ok(await services.GetRequiredService<AppGuardService>().GetDeviceAsync(credentialId, ct));
+        }));
+        app.MapPut("/api/devices/{credentialId:guid}/app-guard", (Guid credentialId, AppGuardPolicy body, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
+        {
+            RequireAdmin(actor, "只有系统管理员可以修改应用守护设置");
+            return Results.Ok(await services.GetRequiredService<AppGuardService>().SetOverrideAsync(credentialId, body, ct));
+        }));
+        app.MapDelete("/api/devices/{credentialId:guid}/app-guard", (Guid credentialId, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
+        {
+            RequireAdmin(actor, "只有系统管理员可以修改应用守护设置");
+            return Results.Ok(await services.GetRequiredService<AppGuardService>().ClearOverrideAsync(credentialId, ct));
+        }));
+        app.MapGet("/api/app-guard/events", (Guid? credentialId, int? limit, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
+        {
+            RequireAdmin(actor, "只有系统管理员可以查看应用守护事件");
+            return Results.Ok(await services.GetRequiredService<AppGuardService>().GetRecentEventsAsync(credentialId, limit ?? 100, ct));
+        }));
+    }
+
+    private static void RequireAdmin(AppUser actor, string message)
+    {
+        if (actor.Role != UserRole.Admin) throw new UnauthorizedAccessException(message);
     }
 
     public const string ExcelContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";

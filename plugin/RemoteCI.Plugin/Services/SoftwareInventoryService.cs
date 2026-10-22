@@ -31,6 +31,9 @@ public sealed class SoftwareInventoryService
     /// <summary>版本清单发生变化时触发；RemoteCiService 监听后推送到服务端。</summary>
     public event Action? InventoryChanged;
 
+    /// <summary>远程升级 ClassIsland 部署完成、即将重启前触发；应用守护据此在升级期间不干预。</summary>
+    public event Action? ClassIslandUpdateRestarting;
+
     public SoftwareInventory Build()
     {
         var applications = new List<SoftwarePackageInfo>();
@@ -280,6 +283,7 @@ public sealed class SoftwareInventoryService
                 "ClassIsland 更新已部署，即将自动重启");
             RaiseInventoryChanged();
             await Task.Delay(750);
+            ClassIslandUpdateRestarting?.Invoke();
             RestartClassIslandAfterAppUpdate();
         }
         catch (Exception ex)

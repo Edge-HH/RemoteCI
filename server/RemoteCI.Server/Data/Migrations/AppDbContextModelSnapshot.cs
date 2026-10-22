@@ -217,6 +217,78 @@ namespace RemoteCI.Server.Data.Migrations
                     b.ToTable("ActionLinkTokens");
                 });
 
+            modelBuilder.Entity("RemoteCI.Server.Data.AppGuardEventRecord", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("AtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CredentialId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Detail")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeviceName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ReceivedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AtUnixMs");
+
+                    b.HasIndex("CredentialId", "AtUnixMs");
+
+                    b.ToTable("AppGuardEvents");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.AppGuardOverride", b =>
+                {
+                    b.Property<Guid>("CredentialId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("BackupIntervalHours")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("PreventDeletion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("RestartAfterExit")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RestartDelayMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("RestartOnCrash")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("CredentialId");
+
+                    b.ToTable("AppGuardOverrides");
+                });
+
             modelBuilder.Entity("RemoteCI.Server.Data.AppUser", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1466,6 +1538,24 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Property<long>("AccountVersion")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("AppGuardBackupIntervalHours")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AppGuardEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AppGuardPreventDeletion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AppGuardRestartAfterExit")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AppGuardRestartDelayMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AppGuardRestartOnCrash")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("AuditRetentionDays")
                         .HasColumnType("INTEGER");
 
@@ -1530,6 +1620,9 @@ namespace RemoteCI.Server.Data.Migrations
 
                     b.Property<string>("MobileServerUrl")
                         .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OrganizationName")
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("ProfileDriftCheckEnabled")
@@ -1850,6 +1943,17 @@ namespace RemoteCI.Server.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.AppGuardOverride", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.PluginCredential", "Credential")
+                        .WithMany()
+                        .HasForeignKey("CredentialId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Credential");
                 });
 
             modelBuilder.Entity("RemoteCI.Server.Data.AppUser", b =>

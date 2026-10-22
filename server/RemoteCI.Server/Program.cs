@@ -100,6 +100,7 @@ builder.Services.AddScoped<ExtensionPolicyService>();
 builder.Services.AddScoped<AuthorizationSyncService>();
 builder.Services.AddScoped<ConfigurationArchiveService>();
 builder.Services.AddScoped<SchedulePullSettings>();
+builder.Services.AddScoped<AppGuardService>();
 builder.Services.AddScoped<HolidaySettingsStore>();
 builder.Services.AddScoped<VisitorAccessSettings>();
 builder.Services.AddScoped<LoginPageSettings>();

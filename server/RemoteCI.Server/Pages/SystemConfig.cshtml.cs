@@ -25,7 +25,8 @@ public sealed class SystemConfigModel(
     PeerRegistry peers,
     IdentityCoordinator identities,
     MobileLoginSettings mobileLogin,
-    OperationsSettings operations) : WebPageModel(users)
+    OperationsSettings operations,
+    AppGuardService appGuard) : WebPageModel(users)
 {
     [BindProperty] public OperationsInput OperationsOptions { get; set; } = new();
     [BindProperty] public UpdateInput UpdateOptions { get; set; } = new();
@@ -34,6 +35,8 @@ public sealed class SystemConfigModel(
     [BindProperty] public ImportInput ImportOptions { get; set; } = new();
     [BindProperty] public bool ForceSenderInTitle { get; set; }
     [BindProperty] public string? MobileServerUrl { get; set; }
+    [BindProperty, StringLength(OrganizationNameMaxLength)] public string? OrganizationName { get; set; }
+    public const int OrganizationNameMaxLength = 60;
     [BindProperty] public IFormFile? UpdatePackage { get; set; }
     public IReadOnlyList<BackupFileInfo> Backups { get; private set; } = [];
     public IReadOnlyList<string> UnreadableTwoFactorUsers { get; private set; } = [];
@@ -58,6 +61,8 @@ public sealed class SystemConfigModel(
         await LoadBackupAsync();
         ForceSenderInTitle = await identities.GetForceSenderInTitleAsync();
         MobileServerUrl = await mobileLogin.GetServerUrlAsync();
+        OrganizationName = await db.SystemMetadata.AsNoTracking().Where(x => x.Id == 1)
+            .Select(x => x.OrganizationName).SingleAsync();
         OperationsOptions = OperationsInput.From(await operations.GetAsync());
         return Page();
     }
@@ -72,6 +77,23 @@ public sealed class SystemConfigModel(
         }
         catch (ArgumentException ex) { TempData["Error"] = ex.Message; }
         return RedirectToPage(null, null, "device-alerts");
+    }
+
+    public async Task<IActionResult> OnPostSaveOrganizationAsync(CancellationToken ct)
+    {
+        if (await RequireAdminAsync() is { } denied) return denied;
+        var name = string.IsNullOrWhiteSpace(OrganizationName) ? null : OrganizationName.Trim();
+        if (name is { Length: > OrganizationNameMaxLength })
+        {
+            TempData["Error"] = $"组织名不能超过 {OrganizationNameMaxLength} 个字符";
+            return RedirectToPage(null, null, "organization");
+        }
+        var row = await db.SystemMetadata.SingleAsync(x => x.Id == 1, ct);
+        row.OrganizationName = name;
+        await db.SaveChangesAsync(ct);
+        await appGuard.OrganizationNameChangedAsync(ct);
+        TempData["Message"] = name is null ? "已清除组织名" : "组织名已保存";
+        return RedirectToPage(null, null, "organization");
     }
 
     public async Task<IActionResult> OnPostSaveMobileLoginSettingsAsync(CancellationToken ct)

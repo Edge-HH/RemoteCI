@@ -96,6 +96,7 @@ RemoteCI 是面向 **ClassIsland 2.x** 的课堂联动与集控系统。你可�
 ### ⚙️ 运维与自动化
 
 - **设备状态与告警**：汇总在线状态、课程、音量、版本与今日在线时间；支持在校时段离线告警和恢复通知。
+- **应用守护**：统一开启 ClassIsland 退出自启（可设延时，如退出 40 分钟后自启）、意外退出重启与禁止删除；被删除后自动从 C 盘备份恢复、重新启动，并用 ClassIsland 原生弹窗提示由谁统一管理。
 - **自动化规则**：按每周定时、上课 / 下课 / 放学或设备上线触发通知、音量、电源、扩展和临时层操作，可限定目标与生效日期。
 - **操作记录**：追溯谁从哪个入口、对哪台设备执行了什么操作，以及执行结果；按条件筛选并导出 Excel。
 - **课时统计**：汇总实际课时、代课与被代课情况，导出教师汇总和逐节明细；台账从启用后累积。
@@ -216,6 +217,7 @@ Windows 用户也可以双击 [`Build-Latest-Cipx.cmd`](Build-Latest-Cipx.cmd)�
 | 手机浏览器、iOS PWA 与通知 | [手机 WebUI / PWA](docs/mobile-web.md) |
 | Android 日历导入与自动同步 | [Android 系统日历](docs/android-calendar-sync.md) |
 | 设备状态、自动化、审计与课时 | [集控运维](docs/operations.md) |
+| 退出自启、崩溃重启与防删除 | [应用守护](docs/app-guard.md) |
 | 二步验证与恢复码 | [账号二步验证](docs/two-factor.md) |
 | 协议、API 与平台差异 | [通信协议 V3](docs/protocol.md) · [平台说明](docs/platform-notes.md) |
 | ClassIsland 插件与扩展接入 | [插件说明](plugin/RemoteCI.Plugin/README.md) |

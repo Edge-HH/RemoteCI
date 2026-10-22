@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      守护进程必须在 ClassIsland（连同它自带的 .NET 运行时）被删除后仍能运行，所以以 Windows 10/11
+      自带的 .NET Framework 4.8 为目标，不依赖任何第三方包；AnyCPU 且不偏好 32 位，
+      便于在 x64/arm64 上读取 ClassIsland 进程的完整路径。
+    -->
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>RemoteCI.Guard</RootNamespace>
+    <AssemblyName>RemoteCI.Guard</AssemblyName>
+    <Version>3.2.1.4</Version>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 只提供编译期引用程序集，运行时使用系统自带的 .NET Framework。 -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 不用 UseWindowsForms：它会引入 Windows Desktop SDK，CI 在 Linux 上构建插件包时无法使用。 -->
+    <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+
+</Project>

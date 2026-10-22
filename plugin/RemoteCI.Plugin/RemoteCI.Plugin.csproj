@@ -55,6 +55,23 @@
 
   <ItemGroup>
     <ProjectReference Include="../../shared/RemoteCI.Shared/RemoteCI.Shared.csproj" />
+    <!--
+      应用守护进程（.NET Framework 4.8）只随插件包分发，不作为程序集引用；插件运行时把它复制到
+      %LOCALAPPDATA%\RemoteCI\Guard 再启动，这样 ClassIsland 被删除后守护进程仍能运行。
+    -->
+    <ProjectReference Include="../RemoteCI.Guard/RemoteCI.Guard.csproj"
+                      ReferenceOutputAssembly="false"
+                      SkipGetTargetFrameworkProperties="true"
+                      SetTargetFramework="TargetFramework=net48"
+                      Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 插件与守护进程之间的文件契约、守护逻辑与备份逻辑：两边共用同一份源码。 -->
+    <Compile Include="../RemoteCI.Guard/Shared/*.cs" LinkBase="Guard" />
+    <None Include="../RemoteCI.Guard/bin/$(Configuration)/RemoteCI.Guard.exe" Link="RemoteCI.Guard.exe" Visible="false">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <ItemGroup>

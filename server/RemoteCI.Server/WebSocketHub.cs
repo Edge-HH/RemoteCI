@@ -290,6 +290,14 @@ public static class WebSocketHub
                     capabilities.Capabilities.Contains(RemoteCiCapabilities.HolidayCalendar, StringComparer.Ordinal))
                     await session.Context.RequestServices.GetRequiredService<HolidayCalendarService>()
                         .SendToConnectionAsync(session.ConnectionId, session.CancellationToken);
+                // 应用守护策略未启用时也要下发，插件据此注销已部署的守护进程。
+                if (session.Principal.IsPlugin &&
+                    capabilities.Capabilities.Contains(RemoteCiCapabilities.AppGuard, StringComparer.Ordinal))
+                {
+                    await using var scope = session.Context.RequestServices.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
+                    await scope.ServiceProvider.GetRequiredService<AppGuardService>()
+                        .SendToConnectionAsync(session.ConnectionId, session.Principal.PluginCredentialId, session.CancellationToken);
+                }
             }
             return;
         }
@@ -317,6 +325,18 @@ public static class WebSocketHub
             if (ConvertPayload<FileTransferProgress>(envelope.Payload) is { } progress)
                 await session.Context.RequestServices.GetRequiredService<FileTransferService>()
                     .ReportProgressAsync(session.Principal.PluginCredentialId, progress);
+            return;
+        }
+        // 守护事件同样按插件凭据归属，未分配班级的设备也要记录。
+        if (envelope.Type == Protocol.MessageTypeAppGuardEvent)
+        {
+            if (session.Principal.PluginCredentialId is { } credentialId &&
+                ConvertPayload<AppGuardEventBatch>(envelope.Payload) is { } batch)
+            {
+                await using var scope = session.Context.RequestServices.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
+                await scope.ServiceProvider.GetRequiredService<AppGuardService>()
+                    .RecordEventsAsync(credentialId, session.Principal.ClassId, batch, session.CancellationToken);
+            }
             return;
         }
         if (await TryDispatchPluginStateAsync(envelope, session)) return;
