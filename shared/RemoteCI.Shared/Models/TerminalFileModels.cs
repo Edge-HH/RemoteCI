@@ -43,20 +43,67 @@ public enum FileTargetFolder
 }
 
 /// <summary>
-/// 分发一个文件到设备。内容以内联 Base64 经 WebSocket 传输（解码后上限 10 MiB，与语音共用 16 MiB 信封），
+/// 分发一个文件到设备。两种传输方式：
+/// <list type="bullet">
+/// <item>中转（file.transfer 能力）：文件先上传到服务端，命令只携带 TransferId/DownloadKey/Size/Sha256，
+/// 插件随后从 <c>GET /api/plugin/files/{transferId}</c> 分段下载（断点续传、SHA-256 校验），并以 file_transfer_progress 上报进度。</item>
+/// <item>内联（旧方式）：内容以 Base64 经 WebSocket 传输，解码后上限 10 MiB，与语音共用 16 MiB 信封；仅系统管理员。</item>
+/// </list>
 /// 保存目录只允许 FileTargetFolder 列出的用户文件夹，文件名经过净化以防止路径穿越；
 /// 默认不覆盖已有文件，而是自动追加序号。
 /// </summary>
 public sealed class FileDistributionRequest
 {
+    /// <summary>内联方式的文件上限。</summary>
     public const int MaxFileBytes = 10 * 1024 * 1024;
+    /// <summary>中转方式的协议上限；服务端可另行配置更小的值。</summary>
+    public const long MaxTransferBytes = 4L * 1024 * 1024 * 1024;
     public const int MaxFileNameLength = 200;
 
     [JsonPropertyName("fileName")]
     public string FileName { get; set; } = string.Empty;
 
+    /// <summary>内联方式的文件内容；中转方式留空。</summary>
     [JsonPropertyName("contentBase64")]
     public string ContentBase64 { get; set; } = string.Empty;
+
+    /// <summary>中转方式：服务端文件传输编号（32 位十六进制）。</summary>
+    [JsonPropertyName("transferId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TransferId { get; set; }
+
+    /// <summary>中转方式：下载凭据，随命令一次性下发，插件下载时放在 X-RemoteCI-Transfer-Key 请求头。</summary>
+    [JsonPropertyName("downloadKey")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DownloadKey { get; set; }
+
+    /// <summary>中转方式：文件字节数。</summary>
+    [JsonPropertyName("size")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long Size { get; set; }
+
+    /// <summary>中转方式：文件内容的 SHA-256（小写十六进制），插件下载完成后校验。</summary>
+    [JsonPropertyName("sha256")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Sha256 { get; set; }
+
+    [JsonIgnore]
+    public bool IsTransfer => !string.IsNullOrEmpty(TransferId);
+
+    /// <summary>校验中转方式的参数；通过时返回 null，否则返回中文错误说明。</summary>
+    public static string? ValidateTransfer(FileDistributionRequest? request)
+    {
+        if (request is null || !request.IsTransfer) return "缺少文件传输编号";
+        if (!IsHex(request.TransferId, 32)) return "文件传输编号无效";
+        if (string.IsNullOrWhiteSpace(request.DownloadKey) || request.DownloadKey.Length is < 16 or > 128)
+            return "缺少下载凭据";
+        if (request.Size is <= 0 or > MaxTransferBytes) return "文件大小无效";
+        if (!IsHex(request.Sha256, 64)) return "文件校验值无效";
+        return SanitizeFileName(request.FileName) is null ? "文件名无效" : null;
+    }
+
+    private static bool IsHex(string? value, int length) =>
+        value is not null && value.Length == length && value.All(Uri.IsHexDigit);
 
     [JsonPropertyName("targetFolder")]
     public FileTargetFolder TargetFolder { get; set; } = FileTargetFolder.Desktop;
@@ -112,4 +159,40 @@ public sealed class FileDistributionRequest
         "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
         "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     };
+}
+
+/// <summary>中转文件在某台设备上的接收状态。</summary>
+public enum FileTransferState
+{
+    /// <summary>已下发命令，等待设备开始下载（或设备离线、尚未回执）。</summary>
+    Pending = 0,
+    Downloading = 1,
+    Completed = 2,
+    Failed = 3,
+}
+
+/// <summary>插件 → 服务端：file_transfer_progress 消息负载。下载中按时间节流上报，结束时必报一次最终状态。</summary>
+public sealed class FileTransferProgress
+{
+    [JsonPropertyName("transferId")]
+    public string TransferId { get; set; } = string.Empty;
+
+    [JsonPropertyName("state")]
+    public FileTransferState State { get; set; }
+
+    [JsonPropertyName("receivedBytes")]
+    public long ReceivedBytes { get; set; }
+
+    [JsonPropertyName("totalBytes")]
+    public long TotalBytes { get; set; }
+
+    /// <summary>失败原因或完成说明。</summary>
+    [JsonPropertyName("message")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Message { get; set; }
+
+    /// <summary>完成时设备上的保存路径。</summary>
+    [JsonPropertyName("savedPath")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SavedPath { get; set; }
 }

@@ -114,6 +114,9 @@ builder.Services.AddScoped<ScheduleViewService>();
 builder.Services.AddScoped<ProfileDispatchService>();
 builder.Services.AddScoped<ClassBroadcastService>();
  builder.Services.AddScoped<DeviceInventoryService>();
+builder.Services.AddSingleton<FileTransferService>();
+builder.Services.AddHostedService<FileTransferCleanupWorker>();
+builder.Services.AddScoped<FileTransferDispatcher>();
 builder.Services.AddScoped<UserImportService>();
 builder.Services.AddScoped<MemberExcelService>();
 builder.Services.AddScoped<ClassExcelService>();
@@ -629,6 +632,13 @@ app.MapPost("/api/commands", async (
                 "请使用 PUT /api/classes/{classId}/extension-groups/{groupId}/settings 修改扩展设置"))
             : Results.Json(Error(ApiErrorCodes.Forbidden,
                 "请通过档案管理页面、POST /api/profiles/collect 或 POST /api/profiles/apply 收集与下发档案"), statusCode: StatusCodes.Status403Forbidden);
+    // 通用命令接口只保留旧的内联文件分发（仅系统管理员）；大文件中转必须走 /api/files 以登记目标设备与下载凭据。
+    if (command.Command == CommandKind.SendFile && command.FileDistribution?.IsTransfer == true)
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest,
+            "大文件请先上传到 POST /api/files，再用 POST /api/files/{id}/send 发送"));
+    if (command.Command == CommandKind.SendFile && principal.User.Role != UserRole.Admin)
+        return Results.Json(Error(ApiErrorCodes.Forbidden,
+            "请使用 POST /api/files 上传后再发送；内联文件分发仅限系统管理员"), statusCode: StatusCodes.Status403Forbidden);
     command.ClassId = target;
     var classPermissions = await access.GetEffectivePermissionsAsync(
         principal.User.Id, principal.User.Role, target, principal.User.GrantedPermissions, ct);
@@ -1419,6 +1429,7 @@ app.MapRazorPages();
 app.MapHolidayEndpoints();
 app.MapProfileEndpoints();
 app.MapOperationsEndpoints();
+app.MapFileTransferEndpoints();
 app.Run();
 
 static async Task<AuthPrincipal?> AuthorizeAsync(HttpContext ctx, IdentityCoordinator identities, CancellationToken ct)

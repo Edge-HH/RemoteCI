@@ -24,8 +24,9 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | 2048 | `ApiAccess`（REST API Key；插件协议仅透传该位） |
 | 4096 | `RequestScheduleSwap`（老师主动换课：发起与审批换课申请） |
 | 8192 | `ForceScheduleSwap`（强制换课：不经审批立即生效，对方可撤回） |
+| 16384 | `SendFiles`（文件分发：经服务端中转把文件发到有权班级设备的桌面、下载或文档文件夹） |
 
-管理员的有效权限固定为 16383（全部位）。`RequestScheduleSwap` 与 `ForceScheduleSwap` 是全局权限，由系统管理员在“角色配置”中开关：内置老师和班主任默认开启前者（升级迁移会为已有的两个内置角色补上一次），后者默认关闭。普通用户固定包含值 1，其余权限来自服务端授权。权限设置界面将值 2 显示为“概览”；七日课表查看只要求账号已登录，手动拉取课表允许系统管理员，以及班级自治策略允许时的本班班主任；定时自动拉取间隔是全局设置，只有系统管理员可以修改，值 16 保护换课。`TeacherComing` 权限位和命令仅为旧客户端兼容保留，当前不在 WebUI、各端 App 或权限设置中显示；`SendNotifications` 只保护自定义通知与清除提醒，`SendVoiceMessages` 独立保护语音消息，`RunExtensions` 是所有插件扩展的独立权限，`MainMenuControl` 保护主界面显隐，`PowerControl` 保护音量和 Windows 电源操作，`ChangeDisplayName` 仅保留为兼容旧权限数据，实际只有系统管理员可以修改用户可见用户名（DisplayName，登录 ID 不变）；用户名会影响老师获取的日程信息。`ApiAccess` 允许账号创建 API Key 并调用 REST API；管理员、班主任与老师默认拥有 API 访问。
+管理员的有效权限固定为 32767（全部位）。`SendFiles` 默认不授予任何内置角色，由系统管理员按需开启。`RequestScheduleSwap` 与 `ForceScheduleSwap` 是全局权限，由系统管理员在“角色配置”中开关：内置老师和班主任默认开启前者（升级迁移会为已有的两个内置角色补上一次），后者默认关闭。普通用户固定包含值 1，其余权限来自服务端授权。权限设置界面将值 2 显示为“概览”；七日课表查看只要求账号已登录，手动拉取课表允许系统管理员，以及班级自治策略允许时的本班班主任；定时自动拉取间隔是全局设置，只有系统管理员可以修改，值 16 保护换课。`TeacherComing` 权限位和命令仅为旧客户端兼容保留，当前不在 WebUI、各端 App 或权限设置中显示；`SendNotifications` 只保护自定义通知与清除提醒，`SendVoiceMessages` 独立保护语音消息，`RunExtensions` 是所有插件扩展的独立权限，`MainMenuControl` 保护主界面显隐，`PowerControl` 保护音量和 Windows 电源操作，`ChangeDisplayName` 仅保留为兼容旧权限数据，实际只有系统管理员可以修改用户可见用户名（DisplayName，登录 ID 不变）；用户名会影响老师获取的日程信息。`ApiAccess` 允许账号创建 API Key 并调用 REST API；管理员、班主任与老师默认拥有 API 访问。
 
 账号密码只用于 `POST /api/auth/login` 登录请求，不在设备上持久化。启用二步验证时，首次请求返回 `twoFactorRequired: true`，不签发会话；客户端提示验证码后，在同一端点重发账号、密码和 `twoFactorCode`，使用恢复码时再传 `useRecoveryCode: true`。`/api/auth/mobile-login` 同样支持这两个可选字段，提示验证时原票据保持有效，完成后一次性消费。验证码错误返回 401，并计入账号锁定。旧客户端需升级才能登录已启用二步验证的账号，详见 [二步验证](two-factor.md)。生产环境必须使用 HTTPS；Android 手机端为兼容尚未配置 TLS 的现有部署，允许用户在持续显示风险提示的情况下明确连接 HTTP 云服务器。成功响应包含 1 小时 `accessToken`、30 天 `deviceSessionId/deviceSecret` 和用户有效权限。`POST /api/auth/refresh` 会同时轮换访问令牌和设备密钥；旧值立即失效。
 
@@ -72,6 +73,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | `connection_bootstrap` | 插件 → 手表 | 用户选中局域网插件后，插件返回的云端连接信息 |
 | `user_notify` | 服务端 → 手机/手表 | 面向当前账号的个人通知 `UserNotificationView {id, kind, title, body, swapRequestId?, createdAt, readAt?}`，投递给该账号全部在线连接，不按班级过滤；旧客户端忽略未知类型 |
 | `holiday_calendar` | 服务端 → 插件 | 调休日历 `HolidayCalendar {enabled, generatedAt, days[]}`，见下文“调休”；只发给声明了 `schedule.holiday-calendar` 能力的插件 |
+| `file_transfer_progress` | 插件 → 服务端 | 中转文件的下载进度与最终结果，见下文“文件分发（中转方式）” |
 
 ## 局域网设备发现
 
@@ -251,11 +253,31 @@ ClassIsland 的临时层是 `ClassPlans` 中 `IsOverlay=true` 的课表：`Overl
 
 ## 远程终端与文件分发
 
-命令值 22 为 `ExecuteTerminalCommand`，23 为 `SendFile`。两者都要求 `ManageUsers` 权限，并在服务端和插件端再次确认系统管理员身份；能力标识分别为 `terminal.execute` 和 `file.distribute`，只进入当前版本能力列表。
+命令值 22 为 `ExecuteTerminalCommand`，23 为 `SendFile`。远程终端要求 `ManageUsers` 权限，并在服务端和插件端再次确认系统管理员身份；文件分发要求 `SendFiles` 权限（值 16384，系统管理员固定拥有，其他账号由管理员在账号权限或角色配置中开启，按目标班级逐个复核）。能力标识分别为 `terminal.execute`、`file.distribute`（内联方式）与 `file.transfer`（中转方式），只进入当前版本能力列表。
 
 - 远程终端在设备上以当前登录用户执行单条命令，等价于 `cmd /d /c`：每次执行相互独立，进程之间不保留 shell 状态。载荷 `terminalCommand` 包含 `command`（≤4000 字符）、可选 `workingDirectory`（≤260 字符，目录不存在时返回 `INVALID_REQUEST`）和可选 `timeoutSeconds`（1-10，默认 10）。插件合并标准输出与标准错误（中间以 `--- 标准错误 ---` 分隔），放入 `command_result.data` 返回，总上限 64K 字符，超出截断并注明；超时的进程会被强制结束并返回 `COMMAND_TIMEOUT`，`data` 携带已捕获的部分输出。命令正常结束时回执 `success=true`，退出代码写入 `message`，非零退出代码不视为失败。
-- 文件分发以内联 Base64 经 WebSocket 传输一个文件，解码后上限 10 MB（复用语音消息的 16 MiB 信封上限），不接受 URL 或服务器本地路径。载荷 `fileDistribution` 包含 `fileName`、`contentBase64`、`targetFolder`（1=桌面、2=下载、3=文档）和 `overwrite`。服务端与插件共用同一校验：文件名剥掉目录部分并过滤非法字符，拦截 Windows 保留设备名，长度上限 200；保存目录只允许 `targetFolder` 枚举列出的用户文件夹（下载目录按系统已知文件夹解析），不接收任意路径。`overwrite` 为 `false`（默认）时同名文件自动追加序号，绝不覆盖；成功回执的 `data` 是设备上的完整保存路径。
-- WebUI 在“批量控制”与班级“控制”页的远程维护区开放这两个功能，均需先勾选高风险确认。终端与文件分发结果通过 AJAX 逐设备展示（输出或保存路径），不走表单跳转；普通班主任即使被授予 `ManageUsers` 也会被服务端与插件拒绝，只有系统管理员可以使用。
+
+### 文件分发（中转方式，file.transfer）
+
+文件先上传到服务端，再由设备分段下载，单个文件上限由服务端配置 `Server:FileTransferMaxBytes` 决定（默认 2 GiB，协议上限 4 GiB），中转目录总量上限 `Server:FileTransferQuotaBytes`（默认 20 GiB），文件保留 `Server:FileTransferRetention`（默认 24 小时）后删除。反向代理需同步放开请求体大小（如 nginx `client_max_body_size`）。
+
+1. `POST /api/files?name=<文件名>`：请求体就是文件内容（`application/octet-stream`，也可用 `X-File-Name` 头传 URL 编码的文件名）。需要至少在一个班级拥有 `SendFiles`。服务端边写盘边计算 SHA-256，返回 201 和 `FileTransferView {id, fileName, size, sha256, ownerName, createdAt, expiresAt, deliveries:[]}`；超过上限返回 413。
+2. `POST /api/files/{id}/send`：请求体 `{classIds?, classNames?, nextClass?, timeZoneOffsetMinutes?, targetFolder: 1 桌面|2 下载|3 文档, overwrite}`。`classNames` 完全匹配优先、否则要求片段唯一匹配；`nextClass: true` 加入当前账号“我的日程”中接下来要上课的班（没有后续课程时取正在上的课）。每个目标班级都必须拥有 `SendFiles`，否则 403。服务端为每台设备（班级的主插件）登记接收记录后并行下发 `SendFile`，返回同一个 `FileTransferView`，`deliveries` 为逐台状态。
+3. `GET /api/files/{id}`：上传者本人或系统管理员查看逐台进度 `deliveries:[{classId, targetName, state, receivedBytes, totalBytes, percent, message, savedPath, updatedAt}]`，`state` 为 0 等待、1 接收中、2 已送达、3 失败。`DELETE /api/files/{id}` 提前删除。
+
+命令载荷 `fileDistribution` 为 `{fileName, transferId, downloadKey, size, sha256, targetFolder, overwrite}`，不含文件内容。插件立即回执“开始接收”，随后在后台用插件长期凭据（`Authorization: Bearer`）加 `X-RemoteCI-Transfer-Key: <downloadKey>` 请求 `GET /api/plugin/files/{transferId}`：服务端只对该传输登记过的插件凭据放行，支持 `Range` 断点续传。插件先写入暂存目录，网络中断时按已下载长度续传（最多 8 次，单次读取 60 秒无数据视为中断），完成后校验 SHA-256，再移动到目标文件夹；同时最多 2 个文件并行下载。
+
+插件以 `file_transfer_progress` 消息上报进度 `FileTransferProgress {transferId, state, receivedBytes, totalBytes, message?, savedPath?}`：下载中每秒最多一次，结束时必报一次最终状态（云端暂时断线时约 2 分钟内重发）。服务端只接受该插件凭据登记过的传输，最终状态不会被迟到的进度覆盖。
+
+不支持 `file.transfer` 的旧插件：系统管理员发送且文件不超过 10 MB 时，服务端自动改用下文的内联方式；否则该设备记为失败（“插件版本过旧”）。通用命令接口（`POST /api/commands`、手机/手表 WebSocket）拒绝携带 `transferId` 的 `SendFile`。
+
+### 文件分发（内联方式，file.distribute）
+
+以内联 Base64 经 WebSocket 传输一个文件，解码后上限 10 MB（复用语音消息的 16 MiB 信封上限），不接受 URL 或服务器本地路径，仅系统管理员可用。载荷 `fileDistribution` 包含 `fileName`、`contentBase64`、`targetFolder`（1=桌面、2=下载、3=文档）和 `overwrite`；成功回执的 `data` 是设备上的完整保存路径。
+
+两种方式共用同一校验：文件名剥掉目录部分并过滤非法字符，拦截 Windows 保留设备名，长度上限 200；保存目录只允许 `targetFolder` 枚举列出的用户文件夹（下载目录按系统已知文件夹解析），不接收任意路径。`overwrite` 为 `false`（默认）时同名文件自动追加序号，绝不覆盖。
+
+WebUI 在“批量控制”与班级“控制”页的远程维护区开放这两个功能，均需先勾选高风险确认。终端结果逐设备展示输出；文件分发先显示上传进度，再每秒刷新逐台下载进度条与最终保存路径。
 
 ## 扩展分组与扩展设置
 
@@ -375,6 +397,7 @@ WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebU
 - `GET/DELETE /api/me/sessions`
 - `GET /api/state`、`GET /api/schedule`
 - `POST /api/commands`
+- `POST /api/files?name=`、`POST /api/files/{id}/send`、`GET/DELETE /api/files/{id}`：文件中转分发；`GET /api/plugin/files/{id}` 供插件续传下载（见“远程终端与文件分发”）
 - `GET/POST/PUT/DELETE /api/users`、`/api/roles`、`/api/visitor`
 - `POST /api/users/{id}/password`
 - `POST /api/plugin/pairing-code`

@@ -311,6 +311,14 @@ public static class WebSocketHub
 
     private static async Task DispatchPluginAsync(Envelope envelope, ConnectionSession session)
     {
+        // 文件接收进度按插件凭据归属，未分配班级的统一连接码设备同样需要上报。
+        if (envelope.Type == Protocol.MessageTypeFileTransferProgress)
+        {
+            if (ConvertPayload<FileTransferProgress>(envelope.Payload) is { } progress)
+                await session.Context.RequestServices.GetRequiredService<FileTransferService>()
+                    .ReportProgressAsync(session.Principal.PluginCredentialId, progress);
+            return;
+        }
         if (await TryDispatchPluginStateAsync(envelope, session)) return;
         if (await TryDispatchPluginControlAsync(envelope, session)) return;
         LogUnhandled(envelope, session);
@@ -700,6 +708,9 @@ public static class WebSocketHub
             if (terminal.TimeoutSeconds is < 1 or > TerminalCommandRequest.MaxTimeoutSeconds)
                 return new CommandError(CommandResultCodes.InvalidRequest, "执行超时必须在 1-10 秒之间");
         }
+        // 中转方式只能经 POST /api/files/{id}/send 下发，由服务端登记目标设备与下载凭据。
+        if (command.Command == CommandKind.SendFile && command.FileDistribution?.IsTransfer == true)
+            return new CommandError(CommandResultCodes.InvalidRequest, "大文件请先上传到 POST /api/files，再用 POST /api/files/{id}/send 发送");
         if (command.Command == CommandKind.SendFile && !FileDistributionRequest.TryDecode(command.FileDistribution, out _))
             return new CommandError(CommandResultCodes.InvalidRequest, "文件分发参数无效，文件不能为空且不能超过 10 MB");
         return command.Command == CommandKind.JoinManagement && command.ManagementJoin is null

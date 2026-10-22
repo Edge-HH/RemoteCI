@@ -121,6 +121,7 @@ public sealed class RemoteCiService : IDisposable
             RequestScheduleSync,
             _loggerFactory.CreateLogger<CloudClient>(),
             tokenStore: _tokenStore);
+        _commandHandler.Files.Channel = _cloudClient;
         _cloudClient.Connected += OnCloudConnected;
         _cloudClient.ConnectionStatusChanged += OnCloudConnectionStatusChanged;
         _cloudClient.HolidayCalendarReceived += _holidayCalendar.Apply;
@@ -139,6 +140,7 @@ public sealed class RemoteCiService : IDisposable
     {
         _holidayTimer?.Dispose();
         _holidayTimer = null;
+        _commandHandler.Files.CancelAll();
         _holidayCalendar.Changed -= RunHolidayApply;
         if (_cloudClient is not null) _cloudClient.HolidayCalendarReceived -= _holidayCalendar.Apply;
         _collector.Stop();

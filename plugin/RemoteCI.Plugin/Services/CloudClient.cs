@@ -11,7 +11,7 @@ using RemoteCI.Shared.Models;
 namespace RemoteCI.Plugin.Services;
 
 /// <summary>插件云端通道：长期插件凭据、版本化授权同步和真实命令回执。</summary>
-public sealed class CloudClient : IDisposable
+public sealed class CloudClient : IDisposable, IFileTransferChannel
 {
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan MaxReconnectDelay = TimeSpan.FromMinutes(1);
@@ -27,6 +27,7 @@ public sealed class CloudClient : IDisposable
     private readonly TimeSpan _connectionTestTimeout;
     // 配对请求设置显式超时，服务器挂起时不会让重连循环永久阻塞。
     private readonly HttpClient _http;
+    private readonly HttpClient _downloadHttp;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly SemaphoreSlim _retrySignal = new(0, 1);
     private readonly SemaphoreSlim _connectionTestLock = new(1, 1);
@@ -75,7 +76,10 @@ public sealed class CloudClient : IDisposable
         _schedulePullRequests = new SchedulePullRequestHandler(requestScheduleSync);
         _logger = logger;
         _socketFactory = socketFactory ?? (() => new ClientWebSocketAdapter(new ClientWebSocket()));
-        _http = new HttpClient(httpHandler ?? new HttpClientHandler()) { Timeout = TimeSpan.FromSeconds(30) };
+        var handler = httpHandler ?? new HttpClientHandler();
+        _http = new HttpClient(handler, disposeHandler: false) { Timeout = TimeSpan.FromSeconds(30) };
+        // 文件下载可能持续很久，整体不设超时；读取卡死由 FileReceiveService 的单次读取超时处理。
+        _downloadHttp = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         _initialReconnectDelay = reconnectDelay ?? ReconnectDelay;
         _reconnectDelay = _initialReconnectDelay;
         _connectionTestTimeout = connectionTestTimeout ?? TimeSpan.FromSeconds(15);
@@ -114,6 +118,22 @@ public sealed class CloudClient : IDisposable
     public Task SendExtensionsAsync(IReadOnlyList<ExtensionDefinition> value) => SendAsync(Envelope.ExtensionsSync(value));
     public Task SendExtensionGroupsAsync(IReadOnlyList<ExtensionGroupDefinition> value) => SendAsync(Envelope.ExtensionGroupsSync(value));
     public Task SendSoftwareInventoryAsync(SoftwareInventory value) => SendAsync(Envelope.SoftwareInventory(value));
+
+    /// <summary>以插件长期凭据从服务端文件中转下载；offset &gt; 0 时按 Range 续传。</summary>
+    public Task<HttpResponseMessage> RequestFileAsync(
+        string transferId, string downloadKey, long offset, CancellationToken ct)
+    {
+        var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{_settings.CloudServerUrl.TrimEnd('/')}/api/plugin/files/{Uri.EscapeDataString(transferId)}");
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(Protocol.BearerScheme, Token ?? string.Empty);
+        request.Headers.Add("X-RemoteCI-Transfer-Key", downloadKey);
+        if (offset > 0) request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(offset, null);
+        return _downloadHttp.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+    }
+
+    public Task<bool> ReportFileProgressAsync(FileTransferProgress progress) =>
+        TrySendAsync(Envelope.FileTransferProgress(progress));
 
     private async Task RunLoopAsync(CancellationToken ct)
     {
@@ -505,6 +525,7 @@ public sealed class CloudClient : IDisposable
         cts?.Dispose();
         DisposeSocket();
         _http.Dispose();
+        _downloadHttp.Dispose();
     }
 
 }

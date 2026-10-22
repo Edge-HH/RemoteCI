@@ -14,6 +14,9 @@ namespace RemoteCI.Server.Pages;
 /// 页面只负责收集参数；实际投递由 DeviceInventoryService 统一按插件连接执行。
 /// </summary>
 [Authorize]
+// 文件分发经本页上传，请求体上限放宽到协议上限；FileTransferService 再按服务端配置的单文件上限复核。
+[RequestSizeLimit(FileDistributionRequest.MaxTransferBytes + 1024 * 1024)]
+[RequestFormLimits(MultipartBodyLengthLimit = FileDistributionRequest.MaxTransferBytes + 1024 * 1024)]
 public class BatchControlModel(
     UserManager<AppUser> users,
     ClassroomService classrooms,
@@ -480,46 +483,79 @@ public class BatchControlModel(
         IReadOnlyCollection<Guid> connectionIds,
         CancellationToken ct)
     {
+        var transfers = HttpContext.RequestServices.GetRequiredService<FileTransferService>();
         var file = Request.Form.Files["file"];
         if (file is null || file.Length == 0)
             return RemoteOpJson(false, "请选择要分发的文件。", []);
-        if (file.Length > FileDistributionRequest.MaxFileBytes)
-            return RemoteOpJson(false, "文件不能超过 10 MB。", []);
-        var fileName = FileDistributionRequest.SanitizeFileName(file.FileName);
-        if (fileName is null)
+        if (file.Length > transfers.MaxFileBytes)
+            return RemoteOpJson(false, $"文件不能超过 {FileTransferService.FormatSize(transfers.MaxFileBytes)}。", []);
+        if (FileDistributionRequest.SanitizeFileName(file.FileName) is null)
             return RemoteOpJson(false, "文件名无效。", []);
         if (!Enum.TryParse(Request.Form["targetFolder"].ToString(), out FileTargetFolder targetFolder) ||
             !Enum.IsDefined(targetFolder))
             return RemoteOpJson(false, "目标文件夹无效。", []);
         var overwrite = string.Equals(Request.Form["overwrite"].ToString(), "true", StringComparison.OrdinalIgnoreCase);
 
-        using var content = new MemoryStream();
-        await file.CopyToAsync(content, ct);
-
-        var plan = await DevicesService.ResolveAsync(classIds, groupIds, connectionIds, ct);
-        if (plan.Targets.Count == 0 && plan.Failures.Count == 0)
-            return RemoteOpJson(false, "没有找到可用的在线设备。", []);
         var profile = await Identities.GetProfileAsync(CurrentUser.Id, ct);
-        var dispatch = await DevicesService.DispatchAsync(
-            plan.Targets,
-            _ => new CommandMessage
+        if (profile is null) return RemoteOpJson(false, "会话已失效，请刷新后重试。", []);
+        FileTransferRecord record;
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            record = await transfers.CreateAsync(stream, file.FileName, profile, ct);
+        }
+        catch (FileTransferException ex)
+        {
+            return RemoteOpJson(false, ex.Message, []);
+        }
+        // 命令回执只代表设备已开始接收；页面随后轮询 FileTransferStatus 显示逐台下载进度。
+        var view = await HttpContext.RequestServices.GetRequiredService<FileTransferDispatcher>().SendAsync(
+            record, classIds, groupIds, connectionIds, targetFolder, overwrite, _ => profile, ct);
+        return FileTransferJson(view);
+    }
+
+    /// <summary>文件分发进度：上传者本人或系统管理员可查询。</summary>
+    public async Task<IActionResult> OnGetFileTransferStatusAsync(string id, CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        var transfers = HttpContext.RequestServices.GetRequiredService<FileTransferService>();
+        var profile = await Identities.GetProfileAsync(CurrentUser.Id, ct);
+        return profile is not null && transfers.Get(id) is { } record && FileTransferService.CanManage(record, profile)
+            ? FileTransferJson(transfers.ToView(record))
+            : RemoteOpJson(false, "文件不存在或已过期。", []);
+    }
+
+    private static IActionResult FileTransferJson(FileTransferView view)
+    {
+        var done = view.Deliveries.Count(x => x.State == FileTransferState.Completed);
+        var failed = view.Deliveries.Count(x => x.State == FileTransferState.Failed);
+        var finished = done + failed == view.Deliveries.Count;
+        return new JsonResult(new
+        {
+            success = done > 0 || !finished,
+            finished,
+            message = view.Deliveries.Count == 0
+                ? "没有可执行的设备。"
+                : finished
+                    ? failed == 0 ? $"已送达 {done} 台设备。" : $"送达 {done} 台，失败 {failed} 台。"
+                    : $"正在接收：已完成 {done}/{view.Deliveries.Count} 台。",
+            transfer = view,
+            results = view.Deliveries.Select(x => new
             {
-                Command = CommandKind.SendFile,
-                FileDistribution = new FileDistributionRequest
+                name = x.TargetName,
+                success = x.State != FileTransferState.Failed,
+                state = x.State.ToString(),
+                percent = x.Percent,
+                message = x.State switch
                 {
-                    FileName = fileName,
-                    ContentBase64 = Convert.ToBase64String(content.ToArray()),
-                    TargetFolder = targetFolder,
-                    Overwrite = overwrite,
+                    FileTransferState.Completed => x.SavedPath ?? x.Message ?? "已保存",
+                    FileTransferState.Failed => x.Message ?? "失败",
+                    FileTransferState.Downloading => $"{FileTransferService.FormatSize(x.ReceivedBytes)} / {FileTransferService.FormatSize(x.TotalBytes)}" +
+                        (string.IsNullOrEmpty(x.Message) || x.Message.StartsWith("开始接收", StringComparison.Ordinal) ? string.Empty : $"（{x.Message}）"),
+                    _ => "等待设备开始接收",
                 },
-                RequestedBy = profile,
-            },
-            "文件分发",
-            BatchCommandTimeout,
-            ct,
-            result => result.Data ?? result.Message);
-        return RemoteOpResultsJson(
-            plan.Failures.Select(ToItemResult).Concat(dispatch.Select(ToItemResult)).ToList());
+            }),
+        });
     }
 
     private static IActionResult RemoteOpJson(bool success, string message, IReadOnlyList<object> results) =>

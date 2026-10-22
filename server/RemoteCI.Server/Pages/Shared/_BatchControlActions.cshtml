@@ -503,7 +503,7 @@ foreach (var extension in Model.BatchExtensionGroups.SelectMany(group => group.E
 <dialog id="batch-settings-sendfile" class="batch-dialog" data-batch-settings="SendFile" data-batch-title="文件分发" data-batch-risk="true">
     <div class="batch-dialog-shell">
         <header class="batch-dialog-header">
-            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>文件分发</h2><p class="muted">单个文件最大 10 MB。</p></div>
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>文件分发</h2><p class="muted">文件先上传到服务端中转，设备在后台断点续传下载并校验完整性，可查看逐台进度。</p></div>
             <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
         </header>
         <div class="batch-dialog-body stack">

@@ -29,6 +29,8 @@ public static class Protocol
     public const string MessageTypeUserNotify = "user_notify";
     /// <summary>服务端发给插件的调休日历（放假日与调休上学日），插件据此开关课表、建立调休临时课表。</summary>
     public const string MessageTypeHolidayCalendar = "holiday_calendar";
+    /// <summary>插件向服务端报告大文件分发的下载进度与最终结果（file.transfer 能力）。</summary>
+    public const string MessageTypeFileTransferProgress = "file_transfer_progress";
 
     public const int LanDiscoveryPort = 48765;
     public const string LanDiscoveryRequest = "REMOTECI_DISCOVER_V3";
@@ -78,9 +80,11 @@ public enum UserPermissions
     RequestScheduleSwap = 1 << 12,
     // 不经审批直接强制换课；对方老师可撤回。
     ForceScheduleSwap = 1 << 13,
+    // 经服务端文件中转把文件发到有权班级的设备桌面、下载或文档文件夹；只能用服务端上传的文件，不能指定任意路径。
+    SendFiles = 1 << 14,
     All = ViewCurrentCourse | AccessWebUi | ManageUsers | SendNotifications | ManageSchedule |
           PowerControl | TeacherComing | RunExtensions | MainMenuControl | SendVoiceMessages |
-          ChangeDisplayName | ApiAccess | RequestScheduleSwap | ForceScheduleSwap,
+          ChangeDisplayName | ApiAccess | RequestScheduleSwap | ForceScheduleSwap | SendFiles,
 }
 
 public static class RolePermissions
@@ -90,7 +94,7 @@ public static class RolePermissions
         UserPermissions.SendNotifications | UserPermissions.ManageSchedule | UserPermissions.PowerControl |
         UserPermissions.TeacherComing | UserPermissions.RunExtensions | UserPermissions.MainMenuControl |
         UserPermissions.SendVoiceMessages | UserPermissions.ApiAccess | UserPermissions.RequestScheduleSwap |
-        UserPermissions.ForceScheduleSwap;
+        UserPermissions.ForceScheduleSwap | UserPermissions.SendFiles;
 
     public static UserPermissions Effective(
         UserRole role,
@@ -208,14 +212,16 @@ public static class CommandPermissions
         CommandKind.Power or CommandKind.Volume => UserPermissions.PowerControl,
         // 服务端另按“系统管理员或获准的班管理员”复核，插件端只校验扩展权限位作为纵深防御。
         CommandKind.ApplyExtensionSettings => UserPermissions.RunExtensions,
-        // 远程升级、插件管理、集控、终端与文件分发都会改变教室端程序、配置或文件系统，
+        // 文件分发只写入固定的用户文件夹；内联文件（旧方式）另外仅限系统管理员，由通用命令通道与插件分别复核。
+        CommandKind.SendFile => UserPermissions.SendFiles,
+        // 远程升级、插件管理、集控与终端都会改变教室端程序、配置或系统状态，
         // 与账号管理同属高风险管理员操作。
         CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
         CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
         CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
         CommandKind.JoinManagement
         or CommandKind.RestartClassIsland
-        or CommandKind.ExecuteTerminalCommand or CommandKind.SendFile
+        or CommandKind.ExecuteTerminalCommand
             => UserPermissions.ManageUsers,
         _ => UserPermissions.None,
     };
@@ -254,6 +260,8 @@ public static class RemoteCiCapabilities
     public const string TerminalExecute = "terminal.execute";
     /// <summary>把文件分发到设备的用户文件夹。</summary>
     public const string FileDistribute = "file.distribute";
+    /// <summary>按传输编号从服务端分段下载文件（断点续传、SHA-256 校验），并上报进度；不再受内联 10 MB 限制。</summary>
+    public const string FileTransfer = "file.transfer";
     /// <summary>同步扩展分组与设置页，并接受远程修改扩展设置。</summary>
     public const string ExtensionsSettings = "extensions.settings";
     /// <summary>按明确选择的方式更新、替换或创建并启用服务端档案。</summary>
@@ -286,7 +294,7 @@ public static class RemoteCiCapabilities
         [.. Baseline, VoiceMessageSend, SoftwareInventory, SoftwareUpgradePlugins, SoftwareUpgradeClassIsland,
             PluginInstall, PluginUninstall, PluginEnable, PluginManagementPolicy, ProfileDistribute, TimeLayoutUpdate, ManagementJoin,
             ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings, ProfileApply, HolidayCalendar,
-            ProfileRead, ProfileTempLayer];
+            ProfileRead, ProfileTempLayer, FileTransfer];
 
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
@@ -316,6 +324,7 @@ public static class RemoteCiCapabilities
         ScheduleSubjectTeacher => "设置科目教师",
         TerminalExecute => "远程终端",
         FileDistribute => "文件分发",
+        FileTransfer => "大文件分发（断点续传）",
         ExtensionsSettings => "修改扩展设置",
         ProfileApply => "应用服务端档案",
         ProfileRead => "读取设备档案",

@@ -64,7 +64,20 @@
             const name = document.createElement("strong");
             name.textContent = item.name;
             text.appendChild(name);
-            if (item.message) {
+            // 文件分发进行中：显示逐台下载进度条。
+            if (item.state === "Pending" || item.state === "Downloading") {
+                icon.className = "icon icon-cloud-download";
+                const bar = document.createElement("progress");
+                bar.className = "batch-transfer-progress";
+                bar.max = 100;
+                bar.value = item.percent || 0;
+                const label = document.createElement("small");
+                label.className = "muted";
+                label.textContent = ` ${item.percent || 0}% · ${item.message || ""}`;
+                text.appendChild(document.createElement("br"));
+                text.appendChild(bar);
+                text.appendChild(label);
+            } else if (item.message) {
                 const pre = document.createElement("pre");
                 pre.className = "batch-remote-output";
                 pre.textContent = item.message;
@@ -107,21 +120,81 @@
         feedback.textContent = "正在执行，等待设备回执…";
         if (remoteResults) remoteResults.hidden = true;
         try {
-            const response = await fetch(action, {
-                method: "POST",
-                credentials: "same-origin",
-                headers: token ? { "X-CSRF-TOKEN": token } : undefined,
-                body: op.buildBody(),
-            });
-            if (!response.ok || response.redirected) throw new Error("会话失效或执行失败，请刷新后重试");
-            const result = await response.json();
+            const result = operation === "SendFile"
+                ? await uploadWithProgress(action, token, op.buildBody(), feedback)
+                : await postRemote(action, token, op.buildBody());
             feedback.textContent = result.message || "";
             renderRemoteResults(result.results || []);
+            if (operation === "SendFile" && result.transfer && !result.finished)
+                pollTransfer(result.transfer.id, feedback);
         } catch (error) {
             feedback.textContent = `执行失败：${error.message}`;
         } finally {
             submitButton.disabled = false;
         }
+    };
+
+    const postRemote = async (action, token, body) => {
+        const response = await fetch(action, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: token ? { "X-CSRF-TOKEN": token } : undefined,
+            body,
+        });
+        if (!response.ok || response.redirected) throw new Error("会话失效或执行失败，请刷新后重试");
+        return response.json();
+    };
+
+    const formatSize = bytes => bytes >= 1024 * 1024 * 1024
+        ? `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+        : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+    // 上传用 XHR：fetch 无法报告上传进度。
+    const uploadWithProgress = (action, token, body, feedback) => new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", action);
+        xhr.withCredentials = true;
+        if (token) xhr.setRequestHeader("X-CSRF-TOKEN", token);
+        xhr.upload.onprogress = event => {
+            if (!event.lengthComputable) return;
+            const percent = Math.floor(event.loaded * 100 / event.total);
+            feedback.textContent = percent >= 100
+                ? "上传完成，正在下发到设备…"
+                : `正在上传到服务器：${percent}%（${formatSize(event.loaded)} / ${formatSize(event.total)}）`;
+        };
+        xhr.onload = () => {
+            if (xhr.status < 200 || xhr.status >= 300 || xhr.responseURL && new URL(xhr.responseURL).pathname !== action.pathname) {
+                reject(new Error(xhr.status === 413 ? "文件超过服务器允许的大小" : "会话失效或执行失败，请刷新后重试"));
+                return;
+            }
+            try { resolve(JSON.parse(xhr.responseText)); }
+            catch { reject(new Error("服务器返回了无法识别的结果")); }
+        };
+        xhr.onerror = () => reject(new Error("网络错误，上传中断"));
+        xhr.send(body);
+    });
+
+    // 设备在后台下载：每秒刷新一次逐台进度，全部结束或 30 分钟后停止。
+    const pollTransfer = (id, feedback) => {
+        const started = Date.now();
+        const tick = async () => {
+            try {
+                const url = new URL(location.pathname, window.location.origin);
+                url.searchParams.set("handler", "FileTransferStatus");
+                url.searchParams.set("id", id);
+                const response = await fetch(url, { credentials: "same-origin" });
+                if (!response.ok || response.redirected) return;
+                const result = await response.json();
+                if (!result.transfer) return;
+                feedback.textContent = result.message || "";
+                renderRemoteResults(result.results || []);
+                if (result.finished) return;
+            } catch {
+                // 网络抖动时继续下一次轮询。
+            }
+            if (Date.now() - started < 30 * 60 * 1000) setTimeout(tick, 1000);
+        };
+        setTimeout(tick, 1000);
     };
 
     const openDialog = dialog => {
@@ -396,14 +469,14 @@
         });
     });
 
-    // 文件分发：文件保存在脚本内存中，提交时经 fetch 以 multipart 上传，不塞进表单隐藏字段。
+    // 文件分发：文件保存在脚本内存中，提交时经 XHR 以 multipart 上传（可显示上传进度），不塞进表单隐藏字段。
     document.querySelectorAll("[data-batch-file]").forEach(input => {
         input.addEventListener("change", () => {
             selectedFile = input.files?.[0] ?? null;
             const status = input.closest("dialog")?.querySelector("[data-batch-file-status]");
             if (!status) return;
             status.textContent = selectedFile
-                ? `已选择 ${selectedFile.name}（${(selectedFile.size / 1024 / 1024).toFixed(2)} MB）${selectedFile.size > 10 * 1024 * 1024 ? "，超过 10 MB 上限" : ""}`
+                ? `已选择 ${selectedFile.name}（${formatSize(selectedFile.size)}）`
                 : "尚未选择文件。";
         });
     });

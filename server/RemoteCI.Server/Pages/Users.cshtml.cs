@@ -504,6 +504,7 @@ public sealed class UsersModel(
         public bool ApiAccess { get; set; }
         public bool RequestScheduleSwap { get; set; }
         public bool ForceScheduleSwap { get; set; }
+        public bool SendFiles { get; set; }
         public UserPermissions Grants => (AccessWebUi ? UserPermissions.AccessWebUi : 0) |
             (ManageUsers ? UserPermissions.ManageUsers : 0) |
             (SendNotifications ? UserPermissions.SendNotifications : 0) |
@@ -515,7 +516,8 @@ public sealed class UsersModel(
             (PowerControl ? UserPermissions.PowerControl : 0) |
             (ApiAccess ? UserPermissions.ApiAccess : 0) |
             (RequestScheduleSwap ? UserPermissions.RequestScheduleSwap : 0) |
-            (ForceScheduleSwap ? UserPermissions.ForceScheduleSwap : 0);
+            (ForceScheduleSwap ? UserPermissions.ForceScheduleSwap : 0) |
+            (SendFiles ? UserPermissions.SendFiles : 0);
     }
 
     public sealed class RoleInput : PermissionInput

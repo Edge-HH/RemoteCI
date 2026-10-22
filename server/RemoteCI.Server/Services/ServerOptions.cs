@@ -33,4 +33,13 @@ public sealed class ServerOptions
     /// 生产环境保持开启；统计数据库命令数的性能回归测试关闭，以免后台查询干扰计数。
     /// </summary>
     public bool OperationsWorkers { get; set; } = true;
+
+    /// <summary>文件中转单个文件上限（字节），默认 2 GiB；不能超过协议上限 4 GiB。反向代理也需放开请求体大小。</summary>
+    public long FileTransferMaxBytes { get; set; } = 2L * 1024 * 1024 * 1024;
+
+    /// <summary>中转文件在服务端的保留时长，过期后删除；设备在此期间可断点续传。</summary>
+    public TimeSpan FileTransferRetention { get; set; } = TimeSpan.FromHours(24);
+
+    /// <summary>中转目录总容量上限（字节），默认 20 GiB；0 表示不限制。</summary>
+    public long FileTransferQuotaBytes { get; set; } = 20L * 1024 * 1024 * 1024;
 }

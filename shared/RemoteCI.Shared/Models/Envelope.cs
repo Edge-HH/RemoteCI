@@ -82,6 +82,9 @@ public sealed class Envelope
     public static Envelope HolidayCalendar(HolidayCalendar payload) =>
         New(Protocol.MessageTypeHolidayCalendar, payload);
 
+    public static Envelope FileTransferProgress(FileTransferProgress payload) =>
+        New(Protocol.MessageTypeFileTransferProgress, payload);
+
     public static Envelope SettingsSync(object payload) =>
         New(Protocol.MessageTypeSettingsSync, payload);
 

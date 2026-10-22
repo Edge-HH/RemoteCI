@@ -58,6 +58,9 @@ public sealed class CommandHandler
         _voiceMessages = voiceMessages ?? new VoiceMessagePlayer();
     }
 
+    /// <summary>文件接收服务；云端客户端建立后注入下载通道。</summary>
+    public FileReceiveService Files => _files;
+
     public event Action<ClassEvent>? NotificationSent;
     public event Action? ScheduleChanged;
     public event Action? HostStateChanged;
@@ -79,12 +82,18 @@ public sealed class CommandHandler
             CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
             CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
             CommandKind.JoinManagement or CommandKind.RestartClassIsland or
-            CommandKind.ExecuteTerminalCommand or CommandKind.SendFile) && command.RequestedBy?.Role != UserRole.Admin)
+            CommandKind.ExecuteTerminalCommand) && command.RequestedBy?.Role != UserRole.Admin)
             return CommandResult.Failure(CommandResultCodes.Forbidden, "仅系统管理员可以执行远程维护操作");
+        // 文件分发：经服务端中转的文件按 SendFiles 权限放行；旧的内联方式仍只允许系统管理员。
+        if (command.Command == CommandKind.SendFile && command.FileDistribution?.IsTransfer != true &&
+            command.RequestedBy?.Role != UserRole.Admin)
+            return CommandResult.Failure(CommandResultCodes.Forbidden, "仅系统管理员可以直接分发文件");
         var required = CommandPermissions.Required(command.Command);
         if (required == UserPermissions.None)
             return CommandResult.Failure(CommandResultCodes.InvalidRequest, $"未知指令：{command.Command}");
-        if (command.RequestedBy is null || !command.RequestedBy.Permissions.HasFlag(required))
+        // 旧版服务端下发的管理员权限位不含新增的 SendFiles，系统管理员按角色放行。
+        var adminFileSend = command.Command == CommandKind.SendFile && command.RequestedBy?.Role == UserRole.Admin;
+        if (command.RequestedBy is null || (!adminFileSend && !command.RequestedBy.Permissions.HasFlag(required)))
             return CommandResult.Failure(CommandResultCodes.Forbidden, "权限不足");
 
         try

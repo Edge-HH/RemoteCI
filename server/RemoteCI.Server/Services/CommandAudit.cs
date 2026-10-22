@@ -326,7 +326,7 @@ public static class CommandAuditSummary
                 Clip(terminal.Command.Trim(), 200) +
                 (string.IsNullOrWhiteSpace(terminal.WorkingDirectory) ? string.Empty : $"（目录 {Clip(terminal.WorkingDirectory, 80)}）"),
             CommandKind.SendFile when command.FileDistribution is { } file =>
-                $"{Clip(file.FileName, 80)}，{FormatSize(EstimateBytes(file.ContentBase64))}，" +
+                $"{Clip(file.FileName, 80)}，{FormatSize(file.IsTransfer ? file.Size : EstimateBytes(file.ContentBase64))}{(file.IsTransfer ? "（中转）" : string.Empty)}，" +
                 $"{file.TargetFolder switch { FileTargetFolder.Downloads => "下载", FileTargetFolder.Documents => "文档", _ => "桌面" }}" +
                 (file.Overwrite ? "，覆盖同名" : string.Empty),
             CommandKind.ApplyExtensionSettings when command.ExtensionSettings is { } settings =>
