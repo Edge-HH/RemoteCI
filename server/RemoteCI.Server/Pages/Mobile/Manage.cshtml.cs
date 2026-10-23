@@ -8,5 +8,6 @@ namespace RemoteCI.Server.Pages.Mobile;
 [Authorize]
 public sealed class ManageModel(UserManager<AppUser> users) : WebPageModel(users)
 {
-    public async Task<IActionResult> OnGetAsync() => await RequireAsync(UserPermissions.ManageUsers) ?? Page();
+    // 管理项已并入“我的”页；旧链接按原权限检查后跳过去。
+    public async Task<IActionResult> OnGetAsync() => await RequireAsync(UserPermissions.ManageUsers) ?? Redirect("/Mobile/Account#manage");
 }

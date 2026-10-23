@@ -16,7 +16,6 @@ public sealed class UsersModel(
     IdentityCoordinator identities,
     AccountRoleService roleService,
     AuthorizationSyncService authorizationSync,
-    VisitorAccessSettings visitorAccess,
     ClassroomService classrooms,
     UserImportService importService,
     MemberExcelService memberExcel,
@@ -33,7 +32,6 @@ public sealed class UsersModel(
         new Dictionary<Guid, IReadOnlyList<ApiKeyInfo>>();
     public ApiKeyCreationResult? CreatedApiKey { get; private set; }
     [BindProperty] public RoleInput RoleEdit { get; set; } = new();
-    [BindProperty] public bool AutoEnterVisitorPage { get; set; }
 
     // 文本批量导入兼容入口：推荐每行 ID,用户名,班级,角色,密码；旧 3 列格式使用默认班级和角色。
     [BindProperty] public string? ImportText { get; set; }
@@ -202,18 +200,6 @@ public sealed class UsersModel(
         return RedirectToPage();
     }
 
-    public async Task<IActionResult> OnPostVisitorAccessAsync(CancellationToken ct)
-    {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
-        // 班级级“开放访客”开关在班级管理页逐班配置；这里只保留登录页自动进入的全局行为。
-        var autoEnter = await visitorAccess.SetAutoEnterAsync(AutoEnterVisitorPage, ct);
-        AutoEnterVisitorPage = autoEnter;
-        TempData["Message"] = autoEnter
-            ? "已开启自动进入访客页。"
-            : "已关闭自动进入访客页。";
-        return RedirectToPage();
-    }
-
     public async Task<IActionResult> OnPostBatchImportAsync(CancellationToken ct)
     {
         if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
@@ -373,7 +359,6 @@ public sealed class UsersModel(
         RoleDefinitions = await roleService.ListAsync(ct);
         Classes = await classrooms.ListAsync(ct);
         ImportGroups = await classrooms.ListGroupsAsync(ct);
-        AutoEnterVisitorPage = await visitorAccess.GetAutoEnterAsync(ct);
         await LoadApiKeyStateAsync(ct);
         if (TempData["MemberExcelReportId"] is string reportId &&
             reportCache.TryGetValue(reportId, out MemberExcelImportResult? report))
@@ -454,7 +439,6 @@ public sealed class UsersModel(
         TempData["Error"] = message;
         Accounts = await identities.ListUsersAsync(ct);
         RoleDefinitions = await roleService.ListAsync(ct);
-        AutoEnterVisitorPage = await visitorAccess.GetAutoEnterAsync(ct);
         await LoadApiKeyStateAsync(ct);
         return Page();
     }

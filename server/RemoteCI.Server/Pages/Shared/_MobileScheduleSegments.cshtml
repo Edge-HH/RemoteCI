@@ -1,0 +1,13 @@
+@model WebPageModel
+@{
+    // 手机网页版课表页的分段：班级课表、我的日程、换课申请（有换课权限时）。
+    var active = ViewData["ScheduleSegment"] as string;
+}
+<div class="mobile-segments">
+    <a href="/Mobile/Schedule?class=1" class="@(active == "class" ? "active" : null)">班级课表</a>
+    <a href="/Mobile/MySchedule" class="@(active == "mine" ? "active" : null)">我的日程</a>
+    @if (Model.Permissions.HasFlag(UserPermissions.RequestScheduleSwap))
+    {
+        <a href="/Mobile/SwapRequests" class="@(active == "swap" ? "active" : null)">换课申请</a>
+    }
+</div>

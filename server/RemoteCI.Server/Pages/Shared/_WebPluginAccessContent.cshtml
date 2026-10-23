@@ -1,0 +1,69 @@
+@model PluginAccessModel
+@{
+    ViewData["Title"] = "插件与课表同步 · 系统设置";
+    ViewData["SystemTab"] = "plugins";
+}
+<div class="page-head">
+    <div>
+        <p class="eyebrow">服务端管理</p>
+        <h1>系统设置</h1>
+    </div>
+</div>
+@await Html.PartialAsync("_SystemSettingsTabs", Model)
+@if (Model.PairCode is not null)
+{
+    <div class="notice pair-code-notice">
+        <span class="notice-icon"><i class="icon icon-key" aria-hidden="true"></i></span>
+        <div><strong>一次性插件配对码</strong><span>使用前持续有效，成功配对后立即作废。</span></div>
+        <code>@Model.PairCode</code>
+        <button class="copy-button" type="button" data-copy-value="@Model.PairCode" aria-label="复制配对码" title="复制配对码"><i class="icon icon-content-copy" aria-hidden="true"></i></button>
+    </div>
+}
+<section class="panel" id="pairing">
+    <h2>插件配对</h2>
+    <p class="muted">为当前班级（@(Model.CurrentClass?.Name ?? "未选择")）生成一次性配对码，在 ClassIsland 插件中填入后完成配对。@if (Model.IsAdmin) { <text>固定连接码与统一连接码在<a asp-page="/Classes">班级管理</a>中设置。</text> }</p>
+    <form method="post" asp-page-handler="PairCode" class="inline-form"><button type="submit">生成配对码</button></form>
+</section>
+@if (Model.IsAdmin)
+{
+    <section class="panel" id="credentials">
+        <h2>插件凭据</h2>
+        @if (Model.PluginCredentials.Count == 0)
+        {
+            <p class="muted">暂无插件凭据，完成首次配对后可在此查看和吊销。</p>
+        }
+        else
+        {
+            <div class="credential-list">
+                @foreach (var credential in Model.PluginCredentials)
+                {
+                    <article>
+                        <div><strong>@credential.Name</strong><small>最近活跃 @credential.LastSeenAt.ToLocalTime().ToString("MM-dd HH:mm")</small></div>
+                        <span class="inline-status @(credential.Enabled ? "online" : "offline")">@(credential.Enabled ? "启用" : "已吊销")</span>
+                        @if (credential.Enabled)
+                        {
+                            <form method="post" asp-page-handler="RevokeCredential" asp-route-id="@credential.Id" onsubmit="return confirm('吊销后该插件将被断开，需用新配对码重新配对。确定？')"><button class="text-action danger" type="submit">吊销</button></form>
+                        }
+                    </article>
+                }
+            </div>
+        }
+    </section>
+
+    <section class="panel" id="schedule-pull">
+        <h2>自动拉取课表</h2>
+        <p class="muted">插件连接时会自动拉取一次；在线期间按下方间隔再次拉取。对全部班级生效。</p>
+        <form method="post" asp-page-handler="PullInterval" class="form-grid">
+            <label>拉取间隔
+                <select asp-for="PullInterval">
+                    <option value="0">关闭</option>
+                    <option value="15">每 15 分钟</option>
+                    <option value="60">每小时</option>
+                    <option value="360">每 6 小时</option>
+                    <option value="1440">每天</option>
+                </select>
+            </label>
+            <button type="submit">保存间隔</button>
+        </form>
+    </section>
+}

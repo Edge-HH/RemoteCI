@@ -17,6 +17,15 @@ class ManagementLogicTest {
     @Test
     fun `manage users permission unlocks people management items`() {
         val manager = UserProfile(permissions = Protocol.PERMISSION_VIEW_CURRENT or Protocol.PERMISSION_MANAGE_USERS)
-        assertEquals(ManagementItem.entries.toList(), visibleManagementItems(manager))
+        assertEquals(
+            listOf(ManagementItem.Users, ManagementItem.Roles, ManagementItem.VisitorAccess, ManagementItem.Pairing),
+            visibleManagementItems(manager),
+        )
+    }
+
+    @Test
+    fun `global settings are only listed for system admins`() {
+        val admin = UserProfile(role = Protocol.ROLE_ADMIN, permissions = Protocol.PERMISSION_VIEW_CURRENT or Protocol.PERMISSION_MANAGE_USERS)
+        assertEquals(ManagementItem.entries.toList(), visibleManagementItems(admin))
     }
 }

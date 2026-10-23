@@ -3,7 +3,7 @@ using RemoteCI.Server.Data;
 
 namespace RemoteCI.Server.Services;
 
-/// <summary>系统配置页“集控运维”区的全局设置：操作记录保留天数、设备离线告警与每日档案差异检查。</summary>
+/// <summary>系统设置“常规”tab 的“集控运维”区的全局设置：操作记录保留天数、设备离线告警与每日档案差异检查。</summary>
 public sealed record OperationsSettingsValues(
     int AuditRetentionDays,
     bool DeviceAlertsEnabled,

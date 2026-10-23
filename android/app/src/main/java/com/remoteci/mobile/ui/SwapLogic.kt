@@ -8,14 +8,11 @@ import com.remoteci.mobile.data.SwapSlot
 import java.time.LocalDate
 
 /** 底栏可见的板块：换课页只在账号拥有“老师主动换课”权限时出现；管理页只在至少有一项管理权限时出现。 */
-internal fun visibleHomeTabs(canRequestSwap: Boolean, canManage: Boolean): List<HomeTab> =
-    HomeTab.entries.filter {
-        when (it) {
-            HomeTab.SwapRequests -> canRequestSwap
-            HomeTab.People -> canManage
-            else -> true
-        }
-    }
+/** 课表页的分段：我的日程、班级课表，以及有“老师主动换课”权限时的换课申请。 */
+internal enum class ScheduleSegment { Mine, Class, SwapRequests }
+
+internal fun visibleScheduleSegments(canRequestSwap: Boolean): List<ScheduleSegment> =
+    ScheduleSegment.entries.filter { it != ScheduleSegment.SwapRequests || canRequestSwap }
 
 /** 换课页里选中的一节课。 */
 internal data class SwapPick(val classId: String, val date: String, val index: Int)

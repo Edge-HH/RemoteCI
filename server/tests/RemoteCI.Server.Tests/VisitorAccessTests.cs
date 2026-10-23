@@ -39,8 +39,8 @@ public sealed class VisitorAccessTests
         Assert.Equal("/Login", disabled.Headers.Location?.OriginalString);
 
         await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
-        var usersHtml = await browser.GetStringAsync("/Users");
-        Assert.Contains("自动进入访客页", usersHtml);
+        var accessHtml = await browser.GetStringAsync("/LoginSettings");
+        Assert.Contains("自动进入访客页", accessHtml);
 
         // 访客开关按班级配置：在班级管理页开启默认班级的访客功能。
         var classesHtml = await browser.GetStringAsync("/Classes");
@@ -224,8 +224,8 @@ public sealed class VisitorAccessTests
         using var admin = CreateBrowser(factory);
         await LoginWebUiAsync(admin, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
         // 没有任何班级开放访客时，即使保存了自动进入意图也不会真正进入访客页。
-        var usersHtml = await admin.GetStringAsync("/Users");
-        var saved = await PostRazorFormAsync(admin, "/Users?handler=VisitorAccess", usersHtml, new Dictionary<string, string>
+        var accessHtml = await admin.GetStringAsync("/LoginSettings");
+        var saved = await PostRazorFormAsync(admin, "/LoginSettings?handler=VisitorAccess", accessHtml, new Dictionary<string, string>
         {
             ["AutoEnterVisitorPage"] = "true",
         });

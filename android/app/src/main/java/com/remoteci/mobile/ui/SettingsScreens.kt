@@ -1,6 +1,13 @@
 package com.remoteci.mobile.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material.icons.rounded.AdminPanelSettings
+import androidx.compose.material.icons.rounded.Group
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.PersonOutline
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -87,13 +94,11 @@ fun SecondaryHost(
     onOpen: (Screen) -> Unit,
     onHome: (HomeTab) -> Unit,
     onPersist: (WatchSettings) -> Unit,
-    onLoggedOut: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
     when (screen) {
         is Screen.Swap -> SwapScreen(screen.date, screen.index, onBack, snackbar, onOpen)
         Screen.Help -> HelpScreen(onBack)
-        Screen.Account -> AccountScreen(settings, onBack, onOpen, onPersist, onLoggedOut)
         Screen.Inbox -> InboxScreen(onBack)
         Screen.Notify -> NotifyScreen(onBack)
         Screen.Voice -> VoiceScreen(onBack)
@@ -112,18 +117,44 @@ fun SecondaryHost(
         Screen.ScheduleSettings -> ScheduleSettingsScreen(onBack)
         Screen.Appearance -> AppearanceScreen(settings, onBack, onPersist)
         Screen.Updates -> UpdatesScreen(settings, onBack, onPersist)
-        Screen.Developer -> DeveloperScreen(settings, onBack, onPersist)
         Screen.System -> SystemScreen(onBack, snackbar)
         Screen.Replace -> SwapScreen(null, null, onBack, snackbar, onOpen)
-        else -> AccountScreen(settings, onBack, onOpen, onPersist, onLoggedOut)
+        // 登录、班级选择与首页由 RemoteCiApp 直接渲染，不会进入这里。
+        else -> Unit
     }
 }
 
+/** “我的”页一行设置：标题、说明、目标页面与图标。 */
+private data class SettingsRow(val title: String, val supporting: String, val screen: Screen, val icon: ImageVector)
+
+/** 带分组标题的一组设置行。 */
+@Composable
+private fun SettingsGroup(label: String, rows: List<SettingsRow>, onOpen: (Screen) -> Unit) {
+    if (rows.isEmpty()) return
+    ListSectionLabel(label)
+    ConnectedListCard(Modifier.padding(horizontal = 16.dp)) {
+        rows.forEachIndexed { index, row ->
+            AppListItem(
+                title = row.title,
+                supporting = row.supporting,
+                leading = row.icon,
+                trailing = Icons.Rounded.ChevronRight,
+                index = index,
+                count = rows.size,
+                onClick = { onOpen(row.screen) },
+            )
+        }
+    }
+}
+
+/**
+ * 底栏“我的”：账号与连接状态、当前班级，以及按“我的偏好 / 账号与连接 / 管理 / 关于”分组的设置。
+ * 管理分组只列出当前账号有权限的项；退出登录放在列表最后。
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccountScreen(
     settings: WatchSettings,
-    onBack: () -> Unit,
     onOpen: (Screen) -> Unit,
     onPersist: (WatchSettings) -> Unit,
     onLoggedOut: () -> Unit,
@@ -132,16 +163,7 @@ fun AccountScreen(
     val currentClassId by ConnectionManager.currentClassId.collectAsState()
     val connection by ConnectionManager.state.collectAsState()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        TopAppBar(
-            title = { Text("账号与设置", style = MaterialTheme.typography.titleLarge) },
-            navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } },
-            actions = {
-                IconButton({
-                    ConnectionManager.logout(settings)
-                    onLoggedOut()
-                }) { Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = "退出登录") }
-            },
-        )
+        TopAppBar(title = { Text("我的", style = MaterialTheme.typography.titleLarge) })
         Card(
             modifier = Modifier.padding(16.dp).fillMaxWidth().height(136.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
@@ -198,90 +220,53 @@ fun AccountScreen(
                 }
             }
         }
-        // 显示名是老师绑定课表教师名的依据，服务端只允许系统管理员修改，其他账号不显示入口。
-        if (user?.isAdmin == true) {
-            var editingName by remember { mutableStateOf(false) }
-            Card(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
-                onClick = { editingName = true },
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("姓名", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        user?.displayName ?: "",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            if (editingName) DisplayNameEditorDialog(user, onDismiss = { editingName = false })
-        }
-        val rows = listOfNotNull(
-            Triple("连接与服务器", "账号、云端地址、局域网插件发现与重新连接", Screen.Connection to Icons.Rounded.Wifi),
-            Triple("密码与设备会话", "修改密码，查看并吊销已登录的手机和手表", Screen.Sessions to Icons.Rounded.Key),
-            Triple("通知设置", "课程、自动化和第三方插件提醒的同步开关", Screen.NotificationSettings to Icons.Rounded.Notifications),
-            Triple("系统日历", "把我的日程或班级课表同步到系统日历，由日历应用提醒", Screen.CalendarSync to Icons.Rounded.CalendarMonth),
-            // 自动拉取周期对全部班级生效，服务端只允许系统管理员修改。
-            if (user?.isAdmin == true)
-                Triple("自动拉取课表", "设置在线插件自动刷新课表的周期（对全部班级生效）", Screen.ScheduleSettings to Icons.Rounded.Schedule)
-            else null,
-            Triple("外观", "主题与显示偏好", Screen.Appearance to Icons.Rounded.Palette),
-            Triple("更新", "检查更新与同版本强制覆盖", Screen.Updates to Icons.Rounded.SystemUpdate),
-            Triple("开发者设置", "云端中转、局域网连接开关与重新连接", Screen.Developer to Icons.Rounded.Code),
-            Triple("系统配置", "服务端更新与备份", Screen.System to Icons.Rounded.Settings),
+        SettingsGroup(
+            "我的偏好",
+            listOf(
+                SettingsRow("通知设置", "课程、自动化和第三方插件提醒的同步开关", Screen.NotificationSettings, Icons.Rounded.Notifications),
+                SettingsRow("系统日历", "把我的日程或班级课表同步到系统日历，由日历应用提醒", Screen.CalendarSync, Icons.Rounded.CalendarMonth),
+                SettingsRow("外观", "主题与显示偏好", Screen.Appearance, Icons.Rounded.Palette),
+            ),
+            onOpen,
         )
-        ConnectedListCard(Modifier.padding(horizontal = 16.dp)) {
-            rows.forEachIndexed { index, (title, supporting, dest) ->
-                val (screen, icon) = dest
-                AppListItem(
-                    title = title,
-                    supporting = supporting,
-                    leading = icon,
-                    trailing = Icons.Rounded.ChevronRight,
-                    index = index,
-                    count = rows.size,
-                    onClick = { onOpen(screen) },
-                )
-            }
+        SettingsGroup(
+            "账号与连接",
+            listOf(
+                SettingsRow("密码与设备会话", "修改密码，查看并吊销已登录的手机和手表", Screen.Sessions, Icons.Rounded.Key),
+                SettingsRow("服务器与连接方式", "账号、服务器地址、局域网插件发现，以及云端与局域网连接开关", Screen.Connection, Icons.Rounded.Wifi),
+            ),
+            onOpen,
+        )
+        SettingsGroup(
+            "管理",
+            visibleManagementItems(user).map { item ->
+                when (item) {
+                    ManagementItem.Users -> SettingsRow(item.title, item.supporting, Screen.Users, Icons.Rounded.Group)
+                    ManagementItem.Roles -> SettingsRow(item.title, item.supporting, Screen.Roles, Icons.Rounded.AdminPanelSettings)
+                    ManagementItem.VisitorAccess -> SettingsRow(item.title, item.supporting, Screen.VisitorAccess, Icons.Rounded.PersonOutline)
+                    ManagementItem.Pairing -> SettingsRow(item.title, item.supporting, Screen.Pairing, Icons.Rounded.Link)
+                    ManagementItem.ScheduleSettings -> SettingsRow(item.title, item.supporting, Screen.ScheduleSettings, Icons.Rounded.Schedule)
+                    ManagementItem.ServerMaintenance -> SettingsRow(item.title, item.supporting, Screen.System, Icons.Rounded.Settings)
+                }
+            },
+            onOpen,
+        )
+        SettingsGroup(
+            "关于",
+            listOf(SettingsRow("应用更新", "检查更新与同版本强制覆盖", Screen.Updates, Icons.Rounded.SystemUpdate)),
+            onOpen,
+        )
+        ConnectedListCard(Modifier.padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 16.dp)) {
+            AppListItem(
+                title = "退出登录",
+                leading = Icons.AutoMirrored.Rounded.Logout,
+                onClick = {
+                    ConnectionManager.logout(settings)
+                    onLoggedOut()
+                },
+            )
         }
     }
-}
-
-/** 系统管理员的姓名（显示名）编辑：保存后从服务端拉取最新档案。 */
-@Composable
-private fun DisplayNameEditorDialog(user: UserProfile?, onDismiss: () -> Unit) {
-    var name by remember(user) { mutableStateOf(user?.displayName ?: "") }
-    var saving by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
-    AlertDialog(
-        onDismissRequest = { if (!saving) onDismiss() },
-        title = { Text("修改姓名") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("姓名（显示名）") }, singleLine = true)
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = !saving && name.trim().length in 1..40,
-                onClick = {
-                    scope.launch {
-                        saving = true
-                        error = null
-                        runCatching {
-                            AdminApi.updateDisplayName(name.trim())
-                            ConnectionManager.refreshProfile()
-                        }.onSuccess { onDismiss() }
-                            .onFailure { error = it.message ?: "保存失败" }
-                        saving = false
-                    }
-                },
-            ) { Text("保存") }
-        },
-        dismissButton = { TextButton(enabled = !saving, onClick = onDismiss) { Text("取消") } },
-    )
 }
 
 /** 与 WebUI“自动拉取课表”使用同一个管理 API；旧服务端不支持时保留当前页面并提示原因。 */
@@ -359,7 +344,7 @@ fun ConnectionScreen(
         }
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        TopAppBar(title = { Text("连接与服务器") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
+        TopAppBar(title = { Text("服务器与连接方式") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(server, { server = it }, label = { Text("服务器地址") }, modifier = Modifier.fillMaxWidth(), trailingIcon = {
                 IconButton({ scanner.launch(qrScanOptions("扫描服务器地址")) }) {
@@ -403,6 +388,25 @@ fun ConnectionScreen(
                     }
                 }, modifier = Modifier.fillMaxWidth()) { Text(plugin.instanceName) }
             }
+        }
+        // 原“开发者设置”：云端中转与局域网直连开关，排查连接问题时才需要调整。
+        ListSectionLabel("连接方式")
+        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                "关闭云端后只走局域网直连；关闭局域网则只使用云端。重新登录时仍使用云端账号认证。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("云服务器")
+                Switch(settings.cloudConnectionEnabled, { onPersist(settings.copy(cloudConnectionEnabled = it)) })
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("局域网直连")
+                Switch(settings.lanConnectionEnabled, { onPersist(settings.copy(lanConnectionEnabled = it)) })
+            }
+            OutlinedButton(onClick = { ConnectionManager.connect(settings) }, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("应用并重连") }
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
@@ -530,7 +534,7 @@ fun UpdatesScreen(settings: WatchSettings, onBack: () -> Unit, onPersist: (Watch
     var status by remember { mutableStateOf("尚未检查") }
     var update by remember { mutableStateOf<CompatibleUpdate?>(null) }
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        TopAppBar(title = { Text("更新") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
+        TopAppBar(title = { Text("应用更新") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = settings.updateChannel == UpdateChannel.STABLE, onClick = { onPersist(settings.copy(updateChannel = UpdateChannel.STABLE)) }, label = { Text("正式版") })
             FilterChip(selected = settings.updateChannel == UpdateChannel.BETA, onClick = { onPersist(settings.copy(updateChannel = UpdateChannel.BETA)) }, label = { Text("Beta") })
@@ -581,26 +585,6 @@ fun UpdatesScreen(settings: WatchSettings, onBack: () -> Unit, onPersist: (Watch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DeveloperScreen(settings: WatchSettings, onBack: () -> Unit, onPersist: (WatchSettings) -> Unit) {
-    Column(Modifier.fillMaxSize()) {
-        TopAppBar(title = { Text("开发者设置") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("关闭云端后只走局域网直连；关闭局域网则只使用云端。重新登录时仍使用云端账号认证。")
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("云服务器")
-                Switch(settings.cloudConnectionEnabled, { onPersist(settings.copy(cloudConnectionEnabled = it)) })
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("局域网直连")
-                Switch(settings.lanConnectionEnabled, { onPersist(settings.copy(lanConnectionEnabled = it)) })
-            }
-            Button(onClick = { ConnectionManager.connect(settings) }, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("应用并重连") }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
 fun SystemScreen(onBack: () -> Unit, snackbar: SnackbarHostState) {
     val user by ConnectionManager.currentUser.collectAsState()
     val scope = rememberCoroutineScope()
@@ -613,7 +597,7 @@ fun SystemScreen(onBack: () -> Unit, snackbar: SnackbarHostState) {
         }
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        TopAppBar(title = { Text("系统配置") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
+        TopAppBar(title = { Text("服务端维护") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
         if (user?.isAdmin != true) {
             EmptyState("仅管理员可管理系统", "服务端更新和备份不会对普通账号开放。")
         } else {

@@ -1,15 +1,24 @@
 @model UsersModel
 @{
-    ViewData["Title"] = "人员权限";
+    ViewData["Title"] = "人员与角色";
     var createIsAdmin = Model.Create.Role == UserRole.Admin;
     var createIsTeacher = Model.Create.RoleId == AccountRole.TeacherId;
 }
 <div class="page-head">
     <div>
         <p class="eyebrow">账号与权限</p>
-        <h1>人员管理</h1>
+        <h1>人员与角色</h1>
     </div>
 </div>
+@if (!MobileUi.IsMobile(Context) && Model.CurrentUser.Role == UserRole.Admin)
+{
+    @* 账号、角色、批量导入导出分 tab；只有账号一类内容时不显示 tab。手机网页版按 section 参数筛选区块。 *@
+    <nav class="page-tabs" aria-label="人员与角色分类" data-page-tabs>
+        <a href="#accounts" data-tab-link="accounts">账号</a>
+        <a href="#roles" data-tab-link="roles">角色</a>
+        <a href="#import" data-tab-link="import">批量导入导出</a>
+    </nav>
+}
 
 @if (Model.CreatedApiKey is { } createdApiKey)
 {
@@ -33,17 +42,9 @@
     </section>
 }
 
-<section class="panel" data-mobile-area="visitor">
-    <h2>访客访问</h2>
-    <p class="muted">在<a asp-page="/Classes">班级管理</a>中逐班开启访客功能后，登录页会出现“仅查看”，访客只能浏览开放班级的课表。</p>
-    <form method="post" asp-page-handler="VisitorAccess" class="stack">
-        <label class="check"><input asp-for="AutoEnterVisitorPage" /> 自动进入访客页</label>
-        <button type="submit">保存访客设置</button>
-    </form>
-</section>
 @if (Model.CurrentUser.Role == UserRole.Admin)
 {
-<section class="panel member-excel-panel">
+<section class="panel member-excel-panel" id="member-excel" data-tab="import">
     <div class="panel-heading">
         <div>
             <h2>批量导入与导出</h2>
@@ -142,7 +143,7 @@
         </form>
     </details>
 </section>
-<section class="panel" data-mobile-area="roles">
+<section class="panel" id="role-list" data-mobile-area="roles" data-tab="roles">
     <div class="panel-heading">
         <div><h2>角色配置</h2><p class="muted">默认权限对该角色的所有账号生效。</p></div>
         <button type="button" data-user-edit-open="role-create-dialog" aria-controls="role-create-dialog">创建角色</button>
@@ -186,7 +187,7 @@
 </section>
 }
 
-<section class="panel" data-mobile-area="users">
+<section class="panel" id="create-account" data-mobile-area="users" data-tab="accounts">
     <h2>新建账号</h2>
     <form method="post" asp-page-handler="Create" class="form-grid" data-async-user-create data-role-form>
         <div class="form-error error" data-create-user-error role="alert" hidden></div>
@@ -230,7 +231,7 @@
     </form>
 </section>
 
-<section class="panel" data-mobile-area="users">
+<section class="panel" id="account-list" data-mobile-area="users" data-tab="accounts">
     <h2>现有账号</h2>
     <div class="user-account-table-wrap">
         <table class="user-account-table">

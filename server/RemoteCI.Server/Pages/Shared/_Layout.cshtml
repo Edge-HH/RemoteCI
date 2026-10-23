@@ -27,6 +27,8 @@
     string? CurrentPage(string page) => currentPage == page ? "page" : null;
     var userInitial = string.IsNullOrWhiteSpace(current?.DisplayName) ? "R" : current.DisplayName.Trim()[0].ToString().ToUpperInvariant();
     var controlMenuActive = currentPage is "/Control" or "/Notifications";
+    // “系统设置”是一组带 tab 的页面：常规与维护、登录与访问、插件与课表同步共用一个侧边栏入口。
+    var systemSettingsActive = currentPage is "/SystemConfig" or "/LoginSettings" or "/PluginAccess";
     var showControlMenu = permissions.HasFlag(UserPermissions.SendNotifications) ||
         permissions.HasFlag(UserPermissions.SendVoiceMessages) ||
         permissions.HasFlag(UserPermissions.PowerControl) ||
@@ -46,17 +48,17 @@
             : accessibleClasses.FirstOrDefault()?.Id ?? Guid.Empty;
     }
     var currentClassName = accessibleClasses.FirstOrDefault(x => x.Id == currentClassId)?.Name ?? "暂无班级";
-    // 档案管理属于班级自治：仅管理员或本班班主任，并且具有本班课表管理权限。
+    // 本班档案属于班级自治：仅管理员或本班班主任，并且具有本班课表管理权限。
     var showClassProfiles = current is not null && accessibleClasses.Any(x => x.Id == currentClassId)
         && await classAccess.IsClassAdminAsync(current.Id, current.Role, currentClassId, Context.RequestAborted)
         && (accessibleClasses.First(x => x.Id == currentClassId).Permissions ?? UserPermissions.None).HasFlag(UserPermissions.ManageSchedule);
     // 班级区的“扩展插件”入口只管理当前班级：系统管理员始终可见；班主任需系统管理员至少开放一个插件且本班有扩展功能权限。
-    // 跨班级、按设备统一下发在“管理”分区的“插件批量设置”中进行。
+    // 跨班级、按设备统一下发在“设备与控制”分组的“插件批量下发”中进行。
     var showClassExtensionSettings = current is not null
         && accessibleClasses.Any(x => x.Id == currentClassId)
         && (current.Role == UserRole.Admin || (await extensionGroups.ListClassAdminEditableAsync(
             current.Id, current.Role, current.GrantedPermissions, currentClassId, Context.RequestAborted))?.Count > 0);
-    // 操作记录：系统管理员在“管理”分区查看全部；班主任在班级区查看自己担任班主任的班级。
+    // 操作记录与课时统计：所有角色都在“记录与统计”分组；系统管理员看全部，班主任看自己担任班主任的班级。
     var showClassAuditLog = current is not null && current.Role != UserRole.Admin
         && accessibleClasses.Any(x => x.Id == currentClassId)
         && await classAccess.IsClassAdminAsync(current.Id, current.Role, currentClassId, Context.RequestAborted);
@@ -140,70 +142,98 @@
                 <button class="sidebar-collapse-button" type="button" data-sidebar-toggle aria-label="展开或收起侧边栏" title="展开或收起侧边栏"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18m7-6l-3-3l3-3"/></g></svg></button>
             </div>
             <nav class="side-nav">
+                <div class="nav-group" data-nav-group="daily">
+                <button class="nav-section-label" type="button" data-nav-group-toggle aria-expanded="true">日常</button>
                 @if (permissions.HasFlag(UserPermissions.AccessWebUi))
                 {
-                    <a class="@NavClass("/Index")" aria-current="@CurrentPage("/Index")" asp-page="/Index" data-search-label="概览 仪表盘 课堂状态"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></g></svg><span>概览</span></a>
+                    <a class="@NavClass("/Index")" aria-current="@CurrentPage("/Index")" asp-page="/Index" data-search-label="概览 仪表盘 课堂状态 连接诊断"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></g></svg><span>概览</span></a>
                 }
-                <a class="@NavClass("/Schedule")" aria-current="@CurrentPage("/Schedule")" asp-page="/Schedule" data-search-label="课表 换课 课程安排"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M8 2v3m8-3v3"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01M16 17h.01"/></g></svg><span>课表</span></a>
-                @if (showClassProfiles)
-                {
-                    <a class="@NavClass("/ClassProfiles")" aria-current="@CurrentPage("/ClassProfiles")" asp-page="/ClassProfiles" data-search-label="班级档案 时间表 课程表 科目 上传档案"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M3 8h18"/></g></svg><span>档案</span></a>
-                }
+                    <a class="@NavClass("/Schedule")" aria-current="@CurrentPage("/Schedule")" asp-page="/Schedule" data-search-label="课表 课程安排 从插件拉取课表"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M8 2v3m8-3v3"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01M16 17h.01"/></g></svg><span>课表</span></a>
                 @if (showControlMenu)
                 {
                     <a class="@(controlMenuActive ? "nav-link active" : "nav-link")" aria-current="@(controlMenuActive ? "page" : null)" asp-page="/Control" data-search-label="控制 发送通知 清除通知 主界面 音量 电源 扩展"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 5H3m9 14H3M14 3v4m2 10v4m5-9h-9m9 7h-5m5-14h-7m-6 5v4m0-2H3"/></svg><span>控制</span></a>
                 }
-                @if (showClassExtensionSettings)
-                {
-                    <a class="@NavClass("/ClassExtensions")" aria-current="@CurrentPage("/ClassExtensions")" asp-page="/ClassExtensions" data-search-label="扩展插件 插件设置 扩展设置 本班插件"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.39 4.39a1 1 0 0 0 1.68-.474a2.5 2.5 0 1 1 3.014 3.015a1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474a2.5 2.5 0 1 0-3.014 3.015a1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474a2.5 2.5 0 1 1-3.014-3.015a1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474a2.5 2.5 0 1 0 3.014-3.015a1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/></svg><span>扩展插件</span></a>
-                }
-                @if (showClassBoards)
-                {
-                    <a class="@NavClass("/ClassBoards")" aria-current="@CurrentPage("/ClassBoards")" asp-page="/ClassBoards" data-search-label="电子班牌 班牌 走廊大屏 门口屏"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="12" x="3" y="4" rx="2"/><path d="M7 20h10M12 16v4M7 9h4m-4 3h7"/></g></svg><span>电子班牌</span></a>
-                }
-                @if (showClassAuditLog)
-                {
-                    <a class="@NavClass("/AuditLog")" aria-current="@CurrentPage("/AuditLog")" asp-page="/AuditLog" data-search-label="操作记录 审计 日志 谁关机 命令记录"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9a9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5m4-1v5l4 2"/></g></svg><span>操作记录</span></a>
-                    <a class="@NavClass("/LessonStats")" aria-current="@CurrentPage("/LessonStats")" asp-page="/LessonStats" data-search-label="课时统计 代课 课时 工作量"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9m-5 8V5M8 17v-3"/></g></svg><span>课时统计</span></a>
-                }
+                </div>
                 @if (hasPersonalSchedule || canRequestSwap)
                 {
-                    <div class="nav-section-label" role="presentation">个人</div>
-                }
-                @if (hasPersonalSchedule)
-                {
-                    <a class="@NavClass("/MySchedule")" aria-current="@CurrentPage("/MySchedule")" asp-page="/MySchedule" data-search-label="我的日程 教师课表 任教班级"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M8 2v3m8-3v3M3 9h18M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01M16 17h.01"/></g></svg><span>我的日程</span></a>
-                }
-                @if (canRequestSwap)
-                {
-                    <a class="@NavClass("/SwapRequests")" aria-current="@CurrentPage("/SwapRequests")" asp-page="/SwapRequests" data-search-label="换课申请 调课 强制换课 审批换课"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m16 3l4 4l-4 4"/><path d="M20 7H4m4 14l-4-4l4-4"/><path d="M4 17h16"/></g></svg><span>换课</span><span class="nav-badge" data-swap-badge hidden="@(pendingSwaps == 0)">@pendingSwaps</span></a>
-                }
-                @* 管理员专属管理器与“选中班级的操作”用分组标签分区：上面是当前班级的操作，下面是全局管理。 *@
-                @if (permissions.HasFlag(UserPermissions.ManageUsers) || current.Role == UserRole.Admin)
-                {
-                    <div class="nav-section-label" role="presentation">管理</div>
-                    @if (permissions.HasFlag(UserPermissions.ManageUsers))
+                    <div class="nav-group" data-nav-group="mine">
+                    <button class="nav-section-label" type="button" data-nav-group-toggle aria-expanded="true">我的</button>
+                    @if (hasPersonalSchedule)
                     {
-                        <a class="@NavClass("/Users")" aria-current="@CurrentPage("/Users")" asp-page="/Users" data-search-label="人员权限 用户 账号管理 批量导入"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3.128a4 4 0 0 1 0 7.744M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></g></svg><span>人员权限</span></a>
+                        <a class="@NavClass("/MySchedule")" aria-current="@CurrentPage("/MySchedule")" asp-page="/MySchedule" data-search-label="我的日程 教师课表 任教班级"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M8 2v3m8-3v3M3 9h18M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01M16 17h.01"/></g></svg><span>我的日程</span></a>
                     }
-                    @if (current.Role == UserRole.Admin)
+                    @if (canRequestSwap)
                     {
-                        <a class="@NavClass("/Profiles")" aria-current="@CurrentPage("/Profiles")" asp-page="/Profiles" data-search-label="档案管理 档案库 批量时间表 批量课程表 上传解析"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12M13 13h4m-4 4h4"/></g></svg><span>档案管理</span></a>
+                        <a class="@NavClass("/SwapRequests")" aria-current="@CurrentPage("/SwapRequests")" asp-page="/SwapRequests" data-search-label="换课申请 调课 强制换课 审批换课"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m16 3l4 4l-4 4"/><path d="M20 7H4m4 14l-4-4l4-4"/><path d="M4 17h16"/></g></svg><span>换课</span><span class="nav-badge" data-swap-badge hidden="@(pendingSwaps == 0)">@pendingSwaps</span></a>
+                    }
+                    </div>
+                }
+                @if (showClassProfiles || showClassExtensionSettings || showClassBoards)
+                {
+                    <div class="nav-group" data-nav-group="class">
+                    <button class="nav-section-label" type="button" data-nav-group-toggle aria-expanded="true">本班 · @currentClassName</button>
+                    @if (showClassProfiles)
+                    {
+                        <a class="@NavClass("/ClassProfiles")" aria-current="@CurrentPage("/ClassProfiles")" asp-page="/ClassProfiles" data-search-label="本班档案 班级档案 档案 时间表 课程表 科目 上传档案"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M3 8h18"/></g></svg><span>本班档案</span></a>
+                    }
+                    @if (showClassExtensionSettings)
+                    {
+                        <a class="@NavClass("/ClassExtensions")" aria-current="@CurrentPage("/ClassExtensions")" asp-page="/ClassExtensions" data-search-label="本班插件 扩展插件 插件设置 扩展设置"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.39 4.39a1 1 0 0 0 1.68-.474a2.5 2.5 0 1 1 3.014 3.015a1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474a2.5 2.5 0 1 0-3.014 3.015a1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474a2.5 2.5 0 1 1-3.014-3.015a1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474a2.5 2.5 0 1 0 3.014-3.015a1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/></svg><span>本班插件</span></a>
+                    }
+                    @if (showClassBoards)
+                    {
+                        <a class="@NavClass("/ClassBoards")" aria-current="@CurrentPage("/ClassBoards")" asp-page="/ClassBoards" data-search-label="电子班牌 班牌 走廊大屏 门口屏"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="12" x="3" y="4" rx="2"/><path d="M7 20h10M12 16v4M7 9h4m-4 3h7"/></g></svg><span>电子班牌</span></a>
+                    }
+                    </div>
+                }
+                @if (current.Role == UserRole.Admin || showClassAuditLog)
+                {
+                    <div class="nav-group" data-nav-group="records">
+                    <button class="nav-section-label" type="button" data-nav-group-toggle aria-expanded="true">记录与统计</button>
+                        <a class="@NavClass("/AuditLog")" aria-current="@CurrentPage("/AuditLog")" asp-page="/AuditLog" data-search-label="操作记录 审计 日志 谁关机 命令记录"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9a9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5m4-1v5l4 2"/></g></svg><span>操作记录</span></a>
+                        <a class="@NavClass("/LessonStats")" aria-current="@CurrentPage("/LessonStats")" asp-page="/LessonStats" data-search-label="课时统计 代课 课时 工作量"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9m-5 8V5M8 17v-3"/></g></svg><span>课时统计</span></a>
+                    </div>
+                }
+                @if (current.Role == UserRole.Admin)
+                {
+                    <div class="nav-group" data-nav-group="academic">
+                    <button class="nav-section-label" type="button" data-nav-group-toggle aria-expanded="true">教务</button>
+                        <a class="@NavClass("/Profiles")" aria-current="@CurrentPage("/Profiles")" asp-page="/Profiles" data-search-label="档案库 档案管理 批量时间表 批量课程表 上传解析"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12M13 13h4m-4 4h4"/></g></svg><span>档案库</span></a>
+                        <a class="@NavClass("/Holidays")" aria-current="@CurrentPage("/Holidays")" asp-page="/Holidays" data-search-label="学期 开学 单双周 教学周 调休 节假日 放假 补课 国庆 春节"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M9 16l2 2l4-4"/></g></svg><span>学期与调休</span></a>
+                    </div>
+                }
+                @if (current.Role == UserRole.Admin)
+                {
+                    <div class="nav-group" data-nav-group="devices">
+                    <button class="nav-section-label" type="button" data-nav-group-toggle aria-expanded="true">设备与控制</button>
+                        <a class="@NavClass("/Devices")" aria-current="@CurrentPage("/Devices")" asp-page="/Devices" data-search-label="设备状态 在线 离线 告警 版本 大屏"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8m-4-4v4"/></g></svg><span>设备状态</span></a>
                         <a class="@NavClass("/BatchControl")" aria-current="@CurrentPage("/BatchControl")" asp-page="/BatchControl" data-search-label="批量控制 广播 通知 开关机 电源 语音"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M4.9 16.1C1 12.2 1 5.8 4.9 1.9m2.9 2.8a6.14 6.14 0 0 0-.8 7.5"/><circle cx="12" cy="9" r="2"/><path d="M16.2 4.8c2 2 2.26 5.11.8 7.47M19.1 1.9a9.96 9.96 0 0 1 0 14.1m-9.6 2h5M8 22l4-11l4 11"/></g></svg><span>批量控制</span></a>
                         <a class="@(currentPage is "/Automation" or "/AutomationEdit" ? "nav-link active" : "nav-link")" aria-current="@(currentPage is "/Automation" or "/AutomationEdit" ? "page" : null)" asp-page="/Automation" data-search-label="自动化 定时 关机 放学 规则 计划任务"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M10 2h4m-2 12l3-3"/><circle cx="12" cy="14" r="8"/></g></svg><span>自动化</span></a>
-                        <a class="@NavClass("/Devices")" aria-current="@CurrentPage("/Devices")" asp-page="/Devices" data-search-label="设备状态 在线 离线 告警 版本 大屏"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8m-4-4v4"/></g></svg><span>设备状态</span></a>
                         <a class="@NavClass("/AppGuard")" aria-current="@CurrentPage("/AppGuard")" asp-page="/AppGuard" data-search-label="应用守护 退出自启 崩溃重启 禁止删除 防删除 备份 恢复 守护进程"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12l2 2l4-4"/></g></svg><span>应用守护</span></a>
-                        <a class="@NavClass("/LessonStats")" aria-current="@CurrentPage("/LessonStats")" asp-page="/LessonStats" data-search-label="课时统计 代课 课时 工作量"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9m-5 8V5M8 17v-3"/></g></svg><span>课时统计</span></a>
-                        <a class="@NavClass("/AuditLog")" aria-current="@CurrentPage("/AuditLog")" asp-page="/AuditLog" data-search-label="操作记录 审计 日志 谁关机 命令记录"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9a9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5m4-1v5l4 2"/></g></svg><span>操作记录</span></a>
-                        <a class="@NavClass("/ExtensionSettings")" aria-current="@CurrentPage("/ExtensionSettings")" asp-page="/ExtensionSettings" data-search-label="插件批量设置 扩展插件 插件设置 批量下发 按设备"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.39 4.39a1 1 0 0 0 1.68-.474a2.5 2.5 0 1 1 3.014 3.015a1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474a2.5 2.5 0 1 0-3.014 3.015a1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474a2.5 2.5 0 1 1-3.014-3.015a1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474a2.5 2.5 0 1 0 3.014-3.015a1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/></svg><span>插件批量设置</span></a>
-                        <a class="@NavClass("/Classes")" aria-current="@CurrentPage("/Classes")" asp-page="/Classes" data-search-label="班级管理 班级 分组 成员 访客"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m6.08 9.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/><path d="m6.08 14.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/></g></svg><span>班级管理</span></a>
-                        <a class="@NavClass("/SystemConfig")" aria-current="@CurrentPage("/SystemConfig")" asp-page="/SystemConfig" data-search-label="系统配置 系统更新 服务端维护"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M14 17H5M19 7h-9"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></g></svg><span>系统配置</span></a>
-                        <a class="@NavClass("/LoginSettings")" aria-current="@CurrentPage("/LoginSettings")" asp-page="/LoginSettings" data-search-label="登录页设置 登录页 主题 深色 浅色 背景 背景图 透明度 外观 卡片位置 左 右"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15l-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></g></svg><span>登录页设置</span></a>
-                        <a class="@NavClass("/Holidays")" aria-current="@CurrentPage("/Holidays")" asp-page="/Holidays" data-search-label="学期 开学 单双周 教学周 调休 节假日 放假 补课 国庆 春节"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M9 16l2 2l4-4"/></g></svg><span>学期与调休</span></a>
-                    }
-                    <div class="nav-section-label" role="presentation">账户</div>
+                        <a class="@NavClass("/ExtensionSettings")" aria-current="@CurrentPage("/ExtensionSettings")" asp-page="/ExtensionSettings" data-search-label="插件批量下发 插件批量设置 扩展插件 插件设置 批量下发 按设备"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.39 4.39a1 1 0 0 0 1.68-.474a2.5 2.5 0 1 1 3.014 3.015a1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474a2.5 2.5 0 1 0-3.014 3.015a1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474a2.5 2.5 0 1 1-3.014-3.015a1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474a2.5 2.5 0 1 0 3.014-3.015a1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/></svg><span>插件批量下发</span></a>
+                    </div>
                 }
-                <a class="@NavClass("/Account")" aria-current="@CurrentPage("/Account")" asp-page="/Account" data-search-label="个人账号 密码 设备 会话"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M17.925 20.056a6 6 0 0 0-11.851.001"/><circle cx="12" cy="11" r="4"/><circle cx="12" cy="12" r="10"/></g></svg><span>个人账号</span></a>
+                @if (current.Role == UserRole.Admin || permissions.HasFlag(UserPermissions.ManageUsers))
+                {
+                    <div class="nav-group" data-nav-group="org">
+                    <button class="nav-section-label" type="button" data-nav-group-toggle aria-expanded="true">组织与权限</button>
+                    @if (current.Role == UserRole.Admin)
+                    {
+                        <a class="@NavClass("/Classes")" aria-current="@CurrentPage("/Classes")" asp-page="/Classes" data-search-label="班级管理 班级 分组 成员 访客 连接码 设备分配"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m6.08 9.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/><path d="m6.08 14.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/></g></svg><span>班级管理</span></a>
+                    }
+                    @if (permissions.HasFlag(UserPermissions.ManageUsers))
+                    {
+                        <a class="@NavClass("/Users")" aria-current="@CurrentPage("/Users")" asp-page="/Users" data-search-label="人员与角色 人员权限 用户 账号管理 角色 批量导入"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3.128a4 4 0 0 1 0 7.744M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></g></svg><span>人员与角色</span></a>
+                    }
+                    </div>
+                }
+                @if (current.Role == UserRole.Admin || permissions.HasFlag(UserPermissions.ManageUsers))
+                {
+                    <div class="nav-group" data-nav-group="system">
+                    <button class="nav-section-label" type="button" data-nav-group-toggle aria-expanded="true">系统</button>
+                        <a class="@(systemSettingsActive ? "nav-link active" : "nav-link")" aria-current="@(systemSettingsActive ? "page" : null)" href="@(current.Role == UserRole.Admin ? Url.Page("/SystemConfig") : Url.Page("/LoginSettings"))" data-search-label="系统设置 系统配置 系统更新 备份 服务端维护 登录页设置 登录页 背景 访客访问 扫码登录 插件凭据 配对码 自动拉取课表"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M14 17H5M19 7h-9"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></g></svg><span>系统设置</span></a>
+                    </div>
+                }
             </nav>
             <div class="sidebar-footer">
                 <a class="sidebar-user" asp-page="/Account" aria-label="打开 @current.DisplayName 的个人账号" title="@current.DisplayName">
@@ -257,8 +287,15 @@
                     <a class="topbar-button notification-bell" asp-page="/Inbox" aria-label="通知" title="通知" data-notification-bell data-unread-url="@Url.Page("/Inbox", "Unread")"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M10.268 21a2 2 0 0 0 3.464 0M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></g></svg><span class="bell-badge" data-unread-badge hidden="@(unreadNotifications == 0)">@(unreadNotifications > 99 ? "99+" : unreadNotifications.ToString())</span></a>
                     <button class="topbar-button" type="button" data-theme-toggle aria-label="切换明暗主题" title="切换明暗主题"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2v2m2.837 12.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715M16 12a4 4 0 0 0-4-4m7-3l-1.256 1.256M20 12h2"/></svg></button>
                     <button class="topbar-button" type="button" data-page-refresh aria-label="刷新当前页面" title="刷新当前页面"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></g></svg></button>
-                    <a class="topbar-button" asp-page="/Account" aria-label="打开个人账号" title="个人账号"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0a2.34 2.34 0 0 0 3.319 1.915a2.34 2.34 0 0 1 2.33 4.033a2.34 2.34 0 0 0 0 3.831a2.34 2.34 0 0 1-2.33 4.033a2.34 2.34 0 0 0-3.319 1.915a2.34 2.34 0 0 1-4.659 0a2.34 2.34 0 0 0-3.32-1.915a2.34 2.34 0 0 1-2.33-4.033a2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></g></svg></a>
-                    <a class="user-avatar" asp-page="/Account" aria-label="打开 @current.DisplayName 的个人账号" title="@current.DisplayName">@userInitial</a>
+                    @* 头像菜单收拢个人账号与退出登录；系统级设置统一走侧边栏“系统设置”。 *@
+                    <details class="account-menu" data-account-menu>
+                        <summary class="user-avatar" aria-label="@current.DisplayName 的账号菜单" title="@current.DisplayName">@userInitial</summary>
+                        <div class="account-menu-list" role="menu">
+                            <div class="account-menu-head"><strong>@current.DisplayName</strong><small>@current.UserName</small></div>
+                            <a class="account-menu-item" role="menuitem" asp-page="/Account">个人账号</a>
+                            <form method="post" asp-page="/Logout"><button class="account-menu-item danger" role="menuitem" type="submit">退出登录</button></form>
+                        </div>
+                    </details>
                 </div>
             </header>
             <main class="shell">

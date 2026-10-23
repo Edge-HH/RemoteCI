@@ -14,7 +14,6 @@ public sealed class ScheduleModel(
     UserManager<AppUser> users,
     IStateStore state,
     PeerRegistry peers,
-    SchedulePullSettings pullSettings,
     ScheduleSyncService scheduleSync,
     ScheduleViewService scheduleViews,
     ProfileLibraryService profiles) : WebPageModel(users)
@@ -31,13 +30,9 @@ public sealed class ScheduleModel(
     // 拉取课表会覆盖服务端缓存，只允许系统管理员或获准的本班班主任使用；其他账号不显示入口。
     public bool CanPullSchedule => ClassSelfService.CanPullSchedule &&
         (!PluginOnline || peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.SchedulePull));
-    // 定时拉取间隔是对全部班级生效的全局设置，只有系统管理员可以修改。
-    public bool CanConfigureSchedulePull => CanPullSchedule && CurrentUser.Role == UserRole.Admin;
     public bool CanManageSchedule => ClassPermissions.HasFlag(UserPermissions.ManageSchedule) &&
         (!PluginOnline || peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.ScheduleChange));
     public ScheduleSyncStatus? CurrentTask => scheduleSync.Current(CurrentClassId);
-    [BindProperty]
-    public SchedulePullInterval PullInterval { get; set; }
     [BindProperty]
     public SubjectTeacherInput SubjectTeacher { get; set; } = new();
 
@@ -66,7 +61,6 @@ public sealed class ScheduleModel(
         Bundle = CurrentView?.Bundle;
         CanEditClassProfile = await profiles.CanManageClassAsync(CurrentUser, CurrentClassId, HttpContext.RequestAborted);
         ViewData["ScheduleToday"] = ClassClock.Today(state, CurrentClassId).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        PullInterval = await pullSettings.GetIntervalAsync();
         return Page();
     }
 
@@ -84,27 +78,6 @@ public sealed class ScheduleModel(
             TempData["Message"] = "已从插件拉取最新课表。";
         else
             TempData["Error"] = status.Message;
-        return RedirectToPage();
-    }
-
-    public async Task<IActionResult> OnPostPullIntervalAsync(CancellationToken ct)
-    {
-        if (await RequireAsync() is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
-        if (PluginOnline && !peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.SchedulePull))
-        {
-            TempData["Error"] = $"{CommandResultCodes.CapabilityUnsupported}：当前班级的插件不支持拉取课表。";
-            return RedirectToPage();
-        }
-        if (!Enum.IsDefined(PullInterval))
-        {
-            TempData["Error"] = "请选择有效的自动拉取间隔。";
-            return RedirectToPage();
-        }
-        await pullSettings.SetIntervalAsync(PullInterval, ct);
-        TempData["Message"] = PullInterval == SchedulePullInterval.Disabled
-            ? "已关闭定时拉取课表。"
-            : "自动拉取课表间隔已保存。";
         return RedirectToPage();
     }
 

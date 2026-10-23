@@ -1,13 +1,13 @@
 @page
 @model ExtensionSettingsModel
 @{
-    ViewData["Title"] = Model.Group is { } current ? $"{current.DisplayName} 批量设置" : "插件批量设置";
+    ViewData["Title"] = Model.Group is { } current ? $"{current.DisplayName} 批量下发" : "插件批量下发";
     var group = Model.Group;
 }
 <div class="page-head">
     <div>
-        <p class="eyebrow">插件批量设置</p>
-        <h1>@(group?.DisplayName ?? "插件批量设置")</h1>
+        <p class="eyebrow">插件批量下发</p>
+        <h1>@(group?.DisplayName ?? "插件批量下发")</h1>
         @if (!string.IsNullOrWhiteSpace(group?.Description))
         {
             <p class="muted">@group.Description</p>

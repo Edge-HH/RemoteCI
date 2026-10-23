@@ -31,21 +31,21 @@ public sealed class MobileLoginTests
     }
 
     [Fact]
-    public async Task SystemConfig_MobileServerUrlDrivesLoginQr()
+    public async Task LoginSettings_MobileServerUrlDrivesLoginQr()
     {
         await using var factory = new TestWebApplicationFactory();
         using var browser = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = true });
         await LoginWebUiAsync(browser);
 
-        var configHtml = await browser.GetStringAsync("/SystemConfig");
+        var configHtml = await browser.GetStringAsync("/LoginSettings");
         Assert.Contains("name=\"MobileServerUrl\"", configHtml);
-        var invalid = await PostFormAsync(browser, "/SystemConfig?handler=SaveMobileLoginSettings", configHtml,
+        var invalid = await PostFormAsync(browser, "/LoginSettings?handler=SaveMobileLoginSettings", configHtml,
             new() { ["MobileServerUrl"] = "ftp://example.com" });
         Assert.Equal(HttpStatusCode.Redirect, invalid.StatusCode);
         using (var scope = factory.Services.CreateScope())
             Assert.Null(await scope.ServiceProvider.GetRequiredService<MobileLoginSettings>().GetServerUrlAsync());
 
-        var saved = await PostFormAsync(browser, "/SystemConfig?handler=SaveMobileLoginSettings", configHtml,
+        var saved = await PostFormAsync(browser, "/LoginSettings?handler=SaveMobileLoginSettings", configHtml,
             new() { ["MobileServerUrl"] = " https://ci.example.com/remoteci/ " });
         Assert.Equal(HttpStatusCode.Redirect, saved.StatusCode);
         using (var scope = factory.Services.CreateScope())

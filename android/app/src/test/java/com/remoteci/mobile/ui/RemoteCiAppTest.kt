@@ -10,6 +10,7 @@ class RemoteCiAppTest {
         val keys = HomeTab.entries.map { screenTransitionKey(Screen.Home(it)) }.toSet()
 
         assertEquals(setOf("home"), keys)
-        assertNotEquals(screenTransitionKey(Screen.Account), screenTransitionKey(Screen.Home()))
+        assertNotEquals(screenTransitionKey(Screen.Inbox), screenTransitionKey(Screen.Home()))
+        assertEquals("home", screenTransitionKey(Screen.Home(HomeTab.Schedule, openSwapRequests = true)))
     }
 }

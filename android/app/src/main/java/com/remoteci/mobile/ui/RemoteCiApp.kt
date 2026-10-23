@@ -41,15 +41,15 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
-/** SwapRequests：老师换课申请页，仅在账号拥有“老师主动换课”权限时出现在底栏。 */
-enum class HomeTab { Today, Schedule, SwapRequests, Control, People }
+/** 底栏四个板块；换课申请在“课表”里，管理项在“我的”里。 */
+enum class HomeTab { Today, Schedule, Control, Me }
 
 sealed interface Screen {
     data object Login : Screen
-    data class Home(val tab: HomeTab = HomeTab.Today) : Screen
+    /** openSwapRequests：进入“课表”时直接打开换课申请（换课通知、今天页快捷入口）。 */
+    data class Home(val tab: HomeTab = HomeTab.Today, val openSwapRequests: Boolean = false) : Screen
     data object ClassPicker : Screen
     data class Swap(val date: String?, val index: Int?) : Screen
-    data object Account : Screen
     data object Inbox : Screen
     data object Notify : Screen
     data object Voice : Screen
@@ -68,7 +68,6 @@ sealed interface Screen {
     data object ScheduleSettings : Screen
     data object Appearance : Screen
     data object Updates : Screen
-    data object Developer : Screen
     data object System : Screen
     data object Help : Screen
     data object Replace : Screen
@@ -120,7 +119,7 @@ fun RemoteCiApp(appContext: android.content.Context) {
         com.remoteci.mobile.MainActivity.openRequests.collect { target ->
             if (target == NotificationHelper.OPEN_SWAP_REQUESTS && stack.last() !is Screen.Login) {
                 navigationDirection = 1
-                stack = listOf(Screen.Home(HomeTab.SwapRequests))
+                stack = listOf(Screen.Home(HomeTab.Schedule, openSwapRequests = true))
             }
             if (target == NotificationHelper.OPEN_SCHEDULE && stack.last() !is Screen.Login) {
                 navigationDirection = 1
@@ -234,17 +233,18 @@ fun RemoteCiApp(appContext: android.content.Context) {
                         onPicked = { goHome(HomeTab.Today) },
                     )
                     is Screen.Home -> HomeShell(
-                        tab = screen.tab,
+                        home = screen,
                         settings = settings,
                         snackbar = snackbar,
-                        onTab = { tab ->
+                        onHome = { home ->
                             val currentTab = (current as? Screen.Home)?.tab
                             navigationDirection = if (currentTab != null &&
-                                HomeTab.entries.indexOf(tab) < HomeTab.entries.indexOf(currentTab)) -1 else 1
-                            stack = listOf(Screen.Home(tab))
+                                HomeTab.entries.indexOf(home.tab) < HomeTab.entries.indexOf(currentTab)) -1 else 1
+                            stack = listOf(home)
                         },
                         onOpen = ::push,
                         onPersist = ::persist,
+                        onLoggedOut = { stack = listOf(Screen.Login) },
                     )
                     else -> SecondaryHost(
                         screen = screen,
@@ -254,7 +254,6 @@ fun RemoteCiApp(appContext: android.content.Context) {
                         onOpen = ::push,
                         onHome = ::goHome,
                         onPersist = ::persist,
-                        onLoggedOut = { stack = listOf(Screen.Login) },
                     )
                 }
             }

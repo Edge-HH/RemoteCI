@@ -1,7 +1,7 @@
 @page
 @model RemoteCI.Server.Pages.MyScheduleModel
-@{ ViewData["Title"] = "课表"; }
-<div class="mobile-segments"><a href="/Mobile/Schedule?class=1">班级课表</a><a href="/Mobile/MySchedule" class="active">我的日程</a></div>
+@{ ViewData["Title"] = "课表"; ViewData["ScheduleSegment"] = "mine"; }
+@await Html.PartialAsync("_MobileScheduleSegments", Model)
 <div class="mobile-button-pair"><button type="button" data-user-edit-open="personal-course-editor">添加课程</button><a class="button ghost" href="/Mobile/Calendar">订阅系统日历</a></div>
 @if (Model.Error is not null) { <p class="notice" role="alert">@Model.Error</p> }
 <div class="mobile-schedule" data-offline-schedule data-schedule-watch="/Mobile/MySchedule?handler=Revision" data-revision="@Model.MobileRevision">

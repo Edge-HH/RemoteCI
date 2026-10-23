@@ -7,7 +7,7 @@
 <div class="page-head">
     <div>
         <p class="eyebrow">扩展插件 · @Model.CurrentClass?.Name</p>
-        <h1>@(group?.DisplayName ?? "本班扩展插件")</h1>
+        <h1>@(group?.DisplayName ?? "本班插件")</h1>
         @if (!string.IsNullOrWhiteSpace(group?.Description))
         {
             <p class="muted">@group.Description</p>
@@ -25,7 +25,7 @@
         <div class="panel-heading">
             <div>
                 <h2>本班插件</h2>
-                <p class="muted">@(Model.IsAdmin ? $"{Model.CurrentClass?.Name} 的设备上报了设置页的插件，修改只作用于本班。跨班级统一下发请使用管理区的“插件批量设置”。" : $"系统管理员开放给班级自行管理、且 {Model.CurrentClass?.Name} 的设备已上报的插件，修改只作用于本班。")</p>
+                <p class="muted">@(Model.IsAdmin ? $"{Model.CurrentClass?.Name} 的设备上报了设置页的插件，修改只作用于本班。跨班级统一下发请使用“设备与控制”中的“插件批量下发”。" : $"系统管理员开放给班级自行管理、且 {Model.CurrentClass?.Name} 的设备已上报的插件，修改只作用于本班。")</p>
             </div>
             <span class="status-pill @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "插件在线" : "插件离线")</span>
         </div>

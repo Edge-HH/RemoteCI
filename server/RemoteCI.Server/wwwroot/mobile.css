@@ -154,3 +154,5 @@ html[data-mobile-ui] { min-width:0; }
 .mobile-topbar { top:env(safe-area-inset-top); }
 .mobile-app.mobile-keyboard .mobile-bottom-nav { display:none; }
 .mobile-app dialog { max-height:min(90dvh, calc(var(--mobile-viewport-height, 100dvh) - 24px)); }
+/* “我的”页分组标题 */
+.mobile-section-label { margin:20px 4px 8px; color:var(--m-muted, var(--muted)); font-size:13px; font-weight:500; letter-spacing:.02em; }

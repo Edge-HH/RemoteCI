@@ -1,7 +1,7 @@
 @page
 @model RemoteCI.Server.Pages.ScheduleModel
-@{ ViewData["Title"] = "课表"; }
-<div class="mobile-segments"><a href="/Mobile/Schedule?class=1" class="active">班级课表</a><a href="/Mobile/MySchedule">我的日程</a></div>
+@{ ViewData["Title"] = "课表"; ViewData["ScheduleSegment"] = "class"; }
+@await Html.PartialAsync("_MobileScheduleSegments", Model)
 <div class="mobile-schedule" data-offline-schedule data-schedule-watch="/Mobile/Schedule?handler=Revision" data-revision="@Model.MobileRevision">
 @if (Model.Bundle is null)
 { <section class="panel mobile-empty"><i class="icon icon-calendar-month"></i><h2>还没有课表</h2><p>等待插件同步课表，或请管理员设置班级档案。</p></section> }
@@ -51,7 +51,3 @@ else
     @if (Model.CanPullSchedule) { <form method="post" asp-page-handler="Pull"><button type="submit" disabled="@(!Model.PluginOnline || Model.CurrentTask is not null)">拉取课表</button></form> }
     <a class="button ghost" href="/Mobile/Calendar">订阅系统日历</a>
 </div>
-@if (Model.CanConfigureSchedulePull)
-{
-    <details class="panel"><summary>自动拉取课表</summary><form method="post" asp-page-handler="PullInterval" class="stack"><label>拉取间隔<select asp-for="PullInterval"><option value="0">关闭</option><option value="15">每15分钟</option><option value="60">每小时</option><option value="360">每6小时</option><option value="1440">每天</option></select></label><button type="submit">保存</button></form></details>
-}

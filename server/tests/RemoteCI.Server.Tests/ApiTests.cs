@@ -440,12 +440,12 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         using var browser = CreateBrowserClient();
         await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
 
-        foreach (var path in new[] { "/", "/Account", "/Users", "/Schedule", "/Control", "/SystemConfig" })
+        foreach (var path in new[] { "/", "/Account", "/Users", "/Schedule", "/Control", "/SystemConfig", "/LoginSettings", "/PluginAccess" })
             Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync(path)).StatusCode);
         var accountHtml = WebUtility.HtmlDecode(await browser.GetStringAsync("/Account"));
         Assert.DoesNotContain("<h2>系统更新", accountHtml);
         var configHtml = WebUtility.HtmlDecode(await browser.GetStringAsync("/SystemConfig"));
-        Assert.Contains("<span>系统配置</span>", configHtml);
+        Assert.Contains("<span>系统设置</span>", configHtml);
         Assert.Contains("系统更新", configHtml);
         Assert.Contains("自动备份", configHtml);
         Assert.Contains("本地备份", configHtml);
@@ -453,7 +453,8 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var usersHtml = WebUtility.HtmlDecode(await browser.GetStringAsync("/Users"));
         Assert.Contains("角色配置", usersHtml);
         Assert.Contains("创建角色", usersHtml);
-        Assert.Contains("自动进入访客页", usersHtml);
+        Assert.DoesNotContain("自动进入访客页", usersHtml);
+        Assert.Contains("自动进入访客页", WebUtility.HtmlDecode(await browser.GetStringAsync("/LoginSettings")));
         Assert.Contains("班级管理", usersHtml);
         Assert.Contains("""class="user-account-table role-summary-table""", usersHtml);
         Assert.Contains("""<dialog id="role-create-dialog""", usersHtml);
@@ -642,10 +643,13 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Contains("""class="schedule-course-name""", scheduleTableHtml);
         Assert.Contains("信息技术实践课程", scheduleTableHtml);
         Assert.Contains("08:00–08:45", scheduleTableHtml);
-        Assert.Contains("每 15 分钟", scheduleHtml);
-        Assert.Contains("每小时", scheduleHtml);
-        Assert.Contains("每 6 小时", scheduleHtml);
-        Assert.Contains("每天", scheduleHtml);
+        // 自动拉取间隔是全局设置，在系统设置的“插件与课表同步”中修改，课表页只保留立即拉取。
+        Assert.DoesNotContain("name=\"PullInterval\"", scheduleHtml);
+        var intervalHtml = WebUtility.HtmlDecode(await browser.GetStringAsync("/PluginAccess"));
+        Assert.Contains("每 15 分钟", intervalHtml);
+        Assert.Contains("每小时", intervalHtml);
+        Assert.Contains("每 6 小时", intervalHtml);
+        Assert.Contains("每天", intervalHtml);
         Assert.Contains(">交换</option>", scheduleHtml);
         Assert.Contains(">替换</option>", scheduleHtml);
         Assert.DoesNotContain(">Exchange</option>", scheduleHtml);
@@ -666,10 +670,11 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Contains("data-replace-field hidden", scheduleHtml);
         Assert.Matches(@"data-replace-field hidden[\s\S]*?<select[^>]+disabled", scheduleHtml);
 
+        var pluginAccessHtml = await browser.GetStringAsync("/PluginAccess");
         var response = await PostRazorFormAsync(
             browser,
-            "/Schedule?handler=PullInterval",
-            scheduleHtml,
+            "/PluginAccess?handler=PullInterval",
+            pluginAccessHtml,
             new Dictionary<string, string> { ["PullInterval"] = "60" });
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
 
@@ -1981,7 +1986,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         });
         await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
 
-        var overview = await browser.GetStringAsync("/");
+        var overview = await browser.GetStringAsync("/PluginAccess");
         Assert.Contains("插件凭据", WebUtility.HtmlDecode(overview));
         Assert.Contains("ClassIsland 插件", WebUtility.HtmlDecode(overview));
         Assert.Contains("最近活跃", WebUtility.HtmlDecode(overview));
@@ -1992,11 +1997,11 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             var database = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             credentialId = (await database.PluginCredentials.SingleAsync()).Id;
         }
-        var revoke = await PostRazorFormAsync(browser, $"/?handler=RevokeCredential&id={credentialId}", overview);
+        var revoke = await PostRazorFormAsync(browser, $"/PluginAccess?handler=RevokeCredential&id={credentialId}", overview);
         Assert.Equal(HttpStatusCode.Redirect, revoke.StatusCode);
         await AssertWebSocketClosedAsync(connectedPlugin);
 
-        var afterHtml = WebUtility.HtmlDecode(await browser.GetStringAsync("/"));
+        var afterHtml = WebUtility.HtmlDecode(await browser.GetStringAsync("/PluginAccess"));
         Assert.Contains("已吊销", afterHtml);
 
         // 普通用户看不到该节。
@@ -2022,6 +2027,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         await LoginWebUiAsync(userBrowser, "view.only", "View-Only-Password-2026");
         var userHtml = WebUtility.HtmlDecode(await userBrowser.GetStringAsync("/"));
         Assert.DoesNotContain("插件凭据", userHtml);
+        Assert.Equal("/Denied", (await userBrowser.GetAsync("/PluginAccess")).Headers.Location?.OriginalString);
     }
 
     [Fact]

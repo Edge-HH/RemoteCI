@@ -2326,3 +2326,98 @@ input[type="checkbox"]:focus, input[type="radio"]:focus { outline: none; }
 input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 2px; }
 label:where(:has(> input[type="checkbox"], > input[type="radio"])) { display: flex; align-items: center; gap: 7px; cursor: pointer; }
 .batch-risk-confirm input[type="checkbox"] { margin-top: 2px; }
+
+/* 侧边栏分组：标题可点击折叠，折叠状态按分组记在本地；当前页所在分组始终展开。 */
+.nav-group { display: grid; gap: 1px; }
+button.nav-section-label {
+    display: flex;
+    width: calc(100% - 20px);
+    min-height: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--nav-heading);
+    text-align: left;
+    cursor: pointer;
+}
+button.nav-section-label::after { content: ""; width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); opacity: .7; transition: transform var(--duration-fast) ease; }
+button.nav-section-label:hover { background: transparent; color: var(--text); }
+button.nav-section-label:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 2px; }
+.nav-group.collapsed > button.nav-section-label::after { transform: rotate(-45deg); }
+.nav-group.collapsed > .nav-link:not(.active) { display: none; }
+body.sidebar-collapsed .nav-group.collapsed > .nav-link:not(.active) { display: flex; }
+
+/* 顶栏头像菜单：个人账号与退出登录。 */
+.account-menu { position: relative; }
+.account-menu > summary { display: grid; place-items: center; cursor: pointer; list-style: none; }
+.account-menu > summary::-webkit-details-marker { display: none; }
+.account-menu > summary:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 2px; }
+.topbar:has(.account-menu[open]) { overflow: visible; }
+.account-menu-list {
+    position: absolute;
+    z-index: 40;
+    top: calc(100% + 6px);
+    right: 0;
+    display: grid;
+    min-width: 180px;
+    gap: 2px;
+    padding: 4px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-card);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+}
+.account-menu-head { display: grid; padding: 8px 10px 6px; border-bottom: 1px solid var(--line); margin-bottom: 2px; }
+.account-menu-head strong { font-size: 13px; }
+.account-menu-head small { color: var(--muted); font-size: 11px; }
+.account-menu-list form { margin: 0; }
+.account-menu-list .account-menu-item {
+    display: flex;
+    width: 100%;
+    min-height: 32px;
+    align-items: center;
+    padding: 0 10px;
+    border: 0;
+    border-radius: var(--radius-button);
+    background: transparent;
+    box-shadow: none;
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 500;
+    text-align: left;
+}
+.account-menu-list .account-menu-item.danger { color: var(--danger); }
+.account-menu-list .account-menu-item:hover,
+.account-menu-list .account-menu-item:focus-visible { background: var(--surface-soft); outline: none; }
+
+/* 页面内 tab：系统设置、个人账号、人员与角色等长页面按主题分页。 */
+.page-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0 0 16px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-card);
+    background: var(--surface-inset);
+    width: fit-content;
+    max-width: 100%;
+}
+.page-tabs a {
+    display: inline-flex;
+    min-height: 32px;
+    align-items: center;
+    padding: 0 12px;
+    border-radius: var(--radius-button);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+}
+.page-tabs a:hover { color: var(--text); background: var(--surface-soft); }
+.page-tabs a.active { color: var(--text); background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.page-tabs a:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 1px; }

@@ -49,6 +49,49 @@ public sealed class MobileWebTests
     }
 
     [Fact]
+    public async Task Navigation_GroupsByTask_AndKeepsSettingsInOnePlace()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        var owner = await factory.LoginAsync();
+
+        // 电脑版：侧边栏按任务分组，系统级设置收拢到“系统设置”，顶栏不再有指向个人账号的齿轮。
+        using var desktop = await BrowserAsync(factory, owner, phone: false);
+        var index = WebUtility.HtmlDecode(await desktop.GetStringAsync("/Index"));
+        foreach (var label in new[] { ">日常<", ">我的<", ">记录与统计<", ">教务<", ">设备与控制<", ">组织与权限<", "<span>系统设置</span>", "<span>档案库</span>", "<span>插件批量下发</span>", "<span>人员与角色</span>" })
+            Assert.Contains(label, index);
+        foreach (var removed in new[] { "<span>系统配置</span>", "<span>登录页设置</span>", "<span>个人账号</span>", "aria-label=\"打开个人账号\"" })
+            Assert.DoesNotContain(removed, index);
+        Assert.Contains("data-account-menu", index);
+        var system = WebUtility.HtmlDecode(await desktop.GetStringAsync("/SystemConfig"));
+        Assert.Contains("data-page-tabs", system);
+        Assert.Contains("data-tab=\"general\"", system);
+        Assert.Contains("data-tab=\"maintenance\"", system);
+        Assert.Contains("href=\"/LoginSettings\"", system);
+        Assert.Contains("href=\"/PluginAccess\"", system);
+        Assert.DoesNotContain("name=\"MobileServerUrl\"", system);
+        var access = WebUtility.HtmlDecode(await desktop.GetStringAsync("/LoginSettings"));
+        Assert.Contains("name=\"MobileServerUrl\"", access);
+        Assert.Contains("name=\"AutoEnterVisitorPage\"", access);
+        var plugins = WebUtility.HtmlDecode(await desktop.GetStringAsync("/PluginAccess"));
+        Assert.Contains("name=\"PullInterval\"", plugins);
+        Assert.Contains("插件凭据", plugins);
+        Assert.DoesNotContain("name=\"AutoEnterVisitorPage\"", WebUtility.HtmlDecode(await desktop.GetStringAsync("/Users")));
+
+        // 手机网页版：底栏是今天、课表、控制、我的；换课申请在课表分段里，管理项在“我的”页。
+        using var phone = await BrowserAsync(factory, owner);
+        var today = WebUtility.HtmlDecode(await phone.GetStringAsync("/Mobile/Today"));
+        Assert.Contains("href=\"/Mobile/Account\"", today);
+        Assert.DoesNotContain("href=\"/Mobile/Manage\"", today);
+        Assert.Contains("href=\"/Mobile/SwapRequests\"", WebUtility.HtmlDecode(await phone.GetStringAsync("/Mobile/Schedule?class=1")));
+        var mine = WebUtility.HtmlDecode(await phone.GetStringAsync("/Mobile/Account"));
+        Assert.Contains("<title>我的 · RemoteCI</title>", mine);
+        foreach (var link in new[] { "/Mobile/Users", "/Mobile/VisitorAccess", "/Mobile/Pairing", "/Mobile/PluginAccess#schedule-pull", "/Mobile/SystemConfig" })
+            Assert.Contains($"href=\"{link}\"", mine);
+        Assert.Equal("/Mobile/Account#manage", (await phone.GetAsync("/Mobile/Manage")).Headers.Location?.OriginalString);
+        Assert.Equal(HttpStatusCode.OK, (await phone.GetAsync("/Mobile/PluginAccess")).StatusCode);
+    }
+
+    [Fact]
     public async Task StudentWithoutDesktopPermission_CanUseMobile_AndCannotManageOthers()
     {
         await using var factory = new TestWebApplicationFactory();
@@ -75,7 +118,7 @@ public sealed class MobileWebTests
     {
         await using var factory = new TestWebApplicationFactory();
         using var browser = await BrowserAsync(factory, await factory.LoginAsync());
-        foreach (var path in new[] { "Today", "Schedule", "MySchedule", "Control", "Users", "Account", "Inbox", "SystemConfig", "Manage", "Pairing", "VisitorAccess", "Calendar" })
+        foreach (var path in new[] { "Today", "Schedule", "MySchedule", "Control", "Users", "Account", "Inbox", "SystemConfig", "PluginAccess", "Pairing", "VisitorAccess", "Calendar" })
             Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/Mobile/" + path)).StatusCode);
         var html = await browser.GetStringAsync("/Mobile/MySchedule");
         Assert.Contains("type=\"time\"", html);

@@ -1,0 +1,28 @@
+@model WebPageModel
+@{
+    // “系统设置”的 tab：常规、维护在系统配置页内切换，登录与访问、插件与课表同步是独立页面。
+    // ViewData["SystemTab"] 标明当前 tab；手机网页版不显示 tab，各区块直接纵向排列。
+    var active = ViewData["SystemTab"] as string;
+    var isAdmin = Model.CurrentUser.Role == UserRole.Admin;
+    var inSystemConfig = active is "general" or "maintenance";
+}
+@if (!MobileUi.IsMobile(Context))
+{
+    <nav class="page-tabs" aria-label="系统设置分类" data-page-tabs>
+        @if (isAdmin)
+        {
+            if (inSystemConfig)
+            {
+                <a href="#general" data-tab-link="general">常规</a>
+                <a href="#maintenance" data-tab-link="maintenance">维护</a>
+            }
+            else
+            {
+                <a href="@Url.Page("/SystemConfig")#general">常规</a>
+                <a href="@Url.Page("/SystemConfig")#maintenance">维护</a>
+            }
+        }
+        <a class="@(active == "access" ? "active" : null)" aria-current="@(active == "access" ? "page" : null)" asp-page="/LoginSettings">登录与访问</a>
+        <a class="@(active == "plugins" ? "active" : null)" aria-current="@(active == "plugins" ? "page" : null)" asp-page="/PluginAccess">插件与课表同步</a>
+    </nav>
+}

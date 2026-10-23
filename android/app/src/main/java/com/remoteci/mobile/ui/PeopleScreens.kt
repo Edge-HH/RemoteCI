@@ -61,59 +61,6 @@ import com.remoteci.mobile.data.UpdateUserRequest
 import com.remoteci.mobile.data.VisitorAccessState
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun PeopleScreen(embedded: Boolean, snackbar: androidx.compose.material3.SnackbarHostState, onOpen: (Screen) -> Unit, onBack: (() -> Unit)?) {
-    val user by ConnectionManagerUser()
-    // 只列出当前账号有权限的管理项；一项都没有时底栏不会显示本页。
-    val items = visibleManagementItems(user)
-    Column(Modifier.fillMaxSize()) {
-        TopAppBar(
-            title = { Text("管理", style = MaterialTheme.typography.titleLarge) },
-            navigationIcon = { IconButton(onClick = { onBack?.invoke() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } },
-            actions = {
-                if (ManagementItem.Users in items) {
-                    IconButton({ onOpen(Screen.Users) }) { Icon(Icons.Rounded.PersonAdd, contentDescription = "添加账号") }
-                }
-            },
-        )
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            if (items.isEmpty()) {
-                EmptyState("没有可用的管理项", "管理项取决于账号权限，可联系管理员开通。")
-            } else {
-                ConnectedListCard(Modifier.padding(16.dp)) {
-                    items.forEachIndexed { index, item ->
-                        AppListItem(
-                            title = item.title,
-                            supporting = item.supporting,
-                            leading = when (item) {
-                                ManagementItem.VisitorAccess -> Icons.Rounded.PersonOutline
-                                ManagementItem.Roles -> Icons.Rounded.AdminPanelSettings
-                                ManagementItem.Users -> Icons.Rounded.Group
-                                ManagementItem.Pairing -> Icons.Rounded.Link
-                            },
-                            trailing = Icons.Rounded.ChevronRight,
-                            index = index,
-                            count = items.size,
-                            onClick = {
-                                onOpen(
-                                    when (item) {
-                                        ManagementItem.VisitorAccess -> Screen.VisitorAccess
-                                        ManagementItem.Roles -> Screen.Roles
-                                        ManagementItem.Users -> Screen.Users
-                                        ManagementItem.Pairing -> Screen.Pairing
-                                    },
-                                )
-                            },
-                        )
-                    }
-                }
-            }
-        }
-        WebUiHint("更多管理操作请使用", "/Users", snackbar)
-    }
-}
-
 @Composable
 private fun ConnectionManagerUser() = com.remoteci.mobile.data.ConnectionManager.currentUser.collectAsState()
 

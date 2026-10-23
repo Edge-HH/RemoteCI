@@ -2,7 +2,8 @@
 @model LoginSettingsModel
 @using RemoteCI.Server.Data
 @{
-    ViewData["Title"] = "登录页设置";
+    ViewData["Title"] = "登录与访问 · 系统设置";
+    ViewData["SystemTab"] = "access";
     // 预览按当前表单值渲染：管理员保存前就能看到主题、不透明度与卡片位置的组合效果。
     var previewTheme = Model.Appearance.Theme switch
     {
@@ -24,10 +25,13 @@
 <div class="page-head">
     <div>
         <p class="eyebrow">服务端管理</p>
-        <h1>登录页设置</h1>
+        <h1>系统设置</h1>
     </div>
 </div>
-<section class="panel">
+@await Html.PartialAsync("_SystemSettingsTabs", Model)
+@if (Model.IsAdmin)
+{
+<section class="panel" id="login-appearance">
     <h2>登录页外观</h2>
     <form method="post" asp-page-handler="Save" enctype="multipart/form-data" class="stack login-settings-form">
         <fieldset class="login-theme-fieldset">
@@ -77,4 +81,26 @@
         }
     </div>
 </section>
+
+<section class="panel" id="mobile-login">
+    <h2>手机扫码登录</h2>
+    <p class="muted">仅修改概览页登录二维码中的服务器地址（例如反向代理后的公网地址），不影响服务端监听。留空则使用当前访问地址。</p>
+    <form method="post" asp-page-handler="SaveMobileLoginSettings" class="stack system-config-form">
+        <label>服务器地址<input asp-for="MobileServerUrl" type="url" maxlength="512" placeholder="https://remoteci.example.com" autocomplete="off" /></label>
+        <button type="submit">保存扫码登录设置</button>
+    </form>
+</section>
+}
+
+<section class="panel" id="visitor">
+    <h2>访客访问</h2>
+    <p class="muted">@if (Model.IsAdmin) { <text>在<a asp-page="/Classes">班级管理</a>中</text> } else { <text>由系统管理员在班级管理中</text> }逐班开启访客功能后，登录页会出现“仅查看”，访客只能浏览开放班级的课表。</p>
+    <form method="post" asp-page-handler="VisitorAccess" class="stack">
+        <label class="check"><input asp-for="AutoEnterVisitorPage" /> 自动进入访客页</label>
+        <button type="submit">保存访客设置</button>
+    </form>
+</section>
+@if (Model.IsAdmin)
+{
 <script src="~/login-settings.js" asp-append-version="true" defer></script>
+}

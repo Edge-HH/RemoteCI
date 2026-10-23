@@ -82,7 +82,9 @@ fun ControlListScreen(embedded: Boolean, snackbar: androidx.compose.material3.Sn
     val caps by ConnectionManager.availableCapabilities.collectAsState()
     val classPermissions = effectiveClassPermissions(classes, currentClassId, user?.permissions ?: 0)
     fun can(permission: Int): Boolean = classPermissions and permission == permission
+    // 控制项按“消息 / 大屏 / 扩展”分组显示。
     data class Row(
+        val group: String,
         val title: String,
         val supporting: String,
         val icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -91,21 +93,21 @@ fun ControlListScreen(embedded: Boolean, snackbar: androidx.compose.material3.Sn
         val action: (() -> Unit)? = null,
     )
     val rows = listOf(
-        Row("发送通知", "标题、正文、强调特效、音效和语音朗读", Icons.Rounded.NotificationsActive,
+        Row("消息", "发送通知", "标题、正文、强调特效、音效和语音朗读", Icons.Rounded.NotificationsActive,
             can(Protocol.PERMISSION_SEND_NOTIFICATIONS) && Protocol.CAP_NOTIFICATION_SEND in caps, Screen.Notify),
-        Row("发送语音", "最长 60 秒的语音消息", Icons.Rounded.Mic,
+        Row("消息", "发送语音", "最长 60 秒的语音消息", Icons.Rounded.Mic,
             can(Protocol.PERMISSION_SEND_VOICE_MESSAGES) && Protocol.CAP_VOICE_MESSAGE_SEND in caps, Screen.Voice),
-        Row("清除提醒", "清除 ClassIsland 当前提醒与手表提示", Icons.Rounded.NotificationsOff,
+        Row("消息", "清除提醒", "清除 ClassIsland 当前提醒与手表提示", Icons.Rounded.NotificationsOff,
             can(Protocol.PERMISSION_SEND_NOTIFICATIONS) && Protocol.CAP_NOTIFICATION_CLEAR in caps, null,
             { ConnectionManager.clearNotifications() }),
-        Row("主界面", if (snapshot?.isMainMenuVisible == true) "当前显示中，点击可隐藏" else "当前已隐藏，点击可显示",
+        Row("大屏", "主界面", if (snapshot?.isMainMenuVisible == true) "当前显示中，点击可隐藏" else "当前已隐藏，点击可显示",
             Icons.Rounded.Visibility,
             can(Protocol.PERMISSION_MAIN_MENU_CONTROL) && Protocol.CAP_MAIN_MENU_VISIBILITY in caps, Screen.MainMenu),
-        Row("音量", "音量调节和切换静音", Icons.Rounded.VolumeUp,
+        Row("大屏", "音量", "音量调节和切换静音", Icons.Rounded.VolumeUp,
             can(Protocol.PERMISSION_POWER_CONTROL) && Protocol.CAP_VOLUME_CONTROL in caps, Screen.Volume),
-        Row("电源控制", "关机、睡眠或休眠", Icons.Rounded.PowerSettingsNew,
+        Row("大屏", "电源控制", "关机、睡眠或休眠", Icons.Rounded.PowerSettingsNew,
             can(Protocol.PERMISSION_POWER_CONTROL) && Protocol.CAP_POWER_CONTROL in caps, Screen.Power),
-        Row("扩展功能", "运行已注册扩展", Icons.Rounded.Extension,
+        Row("扩展", "扩展功能", "运行已注册扩展", Icons.Rounded.Extension,
             can(Protocol.PERMISSION_RUN_EXTENSIONS) && Protocol.CAP_EXTENSIONS_RUN in caps, Screen.Extensions),
     ).filter { it.visible }
     Column(Modifier.fillMaxSize()) {
@@ -134,17 +136,22 @@ fun ControlListScreen(embedded: Boolean, snackbar: androidx.compose.material3.Sn
             EmptyState("没有可用的控制项", "这取决于账号权限，以及当前插件是否在线。")
         } else {
             // 控制项多于一屏（小屏或长说明换行）时必须可滚动，否则底部的“扩展功能”等入口无法触达。
-            ConnectedListCard(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
-                rows.forEachIndexed { index, row ->
-                    AppListItem(
-                        title = row.title,
-                        supporting = row.supporting,
-                        leading = row.icon,
-                        trailing = Icons.Rounded.ChevronRight,
-                        index = index,
-                        count = rows.size,
-                        onClick = { row.screen?.let(onOpen) ?: row.action?.invoke() },
-                    )
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
+                rows.groupBy { it.group }.forEach { (group, groupRows) ->
+                    ListSectionLabel(group)
+                    ConnectedListCard(Modifier.padding(horizontal = 16.dp)) {
+                        groupRows.forEachIndexed { index, row ->
+                            AppListItem(
+                                title = row.title,
+                                supporting = row.supporting,
+                                leading = row.icon,
+                                trailing = Icons.Rounded.ChevronRight,
+                                index = index,
+                                count = groupRows.size,
+                                onClick = { row.screen?.let(onOpen) ?: row.action?.invoke() },
+                            )
+                        }
+                    }
                 }
             }
         }

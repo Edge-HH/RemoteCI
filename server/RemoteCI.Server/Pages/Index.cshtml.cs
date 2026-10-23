@@ -21,7 +21,6 @@ public sealed class IndexModel(
     public ScheduleBundle? Schedule { get; private set; }
     public string? PairCode { get; private set; }
     public string MobileLoginUrl { get; private set; } = string.Empty;
-    public IReadOnlyList<PluginCredentialInfo> PluginCredentials { get; private set; } = [];
     public IReadOnlyList<PeerCapabilityDiagnostic> CapabilityDiagnostics { get; private set; } = [];
     public PluginProtocolMismatch? PluginProtocolMismatch => peers.LatestPluginProtocolMismatch;
     public bool IsAdmin => CurrentUser.Role == UserRole.Admin;
@@ -37,24 +36,6 @@ public sealed class IndexModel(
         if (IsAdmin && AccessibleClasses.Count == 0) return RedirectToPage("/Setup");
         await LoadAsync(ct);
         return Page();
-    }
-
-    public async Task<IActionResult> OnPostRevokeCredentialAsync(Guid id, CancellationToken ct)
-    {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin)
-        {
-            TempData["Error"] = "仅管理员可吊销插件凭据。";
-            return RedirectToPage();
-        }
-        try
-        {
-            await identities.RevokePluginCredentialAsync(id, ct);
-            await peers.DisconnectPluginCredentialAsync(id, ct);
-            TempData["Message"] = "插件凭据已吊销，对应插件已断开，需用新配对码重新配对。";
-        }
-        catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
-        return RedirectToPage();
     }
 
     public async Task<IActionResult> OnPostRetryConnectionAsync(CancellationToken ct)
@@ -103,7 +84,7 @@ public sealed class IndexModel(
         });
     }
 
-    /// <summary>二维码服务器地址：系统配置中指定的地址优先，否则使用当前访问地址。</summary>
+    /// <summary>二维码服务器地址：系统设置“登录与访问”中指定的地址优先，否则使用当前访问地址。</summary>
     private async Task<string> ResolveMobileServerUrlAsync(CancellationToken ct) =>
         await mobileLogin.GetServerUrlAsync(ct) ?? $"{Request.Scheme}://{Request.Host}{Request.PathBase}".TrimEnd('/');
 
@@ -115,9 +96,6 @@ public sealed class IndexModel(
         Snapshot = state.GetLatestSnapshot(CurrentClassId);
         Schedule = state.GetLatestSchedule(CurrentClassId);
         if (CurrentUser.Role == UserRole.Admin)
-        {
-            PluginCredentials = await identities.ListPluginCredentialsAsync(ct);
             CapabilityDiagnostics = peers.GetCapabilityDiagnostics(CurrentClassId);
-        }
     }
 }

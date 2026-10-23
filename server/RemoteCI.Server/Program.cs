@@ -648,7 +648,7 @@ app.MapPost("/api/commands", async (
             ? Results.BadRequest(Error(ApiErrorCodes.InvalidRequest,
                 "请使用 PUT /api/classes/{classId}/extension-groups/{groupId}/settings 修改扩展设置"))
             : Results.Json(Error(ApiErrorCodes.Forbidden,
-                "请通过档案管理页面、POST /api/profiles/collect 或 POST /api/profiles/apply 收集与下发档案"), statusCode: StatusCodes.Status403Forbidden);
+                "请通过档案库页面、POST /api/profiles/collect 或 POST /api/profiles/apply 收集与下发档案"), statusCode: StatusCodes.Status403Forbidden);
     // 通用命令接口只保留旧的内联文件分发（仅系统管理员）；大文件中转必须走 /api/files 以登记目标设备与下载凭据。
     if (command.Command == CommandKind.SendFile && command.FileDistribution?.IsTransfer == true)
         return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest,

@@ -24,7 +24,6 @@ public sealed class SystemConfigModel(
     ConfigurationArchiveService archives,
     PeerRegistry peers,
     IdentityCoordinator identities,
-    MobileLoginSettings mobileLogin,
     OperationsSettings operations,
     AppGuardService appGuard) : WebPageModel(users)
 {
@@ -34,7 +33,6 @@ public sealed class SystemConfigModel(
     [BindProperty] public ExportInput ExportOptions { get; set; } = new();
     [BindProperty] public ImportInput ImportOptions { get; set; } = new();
     [BindProperty] public bool ForceSenderInTitle { get; set; }
-    [BindProperty] public string? MobileServerUrl { get; set; }
     [BindProperty, StringLength(OrganizationNameMaxLength)] public string? OrganizationName { get; set; }
     public const int OrganizationNameMaxLength = 60;
     [BindProperty] public IFormFile? UpdatePackage { get; set; }
@@ -60,7 +58,6 @@ public sealed class SystemConfigModel(
         if (await RequireAdminAsync() is { } denied) return denied;
         await LoadBackupAsync();
         ForceSenderInTitle = await identities.GetForceSenderInTitleAsync();
-        MobileServerUrl = await mobileLogin.GetServerUrlAsync();
         OrganizationName = await db.SystemMetadata.AsNoTracking().Where(x => x.Id == 1)
             .Select(x => x.OrganizationName).SingleAsync();
         OperationsOptions = OperationsInput.From(await operations.GetAsync());
@@ -96,27 +93,13 @@ public sealed class SystemConfigModel(
         return RedirectToPage(null, null, "organization");
     }
 
-    public async Task<IActionResult> OnPostSaveMobileLoginSettingsAsync(CancellationToken ct)
-    {
-        if (await RequireAdminAsync() is { } denied) return denied;
-        try
-        {
-            await mobileLogin.SetServerUrlAsync(MobileServerUrl, ct);
-            TempData["Message"] = string.IsNullOrWhiteSpace(MobileServerUrl)
-                ? "扫码登录二维码将使用当前访问地址"
-                : "扫码登录服务器地址已保存";
-        }
-        catch (ArgumentException ex) { TempData["Error"] = ex.Message; }
-        return RedirectToPage();
-    }
-
     public async Task<IActionResult> OnPostSaveNotificationSettingsAsync(CancellationToken ct)
     {
         if (await RequireAdminAsync() is { } denied) return denied;
         var settings = await identities.SetForceSenderInTitleAsync(ForceSenderInTitle, ct);
         await peers.SendSettingsToWatchesAsync(settings, ct);
         TempData["Message"] = ForceSenderInTitle ? "已开启强制显示发送人" : "已关闭强制显示发送人";
-        return RedirectToPage();
+        return RedirectToPage(null, null, "notification-sender");
     }
 
     public async Task<IActionResult> OnPostCheckUpdateAsync(CancellationToken ct)

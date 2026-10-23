@@ -1,4 +1,5 @@
 @page
 @model SwapRequestsModel
-@{ ViewData["Title"] = "换课"; }
+@{ ViewData["Title"] = "课表"; ViewData["ScheduleSegment"] = "swap"; }
+@await Html.PartialAsync("_MobileScheduleSegments", Model)
 @await Html.PartialAsync("_WebSwapRequestsContent", Model)

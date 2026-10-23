@@ -128,8 +128,8 @@
             </a>
             @if (Model.CurrentUser.Role == UserRole.Admin)
             {
-                <a asp-page="/SystemConfig" data-search-label="系统配置 系统更新 服务端维护">
-                    <span class="task-main"><i class="icon icon-tune" aria-hidden="true"></i><span><strong>系统配置</strong><small>管理服务端全局配置与系统更新</small></span></span>
+                <a asp-page="/SystemConfig" data-search-label="系统设置 系统配置 系统更新 服务端维护">
+                    <span class="task-main"><i class="icon icon-tune" aria-hidden="true"></i><span><strong>系统设置</strong><small>管理服务端全局配置与系统更新</small></span></span>
                     <span class="task-owner">系统管理</span><span class="task-status healthy">可用</span><i class="icon icon-arrow-forward" aria-hidden="true"></i>
                 </a>
             }
@@ -187,30 +187,6 @@
                                     <small>缺少：@Model.FormatCapabilities(peer.MissingCapabilities)</small>
                                 }
                             </div>
-                        </article>
-                    }
-                </div>
-            }
-        </section>
-
-        <section class="dashboard-panel credential-panel">
-            <header class="panel-heading"><div><h2>插件凭据</h2></div><span class="status-pill">@Model.PluginCredentials.Count 项</span></header>
-            @if (Model.PluginCredentials.Count == 0)
-            {
-                <div class="empty-state"><i class="icon icon-key" aria-hidden="true"></i><strong>暂无插件凭据</strong><span>完成首次配对后可在此查看和吊销。</span></div>
-            }
-            else
-            {
-                <div class="credential-list">
-                    @foreach (var credential in Model.PluginCredentials)
-                    {
-                        <article>
-                            <div><strong>@credential.Name</strong><small>最近活跃 @credential.LastSeenAt.ToLocalTime().ToString("MM-dd HH:mm")</small></div>
-                            <span class="inline-status @(credential.Enabled ? "online" : "offline")">@(credential.Enabled ? "启用" : "已吊销")</span>
-                            @if (credential.Enabled)
-                            {
-                                <form method="post" asp-page-handler="RevokeCredential" asp-route-id="@credential.Id" onsubmit="return confirm('吊销后该插件将被断开，需用新配对码重新配对。确定？')"><button class="text-action danger" type="submit">吊销</button></form>
-                            }
                         </article>
                     }
                 </div>

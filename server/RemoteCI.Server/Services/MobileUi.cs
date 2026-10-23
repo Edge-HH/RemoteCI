@@ -22,7 +22,7 @@ public static class MobileUi
         ["/"] = "/Mobile/Today", ["/Index"] = "/Mobile/Today", ["/Schedule"] = "/Mobile/Schedule",
         ["/MySchedule"] = "/Mobile/MySchedule", ["/SwapRequests"] = "/Mobile/SwapRequests",
         ["/Control"] = "/Mobile/Control", ["/Notifications"] = "/Mobile/Control", ["/Users"] = "/Mobile/Users",
-        ["/Account"] = "/Mobile/Account", ["/Inbox"] = "/Mobile/Inbox", ["/SystemConfig"] = "/Mobile/SystemConfig",
+        ["/Account"] = "/Mobile/Account", ["/Inbox"] = "/Mobile/Inbox", ["/SystemConfig"] = "/Mobile/SystemConfig", ["/PluginAccess"] = "/Mobile/PluginAccess",
     };
     private static readonly HashSet<string> DesktopOnly = new(StringComparer.OrdinalIgnoreCase)
     { "/Profiles", "/ClassProfiles", "/BatchControl", "/Classes", "/ExtensionSettings", "/ClassExtensions", "/Holidays", "/LoginSettings",

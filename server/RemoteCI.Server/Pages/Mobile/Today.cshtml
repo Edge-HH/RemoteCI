@@ -12,5 +12,12 @@
     <a class="mobile-row" href="/Mobile/Schedule"><i class="icon icon-directions-run"></i><span><strong>下一节</strong><small data-next-subject>正在同步</small></span><i class="icon icon-chevron-right"></i></a>
     <div class="mobile-row"><i class="icon icon-cloud-done"></i><span><strong data-connection-status>正在连接 RemoteCI</strong><small data-sync-time>正在获取最新状态</small></span></div>
 </div>
-<div class="mobile-button-pair"><a class="button ghost" href="/Mobile/Schedule">课表</a><a class="button" href="/Mobile/Control">控制</a></div>
+@* 底栏已有课表与控制，这里放两个最常用的直达操作。 *@
+@if (Model.Permissions.HasFlag(UserPermissions.RequestScheduleSwap) || Model.Permissions.HasFlag(UserPermissions.SendNotifications))
+{
+    <div class="mobile-button-pair">
+        @if (Model.Permissions.HasFlag(UserPermissions.RequestScheduleSwap)) { <a class="button ghost" href="/Mobile/SwapRequests"><i class="icon icon-swap-horiz"></i> 换课申请</a> }
+        @if (Model.Permissions.HasFlag(UserPermissions.SendNotifications)) { <a class="button" href="/Mobile/Control"><i class="icon icon-send"></i> 发送通知</a> }
+    </div>
+}
 <section class="mobile-install panel" data-install-guide hidden><h2>添加到主屏幕</h2><p>将 RemoteCI 添加到主屏幕，可以独立打开并开启系统通知。</p><p data-install-instructions>在 Safari 分享菜单选择“添加到主屏幕”，然后从桌面图标打开。</p><button type="button" data-install-button hidden>安装 RemoteCI</button><a href="/Mobile/Inbox">设置通知</a></section>

@@ -1,25 +1,57 @@
 @model AccountModel
-@{ ViewData["Title"] = "个人账号"; }
+@{ ViewData["Title"] = MobileUi.IsMobile(Context) ? "我的" : "个人账号"; }
 <div class="page-head"><div><p class="eyebrow">个人安全</p><h1>@Model.CurrentUser.DisplayName</h1><p class="muted">ID：@Model.CurrentUser.UserName · @Model.CurrentUser.Role</p></div></div>
 @if (MobileUi.IsMobile(Context))
 {
+    // 手机网页版的“我的”页：当前班级、个人偏好、管理（有权限才显示），账号安全在下方，退出登录放最后。
+    var canManageUsers = Model.Permissions.HasFlag(UserPermissions.ManageUsers);
+    var isAdmin = Model.CurrentUser.Role == UserRole.Admin;
     <div class="mobile-connected-list">
-        <a class="mobile-row" href="/ClassSelect"><i class="icon icon-apartment"></i><span><strong>切换班级</strong><small>选择要查看和接收课堂通知的班级</small></span><i class="icon icon-chevron-right"></i></a>
+        <a class="mobile-row" href="/ClassSelect"><i class="icon icon-apartment"></i><span><strong>当前班级</strong><small>@(Model.CurrentClass?.Name ?? "未选择") · 点击切换</small></span><i class="icon icon-chevron-right"></i></a>
+    </div>
+    <p class="mobile-section-label">我的偏好</p>
+    <div class="mobile-connected-list">
         <a class="mobile-row" href="/Mobile/Inbox"><i class="icon icon-notifications"></i><span><strong>通知设置</strong><small>系统推送与课堂通知分类</small></span><i class="icon icon-chevron-right"></i></a>
         <a class="mobile-row" href="/Mobile/Calendar"><i class="icon icon-calendar-month"></i><span><strong>系统日历</strong><small>订阅我的日程和班级课表</small></span><i class="icon icon-chevron-right"></i></a>
-        @if (Model.CurrentUser.Role == UserRole.Admin) { <a class="mobile-row" href="/Mobile/SystemConfig"><i class="icon icon-settings"></i><span><strong>系统配置</strong><small>更新检查与备份</small></span><i class="icon icon-chevron-right"></i></a> }
     </div>
     <section class="panel"><h2>外观</h2><label>显示模式<select data-mobile-appearance><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label><label>主题配色<select data-mobile-palette><option value="green">绿色（默认）</option><option value="lavender">淡紫</option><option value="purple">经典紫</option><option value="blue">蓝色</option><option value="orange">橙色</option><option value="pink">粉色</option></select></label></section>
-    <a class="button ghost" href="/?view=auto">恢复自动选择手机或电脑界面</a>
-    <form method="post" asp-page="/Logout" data-mobile-logout><button type="submit" class="ghost danger">退出登录</button></form>
+    @if (canManageUsers || isAdmin)
+    {
+        <p class="mobile-section-label" id="manage">管理</p>
+        <div class="mobile-connected-list">
+            @if (canManageUsers)
+            {
+                <a class="mobile-row" href="/Mobile/Users"><i class="icon icon-group"></i><span><strong>账号管理</strong><small>新建、编辑、启停账号</small></span><i class="icon icon-chevron-right"></i></a>
+                <a class="mobile-row" href="/Mobile/Users?section=roles"><i class="icon icon-verified-user"></i><span><strong>角色配置</strong><small>角色及默认权限</small></span><i class="icon icon-chevron-right"></i></a>
+                <a class="mobile-row" href="/Mobile/VisitorAccess"><i class="icon icon-badge"></i><span><strong>访客访问</strong><small>访客课表与自动进入设置</small></span><i class="icon icon-chevron-right"></i></a>
+                <a class="mobile-row" href="/Mobile/Pairing"><i class="icon icon-link"></i><span><strong>插件配对码</strong><small>配对 ClassIsland、撤销插件凭据</small></span><i class="icon icon-chevron-right"></i></a>
+            }
+            @if (isAdmin)
+            {
+                <a class="mobile-row" href="/Mobile/PluginAccess#schedule-pull"><i class="icon icon-sync"></i><span><strong>自动拉取课表</strong><small>在线插件刷新课表的周期，对全部班级生效</small></span><i class="icon icon-chevron-right"></i></a>
+                <a class="mobile-row" href="/Mobile/SystemConfig"><i class="icon icon-settings"></i><span><strong>系统设置</strong><small>服务端更新、备份与集控运维</small></span><i class="icon icon-chevron-right"></i></a>
+            }
+        </div>
+    }
+    <p class="mobile-section-label">账号与安全</p>
+}
+@if (!MobileUi.IsMobile(Context))
+{
+    @* 个人账号按主题分 tab；手机网页版不显示 tab，各区块纵向排列。 *@
+    <nav class="page-tabs" aria-label="个人账号分类" data-page-tabs>
+        @if (Model.CanChangeDisplayName) { <a href="#profile" data-tab-link="profile">资料</a> }
+        <a href="#security" data-tab-link="security">安全</a>
+        <a href="#sessions" data-tab-link="sessions">已登录设备</a>
+        @if (Model.ShowApiPanel) { <a href="#api" data-tab-link="api">API Key</a> }
+    </nav>
 }
 <div class="two-column">
-    <section class="panel">
+    <section class="panel" id="two-factor" data-tab="security">
         <h2>二步验证</h2>
         <p class="muted">@(Model.CurrentUser.TwoFactorEnabled ? "已开启 TOTP 认证器验证，登录时需要验证码。" : "开启后，登录时将要求输入认证器中的一次性验证码。")</p>
         <a class="button ghost" asp-page="/TwoFactor">@(Model.CurrentUser.TwoFactorEnabled ? "管理二步验证" : "开启二步验证")</a>
     </section>
-    <section class="panel">
+    <section class="panel" id="password" data-tab="security">
         <h2>修改密码</h2>
         <form method="post" asp-page-handler="Password" class="stack" data-password-confirmation>
             <div asp-validation-summary="All" class="validation"></div>
@@ -31,7 +63,7 @@
     </section>
     @if (Model.CanChangeDisplayName)
     {
-        <section class="panel">
+        <section class="panel" id="display-name" data-tab="profile">
             <h2>修改用户名</h2>
             <form method="post" asp-page-handler="DisplayName" class="stack">
                 @if (Model.DisplayNameError is { } displayNameError)
@@ -43,11 +75,11 @@
             </form>
         </section>
     }
-    <section class="panel"><h2>已登录设备</h2>@if (Model.Sessions.Count == 0) { <p class="muted">暂无手表设备会话。</p> } else { <div class="list">@foreach (var session in Model.Sessions) { <article><div><strong>@session.DeviceName</strong><small>最近使用 @session.LastSeenAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</small></div><form method="post" asp-page-handler="Revoke"><input type="hidden" name="id" value="@session.Id" /><button class="danger ghost" type="submit">撤销</button></form></article> }</div> }</section>
+    <section class="panel" id="device-sessions" data-tab="sessions"><h2>已登录设备</h2>@if (Model.Sessions.Count == 0) { <p class="muted">暂无手表设备会话。</p> } else { <div class="list">@foreach (var session in Model.Sessions) { <article><div><strong>@session.DeviceName</strong><small>最近使用 @session.LastSeenAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</small></div><form method="post" asp-page-handler="Revoke"><input type="hidden" name="id" value="@session.Id" /><button class="danger ghost" type="submit">撤销</button></form></article> }</div> }</section>
 </div>
 @if (Model.ShowApiPanel)
 {
-    <section class="panel api-key-panel">
+    <section class="panel api-key-panel" id="api-keys" data-tab="api">
         <div class="panel-heading">
             <div>
                 <h2>API Key</h2>
@@ -137,4 +169,9 @@
             </div>
         }
     </section>
+}
+@if (MobileUi.IsMobile(Context))
+{
+    <a class="button ghost" href="/?view=auto">恢复自动选择手机或电脑界面</a>
+    <form method="post" asp-page="/Logout" data-mobile-logout><button type="submit" class="ghost danger">退出登录</button></form>
 }

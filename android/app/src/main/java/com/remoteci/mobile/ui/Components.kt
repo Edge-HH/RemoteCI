@@ -104,6 +104,17 @@ fun Pressable(
     ) { content() }
 }
 
+/** 列表分组标题：设置页、控制页按主题分组时放在每组卡片上方。 */
+@Composable
+fun ListSectionLabel(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        modifier = modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 8.dp),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+    )
+}
+
 @Composable
 fun ConnectedListCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(3.dp), content = content)

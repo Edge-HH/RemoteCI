@@ -25,16 +25,15 @@ class SwapLogicTest {
     )
 
     @Test
-    fun `swap tab is only visible with request permission`() {
-        assertTrue(HomeTab.SwapRequests in visibleHomeTabs(true, canManage = true))
-        assertFalse(HomeTab.SwapRequests in visibleHomeTabs(false, canManage = true))
-        assertEquals(HomeTab.entries.size - 1, visibleHomeTabs(false, canManage = true).size)
+    fun `swap requests segment is only visible with request permission`() {
+        assertTrue(ScheduleSegment.SwapRequests in visibleScheduleSegments(canRequestSwap = true))
+        assertFalse(ScheduleSegment.SwapRequests in visibleScheduleSegments(canRequestSwap = false))
+        assertEquals(listOf(ScheduleSegment.Mine, ScheduleSegment.Class), visibleScheduleSegments(canRequestSwap = false))
     }
 
     @Test
-    fun `management tab is hidden without any management item`() {
-        assertTrue(HomeTab.People in visibleHomeTabs(true, canManage = true))
-        assertFalse(HomeTab.People in visibleHomeTabs(true, canManage = false))
+    fun `bottom bar has four fixed tabs`() {
+        assertEquals(listOf(HomeTab.Today, HomeTab.Schedule, HomeTab.Control, HomeTab.Me), HomeTab.entries.toList())
     }
 
     @Test

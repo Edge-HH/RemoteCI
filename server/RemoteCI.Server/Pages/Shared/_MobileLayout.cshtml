@@ -11,7 +11,8 @@
     var classroom = classes.FirstOrDefault(x => x.Id == selected) ?? classes.FirstOrDefault();
     var defaults = current is null ? UserPermissions.None : await Db.AccountRoles.Where(x => x.Id == current.RoleDefinitionId).Select(x => x.DefaultPermissions).FirstOrDefaultAsync();
     var permissions = current is null ? UserPermissions.None : RolePermissions.Effective(current.Role, current.GrantedPermissions, defaults);
-    var primary = path is "/Mobile/Today" or "/Mobile/Schedule" or "/Mobile/MySchedule" or "/Mobile/SwapRequests" or "/Mobile/Control" or "/Mobile/Manage";
+    // 底栏四个主页面：今天、课表（含我的日程与换课申请）、控制、我的。
+    var primary = path is "/Mobile/Today" or "/Mobile/Schedule" or "/Mobile/MySchedule" or "/Mobile/SwapRequests" or "/Mobile/Control" or "/Mobile/Account";
     var title = ViewData["Title"]?.ToString() ?? "RemoteCI";
     var desktop = path == "/Mobile/Desktop" ? MobileUi.SafeDesktopPage(Context.Request.Query["page"]) : MobileUi.DesktopPath(path);
     if (!desktop.StartsWith('/') || desktop.StartsWith("//")) desktop = "/Index";
@@ -36,7 +37,8 @@
 <body class="mobile-app" data-mobile-page="@path" data-mobile-user="@current?.Id" data-mobile-class="@classroom?.Id" data-mobile-class-name="@classroom?.Name">
     <div class="mobile-frame">
         <header class="mobile-topbar">
-            <a class="mobile-icon" href="@(primary ? "/Mobile/Account" : "/Mobile/Today")" aria-label="@(primary ? "账号与设置" : "返回今天")"><i class="icon @(primary ? "icon-menu" : "icon-arrow-back")"></i></a>
+            @if (primary) { <span class="mobile-icon" aria-hidden="true"></span> }
+            else { <a class="mobile-icon" href="/Mobile/Account" aria-label="返回我的"><i class="icon icon-arrow-back"></i></a> }
             <strong>@title</strong>
             @if (current is not null)
             { <a class="mobile-icon notification-bell" href="/Mobile/Inbox" data-notification-bell data-unread-url="/Inbox?handler=Unread" aria-label="通知"><i class="icon icon-notifications"></i><span class="bell-badge" data-unread-badge hidden></span></a> }
@@ -60,12 +62,12 @@
         @if (current is not null && primary)
         {
             <nav class="mobile-bottom-nav" aria-label="主导航">
-                @foreach (var tab in new[] { ("今天", "icon-today", "/Mobile/Today"), ("课表", "icon-calendar-month", "/Mobile/Schedule"), ("换课", "icon-swap-horiz", "/Mobile/SwapRequests"), ("控制", "icon-tune", "/Mobile/Control"), ("管理", "icon-manage-accounts", "/Mobile/Manage") })
+                @foreach (var tab in new[] { ("今天", "icon-today", "/Mobile/Today"), ("课表", "icon-calendar-month", "/Mobile/Schedule"), ("控制", "icon-tune", "/Mobile/Control"), ("我的", "icon-manage-accounts", "/Mobile/Account") })
                 {
-                    if (tab.Item1 == "换课" && !permissions.HasFlag(UserPermissions.RequestScheduleSwap)) continue;
-                    if (tab.Item1 == "管理" && !permissions.HasFlag(UserPermissions.ManageUsers)) continue;
-                    var active = path == tab.Item3 || tab.Item1 == "课表" && path == "/Mobile/MySchedule";
-                    <a href="@tab.Item3" class="@(active ? "active" : "")" aria-current="@(active ? "page" : null)"><span><i class="icon @tab.Item2"></i>@if(tab.Item1 == "换课") { <b data-swap-badge hidden></b> }</span>@tab.Item1</a>
+                    var active = path == tab.Item3 || tab.Item1 == "课表" && path is "/Mobile/MySchedule" or "/Mobile/SwapRequests";
+                    // 换课申请并入课表页，待处理数挂在“课表”上。
+                    var swapBadge = tab.Item1 == "课表" && permissions.HasFlag(UserPermissions.RequestScheduleSwap);
+                    <a href="@tab.Item3" class="@(active ? "active" : "")" aria-current="@(active ? "page" : null)"><span><i class="icon @tab.Item2"></i>@if(swapBadge) { <b data-swap-badge hidden></b> }</span>@tab.Item1</a>
                 }
             </nav>
         }

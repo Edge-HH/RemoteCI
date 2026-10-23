@@ -52,7 +52,7 @@ import kotlinx.coroutines.launch
 /** 底栏“换课”：发起申请（可强制）、待我处理、我的申请。申请一律为临时换课，永久换课由班主任在课表页操作。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SwapRequestsScreen(snackbar: SnackbarHostState) {
+fun SwapRequestsScreen(snackbar: SnackbarHostState, showTopBar: Boolean = true) {
     var page by remember { mutableIntStateOf(0) }
     var catalog by remember { mutableStateOf<SwapCatalog?>(null) }
     var incoming by remember { mutableStateOf<List<SwapRequestView>>(emptyList()) }
@@ -91,7 +91,8 @@ fun SwapRequestsScreen(snackbar: SnackbarHostState) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        TopAppBar(title = { Text("换课", style = MaterialTheme.typography.titleLarge) })
+        // 嵌在课表页时由课表页提供顶栏与分段，这里只显示三个子页。
+        if (showTopBar) TopAppBar(title = { Text("换课", style = MaterialTheme.typography.titleLarge) })
         PrimaryTabRow(selectedTabIndex = page) {
             Tab(selected = page == 0, onClick = { page = 0 }, text = { Text("发起申请") })
             Tab(selected = page == 1, onClick = { page = 1 }, text = { Text(if (pending > 0) "待我处理 · $pending" else "待我处理") })

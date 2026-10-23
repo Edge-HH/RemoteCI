@@ -8,14 +8,22 @@ using RemoteCI.Shared;
 
 namespace RemoteCI.Server.Pages;
 
-/// <summary>系统管理员维护登录页外观：主题策略、背景图、背景不透明度与卡片位置。</summary>
+/// <summary>
+/// 系统设置的“登录与访问”tab：登录页外观、手机扫码登录地址（系统管理员），以及访客自动进入（人员管理权限）。
+/// </summary>
 [Authorize]
 public sealed class LoginSettingsModel(
     UserManager<AppUser> users,
-    LoginPageSettings settings) : WebPageModel(users)
+    LoginPageSettings settings,
+    MobileLoginSettings mobileLogin,
+    VisitorAccessSettings visitorAccess) : WebPageModel(users)
 {
     [BindProperty] public AppearanceInput Appearance { get; set; } = new();
     [BindProperty] public IFormFile? BackgroundFile { get; set; }
+    [BindProperty] public string? MobileServerUrl { get; set; }
+    [BindProperty] public bool AutoEnterVisitorPage { get; set; }
+
+    public bool IsAdmin => CurrentUser.Role == UserRole.Admin;
 
     public bool HasBackground { get; private set; }
     public DateTimeOffset? BackgroundUpdatedAt { get; private set; }
@@ -23,7 +31,7 @@ public sealed class LoginSettingsModel(
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
-        if (await RequireAdminAsync() is { } denied) return denied;
+        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
         await LoadAsync(ct);
         return Page();
     }
@@ -58,7 +66,7 @@ public sealed class LoginSettingsModel(
 
         await settings.SetAppearanceAsync(Appearance.Theme, Appearance.Opacity, Appearance.CardPosition, ct);
         TempData["Message"] = "登录页设置已保存。";
-        return RedirectToPage();
+        return RedirectToPage(null, null, "login-appearance");
     }
 
     public async Task<IActionResult> OnPostRemoveBackgroundAsync(CancellationToken ct)
@@ -66,18 +74,46 @@ public sealed class LoginSettingsModel(
         if (await RequireAdminAsync() is { } denied) return denied;
         await settings.SetBackgroundAsync(null, null, ct);
         TempData["Message"] = "已移除登录页背景图。";
-        return RedirectToPage();
+        return RedirectToPage(null, null, "login-appearance");
+    }
+
+    public async Task<IActionResult> OnPostSaveMobileLoginSettingsAsync(CancellationToken ct)
+    {
+        if (await RequireAdminAsync() is { } denied) return denied;
+        try
+        {
+            await mobileLogin.SetServerUrlAsync(MobileServerUrl, ct);
+            TempData["Message"] = string.IsNullOrWhiteSpace(MobileServerUrl)
+                ? "扫码登录二维码将使用当前访问地址"
+                : "扫码登录服务器地址已保存";
+        }
+        catch (ArgumentException ex) { TempData["Error"] = ex.Message; }
+        return RedirectToPage(null, null, "mobile-login");
+    }
+
+    public async Task<IActionResult> OnPostVisitorAccessAsync(CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
+        // 班级级“开放访客”开关在班级管理页逐班配置；这里只保留登录页自动进入的全局行为。
+        var autoEnter = await visitorAccess.SetAutoEnterAsync(AutoEnterVisitorPage, ct);
+        TempData["Message"] = autoEnter
+            ? "已开启自动进入访客页。"
+            : "已关闭自动进入访客页。";
+        return RedirectToPage(null, null, "visitor");
     }
 
     private async Task LoadAsync(CancellationToken ct = default)
     {
+        AutoEnterVisitorPage = await visitorAccess.GetAutoEnterAsync(ct);
+        if (!IsAdmin) return;
+        MobileServerUrl = await mobileLogin.GetServerUrlAsync(ct);
         var appearance = await settings.GetAppearanceAsync(ct);
         Appearance = new AppearanceInput { Theme = appearance.Theme, Opacity = appearance.Opacity, CardPosition = appearance.CardPosition };
         HasBackground = appearance.HasBackground;
         BackgroundUpdatedAt = appearance.BackgroundUpdatedAt;
     }
 
-    /// <summary>登录页设置属于系统级配置，只允许系统管理员访问。</summary>
+    /// <summary>登录页外观与扫码登录地址属于系统级配置，只允许系统管理员修改。</summary>
     private async Task<IActionResult?> RequireAdminAsync()
     {
         if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;

@@ -47,7 +47,7 @@ import androidx.compose.material.icons.rounded.DirectionsRun
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Functions
 import androidx.compose.material.icons.rounded.Help
-import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material.icons.rounded.Refresh
@@ -476,21 +476,20 @@ fun ClassPickerScreen(onPicked: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeShell(
-    tab: HomeTab,
+    home: Screen.Home,
     settings: WatchSettings,
     snackbar: SnackbarHostState,
-    onTab: (HomeTab) -> Unit,
+    onHome: (Screen.Home) -> Unit,
     onOpen: (Screen) -> Unit,
     onPersist: (WatchSettings) -> Unit,
+    onLoggedOut: () -> Unit,
 ) {
+    val tab = home.tab
+    val onTab: (HomeTab) -> Unit = { onHome(Screen.Home(it)) }
     val user by ConnectionManager.currentUser.collectAsState()
     val pendingSwaps by ConnectionManager.pendingSwapCount.collectAsState()
-    val tabs = visibleHomeTabs(
-        canRequestSwap = user?.has(com.remoteci.mobile.data.Protocol.PERMISSION_REQUEST_SWAP) == true,
-        canManage = visibleManagementItems(user).isNotEmpty(),
-    )
-    // 失去换课或管理权限后停留在对应页时退回“今天”。
-    LaunchedEffect(tab, tabs, user) { if (user != null && tab !in tabs) onTab(HomeTab.Today) }
+    // 换课申请在“课表”里，待处理数挂在“课表”图标上。
+    val canRequestSwap = user?.has(com.remoteci.mobile.data.Protocol.PERMISSION_REQUEST_SWAP) == true
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
@@ -499,15 +498,14 @@ fun HomeShell(
                 listOf(
                     Item(HomeTab.Today, "今天", Icons.Rounded.Today),
                     Item(HomeTab.Schedule, "课表", Icons.Rounded.CalendarMonth),
-                    Item(HomeTab.SwapRequests, "换课", Icons.Rounded.SwapHoriz),
                     Item(HomeTab.Control, "控制", Icons.Rounded.Tune),
-                    Item(HomeTab.People, "管理", Icons.Rounded.AdminPanelSettings),
-                ).filter { it.tab in tabs }.forEach { item ->
+                    Item(HomeTab.Me, "我的", Icons.Rounded.AccountCircle),
+                ).forEach { item ->
                     NavigationBarItem(
                         selected = tab == item.tab,
                         onClick = { onTab(item.tab) },
                         icon = {
-                            if (item.tab == HomeTab.SwapRequests && pendingSwaps > 0) {
+                            if (item.tab == HomeTab.Schedule && canRequestSwap && pendingSwaps > 0) {
                                 BadgedBox(badge = { Badge { Text(pendingSwaps.toString()) } }) {
                                     Icon(item.icon, contentDescription = item.label)
                                 }
@@ -523,11 +521,16 @@ fun HomeShell(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (tab) {
-                HomeTab.Today -> TodayScreen(snackbar, onOpen, onTab)
-                HomeTab.Schedule -> ScheduleScreen(embedded = true, snackbar = snackbar, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
-                HomeTab.SwapRequests -> SwapRequestsScreen(snackbar = snackbar)
+                HomeTab.Today -> TodayScreen(snackbar, onOpen, onTab, onSwapRequests = { onHome(Screen.Home(HomeTab.Schedule, openSwapRequests = true)) })
+                HomeTab.Schedule -> ScheduleScreen(
+                    embedded = true,
+                    snackbar = snackbar,
+                    onOpen = onOpen,
+                    onBack = { onTab(HomeTab.Today) },
+                    openSwapRequests = home.openSwapRequests,
+                )
                 HomeTab.Control -> ControlListScreen(embedded = true, snackbar = snackbar, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
-                HomeTab.People -> PeopleScreen(embedded = true, snackbar = snackbar, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
+                HomeTab.Me -> AccountScreen(settings, onOpen, onPersist, onLoggedOut)
             }
         }
     }
@@ -535,7 +538,7 @@ fun HomeShell(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (HomeTab) -> Unit) {
+fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (HomeTab) -> Unit, onSwapRequests: () -> Unit) {
     val snapshot by ConnectionManager.snapshot.collectAsState()
     val schedule by ConnectionManager.schedule.collectAsState()
     val user by ConnectionManager.currentUser.collectAsState()
@@ -579,7 +582,6 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         TopAppBar(
             title = { Text("RemoteCI", style = MaterialTheme.typography.titleLarge) },
-            navigationIcon = { IconButton({ onOpen(Screen.Account) }) { Icon(Icons.Rounded.Menu, contentDescription = "菜单") } },
             actions = {
                 // 扫描 WebUI 登录页的“手机扫码”二维码，确认后电脑浏览器以当前账号登录。
                 WebLoginScanAction(snackbar)
@@ -670,12 +672,19 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
                 count = 2,
             )
         }
-        ConnectedButtons(
-            firstLabel = "课表",
-            secondLabel = "控制",
-            onFirst = { onTab(HomeTab.Schedule) },
-            onSecond = { onTab(HomeTab.Control) },
-        )
+        // 底栏已有课表与控制，这里放两个最常用的直达操作；没有对应权限时不显示。
+        val canSwap = user?.has(Protocol.PERMISSION_REQUEST_SWAP) == true
+        val canNotify = ConnectionManager.hasClassPermission(Protocol.PERMISSION_SEND_NOTIFICATIONS)
+        when {
+            canSwap && canNotify -> ConnectedButtons(
+                firstLabel = "换课申请",
+                secondLabel = "发送通知",
+                onFirst = onSwapRequests,
+                onSecond = { onOpen(Screen.Notify) },
+            )
+            canSwap -> FilledTonalButton(onClick = onSwapRequests, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("换课申请") }
+            canNotify -> FilledTonalButton(onClick = { onOpen(Screen.Notify) }, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("发送通知") }
+        }
         Spacer(Modifier.height(16.dp))
     }
 }
@@ -687,6 +696,7 @@ fun ScheduleScreen(
     snackbar: SnackbarHostState,
     onOpen: (Screen) -> Unit,
     onBack: (() -> Unit)?,
+    openSwapRequests: Boolean = false,
 ) {
     val bundle by ConnectionManager.schedule.collectAsState()
     val snapshot by ConnectionManager.snapshot.collectAsState()
@@ -712,6 +722,11 @@ fun ScheduleScreen(
     var mineChoice by remember { mutableStateOf<Boolean?>(null) }
     // 委派属性无法智能转换，先取局部值再判断，避免 user 为 null 时误读。
     val mineMode = user?.let { mineChoice ?: it.isTeacher } == true
+    // 换课申请是课表页的第三个分段；换课通知与今天页快捷入口直接打开它。
+    val segments = visibleScheduleSegments(user?.has(Protocol.PERMISSION_REQUEST_SWAP) == true)
+    var swapChoice by remember(openSwapRequests) { mutableStateOf(openSwapRequests) }
+    val swapMode = swapChoice && ScheduleSegment.SwapRequests in segments
+    val pendingSwaps by ConnectionManager.pendingSwapCount.collectAsState()
     var mySchedule by remember(user?.id) { mutableStateOf<MyScheduleResponse?>(null) }
     var myScheduleStatus by remember(user?.id) { mutableStateOf<String?>(null) }
     var myScheduleRefresh by remember { mutableIntStateOf(0) }
@@ -751,7 +766,7 @@ fun ScheduleScreen(
                 }
             },
             actions = {
-                IconButton(
+                if (!swapMode) IconButton(
                     onClick = { if (mineMode) myScheduleRefresh++ else ConnectionManager.requestSchedulePull() },
                     enabled = mineMode || (canPull && schedulePullActionEnabled(pull)),
                 ) {
@@ -764,12 +779,21 @@ fun ScheduleScreen(
                 Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                FilterChip(selected = mineMode, onClick = { mineChoice = true }, label = { Text("我的日程") })
+                FilterChip(selected = !swapMode && mineMode, onClick = { mineChoice = true; swapChoice = false }, label = { Text("我的日程") })
                 // 班级芯片显示真实班名；已在班级视图时再点一次展开班级菜单，直接换班。
-                ClassSwitcherChip(selected = !mineMode, onSelect = { mineChoice = false })
+                ClassSwitcherChip(selected = !swapMode && !mineMode, onSelect = { mineChoice = false; swapChoice = false })
+                if (ScheduleSegment.SwapRequests in segments) {
+                    FilterChip(
+                        selected = swapMode,
+                        onClick = { swapChoice = true },
+                        label = { Text(if (pendingSwaps > 0) "换课申请 · $pendingSwaps" else "换课申请") },
+                    )
+                }
             }
         }
-        if (mineMode) {
+        if (swapMode) {
+            SwapRequestsScreen(snackbar = snackbar, showTopBar = false)
+        } else if (mineMode) {
             Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = { editingCourse = null; showCourseEditor = true }) { Text("添加自定义课程") }
                 // 单双周课程本周可能不出现在日程里，从列表进入修改。

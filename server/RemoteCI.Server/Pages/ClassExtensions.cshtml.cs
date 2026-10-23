@@ -11,7 +11,7 @@ namespace RemoteCI.Server.Pages;
 /// <summary>
 /// 班级区的“扩展插件”页：只查看并修改当前班级的插件设置，不提供应用范围选择。
 /// 系统管理员可管理本班全部插件；班主任只能管理系统管理员开放给班级自行管理的插件。
-/// 跨班级、按设备统一下发在管理区的“插件批量设置”中进行。
+/// 跨班级、按设备统一下发在“设备与控制”分组的“插件批量下发”中进行。
 /// </summary>
 [Authorize]
 public sealed class ClassExtensionsModel(

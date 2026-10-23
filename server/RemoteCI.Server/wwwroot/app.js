@@ -471,14 +471,14 @@ if (classBatchForm) {
 
 // 菜单只保留一个展开项，避免树节点和行操作菜单互相遮挡。
 document.addEventListener("click", event => {
-    document.querySelectorAll(".tree-node-menu[open], .row-menu[open], .class-menu[open]").forEach(menu => {
+    document.querySelectorAll(".tree-node-menu[open], .row-menu[open], .class-menu[open], .account-menu[open]").forEach(menu => {
         if (!menu.contains(event.target)) menu.removeAttribute("open");
     });
 });
 
 document.addEventListener("keydown", event => {
     if (event.key !== "Escape") return;
-    const openMenu = document.querySelector(".class-menu[open]");
+    const openMenu = document.querySelector(".class-menu[open], .account-menu[open]");
     if (!openMenu) return;
     openMenu.removeAttribute("open");
     openMenu.querySelector("summary")?.focus();
@@ -498,3 +498,63 @@ function syncRollingHint(scope) {
     const scope = event.target.closest?.("[data-rolling-scope]");
     if (scope) syncRollingHint(scope);
 }));
+
+// 侧边栏分组折叠：状态按分组记在本地；含当前页的分组不折叠，避免当前位置被藏起来。
+(() => {
+    const key = "remoteci-nav-collapsed";
+    let collapsed = [];
+    try { collapsed = JSON.parse(localStorage.getItem(key) || "[]"); } catch { collapsed = []; }
+    document.querySelectorAll("[data-nav-group]").forEach(group => {
+        const toggle = group.querySelector("[data-nav-group-toggle]");
+        const apply = value => {
+            group.classList.toggle("collapsed", value);
+            toggle?.setAttribute("aria-expanded", value ? "false" : "true");
+        };
+        apply(collapsed.includes(group.dataset.navGroup) && !group.querySelector(".nav-link.active"));
+        toggle?.addEventListener("click", () => {
+            const next = !group.classList.contains("collapsed");
+            apply(next);
+            collapsed = collapsed.filter(name => name !== group.dataset.navGroup);
+            if (next) collapsed.push(group.dataset.navGroup);
+            try { localStorage.setItem(key, JSON.stringify(collapsed)); } catch { }
+        });
+    });
+})();
+
+// 页面内 tab：[data-page-tabs] 中带 data-tab-link 的链接切换同页 [data-tab] 区块，其他链接是跨页 tab。
+// 打开顺序：地址栏锚点（tab 名或区块内元素 id）> 本页上次停留的 tab > 第一个 tab；表单提交后重定向回来仍停在原 tab。
+(() => {
+    const nav = document.querySelector("[data-page-tabs]");
+    if (!nav) return;
+    const links = [...nav.querySelectorAll("[data-tab-link]")];
+    if (links.length === 0) return;
+    const storeKey = `remoteci-tab:${location.pathname.toLowerCase()}`;
+    const names = links.map(link => link.dataset.tabLink);
+    const show = (name, remember) => {
+        links.forEach(link => {
+            const active = link.dataset.tabLink === name;
+            link.classList.toggle("active", active);
+            if (active) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
+        });
+        document.querySelectorAll("[data-tab]").forEach(section => { section.hidden = section.dataset.tab !== name; });
+        if (remember) { try { sessionStorage.setItem(storeKey, name); } catch { } }
+    };
+    const fromHash = () => {
+        const hash = decodeURIComponent(location.hash.slice(1));
+        if (!hash) return null;
+        if (names.includes(hash)) return hash;
+        const owner = document.getElementById(hash)?.closest("[data-tab]");
+        return owner && names.includes(owner.dataset.tab) ? owner.dataset.tab : null;
+    };
+    let stored = null;
+    try { stored = sessionStorage.getItem(storeKey); } catch { }
+    const initial = fromHash() ?? (names.includes(stored) ? stored : names[0]);
+    show(initial, true);
+    if (location.hash && !names.includes(decodeURIComponent(location.hash.slice(1)))) document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView();
+    links.forEach(link => link.addEventListener("click", event => {
+        event.preventDefault();
+        show(link.dataset.tabLink, true);
+        history.replaceState(null, "", `#${link.dataset.tabLink}`);
+    }));
+    window.addEventListener("hashchange", () => { const name = fromHash(); if (name) show(name, true); });
+})();
