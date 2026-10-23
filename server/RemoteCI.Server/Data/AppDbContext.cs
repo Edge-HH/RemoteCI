@@ -177,8 +177,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             entity.Property(x => x.Subject).HasMaxLength(100);
             entity.Property(x => x.Location).HasMaxLength(200);
-            entity.HasIndex(x => new { x.UserId, x.StartsAtUnixMs });
-            entity.HasIndex(x => x.EndsAtUnixMs);
+            entity.HasIndex(x => x.UserId);
             entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 

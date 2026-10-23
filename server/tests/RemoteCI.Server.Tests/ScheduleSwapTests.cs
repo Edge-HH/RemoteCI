@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -196,6 +197,53 @@ public sealed class ScheduleSwapTests : IDisposable
         var zhaoForce = Exchange(classId, _today, 2, classId, _today, 1);
         zhaoForce.Force = true;
         Assert.Equal(SwapRequestStatus.Forced, (await PostAsync<SwapRequestView>(await TokenAsync("zhao"), "/api/swap-requests", zhaoForce)).Status);
+    }
+
+    [Fact]
+    public async Task ForcedSwap_CountsAsPendingUntilSeen_ThenStaysRevocable()
+    {
+        var classId = await SeedClassAsync("九班", ("数学", "王老师"), ("英语", "李老师"), ("物理", "李老师"));
+        await CreateTeacherAsync("wang", "王老师");
+        var liId = await CreateTeacherAsync("li", "李老师");
+        await SetTeacherRolePermissionsAsync(add: UserPermissions.ForceScheduleSwap);
+        var wangToken = await TokenAsync("wang");
+        var liToken = await TokenAsync("li");
+
+        var forcedRequest = Exchange(classId, _today, 0, classId, _today, 1);
+        forcedRequest.Force = true;
+        var first = await PostAsync<SwapRequestView>(wangToken, "/api/swap-requests", forcedRequest);
+        var secondRequest = Exchange(classId, _tomorrow, 0, classId, _tomorrow, 2);
+        secondRequest.Force = true;
+        var second = await PostAsync<SwapRequestView>(wangToken, "/api/swap-requests", secondRequest);
+
+        var incoming = await GetAsync<List<SwapRequestView>>(liToken, "/api/swap-requests?box=incoming");
+        Assert.All(incoming, x => Assert.True(x.CanRevoke && x.NeedsAction));
+        Assert.Equal(2, await PendingCountAsync());
+
+        // 查看详情：本次仍是“新”，之后不再计入待处理，但仍可撤回。
+        Assert.True((await GetAsync<SwapRequestView>(liToken, $"/api/swap-requests/{first.Id}")).NeedsAction);
+        var seen = await GetAsync<SwapRequestView>(liToken, $"/api/swap-requests/{first.Id}");
+        Assert.True(seen.CanRevoke);
+        Assert.False(seen.NeedsAction);
+        Assert.Equal(1, await PendingCountAsync());
+
+        // 打开“待我处理”列表后批量标记。
+        var response = await SendAsync(liToken, HttpMethod.Post, "/api/swap-requests/seen", new MarkSwapsSeenRequest { Ids = [second.Id] });
+        response.EnsureSuccessStatusCode();
+        Assert.Equal(0, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("pending").GetInt32());
+        Assert.All(await GetAsync<List<SwapRequestView>>(liToken, "/api/swap-requests?box=incoming"),
+            x => Assert.False(x.NeedsAction));
+        Assert.DoesNotContain(await GetAsync<List<UserNotificationView>>(liToken, "/api/me/notifications"),
+            x => x.Kind == UserNotificationKinds.SwapForced && x.ReadAt is null);
+
+        var revoked = await PostAsync<SwapRequestView>(liToken, $"/api/swap-requests/{first.Id}/revoke", new { });
+        Assert.Equal(SwapRequestStatus.Revoked, revoked.Status);
+
+        async Task<int> PendingCountAsync()
+        {
+            using var scope = _factory.Services.CreateScope();
+            return await scope.ServiceProvider.GetRequiredService<ScheduleSwapService>().CountPendingForAsync(liId);
+        }
     }
 
     [Fact]

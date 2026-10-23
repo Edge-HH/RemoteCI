@@ -69,6 +69,9 @@ public class Plugin : PluginBase
             sp.GetRequiredService<IHolidayHostOperations>(),
             new HolidayStateFile(Path.Combine(PluginConfigFolder, "HolidayState.json")),
             sp.GetRequiredService<ILogger<HolidayScheduleApplier>>()));
+        // 学期：把服务端统一的学期开始日期写入 ClassIsland 单周起始日期。
+        services.AddSingleton<ISemesterHostOperations, ClassIslandSemesterHost>();
+        services.AddSingleton<SemesterApplier>();
         // 应用守护：按服务端策略部署 ClassIsland 之外的守护进程（退出自启、意外退出重启、防删除）。
         services.AddSingleton(new AppGuardStore(Path.Combine(PluginConfigFolder, "AppGuardPolicy.json")));
         services.AddSingleton<IAppGuardHost, ClassIslandAppGuardHost>();

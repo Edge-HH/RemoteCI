@@ -29,6 +29,8 @@ public static class Protocol
     public const string MessageTypeUserNotify = "user_notify";
     /// <summary>服务端发给插件的调休日历（放假日与调休上学日），插件据此开关课表、建立调休临时课表。</summary>
     public const string MessageTypeHolidayCalendar = "holiday_calendar";
+    /// <summary>服务端发给插件的学期设置（第 1 教学周的周一），插件写入 ClassIsland 单周起始日期，使多周轮换全校一致。</summary>
+    public const string MessageTypeSemester = "semester";
     /// <summary>插件向服务端报告大文件分发的下载进度与最终结果（file.transfer 能力）。</summary>
     public const string MessageTypeFileTransferProgress = "file_transfer_progress";
     /// <summary>服务端发给插件的应用守护生效策略（全局默认 + 单设备覆盖），插件据此部署或注销守护进程。</summary>
@@ -276,6 +278,8 @@ public static class RemoteCiCapabilities
     public const string ProfileTempLayer = "profile.temp-layer";
     /// <summary>接收调休日历并在放假日关闭课表、调休上学日建立临时课表。</summary>
     public const string HolidayCalendar = "schedule.holiday-calendar";
+    /// <summary>接收学期设置并写入 ClassIsland 的单周起始日期（清除本机轮换偏移）。</summary>
+    public const string Semester = "schedule.semester";
     /// <summary>接收应用守护策略：退出自启、意外退出重启、防删除备份与恢复。</summary>
     public const string AppGuard = "host.app-guard";
 
@@ -300,7 +304,7 @@ public static class RemoteCiCapabilities
         [.. Baseline, VoiceMessageSend, SoftwareInventory, SoftwareUpgradePlugins, SoftwareUpgradeClassIsland,
             PluginInstall, PluginUninstall, PluginEnable, PluginManagementPolicy, ProfileDistribute, TimeLayoutUpdate, ManagementJoin,
             ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings, ProfileApply, HolidayCalendar,
-            ProfileRead, ProfileTempLayer, FileTransfer, AppGuard];
+            ProfileRead, ProfileTempLayer, Semester, FileTransfer, AppGuard];
 
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
@@ -336,6 +340,7 @@ public static class RemoteCiCapabilities
         ProfileRead => "读取设备档案",
         ProfileTempLayer => "下发临时层",
         HolidayCalendar => "调休自动适配",
+        Semester => "同步学期开始日期",
         AppGuard => "应用守护",
         _ => "未知能力",
     };

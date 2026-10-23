@@ -719,9 +719,14 @@ fun ScheduleScreen(
     var personalCourses by remember(user?.id) { mutableStateOf(emptyList<com.remoteci.mobile.data.PersonalCourseView>()) }
     var editingCourse by remember(user?.id) { mutableStateOf<com.remoteci.mobile.data.PersonalCourseView?>(null) }
     var showCourseEditor by remember(user?.id) { mutableStateOf(false) }
+    var showCourseList by remember(user?.id) { mutableStateOf(false) }
     if (showCourseEditor) PersonalCourseEditor(editingCourse,
         onDismiss = { showCourseEditor = false },
         onSaved = { showCourseEditor = false; myScheduleRefresh++ })
+    if (showCourseList) PersonalCourseListDialog(personalCourses,
+        onDismiss = { showCourseList = false },
+        onAdd = { showCourseList = false; editingCourse = null; showCourseEditor = true },
+        onEdit = { showCourseList = false; editingCourse = it; showCourseEditor = true })
     LaunchedEffect(user?.id, mineMode, myScheduleRefresh) {
         if (mineMode && user != null) {
             mySchedule = null
@@ -765,8 +770,10 @@ fun ScheduleScreen(
             }
         }
         if (mineMode) {
-            TextButton(onClick = { editingCourse = null; showCourseEditor = true }, modifier = Modifier.padding(horizontal = 16.dp)) {
-                Text("添加自定义课程")
+            Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { editingCourse = null; showCourseEditor = true }) { Text("添加自定义课程") }
+                // 单双周课程本周可能不出现在日程里，从列表进入修改。
+                if (personalCourses.isNotEmpty()) TextButton(onClick = { showCourseList = true }) { Text("全部自定义课程（${personalCourses.size}）") }
             }
             CalendarSyncRow(snackbar, myScheduleRefresh, CalendarFeed.Personal)
             when {

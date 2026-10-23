@@ -477,6 +477,16 @@ textarea { resize: vertical; }
 .my-schedule-day .panel-heading { margin-bottom: 16px; }
 .my-schedule-day .panel-heading h2 { margin: 0; }
 .my-schedule-classes { display: grid; gap: 12px; }
+/* 自定义课程：按星期与时刻编辑，桌面与手机网页共用。 */
+.weekday-picker { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.weekday-picker legend { width: 100%; margin-bottom: 6px; padding: 0; color: var(--muted); font-size: 12px; font-weight: 650; }
+.weekday-picker label { display: inline-flex; position: relative; }
+.weekday-picker input { position: absolute; width: 1px; height: 1px; min-height: 0; opacity: 0; }
+.weekday-picker span { display: inline-flex; min-width: 52px; min-height: 40px; align-items: center; justify-content: center; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 20px; background: var(--surface); color: var(--text); font-size: 14px; cursor: pointer; transition: background .18s ease, border-color .18s ease, color .18s ease; }
+.weekday-picker input:checked + span { border-color: var(--accent); background: var(--accent); color: #fff; }
+.weekday-picker input:focus-visible + span { outline: 3px solid rgba(67,131,238,.3); outline-offset: 2px; }
+.course-time-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.course-week-hint, [data-personal-course-form] .notice { grid-column: 1 / -1; margin: 0; }
 .my-schedule-class { padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); }
 .my-schedule-class h3 { margin: 0 0 10px; font-size: 15px; }
 .my-schedule-courses { display: grid; gap: 8px; }

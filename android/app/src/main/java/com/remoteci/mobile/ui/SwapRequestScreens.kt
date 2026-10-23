@@ -72,6 +72,13 @@ fun SwapRequestsScreen(snackbar: SnackbarHostState) {
         ConnectionManager.refreshSwapInbox()
         loading = false
     }
+    // 强制换课看过即处理：打开“待我处理”时上报，角标随之减少；本次列表仍高亮，方便看到是哪条。
+    LaunchedEffect(page, incoming) {
+        val unseen = incoming.filter { it.canRevoke && it.actionRequired }.map { it.id }
+        if (page != 1 || unseen.isEmpty()) return@LaunchedEffect
+        runCatching { AdminApi.markSwapsSeen(unseen) }
+        ConnectionManager.refreshSwapInbox()
+    }
     // 收到新的个人通知（对方提交、通过或撤回）时刷新列表。
     LaunchedEffect(Unit) { ConnectionManager.userNotifications.collect { reload++ } }
 
@@ -150,7 +157,7 @@ private fun SwapCard(item: SwapRequestView, actions: @Composable () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = if (item.canDecide || item.canRevoke) MaterialTheme.colorScheme.secondaryContainer
+            containerColor = if (item.actionRequired) MaterialTheme.colorScheme.secondaryContainer
             else MaterialTheme.colorScheme.surfaceContainer,
         ),
     ) {

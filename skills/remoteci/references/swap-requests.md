@@ -59,6 +59,7 @@
 - `source` / `target`：申请时的课位快照，含 `className`、`label`、`subject`、`teacher`。
 - 理由与审批：`reason`、`approverNames`、`decisionNote`。
 - 当前账号能做的操作：`canDecide`（通过/拒绝）、`canRevoke`（撤回强制换课）、`canCancel`（撤销自己的申请）。
+- `needsAction`：是否计入“待我处理”。可审批的申请，或还没看过的强制换课为 `true`；统计待处理数时按它计数。
 
 ## 强制换课
 
@@ -67,12 +68,14 @@
 - 强制换课立即生效，`status` 为 `6`，并通知对方老师和相关班主任。
 - 对方老师可以撤回。撤回后课表恢复，申请人当天不能再强制换走这节课，返回 `409 SWAP_FORCE_LOCKED`。这时只能提交普通申请。
 - 这个锁只针对“这位申请人 + 这一天 + 这节课”，不影响其他课、其他老师，也不影响下一周的同一节课。
+- 对方老师看过即视为已处理：打开“待我处理”、查看详情或点开通知后，这条强制换课不再计入待处理数（`needsAction` 变为 `false`），但仍可撤回。
 
 ## 查看与处理
 
 - `GET /api/swap-requests?box=incoming`：发给我的（待我审批，或被强制换走、可撤回的）。
 - `GET /api/swap-requests?box=outgoing`：我发起的。`box=all` 返回两者；可以加 `&status=1` 过滤。
-- `GET /api/swap-requests/{id}`：单条详情。
+- `GET /api/swap-requests/{id}`：单条详情。查看强制换课详情会自动标记为已看过。
+- `POST /api/swap-requests/seen`，body 为 `{"ids":["…"]}`：向用户展示了强制换课后调用，标记为已看过，返回 `{"pending":剩余待处理数}`。
 - `POST /api/swap-requests/{id}/approve`，body 为 `{"note":"可选备注"}`：通过。服务端立刻按最新课表复核并下发临时换课，然后通知申请人和相关班主任。
 - `POST /api/swap-requests/{id}/reject`，body 同上：拒绝，并通知申请人。
 - `POST /api/swap-requests/{id}/cancel`：申请人撤销还在待审批的申请。

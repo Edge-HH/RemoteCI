@@ -144,6 +144,19 @@ public sealed class ScheduleSwapService(
         return (await ToViewsAsync([row], actor, ct))[0];
     }
 
+    /// <summary>
+    /// 被强制换课的老师看过即视为已处理：把对应的强制换课通知标记已读，不再计入“待我处理”。
+    /// ids 为空时标记该用户全部强制换课通知。
+    /// </summary>
+    public Task MarkForcedSeenAsync(Guid userId, IReadOnlyCollection<Guid>? ids, CancellationToken ct = default)
+    {
+        var query = db.UserNotifications.Where(x =>
+            x.UserId == userId && x.Kind == UserNotificationKinds.SwapForced && x.ReadAt == null && x.SwapRequestId != null);
+        if (ids is not null) query = query.Where(x => ids.Contains(x.SwapRequestId!.Value));
+        var now = DateTimeOffset.UtcNow;
+        return query.ExecuteUpdateAsync(setters => setters.SetProperty(x => x.ReadAt, now), ct);
+    }
+
     /// <summary>按短编号（Id 前 8 位，聊天机器人输入用）查找与当前用户相关的申请。</summary>
     public async Task<Guid?> ResolveShortIdAsync(Guid userId, string shortId, CancellationToken ct = default)
     {
@@ -155,11 +168,14 @@ public sealed class ScheduleSwapService(
         return matched.Count == 1 ? matched[0].Id : null;
     }
 
+    /// <summary>“待我处理”数：待我审批的申请 + 还没看过的强制换课（与 SwapRequestView.NeedsAction 一致）。</summary>
     public Task<int> CountPendingForAsync(Guid userId, CancellationToken ct = default)
     {
         var userKey = userId.ToString();
-        return db.ScheduleSwapRequests.CountAsync(x =>
-            x.Status == SwapRequestStatus.Pending && x.ApproverUserIdsJson.Contains(userKey), ct);
+        return db.ScheduleSwapRequests.CountAsync(x => x.ApproverUserIdsJson.Contains(userKey) &&
+            (x.Status == SwapRequestStatus.Pending ||
+             x.Status == SwapRequestStatus.Forced && db.UserNotifications.Any(n =>
+                 n.UserId == userId && n.SwapRequestId == x.Id && n.Kind == UserNotificationKinds.SwapForced && n.ReadAt == null)), ct);
     }
 
     // ---------- 申请 ----------
@@ -727,10 +743,17 @@ public sealed class ScheduleSwapService(
         var classIds = rows.SelectMany(x => new[] { x.TargetClassId, x.SourceClassId ?? x.TargetClassId }).Distinct().ToList();
         var classNames = await db.Classrooms.AsNoTracking().Where(x => classIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+        var forcedIds = rows.Where(x => x.Status == SwapRequestStatus.Forced).Select(x => x.Id).ToList();
+        var unseenForced = forcedIds.Count == 0 ? [] : (await db.UserNotifications.AsNoTracking()
+            .Where(x => x.UserId == actor.User.Id && x.Kind == UserNotificationKinds.SwapForced && x.ReadAt == null &&
+                x.SwapRequestId != null && forcedIds.Contains(x.SwapRequestId.Value))
+            .Select(x => x.SwapRequestId!.Value).ToListAsync(ct)).ToHashSet();
         return rows.Select(row =>
         {
             var approvers = Approvers(row);
             var isApprover = approvers.Contains(actor.User.Id);
+            var canDecide = isApprover && row.Status == SwapRequestStatus.Pending;
+            var canRevoke = isApprover && row.Status == SwapRequestStatus.Forced;
             return new SwapRequestView
             {
                 Id = row.Id,
@@ -751,8 +774,9 @@ public sealed class ScheduleSwapService(
                 DecisionNote = row.DecisionNote,
                 CreatedAt = row.CreatedAt,
                 DecidedAt = row.DecidedAt,
-                CanDecide = isApprover && row.Status == SwapRequestStatus.Pending,
-                CanRevoke = isApprover && row.Status == SwapRequestStatus.Forced,
+                CanDecide = canDecide,
+                CanRevoke = canRevoke,
+                NeedsAction = canDecide || canRevoke && unseenForced.Contains(row.Id),
                 CanCancel = row.RequesterUserId == actor.User.Id && row.Status == SwapRequestStatus.Pending,
             };
         }).ToList();

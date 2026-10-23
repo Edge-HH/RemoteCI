@@ -17,7 +17,8 @@ data class WatchSettings(
     val selectedClassId: String = "",
     /** 老师与班主任上课时自动切换到正在任教的班级；默认关闭。 */
     val autoFollowTeachingClass: Boolean = false,
-    val themeId: String = "lavender",
+    /** 默认动态取色；Android 12 以下回退到首个预设配色。 */
+    val themeId: String = "dynamic",
     val updateChannel: UpdateChannel = UpdateChannel.STABLE,
     val forceUpdateEnabled: Boolean = false,
     /** 启动时自动检查 App 更新并弹窗提示；默认开启。 */
@@ -51,7 +52,7 @@ class SettingsStore(context: Context) {
         lanClassId = prefs.getString(KEY_LAN_CLASS_ID, "") ?: "",
         selectedClassId = prefs.getString(KEY_SELECTED_CLASS_ID, "") ?: "",
         autoFollowTeachingClass = prefs.getBoolean(KEY_AUTO_FOLLOW_TEACHING_CLASS, false),
-        themeId = prefs.getString(KEY_THEME_ID, "lavender") ?: "lavender",
+        themeId = prefs.getString(KEY_THEME_ID, "dynamic") ?: "dynamic",
         updateChannel = runCatching {
             UpdateChannel.valueOf(prefs.getString(KEY_UPDATE_CHANNEL, UpdateChannel.STABLE.name)!!)
         }.getOrDefault(UpdateChannel.STABLE),

@@ -47,6 +47,9 @@ public sealed class CloudClient : IDisposable, IFileTransferChannel
     /// <summary>收到服务端下发的调休日历时触发（在接收线程上，订阅方自行切换到 UI 线程）。</summary>
     public event Action<HolidayCalendar>? HolidayCalendarReceived;
 
+    /// <summary>收到服务端下发的学期设置时触发（在接收线程上）。</summary>
+    public event Action<SemesterSync>? SemesterReceived;
+
     /// <summary>收到服务端下发的应用守护策略时触发（在接收线程上）。</summary>
     public event Action<AppGuardPolicy>? AppGuardPolicyReceived;
 
@@ -383,6 +386,12 @@ public sealed class CloudClient : IDisposable, IFileTransferChannel
         if (HolidayCalendarMessage.TryRead(envelope, out var holidayCalendar))
         {
             HolidayCalendarReceived?.Invoke(holidayCalendar);
+            return;
+        }
+
+        if (SemesterMessage.TryRead(envelope, out var semester))
+        {
+            SemesterReceived?.Invoke(semester);
             return;
         }
 

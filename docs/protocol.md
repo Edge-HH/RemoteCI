@@ -73,6 +73,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | `connection_bootstrap` | 插件 → 手表 | 用户选中局域网插件后，插件返回的云端连接信息 |
 | `user_notify` | 服务端 → 手机/手表 | 面向当前账号的个人通知 `UserNotificationView {id, kind, title, body, swapRequestId?, createdAt, readAt?}`，投递给该账号全部在线连接，不按班级过滤；旧客户端忽略未知类型 |
 | `holiday_calendar` | 服务端 → 插件 | 调休日历 `HolidayCalendar {enabled, generatedAt, days[]}`，见下文“调休”；只发给声明了 `schedule.holiday-calendar` 能力的插件 |
+| `semester` | 服务端 → 插件 | 学期设置 `SemesterSync {weekOneMonday}`，见下文“学期”；只发给声明了 `schedule.semester` 能力的插件 |
 | `file_transfer_progress` | 插件 → 服务端 | 中转文件的下载进度与最终结果，见下文“文件分发（中转方式）” |
 | `app_guard_policy` | 服务端 → 插件 | 该设备的应用守护生效策略 `AppGuardPolicy`，见下文“应用守护”；只发给声明了 `host.app-guard` 能力的插件 |
 | `app_guard_event` | 插件 → 服务端 | 守护进程记录的事件 `AppGuardEventBatch {events:[{kind, atUnixMs, detail?}]}`，未分配班级的设备也会上报 |
@@ -97,7 +98,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 ## 能力协商
 
-V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings`、`schedule.holiday-calendar`、`profile.read`、`profile.temp-layer`、`file.transfer` 和 `host.app-guard` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
+V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings`、`schedule.holiday-calendar`、`profile.read`、`profile.temp-layer`、`schedule.semester`、`file.transfer` 和 `host.app-guard` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
 
 WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手机的有效能力是“本地 ∩ 服务端 ∩ 当前班级主插件”。服务端在 `capabilities_sync.classPlugins` 中按接收方可访问的班级逐个下发主插件能力，客户端切换班级时按新班级重算；没有对应条目表示该班插件离线。旧服务端没有该字段时客户端退回 `plugin`。多插件时，当前主插件仍是最早接入的健康插件；主插件切换、断开或能力更新后，服务端重新广播能力快照。界面应隐藏缺失能力的入口，服务端转发命令前仍需按统一映射复核主插件能力，缺少能力时返回 `CAPABILITY_UNSUPPORTED`。能力声明不能绕过账号权限或扩展策略检查。
 
@@ -146,6 +147,17 @@ WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手
 插件把日历缓存到本地，断网时继续生效：放假日把宿主 `LessonsService.IsClassPlanEnabled` 设为 `false`，并且只恢复自己关掉的开关；调休上学日在今天起 7 天内用 `CreateTempClassPlan` 复制该周对应工作日的课表作为临时课表，已有他人安排的预定课表时不覆盖。
 
 插件上报的 `ScheduleDay` 新增可选字段 `dayKind`（`holiday` / `makeup`）和 `holidayName`，普通日期不输出。放假日 `enabled` 为 `false` 且不含课程，因此换课会被拒绝。
+
+## 学期
+
+系统管理员在 WebUI“学期与调休”页或 `PUT /api/settings/semester` 设置全局学期开始日期。学期开始日期所在周（周一起）为第 1 教学周，单周为第 1、3、5… 周；多周轮换按 `(教学周序号 − 1) mod 轮换周数 + 1` 得到轮换中的第几周，与 ClassIsland 课表 `TimeRule.WeekCountDiv / WeekCountDivTotal` 的含义一致。
+
+- `GET /api/settings/semester`（任意已登录账号）：返回 `{startDate, syncToClassrooms, currentWeek?}`；`startDate` 为 `yyyy-MM-dd` 或 null（未设置），`currentWeek` 为按服务端今天计算的教学周，未设置或尚未开学时省略。
+- `PUT /api/settings/semester`（仅系统管理员）：请求体 `{startDate, syncToClassrooms}`，`startDate` 为空表示清除；格式错误返回 400。`syncToClassrooms` 默认 true。
+
+学期开始日期用于：服务端按班级档案推算课表时选择多周轮换课表（未设置时按“本周为第 1 周”推算并提示可能与教室端不同）；教师自定义课程的单双周与多周轮换。
+
+开启 `syncToClassrooms` 且已设置日期时，服务端向声明了 `schedule.semester` 能力的插件发送 `semester` 消息 `{weekOneMonday: "yyyy-MM-dd"}`：插件上报能力后立即发送一次，管理员修改后广播给所有此类插件。插件把第 1 教学周的周一写入 ClassIsland 设置的 `SingleWeekStartTime`，清除本机 `MultiWeekRotationOffset`（“调整轮换”偏移）并保存设置，随后重新上报课表；与本机设置已一致时不写入。未设置日期或关闭同步时不发送，教室端保留自己的设置，清除学期日期也不会改回教室端。
 
 ## 应用守护
 
@@ -345,8 +357,8 @@ WebUI 在“批量控制”与班级“控制”页的远程维护区开放这�
 
 `schedule_sync` 载荷中的 `CourseEntry` 与 `SubjectEntry` 新增可选 `teacher` 字段（教师名，未设置时省略），旧版服务端与插件不下发、所有端可安全忽略。
 
-- `GET /api/me/schedule`：返回“我的日程”`MyScheduleResponse { fromDate, generatedAt, days[] }`。老师或班主任账号按姓名绑定的跨班级课程，与本账号的自定义课程按日期合并；其他账号只返回自己的自定义课程。每天 `items[]` 含 `classId`、`className`、`courses[]`。可选查询参数 `timeZoneOffsetMinutes`（调用方本机的 UTC 偏移分钟数，-840～840，超出范围返回 400）只在还没有任何班级上报过状态快照时，用于确定按档案推算课表的“今天”；自定义课程使用保存时的绝对时间。
-- `GET /api/me/schedule/next`：返回 `MyNextCourseResponse { at, current?, next? }`，分别是指定时刻正在上的课与接下来的第一节课；每项含 `date`、`classId`、`className`、`course`、`startsAt`、`endsAt`。可选查询参数 `at`（ISO 8601）指定计算时刻，省略时取服务端当前时间。课程钟点是教室电脑本地时间，服务端依次按以下时区偏移换算为绝对时间：该班最近状态快照的 `timeZoneOffsetMinutes`；该班没有快照时（例如按档案推算课表、从未连接插件的班级）取任一班级最近上报的偏移；还没有任何班级快照时取可选查询参数 `timeZoneOffsetMinutes`（调用方本机的 UTC 偏移分钟数，-840～840，超出范围返回 400，手机 App 自动携带）；都没有时才退回服务端本地时区（Docker 容器默认是 UTC）。同时纳入本账号自定义课程（不限于班级课表七日窗口）；自定义课程的时间直接使用已保存的绝对时间。没有当前或后续课程时对应字段省略。两个日程端点都接受 API Key。
+- `GET /api/me/schedule`：返回“我的日程”`MyScheduleResponse { fromDate, generatedAt, days[] }`。老师或班主任账号按姓名绑定的跨班级课程，与本账号的自定义课程按日期合并；其他账号只返回自己的自定义课程。每天 `items[]` 含 `classId`、`className`、`courses[]`。可选查询参数 `timeZoneOffsetMinutes`（调用方本机的 UTC 偏移分钟数，-840～840，超出范围返回 400）只在还没有任何班级上报过状态快照时，用于确定按档案推算课表的“今天”；自定义课程按保存的时区偏移展开为每一次课的绝对时间。
+- `GET /api/me/schedule/next`：返回 `MyNextCourseResponse { at, current?, next? }`，分别是指定时刻正在上的课与接下来的第一节课；每项含 `date`、`classId`、`className`、`course`、`startsAt`、`endsAt`。可选查询参数 `at`（ISO 8601）指定计算时刻，省略时取服务端当前时间。课程钟点是教室电脑本地时间，服务端依次按以下时区偏移换算为绝对时间：该班最近状态快照的 `timeZoneOffsetMinutes`；该班没有快照时（例如按档案推算课表、从未连接插件的班级）取任一班级最近上报的偏移；还没有任何班级快照时取可选查询参数 `timeZoneOffsetMinutes`（调用方本机的 UTC 偏移分钟数，-840～840，超出范围返回 400，手机 App 自动携带）；都没有时才退回服务端本地时区（Docker 容器默认是 UTC）。同时纳入本账号自定义课程（不限于班级课表七日窗口）；正在上的一次之外，同一课程的下一次（例如下周同一时间）也参与比较。没有当前或后续课程时对应字段省略。两个日程端点都接受 API Key。
 - `POST /api/me/display-name`：系统管理员修改显示名（即老师姓名），载荷 `{displayName}`（1-40 字），成功返回 204 并触发授权镜像同步；普通账号即使保留旧的 `ChangeDisplayName` 权限也会被拒绝。
 - 命令值 21 为 `SetSubjectTeacher`，要求 `ManageSchedule` 权限和能力 `schedule.subject-teacher`。载荷 `subjectTeacher` 包含 `subjectId` 与 `teacherName`（≤100 字，空表示清除）；插件在 UI 线程写入档案 `Subject.TeacherName` 并保存，保存失败回滚并返回 `SAVE_FAILED`，成功后立即重推课表。WebUI 课表页“科目教师”区由此为班级科目分配授课教师。
 
@@ -357,22 +369,27 @@ WebUI 在“批量控制”与班级“控制”页的远程维护区开放这�
 
 所有已认证账号均可使用以下端点（Bearer 设备令牌或用户 API Key），只访问凭据所属账号，不接受 userId 或 classId：
 
-- `GET /api/me/schedule/courses`：按开始时间列出本人的自定义课程。
-- `POST /api/me/schedule/courses`：创建一节单次课程。
+- `GET /api/me/schedule/courses`：列出本人的自定义课程（每周课程按周一到周日、开始时刻排序，单次课程在后）。
+- `POST /api/me/schedule/courses`：创建一节课程。
 - `PUT /api/me/schedule/courses/{id}`：完整替换本人的课程；修改前先查询当前字段。
 - `DELETE /api/me/schedule/courses/{id}`：删除本人的课程，返回 204。操作他人的编号与不存在的编号均返回 404。
 
-创建/修改示例（起止时间必须使用含时区偏移的 ISO 8601）：
+自定义课程按“每周星期几 + 当天起止时刻 + 周次”重复，周次规则与档案课表相同，单双周与多周轮换按上文“学期”的教学周计算：
 
 ```json
-{"subject":"自习","location":"图书馆","startsAt":"2026-10-18T14:00:00+08:00","endsAt":"2026-10-18T15:00:00+08:00","reminderMinutes":20,"notifyAtStart":true}
+{"subject":"自习","location":"图书馆","weekDay":3,"startTime":"14:00","endTime":"15:00","weekCountDiv":1,"weekCountDivTotal":2,"timeZoneOffsetMinutes":480,"reminderMinutes":20,"notifyAtStart":true}
 ```
 
-课程名称 1–100 字、地点最多 200 字，结束晚于开始且时长不超过 24 小时，支持跨午夜。`reminderMinutes` 为 1–10080 分钟，null 或省略表示关闭课前提醒；`notifyAtStart` 默认 true。响应包含同样字段和 `id`。数据库按账号持久保存，删除账号时级联清除。
+- `weekDay`：0=周日，1=周一 … 6=周六。
+- `startTime` / `endTime`：`HH:mm`，结束晚于开始且在同一天内，按 `timeZoneOffsetMinutes`（-840～840，省略时为服务端时区）解释；修改课程时客户端应保留原偏移。
+- `weekCountDiv`：0 为每周；否则为 `weekCountDivTotal`（2–4）周一轮中的第几周，例如 1/2 单周、2/2 双周、3/3 三周轮换第 3 周。管理员未设置学期开始日期时只能选每周，否则返回 400；设置后又被清除时，轮换课程暂不出现也不提醒。
+- 未提供 `weekDay` 而提供含偏移的 `startsAt` / `endsAt` 时，创建只在该日出现的单次课程（兼容旧客户端与“明天下午加一节课”这类单次安排），须在当天内结束。
 
-合并后的个人日程以 `items[].source: "personal"` 标识自定义课程，`classId` 为全零 GUID（不代表班级、不授予班级访问权限），`className` 为地点或“自定义课程”，`timeZoneOffsetMinutes` 为课程保存时的偏移。`courses[]` 包含稳定的 `personalCourseId`、`startsAt`、`endsAt`、`reminderMinutes`、`notifyAtStart`，不应以节次索引识别自定义课程。课程不写入班级课表，也不受班级节假日停课影响。
+课程名称 1–100 字、地点最多 200 字。`reminderMinutes` 为 1–10080 分钟，null 或省略表示关闭课前提醒；`notifyAtStart` 默认 true。响应在上述字段外包含 `id`、`summary`（如“每周三 14:00–15:00 · 单周”）、单次课程的 `date`，以及下一次（或正在进行的一次）课的绝对时间 `startsAt` / `endsAt`（单次课程过期后仍为原日期）。数据库按账号持久保存，删除账号时级联清除；升级前创建的课程保留为单次课程。
 
-服务端每 15 秒检查一次课前和上课提醒，分别生成 `personal_course_upcoming` 与 `personal_course_start` 个人通知，沿 `user_notify`、浏览器 Web Push 和 `/api/me/notifications` 分发。上课提醒在开始后的 5 分钟内可补发，过期不补发。发送标记与通知一同落库，重启后不会重复生成。客户端勿再对自定义课程独立生成同类提醒；手机的常驻课堂状态仍可显示课程，但保持静默。
+合并后的个人日程以 `items[].source: "personal"` 标识自定义课程，`classId` 为全零 GUID（不代表班级、不授予班级访问权限），`className` 为地点或“自定义课程”，`timeZoneOffsetMinutes` 为课程保存时的偏移。`courses[]` 包含稳定的 `personalCourseId`、该次课的 `startsAt`、`endsAt`、`reminderMinutes`、`notifyAtStart`；同一课程在窗口内每周各出现一次，应以 `personalCourseId` + 日期识别某一次课，不应以节次索引识别。`GET /api/me/schedule` 展开今天起 7 天内的每一次课；`/next` 向后查找到最长轮换周期。课程不写入班级课表，也不受班级节假日停课影响。
+
+服务端每 15 秒检查一次课前和上课提醒，分别生成 `personal_course_upcoming` 与 `personal_course_start` 个人通知，沿 `user_notify`、浏览器 Web Push 和 `/api/me/notifications` 分发。每周的每一次课分别提醒；上课提醒在开始后的 5 分钟内可补发，过期不补发。发送标记（那次课的开始时刻）与通知一同落库，重启后不会重复生成。客户端勿再对自定义课程独立生成同类提醒；手机的常驻课堂状态仍可显示课程，但保持静默。
 
 WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebUI 有未保存编辑时保留表单。AstrBot 通过个人通知通道转发提醒，专用 `remoteci_personal_courses` / `remoteci_save_personal_course` / `remoteci_delete_personal_course` 工具仅允许私聊；个人日程与个人通知也不可通过通用 API 工具向群聊输出。
 
@@ -437,6 +454,7 @@ WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebU
 - `GET /api/me/schedule`、`GET /api/me/schedule/next`
 - `GET /api/swap-requests/catalog`、`GET /api/swap-requests?box=incoming|outgoing|all&status=`、`GET /api/swap-requests/{id}`
 - `POST /api/swap-requests`、`POST /api/swap-requests/{id}/approve|reject|cancel|revoke`（`{id}` 也接受 8 位 `shortId`）
+- `POST /api/swap-requests/seen`（`{ids}`，省略或为空表示全部）：强制换课看过即处理。被强制换课的老师看过后，对应的 `swap_forced` 通知标记已读，该申请不再计入“待我处理”（仍可撤回）；返回 `{pending}` 为剩余待处理数。`GET /api/swap-requests/{id}` 查看强制换课详情也会自动标记。列表项的 `needsAction` 表示是否计入“待我处理”（可审批，或强制换课尚未看过），客户端角标应按它计数，而不是 `canDecide || canRevoke`。
 - `GET /api/me/notifications?after=&unread=&limit=`、`POST /api/me/notifications/read`（`{ids}` 或 `{all:true}`）
 - `GET/DELETE /api/me/sessions`
 - `GET /api/state`、`GET /api/schedule`
@@ -447,7 +465,7 @@ WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebU
 - `POST /api/plugin/pairing-code`
 - `GET /api/admin/status`
 - `GET/POST/PUT/DELETE /api/roles`、`GET/PUT /api/visitor`
-- `GET/PUT /api/settings/notifications`（读取需登录，修改仅系统管理员）、`GET/PUT /api/settings/schedule-pull`
+- `GET/PUT /api/settings/notifications`（读取需登录，修改仅系统管理员）、`GET/PUT /api/settings/schedule-pull`、`GET/PUT /api/settings/semester`（见“学期”）
 - `GET/PUT /api/extensions`
 - `GET /api/admin/system`、`POST /api/admin/updates/check`、`POST /api/admin/updates/upload`（请求体为服务端发布包 zip，调试用，安装后自动重启）、`GET/POST/DELETE /api/admin/backups`
 - `GET /api/audit`、`GET /api/audit/export`、`GET /api/devices/health`（见“集控运维”）

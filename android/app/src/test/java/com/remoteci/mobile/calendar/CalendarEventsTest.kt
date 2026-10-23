@@ -76,14 +76,18 @@ class CalendarEventsTest {
         assertFailsWith<IllegalArgumentException> { events(schedule(offset = 1000)) }
     }
 
-    @Test fun `custom course keeps its id after a date change and uses absolute time`() {
+    @Test fun `weekly custom course gets one event per date and uses absolute time`() {
         fun custom(date: String, id: String) = course.copy(personalCourseId = id,
             startsAt = "${date}T09:00:00+03:00", endsAt = "${date}T09:45:00+03:00")
-        val old = events(schedule(listOf(custom("2026-10-17", "a")))).single()
-        val changed = events(schedule(listOf(custom("2026-10-18", "a"), custom("2026-10-18", "b"))))
-        assertEquals(old.key, changed.first().key)
-        assertEquals(Instant.parse("2026-10-18T06:00:00Z").toEpochMilli(), changed.first().startsAt)
-        assertEquals(2, changed.map { it.key }.distinct().size)
+        val weekly = MyScheduleResponse(days = listOf("2026-10-17", "2026-10-24").map { date ->
+            MyScheduleDay(date, listOf(MyScheduleItem("00000000-0000-0000-0000-000000000000", "自定义课程", listOf(custom(date, "a")), timeZoneOffsetMinutes = 180)))
+        })
+        val result = events(weekly)
+        assertEquals(listOf("personal/a/2026-10-17", "personal/a/2026-10-24"), result.map { it.key })
+        assertEquals(Instant.parse("2026-10-24T06:00:00Z").toEpochMilli(), result.last().startsAt)
+        val renamed = events(MyScheduleResponse(days = listOf(weekly.days.first().copy(
+            items = listOf(weekly.days.first().items.single().copy(courses = listOf(custom("2026-10-17", "a").copy(subject = "改名"))))))))
+        assertEquals(result.first().key, renamed.single().key)
     }
 
     private fun bundle(courses: List<CourseEntry> = listOf(course), enabled: Boolean = true, source: String? = null) = ScheduleBundle(

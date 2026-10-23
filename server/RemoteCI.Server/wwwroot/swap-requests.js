@@ -17,6 +17,30 @@
         return element;
     }
 
+    // 强制换课看过即处理：第一次打开“待我处理”时提交，页签与导航角标改为剩余的待审批数。
+    function markForcedSeen() {
+        const form = document.querySelector("[data-swap-seen]");
+        if (!form) return;
+        form.remove();
+        fetch(form.action, { method: "POST", credentials: "same-origin", body: new FormData(form), headers: { Accept: "application/json" } })
+            .then(response => response.ok ? response.json() : null)
+            .then(data => {
+                if (!data) return;
+                const tabBadge = document.querySelector("[data-swap-pending]");
+                if (tabBadge) {
+                    const left = Number(tabBadge.dataset.afterSeen) || 0;
+                    tabBadge.textContent = String(left);
+                    tabBadge.hidden = !left;
+                }
+                const navBadge = document.querySelector("[data-swap-badge]");
+                if (navBadge) {
+                    navBadge.textContent = String(data.pending || 0);
+                    navBadge.hidden = !data.pending;
+                }
+            })
+            .catch(() => { /* 下次打开再试 */ });
+    }
+
     function setupTabs() {
         const tabs = document.querySelectorAll("[data-swap-tab]");
         const show = name => {
@@ -27,6 +51,7 @@
             });
             document.querySelectorAll("[data-swap-panel]").forEach(panel => { panel.hidden = panel.dataset.swapPanel !== name; });
             try { history.replaceState(null, "", `#${name}`); } catch { /* 忽略 */ }
+            if (name === "incoming") markForcedSeen();
         };
         tabs.forEach(tab => tab.addEventListener("click", () => show(tab.dataset.swapTab)));
         const initial = location.hash.replace("#", "");

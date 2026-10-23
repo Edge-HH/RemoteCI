@@ -1,0 +1,38 @@
+@model RemoteCI.Server.Pages.MyScheduleModel
+@using RemoteCI.Shared.Models
+@{
+    var hasSemester = Model.Semester.StartDate is not null;
+    var weekHint = !hasSemester ? "管理员尚未设置学期开始日期，暂只能选择“每周”。"
+        : Model.Semester.CurrentWeek is { } week ? $"学期自 {Model.Semester.StartDate} 所在周起算，本周为第 {week} 周（{(week % 2 == 1 ? "单周" : "双周")}）。"
+        : $"学期自 {Model.Semester.StartDate} 所在周起算，尚未开学。";
+}
+<input type="hidden" name="id" value="@Model.Editing?.Id" />
+<label>课程名称<input name="Subject" value="@Model.Subject" maxlength="100" required /></label>
+<label>地点（可选）<input name="Location" value="@Model.Location" maxlength="200" /></label>
+<fieldset class="weekday-picker">
+    <legend>每周</legend>
+    @foreach (var day in RemoteCI.Server.Pages.MyScheduleModel.WeekDayOrder)
+    {
+        <label><input type="radio" name="WeekDay" value="@day" checked="@(Model.WeekDay == day)" required /><span>@SemesterWeeks.WeekdayNames[day]</span></label>
+    }
+</fieldset>
+<div class="course-time-pair">
+    <label>开始<input type="time" name="StartTime" value="@Model.StartTime" step="60" required /></label>
+    <label>结束<input type="time" name="EndTime" value="@Model.EndTime" step="60" required /></label>
+</div>
+<label>周次
+    <select name="Rotation">
+        @foreach (var (value, label) in RemoteCI.Server.Pages.MyScheduleModel.RotationOptions)
+        {
+            <option value="@value" selected="@(Model.Rotation == value)" disabled="@(!hasSemester && value != "0/2" && Model.Rotation != value)">@label</option>
+        }
+    </select>
+</label>
+<p class="muted course-week-hint">@weekHint</p>
+<input type="hidden" name="TimeZoneOffsetMinutes" value="@Model.TimeZoneOffsetMinutes" data-course-offset />
+<label>提前提醒（分钟，留空关闭）<input type="number" name="ReminderMinutes" value="@Model.ReminderMinutes" min="1" max="10080" inputmode="numeric" /></label>
+<label class="check"><input type="checkbox" name="NotifyAtStart" value="true" checked="@Model.NotifyAtStart" />上课时提醒</label><input type="hidden" name="NotifyAtStart" value="false" />
+@if (Model.Editing?.Date is { } date)
+{
+    <p class="notice">这是 @date 的单次课程，保存后将改为按上面的星期每周重复。</p>
+}

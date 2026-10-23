@@ -78,9 +78,9 @@ public sealed class MobileWebTests
         foreach (var path in new[] { "Today", "Schedule", "MySchedule", "Control", "Users", "Account", "Inbox", "SystemConfig", "Manage", "Pairing", "VisitorAccess", "Calendar" })
             Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/Mobile/" + path)).StatusCode);
         var html = await browser.GetStringAsync("/Mobile/MySchedule");
-        var start = DateTimeOffset.UtcNow.AddDays(2);
+        Assert.Contains("type=\"time\"", html);
         var response = await browser.PostAsync("/Mobile/MySchedule?handler=Save", new FormUrlEncodedContent(new Dictionary<string, string>
-        { ["__RequestVerificationToken"] = Csrf(html), ["Subject"] = "移动端课程", ["StartsAt"] = start.ToString("O"), ["EndsAt"] = start.AddHours(1).ToString("O"), ["NotifyAtStart"] = "true" }));
+        { ["__RequestVerificationToken"] = Csrf(html), ["Subject"] = "移动端课程", ["WeekDay"] = "2", ["StartTime"] = "09:00", ["EndTime"] = "09:45", ["Rotation"] = "0/2", ["NotifyAtStart"] = "true" }));
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         Assert.Contains("移动端课程", WebUtility.HtmlDecode(await browser.GetStringAsync("/Mobile/MySchedule")));
         var noCsrf = await browser.PostAsJsonAsync("/Mobile/Inbox?handler=Subscribe", new WebPushSubscriptionRequest());
@@ -98,8 +98,8 @@ public sealed class MobileWebTests
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var user = await db.Users.SingleAsync(x => x.Id == owner.User.Id);
             var courses = scope.ServiceProvider.GetRequiredService<PersonalScheduleService>();
-            var start = DateTimeOffset.UtcNow.AddDays(3).ToOffset(TimeSpan.FromHours(8));
-            courseId = (await courses.SaveAsync(user.Id, null, new PersonalCourseRequest { Subject = "中文,课程;\\测试\n第二行", Location = "会议室", StartsAt = start, EndsAt = start.AddHours(1), ReminderMinutes = 10, NotifyAtStart = true })).Id;
+            var day = DateTimeOffset.UtcNow.AddDays(3).ToOffset(TimeSpan.FromHours(8)).DayOfWeek;
+            courseId = (await courses.SaveAsync(user.Id, null, new PersonalCourseRequest { Subject = "中文,课程;\\测试\n第二行", Location = "会议室", WeekDay = (int)day, StartTime = "10:00", EndTime = "11:00", TimeZoneOffsetMinutes = 480, ReminderMinutes = 10, NotifyAtStart = true })).Id;
             var created = await scope.ServiceProvider.GetRequiredService<CalendarFeedService>().CreateAsync(user, null, 10, 480, default);
             token = created.Token; subscriptionId = created.Subscription.Id;
         }
@@ -115,7 +115,7 @@ public sealed class MobileWebTests
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var course = await db.PersonalCourses.SingleAsync(x => x.Id == courseId);
-            course.Subject = "改名后课程"; course.StartsAtUnixMs += 60_000; course.EndsAtUnixMs += 60_000;
+            course.Subject = "改名后课程"; course.StartMinutes += 1; course.EndMinutes += 1;
             await db.SaveChangesAsync();
         }
         var changed = await client.GetStringAsync($"/calendar/{token}.ics");
@@ -139,9 +139,9 @@ public sealed class MobileWebTests
         {
             var user = await scope.ServiceProvider.GetRequiredService<AppDbContext>().Users.SingleAsync(x => x.Id == owner.User.Id);
             var courses = scope.ServiceProvider.GetRequiredService<PersonalScheduleService>();
-            var start = DateTimeOffset.UtcNow.AddDays(2).ToOffset(TimeSpan.FromHours(8));
+            var day = DateTimeOffset.UtcNow.AddDays(2).ToOffset(TimeSpan.FromHours(8)).DayOfWeek;
             for (var i = 0; i < 3; i++)
-                await courses.SaveAsync(user.Id, null, new PersonalCourseRequest { Subject = $"并发课程{i}", StartsAt = start.AddHours(i * 2), EndsAt = start.AddHours(i * 2 + 1) });
+                await courses.SaveAsync(user.Id, null, new PersonalCourseRequest { Subject = $"并发课程{i}", WeekDay = (int)day, StartTime = $"{8 + i * 2:00}:00", EndTime = $"{9 + i * 2:00}:00", TimeZoneOffsetMinutes = 480 });
             var feed = scope.ServiceProvider.GetRequiredService<CalendarFeedService>();
             personal = (await feed.CreateAsync(user, null, 10, 480, default)).Token;
             classFeed = (await feed.CreateAsync(user, TestWebApplicationFactory.DefaultClassId, null, 480, default)).Token;

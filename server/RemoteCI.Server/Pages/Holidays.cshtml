@@ -2,15 +2,31 @@
 @model HolidaysModel
 @using RemoteCI.Shared.Models
 @{
-    ViewData["Title"] = "调休";
+    ViewData["Title"] = "学期与调休";
     var status = Model.Overview.Status;
 }
 <div class="page-head">
     <div>
         <p class="eyebrow">服务端管理</p>
-        <h1>调休</h1>
+        <h1>学期与调休</h1>
     </div>
 </div>
+<section class="panel">
+    <h2>学期</h2>
+    <p class="muted">学期开始日期所在周为第 1 教学周。单双周和多周轮换据此计算：班级档案推算课表、教师自定义课程都使用这一日期。</p>
+    <form method="post" asp-page-handler="Semester" class="stack">
+        <label>学期开始日期（留空表示未设置）
+            <input type="date" name="Semester.StartDate" value="@Model.Semester.StartDate" />
+        </label>
+        <label class="check"><input type="checkbox" name="Semester.SyncToClassrooms" value="true" checked="@Model.Semester.SyncToClassrooms" /> 同步到教室端 ClassIsland（写入“单周起始日期”并清除本机轮换偏移，使各教室的多周轮换一致）</label>
+        <input type="hidden" name="Semester.SyncToClassrooms" value="false" />
+        <button type="submit">保存</button>
+    </form>
+    @if (Model.Semester.StartDate is not null)
+    {
+        <p class="muted">@(Model.CurrentWeek is { } week ? $"本周为第 {week} 教学周（{(week % 2 == 1 ? "单周" : "双周")}）。" : "学期尚未开始。")</p>
+    }
+</section>
 <section class="panel">
     <h2>自动适配</h2>
     <p class="muted">放假日自动关闭教室课表；原本是周末但要上学的日子，自动开启一份临时课表，上对应工作日的课。</p>

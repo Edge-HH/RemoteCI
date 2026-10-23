@@ -137,7 +137,8 @@ public sealed class CalendarFeedService(AppDbContext db, ClassAccessService acce
                 if (end < start) end = end.Value.AddDays(1);
             }
             if (end <= start || end < now.AddDays(-30)) return;
-            var uid = course.PersonalCourseId is { } id ? $"personal-{id:N}@remoteci" : $"class-{classId:N}-{date}-{course.Index}@remoteci";
+            // 自定义课程每周重复，按课程与日期区分每一次。
+            var uid = course.PersonalCourseId is { } id ? $"personal-{id:N}-{date}@remoteci" : $"class-{classId:N}-{date}-{course.Index}@remoteci";
             var content = new List<string> { "DTSTART:" + Utc(start.Value), "DTEND:" + Utc(end.Value), "SUMMARY:" + Escape(course.Subject),
                 "LOCATION:" + Escape(location), "DESCRIPTION:" + Escape(source == ScheduleBundleSources.Profile ? "按班级档案推算，可能与教室端实际课程不同" : "由 RemoteCI 同步；请在 RemoteCI 修改课程") };
             var reminder = course.PersonalCourseId is not null ? course.ReminderMinutes : row.ReminderMinutes;

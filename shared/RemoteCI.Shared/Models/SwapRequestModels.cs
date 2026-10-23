@@ -146,6 +146,13 @@ public sealed class SwapRequestView
     [JsonPropertyName("canRevoke")]
     public bool CanRevoke { get; set; }
 
+    /// <summary>
+    /// 是否计入“待我处理”：可审批，或被强制换课但还没看过（对应的强制换课通知未读）。
+    /// 强制换课看过即视为已处理，之后仍可撤回，但不再计数。
+    /// </summary>
+    [JsonPropertyName("needsAction")]
+    public bool NeedsAction { get; set; }
+
     /// <summary>当前用户（申请人）能否撤销待审批申请。</summary>
     [JsonPropertyName("canCancel")]
     public bool CanCancel { get; set; }
@@ -278,6 +285,13 @@ public sealed class MarkNotificationsReadRequest
 
     [JsonPropertyName("all")]
     public bool All { get; set; }
+}
+
+/// <summary>标记强制换课“已看过”；Ids 为空表示我全部的强制换课。</summary>
+public sealed class MarkSwapsSeenRequest
+{
+    [JsonPropertyName("ids")]
+    public List<Guid>? Ids { get; set; }
 }
 
 public sealed class WebPushSubscriptionRequest

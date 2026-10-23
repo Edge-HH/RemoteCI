@@ -290,6 +290,13 @@ public static class WebSocketHub
                     capabilities.Capabilities.Contains(RemoteCiCapabilities.HolidayCalendar, StringComparer.Ordinal))
                     await session.Context.RequestServices.GetRequiredService<HolidayCalendarService>()
                         .SendToConnectionAsync(session.ConnectionId, session.CancellationToken);
+                if (session.Principal.IsPlugin &&
+                    capabilities.Capabilities.Contains(RemoteCiCapabilities.Semester, StringComparer.Ordinal))
+                {
+                    await using var scope = session.Context.RequestServices.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
+                    await scope.ServiceProvider.GetRequiredService<SemesterSettingsService>()
+                        .SendToConnectionAsync(session.ConnectionId, session.CancellationToken);
+                }
                 // 应用守护策略未启用时也要下发，插件据此注销已部署的守护进程。
                 if (session.Principal.IsPlugin &&
                     capabilities.Capabilities.Contains(RemoteCiCapabilities.AppGuard, StringComparer.Ordinal))

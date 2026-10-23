@@ -20,7 +20,7 @@ public sealed class SwapRequestsModel(UserManager<AppUser> users, ScheduleSwapSe
     /// <summary>选择器数据以 JSON 内嵌到页面，由 swap-requests.js 联动班级→日期→节次。</summary>
     public string CatalogJson => JsonSerializer.Serialize(Catalog, JsonDefaults.Options);
 
-    public int PendingIncoming => Incoming.Count(x => x.CanDecide || x.CanRevoke);
+    public int PendingIncoming => Incoming.Count(x => x.NeedsAction);
 
     [BindProperty] public SwapInput Input { get; set; } = new();
 
@@ -95,6 +95,14 @@ public sealed class SwapRequestsModel(UserManager<AppUser> users, ScheduleSwapSe
             await swaps.RevokeForcedAsync(CurrentUser.Id, id, ct);
             return "已撤回强制换课，课表已恢复。";
         });
+    }
+
+    /// <summary>打开“待我处理”页签即看到了强制换课，视为已处理；返回剩余待处理数用于刷新角标。</summary>
+    public async Task<IActionResult> OnPostSeenAsync(List<Guid> ids, CancellationToken ct)
+    {
+        if (await RequireAsync() is not null) return Unauthorized();
+        if (ids.Count > 0) await swaps.MarkForcedSeenAsync(CurrentUser.Id, ids, ct);
+        return new JsonResult(new { pending = await swaps.CountPendingForAsync(CurrentUser.Id, ct) });
     }
 
     private async Task<IActionResult> RunAsync(Func<Task<string>> action)

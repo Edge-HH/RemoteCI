@@ -24,6 +24,7 @@ public sealed class RemoteCiService : IDisposable
     private readonly SoftwareInventoryService _softwareInventory;
     private readonly HolidayCalendarStore _holidayCalendar;
     private readonly HolidayScheduleApplier _holidayApplier;
+    private readonly SemesterApplier _semesterApplier;
     private readonly AppGuardService _appGuard;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<RemoteCiService> _logger;
@@ -48,10 +49,12 @@ public sealed class RemoteCiService : IDisposable
         SoftwareInventoryService softwareInventory,
         HolidayCalendarStore holidayCalendar,
         HolidayScheduleApplier holidayApplier,
+        SemesterApplier semesterApplier,
         AppGuardService appGuard,
         ILoggerFactory loggerFactory)
     {
         _appGuard = appGuard;
+        _semesterApplier = semesterApplier;
         _holidayCalendar = holidayCalendar;
         _holidayApplier = holidayApplier;
         _collector = collector;
@@ -131,6 +134,7 @@ public sealed class RemoteCiService : IDisposable
         _cloudClient.Connected += OnCloudConnected;
         _cloudClient.ConnectionStatusChanged += OnCloudConnectionStatusChanged;
         _cloudClient.HolidayCalendarReceived += _holidayCalendar.Apply;
+        _cloudClient.SemesterReceived += OnSemesterReceived;
         _cloudClient.AppGuardPolicyReceived += _appGuard.ApplyPolicy;
         _softwareInventory.ClassIslandUpdateRestarting += _appGuard.MarkUpdating;
         var cloudForGuard = _cloudClient;
@@ -156,6 +160,7 @@ public sealed class RemoteCiService : IDisposable
         if (_cloudClient is not null)
         {
             _cloudClient.HolidayCalendarReceived -= _holidayCalendar.Apply;
+            _cloudClient.SemesterReceived -= OnSemesterReceived;
             _cloudClient.AppGuardPolicyReceived -= _appGuard.ApplyPolicy;
         }
         _softwareInventory.ClassIslandUpdateRestarting -= _appGuard.MarkUpdating;
@@ -271,6 +276,19 @@ public sealed class RemoteCiService : IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "应用调休日历失败");
+        }
+    });
+
+    /// <summary>宿主设置在 UI 线程读写；单周起始日期变化会改变轮换课表，写入后重新上报课表。</summary>
+    private void OnSemesterReceived(SemesterSync sync) => Dispatcher.UIThread.Post(() =>
+    {
+        try
+        {
+            if (_semesterApplier.Apply(sync)) _collector.ForceSchedulePush();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "同步学期开始日期失败");
         }
     });
 

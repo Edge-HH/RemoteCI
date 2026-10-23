@@ -62,6 +62,7 @@ public sealed class ScheduleViewService(
             .ToListAsync(ct);
         if (profiles.Count == 0) return result;
         var calendar = await holidays.BuildCalendarAsync(ct);
+        var semesterStart = await db.SystemMetadata.AsNoTracking().Where(x => x.Id == 1).Select(x => x.SemesterStartDate).SingleOrDefaultAsync(ct);
         var holidayDays = calendar.Enabled
             ? calendar.Days.GroupBy(x => x.Date, StringComparer.Ordinal).ToDictionary(x => x.Key, x => x.First(), StringComparer.Ordinal)
             : new Dictionary<string, HolidayCalendarDay>(StringComparer.Ordinal);
@@ -70,7 +71,7 @@ public sealed class ScheduleViewService(
             try
             {
                 var built = ProfileDocument.BuildSchedule(profile.ProfileJson, ClassClock.Today(state, profile.ClassId, fallback: fallbackOffset), Days,
-                    date => holidayDays.GetValueOrDefault(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
+                    date => holidayDays.GetValueOrDefault(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)), semesterStart);
                 built.Bundle.ClassId = profile.ClassId;
                 result[profile.ClassId] = new ScheduleView(built.Bundle, ScheduleViewSource.Profile, profile.Name, built.UsesWeekRotation);
             }

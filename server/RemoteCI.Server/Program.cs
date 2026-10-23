@@ -100,6 +100,7 @@ builder.Services.AddScoped<ExtensionPolicyService>();
 builder.Services.AddScoped<AuthorizationSyncService>();
 builder.Services.AddScoped<ConfigurationArchiveService>();
 builder.Services.AddScoped<SchedulePullSettings>();
+builder.Services.AddScoped<SemesterSettingsService>();
 builder.Services.AddScoped<AppGuardService>();
 builder.Services.AddScoped<HolidaySettingsStore>();
 builder.Services.AddScoped<VisitorAccessSettings>();
@@ -524,7 +525,22 @@ app.MapGet("/api/swap-requests", async (
 app.MapGet("/api/swap-requests/{id}", async (
     string id, HttpContext ctx, IdentityCoordinator identities, ScheduleSwapService swaps, CancellationToken ct) =>
     await SwapCallAsync(ctx, identities, async principal =>
-        await swaps.GetAsync(principal.User!.Id, await ResolveSwapIdAsync(swaps, principal, id, ct), ct), ct));
+    {
+        var view = await swaps.GetAsync(principal.User!.Id, await ResolveSwapIdAsync(swaps, principal, id, ct), ct);
+        // 查看强制换课详情即视为已处理；本次返回仍保留 needsAction，下次读取才清除。
+        if (view.CanRevoke) await swaps.MarkForcedSeenAsync(principal.User.Id, [view.Id], ct);
+        return view;
+    }, ct));
+
+// 强制换课看过即处理：客户端展示“待我处理”列表后调用，返回剩余待处理数用于刷新角标。
+app.MapPost("/api/swap-requests/seen", async (
+    HttpContext ctx, MarkSwapsSeenRequest? request, IdentityCoordinator identities, ScheduleSwapService swaps,
+    CancellationToken ct) =>
+    await SwapCallAsync(ctx, identities, async principal =>
+    {
+        await swaps.MarkForcedSeenAsync(principal.User!.Id, request?.Ids is { Count: > 0 } ids ? ids : null, ct);
+        return new { pending = await swaps.CountPendingForAsync(principal.User.Id, ct) };
+    }, ct));
 
 app.MapPost("/api/swap-requests", async (
     HttpContext ctx, CreateSwapRequest request, IdentityCoordinator identities, ScheduleSwapService swaps, CancellationToken ct) =>
@@ -1225,6 +1241,25 @@ app.MapPut("/api/settings/schedule-pull", async (HttpContext ctx, SchedulePullIn
         : SchedulePullInterval.Disabled;
     await pull.SetIntervalAsync(interval, ct);
     return Results.Ok(new { intervalMinutes = (int)interval });
+});
+app.MapGet("/api/settings/semester", async (HttpContext ctx, IdentityCoordinator identities, SemesterSettingsService semester, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    return Results.Ok(await semester.GetViewAsync(ct));
+});
+app.MapPut("/api/settings/semester", async (HttpContext ctx, SemesterSettings body, IdentityCoordinator identities, SemesterSettingsService semester, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    // 学期开始日期影响全校课表推算与教室端轮换，只允许系统管理员修改。
+    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    try
+    {
+        await semester.SetAsync(body, ct);
+        return Results.Ok(await semester.GetViewAsync(ct));
+    }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
 });
 // 登录页背景图属于未登录可见的公开资源，无需鉴权；ETag 让浏览器在图片未变时复用缓存。
 app.MapGet("/api/settings/login-background", async (HttpContext ctx, LoginPageSettings loginPage, CancellationToken ct) =>

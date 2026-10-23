@@ -7,8 +7,8 @@ namespace RemoteCI.Shared.Models;
 
 /// <summary>按档案推算的课表及推算时无法确定的信息。</summary>
 /// <param name="UsesWeekRotation">
-/// 有日期需要在多周轮换课表之间选择。轮换起始周保存在教室端 ClassIsland 设置里、不在档案中，
-/// 推算时按“本周为轮换第 1 周”处理，可能与教室端实际轮换不一致。
+/// 有日期需要在多周轮换课表之间选择，但管理员没有设置学期开始日期。轮换起始周保存在教室端 ClassIsland 设置里、不在档案中，
+/// 此时推算按“本周为轮换第 1 周”处理，可能与教室端实际轮换不一致；设置学期开始日期后按教学周推算，不再标记。
 /// </param>
 public sealed record ProfileScheduleResult(ScheduleBundle Bundle, bool UsesWeekRotation);
 
@@ -22,7 +22,7 @@ public static partial class ProfileDocument
     private const string UnsetSubjectPlaceholder = "???";
 
     public static ProfileScheduleResult BuildSchedule(
-        string json, DateOnly from, int days = 7, Func<DateOnly, HolidayCalendarDay?>? holidays = null)
+        string json, DateOnly from, int days = 7, Func<DateOnly, HolidayCalendarDay?>? holidays = null, DateOnly? semesterStart = null)
     {
         var profile = Parse(json);
         var subjects = Dictionary(profile, "Subjects");
@@ -40,8 +40,9 @@ public static partial class ProfileDocument
                 .OrderBy(x => x.Name, StringComparer.Ordinal)
                 .ToList(),
         };
-        // 轮换周以推算起点所在周（周一开始）为第 1 周。
-        var rotationAnchor = from.AddDays(-(((int)from.DayOfWeek + 6) % 7));
+        // 轮换周以学期开始日期所在周为第 1 周；未设置学期时以推算起点所在周（周一开始）为第 1 周。
+        var rotationAnchor = SemesterWeeks.Monday(semesterStart ?? from);
+        var rotationKnown = semesterStart is not null;
         for (var offset = 0; offset < days; offset++)
         {
             var date = from.AddDays(offset);
@@ -56,6 +57,7 @@ public static partial class ProfileDocument
                     ? date.AddDays(-(((int)date.DayOfWeek + 6) % 7)).AddDays(weekday - 1)
                     : date;
                 (plan, planId) = ResolvePlan(profile, source, rotationAnchor, ref usesRotation);
+                if (rotationKnown) usesRotation = false;
             }
             var day = new ScheduleDay
             {
@@ -124,14 +126,10 @@ public static partial class ProfileDocument
             .Where(item => item.Rank >= 0 && Integer(item.Rule, "WeekDay", 0) == (int)date.DayOfWeek)
             .ToList();
         if (candidates.Any(item => Integer(item.Rule, "WeekCountDiv", 0) > 0)) usesRotation = true;
-        var week = (date.DayNumber - rotationAnchor.DayNumber) / 7;
+        var week = SemesterWeeks.WeekIndex(rotationAnchor, date);
         var match = candidates
-            .Where(item =>
-            {
-                var div = Integer(item.Rule, "WeekCountDiv", 0);
-                var total = Math.Max(1, Integer(item.Rule, "WeekCountDivTotal", 2));
-                return div <= 0 || div == ((week % total) + total) % total + 1;
-            })
+            .Where(item => SemesterWeeks.InRotation(
+                Integer(item.Rule, "WeekCountDiv", 0), Integer(item.Rule, "WeekCountDivTotal", 2), week))
             .OrderBy(item => item.Rank)
             .FirstOrDefault();
         return match.Plan is null ? (null, null) : (match.Plan, match.Id);

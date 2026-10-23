@@ -13,6 +13,7 @@ namespace RemoteCI.Server.Pages;
 public sealed class MyScheduleModel(
     UserManager<AppUser> users,
     PersonalScheduleService schedule,
+    SemesterSettingsService semester,
     LessonStatsService lessonStats) : WebPageModel(users)
 {
     /// <summary>本人本月课时（按姓名匹配课时台账）；没有记录时为 null。</summary>
@@ -22,11 +23,25 @@ public sealed class MyScheduleModel(
     public PersonalCourseView? Editing { get; private set; }
     [BindProperty] public string Subject { get; set; } = "";
     [BindProperty] public string? Location { get; set; }
-    [BindProperty] public string StartsAt { get; set; } = "";
-    [BindProperty] public string EndsAt { get; set; } = "";
+    [BindProperty] public int WeekDay { get; set; } = 1;
+    [BindProperty] public string StartTime { get; set; } = "08:00";
+    [BindProperty] public string EndTime { get; set; } = "08:45";
+    /// <summary>周次，格式为“第几周/轮换总周数”，0/2 表示每周。</summary>
+    [BindProperty] public string Rotation { get; set; } = "0/2";
+    [BindProperty] public int? TimeZoneOffsetMinutes { get; set; }
     [BindProperty] public int? ReminderMinutes { get; set; } = 10;
     [BindProperty] public bool NotifyAtStart { get; set; } = true;
     public string? Error { get; private set; }
+    public SemesterSettingsView Semester { get; private set; } = new();
+
+    /// <summary>周次选项，与档案课表的 WeekCountDiv / WeekCountDivTotal 对应。</summary>
+    public static readonly (string Value, string Label)[] RotationOptions =
+    [
+        ("0/2", "每周"), ("1/2", "单周"), ("2/2", "双周"),
+        ("1/3", "三周轮换 · 第 1 周"), ("2/3", "三周轮换 · 第 2 周"), ("3/3", "三周轮换 · 第 3 周"),
+        ("1/4", "四周轮换 · 第 1 周"), ("2/4", "四周轮换 · 第 2 周"), ("3/4", "四周轮换 · 第 3 周"), ("4/4", "四周轮换 · 第 4 周"),
+    ];
+    public static readonly int[] WeekDayOrder = [1, 2, 3, 4, 5, 6, 0];
     public string MobileRevision => CalendarFeedService.Hash(System.Text.Json.JsonSerializer.Serialize(Schedule.Days, JsonDefaults.Options));
 
     public async Task<IActionResult> OnGetRevisionAsync(CancellationToken ct)
@@ -48,7 +63,9 @@ public sealed class MyScheduleModel(
         if (Editing is { } course)
         {
             Subject = course.Subject; Location = course.Location;
-            StartsAt = course.StartsAt.ToString("O"); EndsAt = course.EndsAt.ToString("O");
+            WeekDay = course.WeekDay ?? 1; StartTime = course.StartTime ?? StartTime; EndTime = course.EndTime ?? EndTime;
+            Rotation = $"{course.WeekCountDiv}/{(course.WeekCountDiv == 0 ? 2 : course.WeekCountDivTotal)}";
+            TimeZoneOffsetMinutes = course.TimeZoneOffsetMinutes;
             ReminderMinutes = course.ReminderMinutes; NotifyAtStart = course.NotifyAtStart;
         }
         return Page();
@@ -57,14 +74,17 @@ public sealed class MyScheduleModel(
     public async Task<IActionResult> OnPostSaveAsync(Guid? id, CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (!ModelState.IsValid || !DateTimeOffset.TryParseExact(StartsAt, "O", CultureInfo.InvariantCulture, DateTimeStyles.None, out var start) ||
-            !DateTimeOffset.TryParseExact(EndsAt, "O", CultureInfo.InvariantCulture, DateTimeStyles.None, out var end))
-            Error = "请选择有效的课程起止时间";
+        var rotation = (Rotation ?? "").Split('/');
+        if (!ModelState.IsValid || rotation.Length != 2 ||
+            !int.TryParse(rotation[0], NumberStyles.None, CultureInfo.InvariantCulture, out var div) ||
+            !int.TryParse(rotation[1], NumberStyles.None, CultureInfo.InvariantCulture, out var total))
+            Error = "请选择有效的星期、时间和周次";
         else try
         {
             await schedule.SaveAsync(CurrentUser.Id, id, new PersonalCourseRequest
             {
-                Subject = Subject, Location = Location ?? "", StartsAt = start, EndsAt = end,
+                Subject = Subject, Location = Location ?? "", WeekDay = WeekDay, StartTime = StartTime, EndTime = EndTime,
+                WeekCountDiv = div, WeekCountDivTotal = total, TimeZoneOffsetMinutes = TimeZoneOffsetMinutes,
                 ReminderMinutes = ReminderMinutes, NotifyAtStart = NotifyAtStart,
             }, ct);
             return RedirectToPage();
@@ -92,6 +112,7 @@ public sealed class MyScheduleModel(
     private async Task LoadAsync(CancellationToken ct)
     {
         Courses = await schedule.ListAsync(CurrentUser.Id, ct);
+        Semester = await semester.GetViewAsync(ct);
         Schedule = await schedule.BuildAsync(CurrentUser.Id,
             AccountRole.HasPersonalSchedule(CurrentUser.RoleDefinitionId) ? CurrentUser.DisplayName : null, ct: ct);
     }

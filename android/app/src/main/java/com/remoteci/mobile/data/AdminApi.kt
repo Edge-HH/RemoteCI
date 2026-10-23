@@ -58,6 +58,7 @@ object AdminApi {
         if (id == null) post("/api/me/schedule/courses", body, PersonalCourseRequest.serializer(), PersonalCourseView.serializer())
         else put("/api/me/schedule/courses/${enc(id)}", body, PersonalCourseRequest.serializer(), PersonalCourseView.serializer())
     suspend fun deletePersonalCourse(id: String) { request("DELETE", "/api/me/schedule/courses/${enc(id)}") }
+    suspend fun semester(): SemesterSettingsView = get("/api/settings/semester", SemesterSettingsView.serializer())
     /** 老师状态栏/超级岛使用的当前课与下一节课。 */
     suspend fun myNextCourse(): MyNextCourseResponse =
         get("/api/me/schedule/next?timeZoneOffsetMinutes=${deviceOffsetMinutes()}", MyNextCourseResponse.serializer())
@@ -86,6 +87,10 @@ object AdminApi {
         post("/api/swap-requests/${enc(id)}/cancel", EmptyBody(), EmptyBody.serializer(), SwapRequestView.serializer())
     suspend fun revokeSwap(id: String): SwapRequestView =
         post("/api/swap-requests/${enc(id)}/revoke", EmptyBody(), EmptyBody.serializer(), SwapRequestView.serializer())
+    /** 强制换课看过即处理：展示“待我处理”后上报，之后不再计入角标。 */
+    suspend fun markSwapsSeen(ids: List<String>) {
+        post("/api/swap-requests/seen", MarkSwapsSeenRequest(ids), MarkSwapsSeenRequest.serializer(), UnitSerializer)
+    }
 
     /** 个人通知；after 为上次收到的最新通知时间，用于重连后补齐离线期间的通知。 */
     suspend fun notifications(after: String? = null, unreadOnly: Boolean = false): List<UserNotification> {

@@ -82,6 +82,9 @@ public sealed class Envelope
     public static Envelope HolidayCalendar(HolidayCalendar payload) =>
         New(Protocol.MessageTypeHolidayCalendar, payload);
 
+    public static Envelope Semester(SemesterSync payload) =>
+        New(Protocol.MessageTypeSemester, payload);
+
     public static Envelope AppGuardPolicy(AppGuardPolicy payload) =>
         New(Protocol.MessageTypeAppGuardPolicy, payload);
 

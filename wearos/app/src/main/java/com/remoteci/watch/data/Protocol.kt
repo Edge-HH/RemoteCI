@@ -238,6 +238,9 @@ data class PersonalCourseView(
     val id: String,
     val subject: String,
     val location: String = "",
+    /** 重复规则说明，例如“每周三 14:00–14:45 · 双周”；旧服务端不返回。 */
+    val summary: String = "",
+    /** 下一次课的绝对时间。 */
     val startsAt: String,
     val endsAt: String,
     val reminderMinutes: Int? = null,

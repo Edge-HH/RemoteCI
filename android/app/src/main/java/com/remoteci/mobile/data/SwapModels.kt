@@ -83,7 +83,14 @@ data class SwapRequestView(
     @SerialName("canDecide") val canDecide: Boolean = false,
     @SerialName("canRevoke") val canRevoke: Boolean = false,
     @SerialName("canCancel") val canCancel: Boolean = false,
-)
+    /** 计入“待我处理”：可审批，或强制换课尚未看过；旧服务端没有该字段时按可审批/可撤回计。 */
+    @SerialName("needsAction") val needsAction: Boolean? = null,
+) {
+    val actionRequired: Boolean get() = needsAction ?: (canDecide || canRevoke)
+}
+
+@Serializable
+data class MarkSwapsSeenRequest(val ids: List<String>)
 
 @Serializable
 data class SwapCatalog(

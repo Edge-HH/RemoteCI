@@ -72,6 +72,9 @@ class SwapLogicTest {
         )
         assertEquals(Swap.STATUS_FORCED, item.status)
         assertTrue(item.canRevoke)
+        // 旧服务端没有 needsAction：按可撤回计入待处理；新服务端看过后为 false。
+        assertTrue(item.actionRequired)
+        assertFalse(item.copy(needsAction = false).actionRequired)
         assertEquals("已强制换课", Swap.statusText(item.status))
         assertTrue(swapSummary(item).contains("⇄"))
         val note = protocolJson.decodeFromString(

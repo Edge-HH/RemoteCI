@@ -1183,7 +1183,10 @@ namespace RemoteCI.Server.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<long>("EndsAtUnixMs")
+                    b.Property<DateOnly?>("Date")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("EndMinutes")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Location")
@@ -1197,10 +1200,10 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Property<int?>("ReminderMinutes")
                         .HasColumnType("INTEGER");
 
-                    b.Property<bool>("StartSent")
+                    b.Property<int>("StartMinutes")
                         .HasColumnType("INTEGER");
 
-                    b.Property<long>("StartsAtUnixMs")
+                    b.Property<long>("StartSentFor")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Subject")
@@ -1211,17 +1214,24 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Property<int>("TimeZoneOffsetMinutes")
                         .HasColumnType("INTEGER");
 
-                    b.Property<bool>("UpcomingSent")
+                    b.Property<long>("UpcomingSentFor")
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("WeekCountDiv")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("WeekCountDivTotal")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("WeekDay")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("EndsAtUnixMs");
-
-                    b.HasIndex("UserId", "StartsAtUnixMs");
+                    b.HasIndex("UserId");
 
                     b.ToTable("PersonalCourses");
                 });
@@ -1637,6 +1647,12 @@ namespace RemoteCI.Server.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<int>("SchedulePullIntervalMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateOnly?>("SemesterStartDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("SemesterSyncToClassrooms")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("VapidPrivateKey")

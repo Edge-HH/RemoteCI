@@ -1008,6 +1008,29 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     }
 
     [Fact]
+    public async Task Semester_IsSentToCapablePlugins_OnConnectAndWhenAdminChangesIt()
+    {
+        using (var scope = _factory.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<SemesterSettingsService>().SetAsync(new SemesterSettings { StartDate = "2026-09-02" });
+        using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities
+        {
+            SoftwareVersion = "3.3.0",
+            Capabilities = RemoteCiCapabilities.Current,
+        }));
+        var initial = ConvertPayload<SemesterSync>((await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSemester)).Payload);
+        Assert.Equal("2026-08-31", initial.WeekOneMonday);
+
+        var admin = await _factory.LoginAsync();
+        var update = await _factory.CreateClient().SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Put, "/api/settings/semester", admin.AccessToken,
+            new SemesterSettings { StartDate = "2027-02-22", SyncToClassrooms = true }));
+        update.EnsureSuccessStatusCode();
+        var changed = ConvertPayload<SemesterSync>((await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSemester)).Payload);
+        Assert.Equal("2027-02-22", changed.WeekOneMonday);
+    }
+
+    [Fact]
     public async Task AppGuardPolicy_IsSentAfterCapability_AndEachDeviceGetsItsOwnEffectivePolicy()
     {
         var credentialId = await AppGuardTests.PluginCredentialIdAsync(_factory);

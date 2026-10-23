@@ -97,6 +97,12 @@ public sealed class SystemMetadata
     /// <summary>服务端主动向插件拉取课表的间隔分钟数；0 表示关闭定时拉取。</summary>
     public int SchedulePullIntervalMinutes { get; set; }
 
+    /// <summary>学期开始日期，用于教学周与单双周/多周轮换；null 表示未设置。</summary>
+    public DateOnly? SemesterStartDate { get; set; }
+
+    /// <summary>把学期开始日期写入教室端 ClassIsland 的单周起始日期；默认开启，仅在设置了学期开始日期后生效。</summary>
+    public bool SemesterSyncToClassrooms { get; set; } = true;
+
     /// <summary>启用访客功能时，访问 WebUI 落地页直接进入访客课表；没有任何班级启用访客功能时无效。</summary>
     public bool AutoEnterVisitorPage { get; set; }
 

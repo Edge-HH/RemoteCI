@@ -407,7 +407,7 @@ object ConnectionManager {
             .onSuccess { items -> items.sortedBy { it.createdAt }.forEach { userNotifications.tryEmit(it) } }
         if (currentUser.value?.has(Protocol.PERMISSION_REQUEST_SWAP) != true) return
         runCatching { AdminApi.swapRequests("incoming") }
-            .onSuccess { items -> pendingSwapCount.value = items.count { it.canDecide || it.canRevoke } }
+            .onSuccess { items -> pendingSwapCount.value = items.count { it.actionRequired } }
     }
 
     /** 班级内的有效权限；服务端未下发班级信息（旧服务端）时回退到全局权限。 */

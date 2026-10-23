@@ -29,16 +29,18 @@
         }
     }
 </div>
+@if (Model.Courses.Count > 0)
+{
+    <h2 class="mobile-section-title">我的自定义课程</h2>
+    <div class="mobile-connected-list">
+        @foreach (var course in Model.Courses)
+        { <a class="mobile-row" href="/Mobile/MySchedule?edit=@course.Id"><i class="icon icon-menu-book"></i><span><strong>@course.Subject</strong><small>@course.Summary @course.Location</small></span><i class="icon icon-edit"></i></a> }
+    </div>
+}
 <dialog id="personal-course-editor" class="user-edit-dialog" data-user-edit-dialog data-personal-editor data-auto-open="@(Model.Editing is not null || Model.Error is not null ? "true" : "false")">
     <header><h2>@(Model.Editing is null ? "添加自定义课程" : "修改自定义课程")</h2><button type="button" class="ghost" data-user-edit-close>关闭</button></header>
     <form method="post" asp-page-handler="Save" class="stack" data-personal-course-form>
-        <input type="hidden" name="id" value="@Model.Editing?.Id" />
-        <label>课程名称<input name="Subject" value="@Model.Subject" maxlength="100" required /></label>
-        <label>地点（可选）<input name="Location" value="@Model.Location" maxlength="200" /></label>
-        <label>开始时间（本机时区）<input type="datetime-local" data-course-start required /></label><input type="hidden" name="StartsAt" value="@Model.StartsAt" data-course-start-iso />
-        <label>结束时间（本机时区）<input type="datetime-local" data-course-end required /></label><input type="hidden" name="EndsAt" value="@Model.EndsAt" data-course-end-iso />
-        <label>提前提醒（分钟，留空关闭）<input type="number" name="ReminderMinutes" value="@Model.ReminderMinutes" min="1" max="10080" /></label>
-        <label class="check"><input type="checkbox" name="NotifyAtStart" value="true" checked="@Model.NotifyAtStart" />上课时提醒</label><input type="hidden" name="NotifyAtStart" value="false" />
+        <partial name="_PersonalCourseFields" model="Model" />
         <button type="submit">保存课程</button>
     </form>
     @if (Model.Editing is { } editing)

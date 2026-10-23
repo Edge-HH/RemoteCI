@@ -14,7 +14,7 @@
 
 <div class="swap-tabs" role="tablist" data-swap-tabs>
     <button type="button" role="tab" class="swap-tab active" aria-selected="true" data-swap-tab="create">发起申请</button>
-    <button type="button" role="tab" class="swap-tab" aria-selected="false" data-swap-tab="incoming"><span>待我处理</span>@if (Model.PendingIncoming > 0) { <span class="nav-badge">@Model.PendingIncoming</span> }</button>
+    <button type="button" role="tab" class="swap-tab" aria-selected="false" data-swap-tab="incoming"><span>待我处理</span>@if (Model.PendingIncoming > 0) { <span class="nav-badge" data-swap-pending data-after-seen="@Model.Incoming.Count(x => x.CanDecide)">@Model.PendingIncoming</span> }</button>
     <button type="button" role="tab" class="swap-tab" aria-selected="false" data-swap-tab="outgoing">我的申请</button>
 </div>
 
@@ -84,10 +84,20 @@
     {
         <p class="muted">还没有发给你的换课申请。</p>
     }
+    @if (Model.Incoming.Any(x => x.CanRevoke && x.NeedsAction))
+    {
+        @* 强制换课看过即处理：打开“待我处理”页签时由 swap-requests.js 提交，角标随之减少。 *@
+        <form method="post" asp-page-handler="Seen" data-swap-seen hidden>
+            @foreach (var item in Model.Incoming.Where(x => x.CanRevoke && x.NeedsAction))
+            {
+                <input type="hidden" name="ids" value="@item.Id" />
+            }
+        </form>
+    }
     <div class="swap-list">
         @foreach (var item in Model.Incoming)
         {
-            <article class="swap-card@(item.CanDecide || item.CanRevoke ? " actionable" : "")">
+            <article class="swap-card@(item.NeedsAction ? " actionable" : "")">
                 <header>
                     <strong>@item.RequesterName@(item.Forced ? " 强制换课" : " 申请换课")</strong>
                     <span class="@SwapRequestsModel.StatusClass(item.Status)">@SwapRequestsModel.StatusText(item.Status)</span>

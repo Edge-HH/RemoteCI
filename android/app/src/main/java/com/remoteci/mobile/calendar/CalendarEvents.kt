@@ -36,7 +36,8 @@ internal fun calendarEvents(
             item.courses.filter { it.enabled }.forEach { course ->
                 val window = courseWindow(date, course, zone)
                 if (window.endsAt > now) add(CalendarEvent(
-                    key = course.personalCourseId?.let { "personal/$it" } ?: "${day.date}/${item.classId}/${course.index}",
+                    // 自定义课程每周重复，按课程与日期区分每一次。
+                    key = course.personalCourseId?.let { "personal/$it/${day.date}" } ?: "${day.date}/${item.classId}/${course.index}",
                     title = "${course.subject} · ${item.className}",
                     description = listOfNotNull(
                         "RemoteCI 我的日程 · ${course.label}", course.teacher,

@@ -87,6 +87,12 @@ public sealed class ProfileScheduleTests
         Assert.True(result.UsesWeekRotation);
         Assert.Equal("单周", result.Bundle.Days[0].ClassPlanName);
         Assert.Equal("双周", result.Bundle.Days[7].ClassPlanName);
+
+        // 设置学期开始日期后按教学周轮换：学期从上周开始，本周是第 2 周（双周），不再提示轮换不确定。
+        var semester = ProfileDocument.BuildSchedule(ProfileDocument.Serialize(profile), Monday, days: 8, semesterStart: Monday.AddDays(-5));
+        Assert.False(semester.UsesWeekRotation);
+        Assert.Equal("双周", semester.Bundle.Days[0].ClassPlanName);
+        Assert.Equal("单周", semester.Bundle.Days[7].ClassPlanName);
     }
 
     [Fact]

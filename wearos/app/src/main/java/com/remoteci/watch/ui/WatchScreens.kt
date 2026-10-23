@@ -489,7 +489,8 @@ internal fun ScheduleOverviewScreen(
         personalError?.let { item { Hint(it) } }
         if (personal.isEmpty() && personalError == null) item { Hint("暂无自定义课程，可在手机或 WebUI 添加。") }
         personal.forEach { course ->
-            item { Hint("${course.subject}\n${course.startsAt.take(16).replace('T', ' ')}–${course.endsAt.substringAfter('T').take(5)}\n${course.location}") }
+            val time = course.summary.ifBlank { "${course.startsAt.take(16).replace('T', ' ')}–${course.endsAt.substringAfter('T').take(5)}" }
+            item { Hint("${course.subject}\n$time\n${course.location}") }
         }
         item { BackButton(onBack) }
         return@WatchList
