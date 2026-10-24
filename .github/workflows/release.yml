@@ -395,7 +395,7 @@ jobs:
           test -f "artifacts/fnos-fpk/RemoteCI-${version}-fnos-arm64-offline.fpk"
           grep -Fq '<!-- CLASSISLAND_PKG_MD5 {"RemoteCI.Plugin.cipx":"' artifacts/plugin-cipx/checksums.md
       - name: 发布
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             artifacts/server-linux-x64/**
