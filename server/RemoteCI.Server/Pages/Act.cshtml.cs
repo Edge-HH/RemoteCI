@@ -15,6 +15,10 @@ public sealed class ActModel(ActionLinkService links) : PageModel
 {
     [BindProperty(SupportsGet = true)] public string Token { get; set; } = string.Empty;
     [BindProperty] public string? Note { get; set; }
+    /// <summary>上次提交返回了需要确认的冲突（如任课冲突），勾选后带确认重新提交。</summary>
+    [BindProperty] public bool AcknowledgeConflicts { get; set; }
+
+    public IReadOnlyList<SwapConflict> Conflicts { get; private set; } = [];
 
     public ActionLinkState State { get; private set; } = new(null, null, null);
     public SwapRequestView? Result { get; private set; }
@@ -34,7 +38,13 @@ public sealed class ActModel(ActionLinkService links) : PageModel
         NoStore();
         try
         {
-            Result = await links.ExecuteAsync(Token, Note, ct);
+            Result = await links.ExecuteAsync(Token, Note, AcknowledgeConflicts, ct);
+            State = await links.InspectAsync(Token, ct);
+        }
+        catch (SwapOperationException ex) when (ex.Conflicts is { Count: > 0 })
+        {
+            Error = "这次换课存在需要确认的冲突，请确认后再同意。";
+            Conflicts = ex.Conflicts;
             State = await links.InspectAsync(Token, ct);
         }
         catch (Exception ex) when (ex is ArgumentException or SwapOperationException or UnauthorizedAccessException)

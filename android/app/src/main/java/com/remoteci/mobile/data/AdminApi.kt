@@ -13,7 +13,12 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
-class AdminApiException(message: String) : IOException(message)
+/** REST 调用失败：code 为服务端错误码（如 SWAP_CONFLICTS），conflicts 为换课冲突列表。 */
+class AdminApiException(
+    message: String,
+    val code: String? = null,
+    val conflicts: List<SwapConflict> = emptyList(),
+) : IOException(message)
 
 object AdminApi {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
@@ -98,8 +103,10 @@ object AdminApi {
         get("/api/swap-requests?box=${enc(box)}", ListSerializer(SwapRequestView.serializer()))
     suspend fun createSwap(body: CreateSwapRequest): SwapRequestView =
         post("/api/swap-requests", body, CreateSwapRequest.serializer(), SwapRequestView.serializer())
-    suspend fun approveSwap(id: String, note: String?): SwapRequestView =
-        post("/api/swap-requests/${enc(id)}/approve", SwapDecisionRequest(note), SwapDecisionRequest.serializer(), SwapRequestView.serializer())
+    suspend fun approveSwap(id: String, note: String?, acknowledgeConflicts: Boolean = false): SwapRequestView =
+        post("/api/swap-requests/${enc(id)}/approve", SwapDecisionRequest(note, acknowledgeConflicts), SwapDecisionRequest.serializer(), SwapRequestView.serializer())
+    suspend fun revertSwap(id: String): SwapRequestView =
+        post("/api/swap-requests/${enc(id)}/revert", EmptyBody(), EmptyBody.serializer(), SwapRequestView.serializer())
     suspend fun rejectSwap(id: String, note: String?): SwapRequestView =
         post("/api/swap-requests/${enc(id)}/reject", SwapDecisionRequest(note), SwapDecisionRequest.serializer(), SwapRequestView.serializer())
     suspend fun cancelSwap(id: String): SwapRequestView =
@@ -233,8 +240,12 @@ object AdminApi {
         client.newCall(builder.build()).execute().use { response ->
             val text = response.body.string()
             if (!response.isSuccessful) {
-                val message = runCatching { json.decodeFromString(ApiError.serializer(), text).message }.getOrNull()
-                throw AdminApiException(message ?: "HTTP ${response.code}")
+                val error = runCatching { json.decodeFromString(ApiError.serializer(), text) }.getOrNull()
+                throw AdminApiException(
+                    error?.message?.takeIf { it.isNotBlank() } ?: "HTTP ${response.code}",
+                    error?.code?.takeIf { it.isNotBlank() },
+                    error?.conflicts.orEmpty(),
+                )
             }
             text
         }
@@ -260,8 +271,6 @@ data class ScreenshotInfo(
     @SerialName("capturedAt") val capturedAt: String = "",
     val url: String = "",
 )
-
-/** /api/auth/web-ticket 的响应：path 是相对服务器根的一次性登录地址。 */
 
 /** /api/auth/web-ticket 的响应：path 是相对服务器根的一次性登录地址。 */
 @Serializable data class WebLoginTicket(val ticket: String = "", val path: String = "")
@@ -396,4 +405,4 @@ data class BackupFileInfo(
 @Serializable data class UpdateCheckRequest(val channel: String)
 @Serializable data class UpdateApplyRequest(val channel: String, val force: Boolean = false)
 @Serializable data class ReleaseInfo(val tag: String = "", val name: String? = null)
-@Serializable data class ApiError(val code: String = "", val message: String = "")
+@Serializable data class ApiError(val code: String = "", val message: String = "", val conflicts: List<SwapConflict>? = null)

@@ -26,6 +26,7 @@ public sealed class CommandHandler
     private readonly ILogger _logger;
     private readonly ExtensionCommandRouter _extensionRouter;
     private readonly VoiceMessagePlayer _voiceMessages;
+    private readonly ScheduleOverlayService? _overlays;
 
     public CommandHandler(
         ScheduleCatalog schedules,
@@ -42,8 +43,10 @@ public sealed class CommandHandler
         VoiceMessagePlayer? voiceMessages = null,
         TerminalCommandService? terminal = null,
         FileReceiveService? files = null,
+        ScheduleOverlayService? overlays = null,
         ScreenCaptureService? screenshots = null)
     {
+        _overlays = overlays;
         _schedules = schedules;
         _scheduleBackend = scheduleBackend;
         _profileOps = profileOps;
@@ -106,7 +109,7 @@ public sealed class CommandHandler
         {
             return command.Command switch
             {
-                CommandKind.ChangeSchedule => await HandleScheduleChangeAsync(command.ScheduleChange),
+                CommandKind.ChangeSchedule => await HandleScheduleChangeAsync(command.ScheduleChange, command.RequestedBy),
                 CommandKind.SetSubjectTeacher => await HandleSetSubjectTeacherAsync(command.SubjectTeacher),
                 CommandKind.SendNotification => await HandleNotificationAsync(
                     command.Notification,
@@ -145,12 +148,12 @@ public sealed class CommandHandler
         }
     }
 
-    private async Task<CommandResult> HandleScheduleChangeAsync(ScheduleChangeRequest? request)
+    private async Task<CommandResult> HandleScheduleChangeAsync(ScheduleChangeRequest? request, UserProfile? requestedBy)
     {
         if (ValidateScheduleChangeRequest(request, DateTime.Today, out var date) is { } validationError)
             return CommandResult.Failure(CommandResultCodes.InvalidRequest, validationError);
 
-        var result = await Dispatcher.UIThread.InvokeAsync(() => ApplyScheduleChange(date, request!));
+        var result = await Dispatcher.UIThread.InvokeAsync(() => ApplyScheduleChange(date, request!, requestedBy));
         if (result.Success) ScheduleChanged?.Invoke();
         return result;
     }
@@ -188,10 +191,10 @@ public sealed class CommandHandler
         return null;
     }
 
-    private CommandResult ApplyScheduleChange(DateTime date, ScheduleChangeRequest request) =>
+    private CommandResult ApplyScheduleChange(DateTime date, ScheduleChangeRequest request, UserProfile? requestedBy) =>
         ScheduleChangeExecutor.Apply(
             date, request, _schedules, _scheduleBackend, _profileOps,
-            ex => _logger.LogError(ex, "保存 {Date} 临时课表失败", date));
+            ex => _logger.LogError(ex, "保存 {Date} 临时课表失败", date), _overlays, requestedBy);
 
     private async Task<CommandResult> HandleNotificationAsync(NotificationRequest? request, string senderName)
     {

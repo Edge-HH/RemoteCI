@@ -86,7 +86,7 @@ public sealed class ActionLinkService(AppDbContext db, ScheduleSwapService swaps
     }
 
     /// <summary>确认执行：先原子标记已使用（并发或重复提交只有一次成功），再调用换课服务。</summary>
-    public async Task<SwapRequestView> ExecuteAsync(string token, string? note, CancellationToken ct = default)
+    public async Task<SwapRequestView> ExecuteAsync(string token, string? note, bool acknowledgeConflicts = false, CancellationToken ct = default)
     {
         var row = await FindAsync(token, ct) ?? throw new ArgumentException("链接无效或已过期。");
         if (Problem(row) is { } problem) throw new ArgumentException(problem);
@@ -100,7 +100,7 @@ public sealed class ActionLinkService(AppDbContext db, ScheduleSwapService swaps
         {
             return row.Action switch
             {
-                ActionLinkActions.SwapApprove => await swaps.ApproveAsync(row.UserId, row.TargetId, trimmed, ct),
+                ActionLinkActions.SwapApprove => await swaps.ApproveAsync(row.UserId, row.TargetId, trimmed, acknowledgeConflicts, ct),
                 ActionLinkActions.SwapReject => await swaps.RejectAsync(row.UserId, row.TargetId, trimmed, ct),
                 ActionLinkActions.SwapRevoke => await swaps.RevokeForcedAsync(row.UserId, row.TargetId, ct),
                 _ => throw new ArgumentException("不支持的动作。"),

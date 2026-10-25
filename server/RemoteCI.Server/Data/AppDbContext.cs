@@ -48,6 +48,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ClassBoard> ClassBoards => Set<ClassBoard>();
     public DbSet<AppGuardOverride> AppGuardOverrides => Set<AppGuardOverride>();
     public DbSet<AppGuardEventRecord> AppGuardEvents => Set<AppGuardEventRecord>();
+    public DbSet<ScheduleAdjustment> ScheduleAdjustments => Set<ScheduleAdjustment>();
+    public DbSet<ClassSyncState> ClassSyncStates => Set<ClassSyncState>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -331,7 +333,28 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.Property(x => x.SourceTeacher).HasMaxLength(100);
             entity.Property(x => x.TargetTeacher).HasMaxLength(100);
             entity.Property(x => x.ReplacementSubjectName).HasMaxLength(100);
+            entity.Property(x => x.InvalidReason).HasMaxLength(200);
             entity.HasOne(x => x.Requester).WithMany().HasForeignKey(x => x.RequesterUserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ScheduleAdjustment>(entity =>
+        {
+            entity.HasIndex(x => new { x.ClassId, x.Date, x.Index, x.Status });
+            entity.HasIndex(x => x.SwapRequestId);
+            entity.HasIndex(x => new { x.Status, x.Date });
+            entity.Property(x => x.Date).HasMaxLength(10);
+            entity.Property(x => x.FromSubject).HasMaxLength(100);
+            entity.Property(x => x.ToSubject).HasMaxLength(100);
+            entity.Property(x => x.TeacherName).HasMaxLength(100);
+            entity.Property(x => x.CreatedByName).HasMaxLength(100);
+            entity.Property(x => x.ConflictCode).HasMaxLength(40);
+            entity.Property(x => x.StatusReason).HasMaxLength(200);
+            entity.HasOne<Classroom>().WithMany().HasForeignKey(x => x.ClassId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ClassSyncState>(entity =>
+        {
+            entity.HasKey(x => x.ClassId);
+            entity.Property(x => x.ClassId).ValueGeneratedNever();
+            entity.HasOne<Classroom>().WithMany().HasForeignKey(x => x.ClassId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<LessonTeacherOverride>(entity =>
         {

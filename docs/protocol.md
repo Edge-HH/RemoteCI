@@ -1,6 +1,6 @@
 # RemoteCI 协议 V3
 
-协议版本和软件版本是两个概念。当前稳定版服务端、插件、手机和手表的软件发布版本统一为 `3.3.0.2`，但所有 WebSocket 信封都使用整数 `protocolVersion: 3`。稳定版使用四段纯数字版本，Beta 使用 `v3.x.x-beta.y`；软件版本只用于更新和诊断，不参与连接拒绝；只有协议号不是 `3` 时才返回 `PROTOCOL_VERSION_UNSUPPORTED`。
+协议版本和软件版本是两个概念。当前稳定版服务端、插件、手机和手表的软件发布版本统一为 `3.3.1.8`，但所有 WebSocket 信封都使用整数 `protocolVersion: 3`。稳定版使用四段纯数字版本，Beta 使用 `v3.x.x-beta.y`；软件版本只用于更新和诊断，不参与连接拒绝；只有协议号不是 `3` 时才返回 `PROTOCOL_VERSION_UNSUPPORTED`。
 
 V3 内只能增加可选字段、新消息和新能力，未知字段与未知能力标识必须安全忽略。删除字段、改变既有字段含义或改变既有命令语义属于破坏性变更，必须升级为 V4。
 
@@ -61,7 +61,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | `capabilities_sync` | 服务端/插件 → 手表 | 服务端能力，以及接收方每个可访问班级主插件的能力 `classPlugins: [{classId, plugin}]`；`plugin` 为兼容旧客户端保留 |
 | `software_inventory` | 插件 → 服务端 | 设备名称、ClassIsland 主程序与当前已加载插件的版本、可用更新和最近升级状态 |
 | `state_push` | 插件 → 服务端/手表 | 高频当前课程、提醒播放、主界面显隐与可用电源状态，不含完整课表 |
-| `schedule_sync` | 插件 → 服务端/手表 | 今天起七天的日期、课程、科目清单和每日修订号 |
+| `schedule_sync` | 插件 → 服务端/手表 | 今天起七天的日期、课程、科目清单和每日修订号；新版插件附带调课回执 `adjustments`（只发给服务端，服务端对账后不保存、不转发），见下文“调课记录与托管临时层” |
 | `schedule_pull` | 服务端/手表/手机 → 插件 | 只读请求，载荷可含 `{taskId, source, requestedAt}`，要求插件立即重新生成并推送七日课表；手机端 `source` 为 6。云端拒绝无权请求时向发起方回一条 `Failed` 状态的 `schedule_sync_status` |
 | `schedule_sync_status` | 插件 → 服务端/手表 | 全局课表任务状态：Running、Completed、Failed 或 Busy，以及任务来源和占用任务 ID |
 | `extensions_sync` | 插件 → 服务端/手表 | 扩展功能清单（id、displayName、icon、requiredPermission、parameters，可选 description、groupId） |
@@ -75,6 +75,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | `user_notify` | 服务端 → 手机/手表 | 面向当前账号的个人通知 `UserNotificationView {id, kind, title, body, swapRequestId?, createdAt, readAt?}`，投递给该账号全部在线连接，不按班级过滤；旧客户端忽略未知类型 |
 | `holiday_calendar` | 服务端 → 插件 | 调休日历 `HolidayCalendar {enabled, generatedAt, days[]}`，见下文“调休”；只发给声明了 `schedule.holiday-calendar` 能力的插件 |
 | `semester` | 服务端 → 插件 | 学期设置 `SemesterSync {weekOneMonday}`，见下文“学期”；只发给声明了 `schedule.semester` 能力的插件 |
+| `schedule_adjustments` | 服务端 → 插件 | 该班今天起的全部有效调课 `ScheduleAdjustmentSet {classId, version, generatedAt, items[], acknowledgedLocalIds[]}`，见下文“调课记录与托管临时层”；只发给声明了 `schedule.adjustments` 能力的班级插件 |
 | `file_transfer_progress` | 插件 → 服务端 | 中转文件的下载进度与最终结果，见下文“文件分发（中转方式）” |
 | `app_guard_policy` | 服务端 → 插件 | 该设备的应用守护生效策略 `AppGuardPolicy`，见下文“应用守护”；只发给声明了 `host.app-guard` 能力的插件 |
 | `app_guard_event` | 插件 → 服务端 | 守护进程记录的事件 `AppGuardEventBatch {events:[{kind, atUnixMs, detail?}]}`，未分配班级的设备也会上报 |
@@ -99,7 +100,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 ## 能力协商
 
-V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings`、`schedule.holiday-calendar`、`profile.read`、`profile.temp-layer`、`schedule.semester`、`file.transfer`、`host.app-guard` 和 `screen.capture` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
+V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings`、`schedule.holiday-calendar`、`profile.read`、`profile.temp-layer`、`schedule.semester`、`file.transfer`、`host.app-guard`、`schedule.change-permanent`、`schedule.adjustments` 和 `screen.capture` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
 
 WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手机的有效能力是“本地 ∩ 服务端 ∩ 当前班级主插件”。服务端在 `capabilities_sync.classPlugins` 中按接收方可访问的班级逐个下发主插件能力，客户端切换班级时按新班级重算；没有对应条目表示该班插件离线。旧服务端没有该字段时客户端退回 `plugin`。多插件时，当前主插件仍是最早接入的健康插件；主插件切换、断开或能力更新后，服务端重新广播能力快照。界面应隐藏缺失能力的入口，服务端转发命令前仍需按统一映射复核主插件能力，缺少能力时返回 `CAPABILITY_UNSUPPORTED`。能力声明不能绕过账号权限或扩展策略检查。
 
@@ -133,7 +134,9 @@ WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手
 - `targetIndex`：交换模式必填。
 - `replacementSubjectId`：替换模式必填。
 - `expectedRevision`：客户端读取当天课表时的修订号。
-- `permanent`：为 `true` 时直接修改 ClassIsland 源课表，本周及以后每周持续生效；默认 `false`，只写入当天临时课表层。
+- `permanent`：为 `true` 时直接修改 ClassIsland 源课表，本周及以后每周持续生效；当天已有临时层时写入临时层的来源课表（`OverlaySourceId`），而不是只改当天（`schedule.change-permanent` 能力）。默认 `false`，只影响当天。
+
+声明 `schedule.adjustments` 的插件把临时换课（`permanent: false`，无论来自 WebUI 课表页、手机、手表、`POST /api/commands` 还是局域网）记为本地调课：按当天生效科目与基础科目换算成逐节调课，写入该日的托管临时层，并随下一次课表推送上报给服务端收编，见“调课记录与托管临时层”。客户端无需改动；该日无法托管（没有课表、外来临时层节数与基础课表不同）时退回直接修改当天课表。永久换课写入源课表后，插件按新的基础课表重建托管临时层，守卫对不上的调课回报为冲突。
 
 手机端的能力快照只用于界面提示，不能代替服务端鉴权；换课入口在当前班级拥有 `ManageSchedule` 时仍可提交，最终由服务端和目标班级主插件复核能力并返回 `CAPABILITY_UNSUPPORTED` 等结果。
 
@@ -145,7 +148,7 @@ WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手
 
 `days[]` 每项为 `{date, kind, name, followWeekday?, followSource?}`：`kind` 为 `off`（放假日）或 `makeup`（调休上学日）；调休上学日的 `followWeekday` 为 1-5（周一至周五），为 null 时表示不补课或无法推算，`followSource` 为 `auto` / `manual` / `skip` / `unresolved`。`enabled` 为 `false` 时 `days` 为空，插件应撤销此前做过的全部调整。
 
-插件把日历缓存到本地，断网时继续生效：放假日把宿主 `LessonsService.IsClassPlanEnabled` 设为 `false`，并且只恢复自己关掉的开关；调休上学日在今天起 7 天内用 `CreateTempClassPlan` 复制该周对应工作日的课表作为临时课表，已有他人安排的预定课表时不覆盖。
+插件把日历缓存到本地，断网时继续生效：放假日把宿主 `LessonsService.IsClassPlanEnabled` 设为 `false`，并且只恢复自己关掉的开关；调休上学日在今天起 7 天内建立托管临时层，基础课表为该周对应工作日按规则匹配的课表（忽略那天的临时层，不会把那天的换课复制过来），当天的调课叠加在上面；管理员给该日预定了普通课表时以管理员为准。调休安排变化时托管临时层按新的基础课表重建，其中的调课保留或按守卫回报冲突。放假日上的调课回报冲突 `HOLIDAY`。旧版插件建立的调休临时课表（`HolidayState.json`）在升级后首次运行时接管，其中旧版换课的改动转为本地调课保留。
 
 插件上报的 `ScheduleDay` 新增可选字段 `dayKind`（`holiday` / `makeup`）和 `holidayName`，普通日期不输出。放假日 `enabled` 为 `false` 且不含课程，因此换课会被拒绝。
 
@@ -204,14 +207,30 @@ REST 接口全部仅限系统管理员，其他账号返回 403：
 
 ## 换课申请
 
-拥有 `RequestScheduleSwap` 的老师可以向其他老师发起临时换课申请，对方同意后服务端代为向教室端下发 `ChangeSchedule`（`permanent: false`）。教室端插件无需升级：执行身份 `RequestedBy` 由服务端生成，显示名为“换课申请 · 姓名”，只携带 `ManageSchedule`。
+拥有 `RequestScheduleSwap` 的老师可以向其他老师发起临时换课申请，对方同意后服务端写成调课记录，由教室端插件生成临时层生效（见“调课记录与托管临时层”）。教室端插件必须声明 `schedule.adjustments`：插件在线但版本过旧时，提交或审批返回 422 `CAPABILITY_UNSUPPORTED`（“教室端插件版本过旧，请先升级 RemoteCI 插件”）。
 
 - **模式**：`mode` 1 为互换，`source` 与 `target` 两节课可以跨班、跨日，也可以选别人的课，但至少一节的老师必须是申请人；跨班时学科按名称在各自班级匹配。2 为替换，只填 `target` 与申请人任教的 `subjectName`。
 - **审批人**：对方课位老师字段匹配到的账号；匹配不到时回退为该班班主任，再回退为系统管理员。两节都是申请人自己的课时直接生效。
-- **执行**：同班同日的互换下发一条 `Exchange`。其余情况逐节下发 `Replace`，修订号取最新值或上一条回执的 `scheduleRevision`；后一条失败时，前面已生效的会反向替换补偿。执行前按服务端最新课表复核课位快照，变化时返回 `SWAP_SLOT_CHANGED`。插件离线或超时时申请保持待审批。
-- **单节临时任课老师**：ClassIsland 只有“班级学科 → 老师”。换课后某节课的实际老师与学科默认老师不一致时，服务端记录单节覆盖 `LessonTeacherOverride (classId, date, index) → teacherName`，叠加到下发给手机、手表、WebUI 的课表和“我的日程”。该节学科再次变化或日期过去后，覆盖自动失效。覆盖有效期间，临时任课老师按任教老师获得该班访问。ClassIsland 本机仍显示学科默认老师。
-- **强制换课**：拥有 `ForceScheduleSwap` 时可以带 `force: true` 立即生效，并通知对方老师与班主任。对方可撤回，撤回后按记录的原学科反向替换。同一申请人当天不能再强制换走这一节课（`SWAP_FORCE_LOCKED`），其他老师、其他课以及之后各周的同一节课不受影响。
-- **状态**：1 待审批、2 已通过、3 已拒绝、4 已撤销、5 已过期（每 10 分钟清扫）、6 已强制、7 已撤回。
+- **重复申请**：同一对课位（不分先后、不分申请人）、同一模式与换入学科只能有一份待审批申请，否则返回 409 `SWAP_STATE_CONFLICT`。
+- **冲突提示**：提交、预检（`POST /api/swap-requests/preview`）与审批时，服务端按真实上下课时间检查换课后的任课老师是否同时在另一个班上课（`teacher_clash`，各班时间表可以不同，不比较节次序号；本次换课腾出的课位不算），以及涉及的课是否还有其他待审批申请（`slot_pending`）。这两类需要确认：未带 `acknowledgeConflicts: true` 时返回 409 `SWAP_CONFLICTS`，错误体 `conflicts[]` 列出 `SwapConflict {kind, message, requiresAcknowledgement, classId?, className?, date?, index?, label?, subject?, teacher?, startTime?, endTime?, swapRequestId?}`；确认后照常执行（例如合班上课），确认过的冲突记录在申请的 `acknowledgedConflicts` 中。`slot_adjusted`（课位当天已调整过）只作提示，不需要确认。审批通过的 `SwapDecisionRequest` 同样带 `acknowledgeConflicts`。
+- **执行**：执行前按服务端叠加调课后的最新课表复核课位快照，变化时返回 `SWAP_SLOT_CHANGED`。随后写入调课记录（守卫为各节基础科目）、下发调课集合，并等待插件回执约 8 秒：全部生效即通过；插件报告冲突时撤掉这次的记录，申请保持待审批并返回 409 `SWAP_SLOT_CHANGED`；插件离线或超时时照常通过，`delivery` 为 `pending`（“教室电脑暂未确认，上线后自动生效”），插件上线后补发。
+- **单节临时任课老师**：ClassIsland 只有“班级学科 → 老师”。换课后某节课的实际老师与学科默认老师不一致时，调课记录带上 `teacherName`，服务端叠加到下发给手机、手表、WebUI 的课表和“我的日程”；叠加按科目 ID 匹配，课位已不是调课的新科目时不叠加。叠加有效期间，临时任课老师按任教老师获得该班访问。ClassIsland 本机仍显示学科默认老师。
+- **同一节课的其他申请**：一份申请通过或强制生效后，触及同一节课的其他待审批申请置为已失效，并通知申请人（`swap_invalidated`）。
+- **强制换课**：拥有 `ForceScheduleSwap` 时可以带 `force: true` 立即生效，并通知对方老师与班主任。对方可撤回，撤回即撤销调课记录，不依赖教室端当前课表，不会因课位已变化而失败。同一申请人当天不能再强制换走这一节课（`SWAP_FORCE_LOCKED`），其他老师、其他课以及之后各周的同一节课不受影响。
+- **班主任撤回**：相关班级的班主任或系统管理员可以撤回已通过或已强制的换课（`POST /api/swap-requests/{id}/revert`），状态变为已撤回并通知申请人与对方老师；列表项 `canRevert` 表示当前用户能否撤回。班主任可以查看本班相关换课的详情。
+- **失效**：换课生效后，教室端报告调课冲突（档案下发改了基础课表、该日改为放假、插件过旧等）时，申请置为已失效（`invalidReason` 为原因），同一申请的其余调课一并撤销（不留半个换课），并通知申请人、对方老师与相关班主任（`swap_invalidated`）。
+- **状态**：1 待审批、2 已通过、3 已拒绝、4 已撤销、5 已过期（每 10 分钟清扫）、6 已强制、7 已撤回、8 已失效。已通过与已强制的申请带 `delivery`（`pending` / `applied`）。
+
+## 调课记录与托管临时层
+
+调课记录是单日调整的权威来源（见 [ADR 0001](adr/0001-timetable-source-of-truth.md)）：某班某日某节从基础科目改为另一科目，来源可以是换课申请、经 RemoteCI 的直接临时换课或在 ClassIsland 里直接修改临时层。同一课位可叠放多条记录，序号最大的有效记录生效，撤回上层后回落到下层；每条记录带守卫 `fromSubjectId`（该节基础课表应有的科目），同一课位的记录守卫相同。
+
+- **下发**：服务端每次有效调课变化都递增该班的集合版本，向班级插件发送 `schedule_adjustments`：`items[]` 为今天起每个课位最上层的一条 `ScheduleSlotChange {id, date, index, fromSubjectId, toSubjectId}`，`acknowledgedLocalIds[]` 为服务端已经记录的插件本地调课 ID。插件上报能力后、回执版本落后时（限频 30 秒）也会补发。集合是期望状态，可以重复发送；插件忽略版本低于已应用版本的集合。
+- **托管临时层**：插件为需要的日期生成临时层，内容为“基础课表 + 服务端调课 + 本地调课”。基础课表依次取管理员给该日预定的普通课表、调休上学日所跟星期那天的课表、宿主按规则匹配的课表，一律忽略临时层。插件建立的临时层原地改写（课表 ID 不变，修订号只在内容变化时变化），基础课表或其时间表变化时重建，丢失（例如“新建并启用”档案、手动删除）时重建，不再需要时删除并恢复被顶替的预定课表。档案下发、ClassIsland 自带换课或升级前遗留的外来临时层与基础课表节数相同时接管（保留其时间表），与基础课表不同的节次转为本地调课；节数不同时该日不托管，服务端调课以 `FOREIGN_OVERLAY` 冲突返回。
+- **本地调课**：临时换课命令与在 ClassIsland 里对托管临时层的修改转为 `LocalScheduleAdjustment {id, date, index, fromSubjectId, toSubjectId, origin: direct|classisland, requestedByUserId?, requestedByName?, createdAt}`，持久化在插件本地，随课表上报，服务端按 ID 幂等收编（来源为直接换课或 ClassIsland），之后在 `acknowledgedLocalIds` 中确认。
+- **回执**：`schedule_sync` 的 `adjustments` 为 `ScheduleAdjustmentReport {version, items[], local[], unmanagedDates[]}`；`items[]` 为每条服务端调课的 `{id, state: 0 待处理|1 已生效|2 冲突, code?, message?}`。冲突码：`BASE_CHANGED`（基础课表已变化）、`INDEX_OUT_OF_RANGE`、`NO_PLAN`、`HOLIDAY`、`FOREIGN_OVERLAY`、`SUBJECT_MISSING`、`PLUGIN_OUTDATED`、`SAVE_FAILED`。服务端把冲突课位的整叠记录置为失效并通知相关换课申请的老师。托管日期的 `CourseEntry` 带 `baseSubjectId`（与生效科目不同时）与 `adjustmentId`；服务端叠加尚未送达的调课时标记 `adjustmentPending: true`。
+- **旧插件**：不声明 `schedule.adjustments` 的插件上线时，该班尚未送达的调课置为失效（`PLUGIN_OUTDATED`）并通知相关老师。
+- **升级回填**：服务端升级后启动时，把旧版逐节命令执行、今天及以后仍有效的换课回填为调课记录（同一课位以最早一次的原科目为守卫）；插件接管旧临时层后再回执。
 
 每次提交、通过、拒绝、撤销、强制和撤回都会写入个人通知（`UserNotification`），并同时推送：在线手机和手表走 `user_notify`，已订阅的浏览器走 Web Push（RFC 8291 aes128gcm + RFC 8292 VAPID；VAPID 密钥首次使用时生成并存入 `SystemMetadata`）。AstrBot 等外部客户端轮询 `GET /api/me/notifications`。
 
@@ -290,6 +309,7 @@ ClassIsland 的临时层是 `ClassPlans` 中 `IsOverlay=true` 的课表：`Overl
 - 服务端 `ProfileDispatchRequest` 在 `mode=4` 时不要求 `sections`，可带 `tempLayerIds`（省略表示全部；多份档案批量下发时忽略）和 `replaceExistingTempLayers`。载荷只包含所选临时层、它们的日期条目及依赖。某班档案没有临时层时只让该班失败。
 - 插件逐个写入：早于设备今天的跳过并计数，全部过期时失败；设备同日已有临时层或预定课表时，未设置 `replaceExistingTempLayers` 则整台设备拒绝并列出日期，设置后删除该日条目及不再被引用的旧临时层。科目和课表群只补缺，不覆盖设备现有对象；时间表在设备有同 ID 且时段一致时直接引用，否则以新 ID 写入临时层时间表副本，不改动设备的常规时间表。临时层课表以新 ID 写入，来源课表在设备上不存在时 `OverlaySourceId` 置空，并按来源课表重算 `IsChangedClass`。写入后总是打开 `IsOverlayClassPlanEnabled`（与宿主 `CreateTempClassPlan` 一致，否则未来日期的临时层不会生效），日期为今天时同时设置 `OverlayClassPlanId`。回执消息为“已下发 N 个临时层（，跳过 M 个已过期的临时层）”。
 - 校验同时拒绝 `OrderedSchedules` 中同一天出现多个条目（例如带与不带时区后缀的同一日期）。
+- 设备声明了 `schedule.adjustments` 时，插件会接管下发的临时层（与基础课表节数相同的才接管，与基础课表不同的节次转为本地调课）；覆盖已有调课的日期时，原有托管临时层被替换，其中的调课按守卫重新应用或回报冲突。
 - WebUI 按各班最近状态快照上报的时区偏移计算教室端“今天”（无快照时用服务端本地时区），据此标注临时层“今天生效/已过期”；模板没有班级时用浏览器日期。设备写入时仍以设备自身日期跳过过期项。
 
 ### 档案版本历史与设备差异
@@ -466,7 +486,10 @@ WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebU
 - `GET /api/me`、`POST /api/me/password`、`POST /api/me/display-name`
 - `GET /api/me/schedule`、`GET /api/me/schedule/next`
 - `GET /api/swap-requests/catalog`、`GET /api/swap-requests?box=incoming|outgoing|all&status=`、`GET /api/swap-requests/{id}`
-- `POST /api/swap-requests`、`POST /api/swap-requests/{id}/approve|reject|cancel|revoke`（`{id}` 也接受 8 位 `shortId`）
+- `POST /api/swap-requests`、`POST /api/swap-requests/{id}/approve|reject|cancel|revoke|revert`（`{id}` 也接受 8 位 `shortId`；`revert` 仅相关班级班主任与系统管理员）
+- `POST /api/swap-requests/preview`：请求体同 `POST /api/swap-requests`，不写入数据，返回 `{conflicts[]}`
+- `GET /api/classes/{classId}/schedule-adjustments?from=`：该班调课记录（默认从班级今天起），`ScheduleAdjustmentView {id, classId, date, index, fromSubject, toSubject, teacher?, origin: swap|direct|classisland|backfill, status: active|reverted|invalidated|expired, delivery: pending|applied|conflict, effective, conflictCode?, reason?, swapRequestId?, createdByName, createdAt}`
+- `DELETE /api/schedule-adjustments/{id}`：删除直接换课或教室端本地修改产生的有效调课（本班班主任或系统管理员）；来自换课申请的请走撤回
 - `POST /api/swap-requests/seen`（`{ids}`，省略或为空表示全部）：强制换课看过即处理。被强制换课的老师看过后，对应的 `swap_forced` 通知标记已读，该申请不再计入“待我处理”（仍可撤回）；返回 `{pending}` 为剩余待处理数。`GET /api/swap-requests/{id}` 查看强制换课详情也会自动标记。列表项的 `needsAction` 表示是否计入“待我处理”（可审批，或强制换课尚未看过），客户端角标应按它计数，而不是 `canDecide || canRevoke`。
 - `GET /api/me/notifications?after=&unread=&limit=`、`POST /api/me/notifications/read`（`{ids}` 或 `{all:true}`）
 - `GET/DELETE /api/me/sessions`

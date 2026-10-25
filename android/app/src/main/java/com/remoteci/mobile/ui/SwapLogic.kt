@@ -1,7 +1,9 @@
 package com.remoteci.mobile.ui
 
+import com.remoteci.mobile.data.AdminApiException
 import com.remoteci.mobile.data.Swap
 import com.remoteci.mobile.data.SwapCatalog
+import com.remoteci.mobile.data.SwapConflict
 import com.remoteci.mobile.data.SwapCatalogCourse
 import com.remoteci.mobile.data.SwapRequestView
 import com.remoteci.mobile.data.SwapSlot
@@ -70,6 +72,21 @@ internal fun swapCourseLabel(course: SwapCatalogCourse): String {
 internal fun swapSlotText(slot: SwapSlot): String {
     val teacher = slot.teacher?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
     return "${slot.className.orEmpty()} ${swapDateLabel(slot.date)} ${slot.label.orEmpty()} ${slot.subject.orEmpty()}$teacher".trim()
+}
+
+/** 需要确认的冲突（任课冲突、同一节课的其他待审批申请），每条一行；没有时返回 null。 */
+internal fun conflictLines(conflicts: List<SwapConflict>): String? =
+    conflicts.filter { it.requiresAcknowledgement }.takeIf { it.isNotEmpty() }?.joinToString("\n") { "· ${it.message}" }
+
+/** 失败是否为需要确认的换课冲突（409 SWAP_CONFLICTS）：是则返回给用户确认的冲突说明，否则返回 null。 */
+internal fun Throwable.swapConflictText(): String? =
+    (this as? AdminApiException)?.takeIf { it.code == Swap.ERROR_CONFLICTS }?.let { conflictLines(it.conflicts) ?: it.message }
+
+/** 换课卡片上的补充说明：送达状态、失效原因与确认过的冲突。 */
+internal fun swapStatusNotes(item: SwapRequestView): List<String> = buildList {
+    if (item.delivery == Swap.DELIVERY_PENDING) add("教室电脑暂未确认，上线后自动生效")
+    if (item.status == Swap.STATUS_INVALIDATED && !item.invalidReason.isNullOrBlank()) add("已失效：${item.invalidReason}")
+    if (item.acknowledgedConflicts.isNotEmpty()) add("已确认的冲突：" + item.acknowledgedConflicts.joinToString("；") { it.message })
 }
 
 /** 一条申请的课位摘要：互换显示“A ⇄ B”，替换显示“目标 → 学科”。 */

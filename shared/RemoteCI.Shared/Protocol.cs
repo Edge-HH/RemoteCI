@@ -37,6 +37,8 @@ public static class Protocol
     public const string MessageTypeAppGuardPolicy = "app_guard_policy";
     /// <summary>插件上报守护进程记录的事件（自动恢复、崩溃重启、备份结果等）。</summary>
     public const string MessageTypeAppGuardEvent = "app_guard_event";
+    /// <summary>服务端发给插件的调课集合（schedule.adjustments 能力），插件据此生成托管临时层；回执随 schedule_sync 上报。</summary>
+    public const string MessageTypeScheduleAdjustments = "schedule_adjustments";
 
     public const int LanDiscoveryPort = 48765;
     public const string LanDiscoveryRequest = "REMOTECI_DISCOVER_V3";
@@ -288,6 +290,8 @@ public static class RemoteCiCapabilities
     public const string Semester = "schedule.semester";
     /// <summary>接收应用守护策略：退出自启、意外退出重启、防删除备份与恢复。</summary>
     public const string AppGuard = "host.app-guard";
+    /// <summary>接收服务端调课集合，按“基础课表 + 调课记录”生成并维护托管临时层，在课表中回报结果与本地调课。</summary>
+    public const string ScheduleAdjustments = "schedule.adjustments";
     /// <summary>截取当前屏幕并凭一次性上传凭据上传到服务端。</summary>
     public const string ScreenCapture = "screen.capture";
 
@@ -312,7 +316,8 @@ public static class RemoteCiCapabilities
         [.. Baseline, VoiceMessageSend, SoftwareInventory, SoftwareUpgradePlugins, SoftwareUpgradeClassIsland,
             PluginInstall, PluginUninstall, PluginEnable, PluginManagementPolicy, ProfileDistribute, TimeLayoutUpdate, ManagementJoin,
             ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings, ProfileApply, HolidayCalendar,
-            ProfileRead, ProfileTempLayer, Semester, FileTransfer, AppGuard, ScreenCapture];
+            ProfileRead, ProfileTempLayer, Semester, FileTransfer, AppGuard, ScheduleChangePermanent, ScheduleAdjustments,
+            ScreenCapture];
 
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
@@ -350,6 +355,8 @@ public static class RemoteCiCapabilities
         HolidayCalendar => "调休自动适配",
         Semester => "同步学期开始日期",
         AppGuard => "应用守护",
+        ScheduleChangePermanent => "永久换课",
+        ScheduleAdjustments => "按调课记录生成临时层",
         ScreenCapture => "屏幕截图",
         _ => "未知能力",
     };

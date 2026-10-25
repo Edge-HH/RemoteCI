@@ -10,7 +10,7 @@ public sealed class ClassStateCache
     public Guid ClassroomId { get; set; }
     public Classroom Classroom { get; set; } = null!;
 
-    /// <summary>插件原样上报的课表（不含换课临时任课老师覆盖，覆盖另存于 LessonTeacherOverrides）。</summary>
+    /// <summary>插件原样上报的课表（不含服务端调课记录的叠加，调课记录另存于 ScheduleAdjustments）。</summary>
     public string? ScheduleJson { get; set; }
 
     public string? ExtensionsJson { get; set; }

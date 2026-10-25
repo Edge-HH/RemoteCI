@@ -22,8 +22,94 @@ public enum SwapRequestStatus
     Expired = 5,
     /// <summary>强制换课已生效，对方老师仍可撤回。</summary>
     Forced = 6,
-    /// <summary>强制换课被对方老师撤回，课表已恢复。</summary>
+    /// <summary>强制换课被对方老师撤回，或已生效的换课被班主任/管理员撤回，课表已恢复。</summary>
     Revoked = 7,
+    /// <summary>
+    /// 已失效：同一节课已有其他换课生效（待审批申请），或换课生效后基础课表变化、教室端无法再应用（已生效的换课）。
+    /// </summary>
+    Invalidated = 8,
+}
+
+/// <summary>换课在教室端的送达状态。</summary>
+public static class SwapDeliveryStates
+{
+    /// <summary>服务端已记录，等待教室端（离线或尚未回执）生效。</summary>
+    public const string Pending = "pending";
+    /// <summary>教室端已生效。</summary>
+    public const string Applied = "applied";
+}
+
+/// <summary>换课申请的冲突提示类型。</summary>
+public static class SwapConflictKinds
+{
+    /// <summary>换课后某位老师同一时间要在两个班上课。</summary>
+    public const string TeacherClash = "teacher_clash";
+    /// <summary>涉及的课还有其他待审批的换课申请，这次通过后它们会失效。</summary>
+    public const string SlotPending = "slot_pending";
+    /// <summary>涉及的课当天已经调整过（仅提示）。</summary>
+    public const string SlotAdjusted = "slot_adjusted";
+}
+
+/// <summary>提交或审批换课前检查出的冲突；需要确认的冲突未确认时，服务端返回 409 SWAP_CONFLICTS。</summary>
+public sealed class SwapConflict
+{
+    [JsonPropertyName("kind")]
+    public string Kind { get; set; } = string.Empty;
+
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>为 true 时必须确认（acknowledgeConflicts）才能继续；false 仅作提示。</summary>
+    [JsonPropertyName("requiresAcknowledgement")]
+    public bool RequiresAcknowledgement { get; set; }
+
+    [JsonPropertyName("classId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? ClassId { get; set; }
+
+    [JsonPropertyName("className")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ClassName { get; set; }
+
+    [JsonPropertyName("date")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Date { get; set; }
+
+    [JsonPropertyName("index")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Index { get; set; }
+
+    [JsonPropertyName("label")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Label { get; set; }
+
+    [JsonPropertyName("subject")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Subject { get; set; }
+
+    [JsonPropertyName("teacher")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Teacher { get; set; }
+
+    [JsonPropertyName("startTime")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StartTime { get; set; }
+
+    [JsonPropertyName("endTime")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EndTime { get; set; }
+
+    /// <summary>相关的其他换课申请（SlotPending / SlotAdjusted）。</summary>
+    [JsonPropertyName("swapRequestId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? SwapRequestId { get; set; }
+}
+
+/// <summary>POST /api/swap-requests/preview 的响应：提交前检查出的冲突，空列表表示没有冲突。</summary>
+public sealed class SwapPreviewResponse
+{
+    [JsonPropertyName("conflicts")]
+    public List<SwapConflict> Conflicts { get; set; } = [];
 }
 
 /// <summary>某班某日的一节课；快照字段只用于展示，服务端执行前会按最新课表复核。</summary>
@@ -79,12 +165,20 @@ public sealed class CreateSwapRequest
     /// <summary>强制换课：不经审批立即生效，需要 ForceScheduleSwap 权限。</summary>
     [JsonPropertyName("force")]
     public bool Force { get; set; }
+
+    /// <summary>已看过冲突提示（如任课冲突）并确认继续；未确认时有冲突会返回 409 SWAP_CONFLICTS。</summary>
+    [JsonPropertyName("acknowledgeConflicts")]
+    public bool AcknowledgeConflicts { get; set; }
 }
 
 public sealed class SwapDecisionRequest
 {
     [JsonPropertyName("note")]
     public string? Note { get; set; }
+
+    /// <summary>审批通过时确认冲突提示继续；拒绝时忽略。</summary>
+    [JsonPropertyName("acknowledgeConflicts")]
+    public bool AcknowledgeConflicts { get; set; }
 }
 
 public sealed class SwapRequestView
@@ -156,6 +250,24 @@ public sealed class SwapRequestView
     /// <summary>当前用户（申请人）能否撤销待审批申请。</summary>
     [JsonPropertyName("canCancel")]
     public bool CanCancel { get; set; }
+
+    /// <summary>当前用户（相关班级的班主任或系统管理员）能否撤回已生效的换课。</summary>
+    [JsonPropertyName("canRevert")]
+    public bool CanRevert { get; set; }
+
+    /// <summary>已生效换课在教室端的送达状态，见 <see cref="SwapDeliveryStates"/>；其他状态省略。</summary>
+    [JsonPropertyName("delivery")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Delivery { get; set; }
+
+    /// <summary>失效原因（状态为已失效时）。</summary>
+    [JsonPropertyName("invalidReason")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? InvalidReason { get; set; }
+
+    /// <summary>提交或审批时确认过的冲突提示。</summary>
+    [JsonPropertyName("acknowledgedConflicts")]
+    public List<SwapConflict> AcknowledgedConflicts { get; set; } = [];
 }
 
 /// <summary>换课页选择器数据：所有班级的七日课表（已叠加临时任课老师）与本人任教学科。</summary>
@@ -233,6 +345,8 @@ public static class UserNotificationKinds
     public const string SwapRevoked = "swap_revoked";
     /// <summary>发给相关班主任：本班课表因换课申请发生临时变化。</summary>
     public const string SwapHomeroomInfo = "swap_homeroom_info";
+    /// <summary>换课已失效：同一节课已有其他换课生效，或基础课表变化后教室端无法再应用。</summary>
+    public const string SwapInvalidated = "swap_invalidated";
     /// <summary>教室电脑插件在在校时段连续离线超过阈值。</summary>
     public const string DeviceOffline = "device_offline";
     /// <summary>告警过的教室电脑重新上线。</summary>

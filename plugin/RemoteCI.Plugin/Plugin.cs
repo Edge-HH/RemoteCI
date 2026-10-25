@@ -65,10 +65,14 @@ public class Plugin : PluginBase
         services.AddSingleton(holidayCalendar);
         services.AddSingleton<IHolidayCalendarLookup>(holidayCalendar);
         services.AddSingleton<IHolidayHostOperations, ClassIslandHolidayHost>();
-        services.AddSingleton(sp => new HolidayScheduleApplier(
-            sp.GetRequiredService<IHolidayHostOperations>(),
-            new HolidayStateFile(Path.Combine(PluginConfigFolder, "HolidayState.json")),
-            sp.GetRequiredService<ILogger<HolidayScheduleApplier>>()));
+        services.AddSingleton<HolidayScheduleApplier>();
+        // 托管临时层：按“基础课表 + 服务端调课 + 本地调课 + 调休”生成每天的临时层；首次运行时接管旧版调休临时课表。
+        services.AddSingleton<IScheduleOverlayHost, ClassIslandScheduleOverlayHost>();
+        services.AddSingleton(new ScheduleOverlayStateFile(
+            Path.Combine(PluginConfigFolder, "ScheduleOverlayState.json"),
+            Path.Combine(PluginConfigFolder, "HolidayState.json")));
+        services.AddSingleton<ScheduleOverlayService>();
+        services.AddSingleton<IScheduleOverlayInfo>(sp => sp.GetRequiredService<ScheduleOverlayService>());
         // 学期：把服务端统一的学期开始日期写入 ClassIsland 单周起始日期。
         services.AddSingleton<ISemesterHostOperations, ClassIslandSemesterHost>();
         services.AddSingleton<SemesterApplier>();

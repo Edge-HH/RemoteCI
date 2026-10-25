@@ -6,7 +6,7 @@ using RemoteCI.Shared.Models;
 namespace RemoteCI.Plugin.Services;
 
 /// <summary>七日课表读取和修订号计算的唯一入口（经 IScheduleBackend 防腐层，可单元测试）。</summary>
-public sealed class ScheduleCatalog(IScheduleBackend backend, IHolidayCalendarLookup? holidays = null)
+public sealed class ScheduleCatalog(IScheduleBackend backend, IHolidayCalendarLookup? holidays = null, IScheduleOverlayInfo? overlays = null)
 {
     public ScheduleBundle BuildBundle(DateTime? start = null)
     {
@@ -22,6 +22,7 @@ public sealed class ScheduleCatalog(IScheduleBackend backend, IHolidayCalendarLo
                 // Ordinal 排序不受运行环境区域设置影响，保证同一课表各端看到的顺序一致。
                 .OrderBy(x => x.Name, StringComparer.Ordinal)
                 .ToList(),
+            Adjustments = overlays?.BuildReport(),
         };
     }
 
@@ -46,6 +47,16 @@ public sealed class ScheduleCatalog(IScheduleBackend backend, IHolidayCalendarLo
             },
             HolidayName = holiday?.Name,
         };
+        // 托管临时层的日期标出基础科目与生效的调课，服务端据此确定调课守卫、显示调课来源；不参与修订号。
+        if (!isOff && overlays is not null && overlays.TryGetDate(result.Date, out var baseSubjects, out var applied) &&
+            baseSubjects.Count == result.Courses.Count)
+        {
+            foreach (var course in result.Courses)
+            {
+                if (baseSubjects[course.Index] != course.SubjectId) course.BaseSubjectId = baseSubjects[course.Index];
+                if (applied.TryGetValue(course.Index, out var adjustmentId)) course.AdjustmentId = adjustmentId;
+            }
+        }
         result.Revision = ComputeRevision(result, planId);
         return result;
     }

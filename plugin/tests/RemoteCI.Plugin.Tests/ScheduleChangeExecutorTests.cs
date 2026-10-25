@@ -165,6 +165,39 @@ public sealed class ScheduleChangeExecutorTests
     }
 
     [Fact]
+    public void Apply_PermanentOnTempLayerDate_WritesTheLayersSourcePlan()
+    {
+        // 当天已有临时层：永久换课要写它的来源课表，而不是只改当天的临时层。
+        var (catalog, backend, profile, overlay, subjectIds) = CreateHarness(overlay: true);
+        var sourceId = Guid.NewGuid();
+        var source = new ClassPlan { Name = "源课表" };
+        foreach (var id in subjectIds) source.Classes.Add(new ClassInfo { SubjectId = id, IsEnabled = true });
+        profile.ClassPlans[sourceId] = source;
+        overlay.OverlaySourceId = sourceId;
+        var request = Exchange(catalog.BuildDay(TestDay).Revision);
+        request.Permanent = true;
+
+        var result = ScheduleChangeExecutor.Apply(TestDay, request, catalog, backend, profile);
+
+        Assert.True(result.Success);
+        Assert.Equal([subjectIds[1], subjectIds[0]], source.Classes.Select(x => x.SubjectId));
+        Assert.Equal(subjectIds[0], overlay.Classes[0].SubjectId);
+    }
+
+    [Fact]
+    public void Apply_PermanentOnTempLayerWithoutSource_IsRejected()
+    {
+        var (catalog, backend, profile, _, _) = CreateHarness(overlay: true);
+        var request = Exchange(catalog.BuildDay(TestDay).Revision);
+        request.Permanent = true;
+
+        var result = ScheduleChangeExecutor.Apply(TestDay, request, catalog, backend, profile);
+
+        Assert.Equal(CommandResultCodes.ScheduleUnavailable, result.Code);
+        Assert.Equal(0, profile.SaveCount);
+    }
+
+    [Fact]
     public void Apply_SaveFailureRollsBackMutationAndReportsSaveFailed()
     {
         var (catalog, backend, profile, plan, subjectIds) = CreateHarness(overlay: true);

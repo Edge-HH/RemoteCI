@@ -763,6 +763,28 @@ namespace RemoteCI.Server.Data.Migrations
                     b.ToTable("ClassStateCaches");
                 });
 
+            modelBuilder.Entity("RemoteCI.Server.Data.ClassSyncState", b =>
+                {
+                    b.Property<Guid>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("AckedAdjustmentVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("AckedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("AdjustmentSequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("AdjustmentVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ClassId");
+
+                    b.ToTable("ClassSyncStates");
+                });
+
             modelBuilder.Entity("RemoteCI.Server.Data.Classroom", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1351,10 +1373,98 @@ namespace RemoteCI.Server.Data.Migrations
                     b.ToTable("ProfileDriftReports");
                 });
 
+            modelBuilder.Entity("RemoteCI.Server.Data.ScheduleAdjustment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ClassId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("ClosedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ConflictCode")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedByName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Date")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Delivery")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FromSubject")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("FromSubjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Index")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Origin")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Sequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StatusReason")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SwapRequestId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TeacherName")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ToSubject")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ToSubjectId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SwapRequestId");
+
+                    b.HasIndex("Status", "Date");
+
+                    b.HasIndex("ClassId", "Date", "Index", "Status");
+
+                    b.ToTable("ScheduleAdjustments");
+                });
+
             modelBuilder.Entity("RemoteCI.Server.Data.ScheduleSwapRequest", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AcknowledgedConflictsJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("AppliedPlanJson")
@@ -1390,6 +1500,10 @@ namespace RemoteCI.Server.Data.Migrations
 
                     b.Property<bool>("Forced")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("InvalidReason")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("Mode")
                         .HasColumnType("INTEGER");
@@ -2100,6 +2214,15 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Navigation("Classroom");
                 });
 
+            modelBuilder.Entity("RemoteCI.Server.Data.ClassSyncState", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.Classroom", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("RemoteCI.Server.Data.DeviceSession", b =>
                 {
                     b.HasOne("RemoteCI.Server.Data.AppUser", "User")
@@ -2141,6 +2264,15 @@ namespace RemoteCI.Server.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("Classroom");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.ScheduleAdjustment", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.Classroom", null)
+                        .WithMany()
+                        .HasForeignKey("ClassId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("RemoteCI.Server.Data.ScheduleSwapRequest", b =>

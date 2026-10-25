@@ -15,6 +15,17 @@ object Swap {
     const val STATUS_EXPIRED = 5
     const val STATUS_FORCED = 6
     const val STATUS_REVOKED = 7
+    const val STATUS_INVALIDATED = 8
+
+    /** 已生效换课的送达状态：教室端尚未确认（离线等）/ 已生效。 */
+    const val DELIVERY_PENDING = "pending"
+    const val DELIVERY_APPLIED = "applied"
+
+    /** 换课冲突提示；任课冲突与同一节课的其他待审批申请需要确认后才能提交或通过。 */
+    const val CONFLICT_TEACHER_CLASH = "teacher_clash"
+    const val CONFLICT_SLOT_PENDING = "slot_pending"
+    const val CONFLICT_SLOT_ADJUSTED = "slot_adjusted"
+    const val ERROR_CONFLICTS = "SWAP_CONFLICTS"
 
     const val KIND_REQUESTED = "swap_requested"
     const val KIND_APPROVED = "swap_approved"
@@ -23,6 +34,7 @@ object Swap {
     const val KIND_FORCED = "swap_forced"
     const val KIND_REVOKED = "swap_revoked"
     const val KIND_HOMEROOM_INFO = "swap_homeroom_info"
+    const val KIND_INVALIDATED = "swap_invalidated"
 
     const val FORCE_WARNING = "仅在需要紧急换课时使用，请提前与对方沟通并达成一致。"
 
@@ -34,6 +46,7 @@ object Swap {
         STATUS_EXPIRED -> "已过期"
         STATUS_FORCED -> "已强制换课"
         STATUS_REVOKED -> "已撤回"
+        STATUS_INVALIDATED -> "已失效"
         else -> "未知"
     }
 }
@@ -59,10 +72,27 @@ data class CreateSwapRequest(
     @SerialName("subjectName") val subjectName: String? = null,
     val reason: String,
     val force: Boolean = false,
+    /** 已看过冲突提示并确认继续；未确认时有需要确认的冲突会返回 409 SWAP_CONFLICTS。 */
+    @SerialName("acknowledgeConflicts") val acknowledgeConflicts: Boolean = false,
 )
 
 @Serializable
-data class SwapDecisionRequest(val note: String? = null)
+data class SwapDecisionRequest(
+    val note: String? = null,
+    @SerialName("acknowledgeConflicts") val acknowledgeConflicts: Boolean = false,
+)
+
+/** 提交或审批换课前检查出的冲突。 */
+@Serializable
+data class SwapConflict(
+    val kind: String = "",
+    val message: String = "",
+    @SerialName("requiresAcknowledgement") val requiresAcknowledgement: Boolean = false,
+    @SerialName("className") val className: String? = null,
+    val date: String? = null,
+    val label: String? = null,
+    val teacher: String? = null,
+)
 
 @Serializable
 data class SwapRequestView(
@@ -85,6 +115,12 @@ data class SwapRequestView(
     @SerialName("canCancel") val canCancel: Boolean = false,
     /** 计入“待我处理”：可审批，或强制换课尚未看过；旧服务端没有该字段时按可审批/可撤回计。 */
     @SerialName("needsAction") val needsAction: Boolean? = null,
+    /** 相关班级的班主任或系统管理员可撤回已生效的换课。 */
+    @SerialName("canRevert") val canRevert: Boolean = false,
+    /** 已生效换课的送达状态（pending / applied）；其他状态为 null。 */
+    val delivery: String? = null,
+    @SerialName("invalidReason") val invalidReason: String? = null,
+    @SerialName("acknowledgedConflicts") val acknowledgedConflicts: List<SwapConflict> = emptyList(),
 ) {
     val actionRequired: Boolean get() = needsAction ?: (canDecide || canRevoke)
 }

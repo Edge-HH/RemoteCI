@@ -3,10 +3,10 @@ using RemoteCI.Shared.Models;
 
 namespace RemoteCI.Server.Services;
 
-public sealed class StateStore(LessonOverrideTable? overrides = null) : IStateStore
+public sealed class StateStore(ScheduleAdjustmentOverlay? adjustments = null) : IStateStore
 {
     private readonly ConcurrentDictionary<Guid, ClassStateBucket> _buckets = new();
-    private readonly LessonOverrideTable _overrides = overrides ?? new LessonOverrideTable();
+    private readonly ScheduleAdjustmentOverlay _adjustments = adjustments ?? new ScheduleAdjustmentOverlay();
 
     private ClassStateBucket Bucket(Guid classId) => _buckets.GetOrAdd(classId, _ => new ClassStateBucket());
 
@@ -22,7 +22,7 @@ public sealed class StateStore(LessonOverrideTable? overrides = null) : IStateSt
     public void SaveSchedule(Guid classId, ScheduleBundle schedule) => Bucket(classId).SaveSchedule(schedule);
 
     public ScheduleBundle? GetLatestSchedule(Guid classId) =>
-        Bucket(classId).GetLatestSchedule() is { } bundle ? _overrides.Apply(classId, bundle) : null;
+        Bucket(classId).GetLatestSchedule() is { } bundle ? _adjustments.Apply(classId, bundle) : null;
 
     public ScheduleBundle? GetSourceSchedule(Guid classId) => Bucket(classId).GetLatestSchedule();
 

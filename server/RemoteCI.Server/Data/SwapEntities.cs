@@ -45,13 +45,22 @@ public sealed class ScheduleSwapRequest
     public DateTimeOffset? DecidedAt { get; set; }
     public DateTimeOffset? RevokedAt { get; set; }
 
-    /// <summary>实际下发到教室端的单节改动及原学科，JSON；撤回时按此精确反向。</summary>
+    /// <summary>
+    /// 遗留字段：旧版逐节命令下发的改动 JSON。新版改为 <see cref="ScheduleAdjustment"/>（按 SwapRequestId 关联），
+    /// 只在升级时回填一次，之后不再写入。
+    /// </summary>
     public string? AppliedPlanJson { get; set; }
+
+    /// <summary>失效原因（Status 为 Invalidated 时）。</summary>
+    public string? InvalidReason { get; set; }
+
+    /// <summary>提交或审批时确认过的冲突提示，JSON 数组（SwapConflict）。</summary>
+    public string? AcknowledgedConflictsJson { get; set; }
 }
 
 /// <summary>
-/// 单节课临时任课老师覆盖：ClassIsland 只有“班级学科→老师”，换课后某节课可能由另一位老师上。
-/// 仅影响 RemoteCI 的课表显示与个人日程，不授予班级权限；课位学科不再是 ExpectedSubject 时自动失效。
+/// 遗留表：旧版单节课临时任课老师覆盖。新版由 <see cref="ScheduleAdjustment.TeacherName"/> 取代，
+/// 只在升级时回填一次，之后不再读写。
 /// </summary>
 public sealed class LessonTeacherOverride
 {

@@ -24,6 +24,10 @@ public sealed class SwapRequestsModel(UserManager<AppUser> users, ScheduleSwapSe
 
     [BindProperty] public SwapInput Input { get; set; } = new();
 
+    /// <summary>上次审批返回了需要确认的冲突：对应申请卡片上列出冲突并提供“仍然通过”。</summary>
+    public Guid? ConflictSwapId { get; private set; }
+    public IReadOnlyList<SwapConflict> Conflicts { get; private set; } = [];
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         if (await RequireAsync(UserPermissions.RequestScheduleSwap) is { } denied) return denied;
@@ -34,37 +38,57 @@ public sealed class SwapRequestsModel(UserManager<AppUser> users, ScheduleSwapSe
     public async Task<IActionResult> OnPostCreateAsync(CancellationToken ct)
     {
         if (await RequireAsync(UserPermissions.RequestScheduleSwap) is { } denied) return denied;
-        var request = new CreateSwapRequest
-        {
-            Mode = Input.Mode,
-            Reason = Input.Reason ?? string.Empty,
-            Force = Input.Force,
-            SubjectName = Input.Mode == SwapMode.Replace ? Input.SubjectName : null,
-            Target = new SwapSlot { ClassId = Input.TargetClassId, Date = Input.TargetDate ?? "", Index = Input.TargetIndex },
-            Source = Input.Mode == SwapMode.Exchange
-                ? new SwapSlot { ClassId = Input.SourceClassId, Date = Input.SourceDate ?? "", Index = Input.SourceIndex }
-                : null,
-        };
+        var request = BuildRequest();
         return await RunAsync(async () =>
         {
             var created = await swaps.CreateAsync(CurrentUser.Id, request, ct);
+            var offline = created.Delivery == SwapDeliveryStates.Pending ? "教室电脑当前离线，上线后自动生效。" : "";
             return created.Status switch
             {
-                SwapRequestStatus.Forced => "已强制换课，并已通知对方老师。",
-                SwapRequestStatus.Approved => "两节课都是你的课，已直接完成临时换课。",
+                SwapRequestStatus.Forced => "已强制换课，并已通知对方老师。" + offline,
+                SwapRequestStatus.Approved => "两节课都是你的课，已直接完成临时换课。" + offline,
                 _ => "换课申请已发送，等待对方老师处理。",
             };
         });
     }
 
-    public async Task<IActionResult> OnPostApproveAsync(Guid id, string? note, CancellationToken ct)
+    /// <summary>提交前预检冲突，由 swap-requests.js 调用；校验失败时返回错误文案。</summary>
+    public async Task<IActionResult> OnPostPreviewAsync(CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.RequestScheduleSwap) is not null) return Unauthorized();
+        try
+        {
+            return new JsonResult(await swaps.PreviewAsync(CurrentUser.Id, BuildRequest(), ct), JsonDefaults.Options);
+        }
+        catch (SwapOperationException ex)
+        {
+            return new JsonResult(new ApiError { Code = ex.Code, Message = ex.Message }, JsonDefaults.Options) { StatusCode = ex.Status };
+        }
+    }
+
+    private CreateSwapRequest BuildRequest() => new()
+    {
+        Mode = Input.Mode,
+        Reason = Input.Reason ?? string.Empty,
+        Force = Input.Force,
+        AcknowledgeConflicts = Input.AcknowledgeConflicts,
+        SubjectName = Input.Mode == SwapMode.Replace ? Input.SubjectName : null,
+        Target = new SwapSlot { ClassId = Input.TargetClassId, Date = Input.TargetDate ?? "", Index = Input.TargetIndex },
+        Source = Input.Mode == SwapMode.Exchange
+            ? new SwapSlot { ClassId = Input.SourceClassId, Date = Input.SourceDate ?? "", Index = Input.SourceIndex }
+            : null,
+    };
+
+    public async Task<IActionResult> OnPostApproveAsync(Guid id, string? note, bool acknowledgeConflicts, CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
         return await RunAsync(async () =>
         {
-            await swaps.ApproveAsync(CurrentUser.Id, id, note, ct);
-            return "已同意换课，课表已临时调整。";
-        });
+            var approved = await swaps.ApproveAsync(CurrentUser.Id, id, note, acknowledgeConflicts, ct);
+            return approved.Delivery == SwapDeliveryStates.Pending
+                ? "已同意换课。教室电脑当前离线，上线后自动生效。"
+                : "已同意换课，课表已临时调整。";
+        }, id);
     }
 
     public async Task<IActionResult> OnPostRejectAsync(Guid id, string? note, CancellationToken ct)
@@ -97,6 +121,16 @@ public sealed class SwapRequestsModel(UserManager<AppUser> users, ScheduleSwapSe
         });
     }
 
+    public async Task<IActionResult> OnPostRevertAsync(Guid id, CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        return await RunAsync(async () =>
+        {
+            await swaps.RevertAsync(CurrentUser.Id, id, ct);
+            return "已撤回换课，课表已恢复。";
+        });
+    }
+
     /// <summary>打开“待我处理”页签即看到了强制换课，视为已处理；返回剩余待处理数用于刷新角标。</summary>
     public async Task<IActionResult> OnPostSeenAsync(List<Guid> ids, CancellationToken ct)
     {
@@ -105,7 +139,7 @@ public sealed class SwapRequestsModel(UserManager<AppUser> users, ScheduleSwapSe
         return new JsonResult(new { pending = await swaps.CountPendingForAsync(CurrentUser.Id, ct) });
     }
 
-    private async Task<IActionResult> RunAsync(Func<Task<string>> action)
+    private async Task<IActionResult> RunAsync(Func<Task<string>> action, Guid? swapId = null)
     {
         try
         {
@@ -114,12 +148,25 @@ public sealed class SwapRequestsModel(UserManager<AppUser> users, ScheduleSwapSe
         catch (SwapOperationException ex)
         {
             TempData["Error"] = ex.Message;
+            if (swapId is { } id && ex.Conflicts is { Count: > 0 } conflicts)
+            {
+                TempData["SwapConflictId"] = id.ToString();
+                TempData["SwapConflicts"] = JsonSerializer.Serialize(conflicts, JsonDefaults.Options);
+                return RedirectToPage(null, null, "incoming");
+            }
         }
         return RedirectToPage();
     }
 
     private async Task LoadAsync(CancellationToken ct)
     {
+        if (TempData["SwapConflictId"] is string conflictId && Guid.TryParse(conflictId, out var parsed) &&
+            TempData["SwapConflicts"] is string conflictsJson)
+        {
+            ConflictSwapId = parsed;
+            try { Conflicts = JsonSerializer.Deserialize<List<SwapConflict>>(conflictsJson, JsonDefaults.Options) ?? []; }
+            catch (JsonException) { Conflicts = []; }
+        }
         Catalog = await swaps.GetCatalogAsync(CurrentUser.Id, ct);
         Incoming = await swaps.ListAsync(CurrentUser.Id, "incoming", null, ct);
         Outgoing = await swaps.ListAsync(CurrentUser.Id, "outgoing", null, ct);
@@ -134,6 +181,7 @@ public sealed class SwapRequestsModel(UserManager<AppUser> users, ScheduleSwapSe
         SwapRequestStatus.Expired => "已过期",
         SwapRequestStatus.Forced => "已强制换课",
         SwapRequestStatus.Revoked => "已撤回",
+        SwapRequestStatus.Invalidated => "已失效",
         _ => status.ToString(),
     };
 
@@ -166,5 +214,6 @@ public sealed class SwapRequestsModel(UserManager<AppUser> users, ScheduleSwapSe
         public string? SubjectName { get; set; }
         public string? Reason { get; set; }
         public bool Force { get; set; }
+        public bool AcknowledgeConflicts { get; set; }
     }
 }

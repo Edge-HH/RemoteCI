@@ -25,6 +25,7 @@ public sealed class RemoteCiService : IDisposable
     private readonly HolidayCalendarStore _holidayCalendar;
     private readonly HolidayScheduleApplier _holidayApplier;
     private readonly SemesterApplier _semesterApplier;
+    private readonly ScheduleOverlayService _overlays;
     private readonly AppGuardService _appGuard;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<RemoteCiService> _logger;
@@ -50,9 +51,11 @@ public sealed class RemoteCiService : IDisposable
         HolidayCalendarStore holidayCalendar,
         HolidayScheduleApplier holidayApplier,
         SemesterApplier semesterApplier,
+        ScheduleOverlayService overlays,
         AppGuardService appGuard,
         ILoggerFactory loggerFactory)
     {
+        _overlays = overlays;
         _appGuard = appGuard;
         _semesterApplier = semesterApplier;
         _holidayCalendar = holidayCalendar;
@@ -136,6 +139,7 @@ public sealed class RemoteCiService : IDisposable
         _cloudClient.ConnectionStatusChanged += OnCloudConnectionStatusChanged;
         _cloudClient.HolidayCalendarReceived += _holidayCalendar.Apply;
         _cloudClient.SemesterReceived += OnSemesterReceived;
+        _cloudClient.ScheduleAdjustmentsReceived += OnScheduleAdjustmentsReceived;
         _cloudClient.AppGuardPolicyReceived += _appGuard.ApplyPolicy;
         _softwareInventory.ClassIslandUpdateRestarting += _appGuard.MarkUpdating;
         var cloudForGuard = _cloudClient;
@@ -162,6 +166,7 @@ public sealed class RemoteCiService : IDisposable
         {
             _cloudClient.HolidayCalendarReceived -= _holidayCalendar.Apply;
             _cloudClient.SemesterReceived -= OnSemesterReceived;
+            _cloudClient.ScheduleAdjustmentsReceived -= OnScheduleAdjustmentsReceived;
             _cloudClient.AppGuardPolicyReceived -= _appGuard.ApplyPolicy;
         }
         _softwareInventory.ClassIslandUpdateRestarting -= _appGuard.MarkUpdating;
@@ -263,7 +268,12 @@ public sealed class RemoteCiService : IDisposable
             _scheduleSync.TryFail(active.TaskId, $"生成课表失败：{error}", out _);
     }
 
-    private void OnScheduleChanged() => Dispatcher.UIThread.Post(_collector.ForceSchedulePush);
+    /// <summary>远程写操作之后（换课、改任课老师、应用档案）按新的基础课表重建托管临时层，再上报课表。</summary>
+    private void OnScheduleChanged() => Dispatcher.UIThread.Post(() =>
+    {
+        RecomposeOverlays();
+        _collector.ForceSchedulePush();
+    });
 
     /// <summary>ClassIsland 课表服务只能在 UI 线程读写；调整后强制重新上报，让 WebUI 立刻看到放假/调休标记。</summary>
     private void RunHolidayApply() => Dispatcher.UIThread.Post(() =>
@@ -272,6 +282,7 @@ public sealed class RemoteCiService : IDisposable
         {
             _holidayAppliedDate = DateTime.Today;
             _holidayApplier.Apply(_holidayCalendar.Current, DateTime.Now);
+            RecomposeOverlays();
             _collector.ForceSchedulePush();
         }
         catch (Exception ex)
@@ -280,18 +291,46 @@ public sealed class RemoteCiService : IDisposable
         }
     });
 
-    /// <summary>宿主设置在 UI 线程读写；单周起始日期变化会改变轮换课表，写入后重新上报课表。</summary>
+    /// <summary>宿主设置在 UI 线程读写；单周起始日期变化会改变轮换课表，写入后重建托管临时层并重新上报课表。</summary>
     private void OnSemesterReceived(SemesterSync sync) => Dispatcher.UIThread.Post(() =>
     {
         try
         {
-            if (_semesterApplier.Apply(sync)) _collector.ForceSchedulePush();
+            if (!_semesterApplier.Apply(sync)) return;
+            RecomposeOverlays();
+            _collector.ForceSchedulePush();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "同步学期开始日期失败");
         }
     });
+
+    /// <summary>服务端调课集合：生成托管临时层后上报课表（带回执）；课表没变时不发“课表已更新”事件。</summary>
+    private void OnScheduleAdjustmentsReceived(ScheduleAdjustmentSet set) => Dispatcher.UIThread.Post(() =>
+    {
+        try
+        {
+            if (_overlays.ApplyServerSet(set, DateTime.Now)) _collector.ForceSchedulePush();
+            else _collector.RequestSchedulePush();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "应用服务端调课失败");
+        }
+    });
+
+    private void RecomposeOverlays()
+    {
+        try
+        {
+            _overlays.Recompose(DateTime.Now);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "重建托管临时层失败");
+        }
+    }
 
     private ScheduleSyncStatus RequestScheduleSync(ScheduleSyncRequest request)
     {

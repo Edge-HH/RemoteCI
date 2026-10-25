@@ -136,7 +136,10 @@ builder.Services.AddSingleton<WebPushSignal>();
 builder.Services.AddScoped<CalendarFeedService>();
 builder.Services.AddHostedService<WebPushWorker>();
 builder.Services.AddScoped<ScheduleSwapService>();
-builder.Services.AddSingleton<IScheduleCommandSender, PeerScheduleCommandSender>();
+builder.Services.AddScoped<ScheduleAdjustmentService>();
+builder.Services.AddScoped<ScheduleConflictService>();
+builder.Services.AddSingleton<IScheduleAdjustmentChannel, PeerScheduleAdjustmentChannel>();
+builder.Services.AddSingleton<ScheduleAdjustmentAckWaiter>();
 builder.Services.AddSingleton<WebPushSender>();
 builder.Services.AddSingleton<WebQrLoginService>();
 builder.Services.AddHttpClient(WebPushSender.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(15))
@@ -150,8 +153,8 @@ builder.Services.AddScoped(sp =>
     service.OnlinePluginCounter = classId => registry.GetOnlinePluginConnections().Count(x => x.ClassId == classId);
     return service;
 });
-builder.Services.AddSingleton<LessonOverrideTable>();
-builder.Services.AddSingleton(sp => new StateStore(sp.GetRequiredService<LessonOverrideTable>()));
+builder.Services.AddSingleton<ScheduleAdjustmentOverlay>();
+builder.Services.AddSingleton(sp => new StateStore(sp.GetRequiredService<ScheduleAdjustmentOverlay>()));
 // 课表与扩展声明落库：服务端重启后插件尚未重连时，换课、日程与扩展设置仍有最近一次同步的数据。
 builder.Services.AddSingleton<ClassStateCacheService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ClassStateCacheService>());
@@ -255,10 +258,12 @@ app.MapGet("/calendar/{token}.ics", async (string token, HttpContext context, Ca
 using (var scope = app.Services.CreateScope())
 {
     await scope.ServiceProvider.GetRequiredService<IdentityCoordinator>().BootstrapAsync();
-    // 换课产生的单节临时任课老师覆盖需要在接受连接前载入内存，首个课表推送即可正确叠加。
-    await scope.ServiceProvider.GetRequiredService<ScheduleSwapService>().LoadOverridesAsync();
     // 插件重连前先用上次同步的课表与扩展声明；插件上线后会立即重新拉取并覆盖。
     await scope.ServiceProvider.GetRequiredService<ClassStateCacheService>().LoadAsync();
+    // 调课记录需要在接受连接前载入内存，首个课表推送即可正确叠加；回填旧换课要用到上面载入的课表解析科目。
+    var scheduleAdjustments = scope.ServiceProvider.GetRequiredService<ScheduleAdjustmentService>();
+    await scheduleAdjustments.BackfillAsync();
+    await scheduleAdjustments.LoadAsync();
 }
 
 app.Map("/ws", async context =>
@@ -549,11 +554,17 @@ app.MapPost("/api/swap-requests", async (
     HttpContext ctx, CreateSwapRequest request, IdentityCoordinator identities, ScheduleSwapService swaps, CancellationToken ct) =>
     await SwapCallAsync(ctx, identities, principal => swaps.CreateAsync(principal.User!.Id, request, ct), ct));
 
+// 提交前预检冲突（任课冲突、同一节课的其他待审批申请等），不写入任何数据。
+app.MapPost("/api/swap-requests/preview", async (
+    HttpContext ctx, CreateSwapRequest request, IdentityCoordinator identities, ScheduleSwapService swaps, CancellationToken ct) =>
+    await SwapCallAsync(ctx, identities, principal => swaps.PreviewAsync(principal.User!.Id, request, ct), ct));
+
 app.MapPost("/api/swap-requests/{id}/approve", async (
     string id, HttpContext ctx, SwapDecisionRequest? request, IdentityCoordinator identities, ScheduleSwapService swaps,
     CancellationToken ct) =>
     await SwapCallAsync(ctx, identities, async principal =>
-        await swaps.ApproveAsync(principal.User!.Id, await ResolveSwapIdAsync(swaps, principal, id, ct), request?.Note, ct), ct));
+        await swaps.ApproveAsync(principal.User!.Id, await ResolveSwapIdAsync(swaps, principal, id, ct), request?.Note,
+            request?.AcknowledgeConflicts ?? false, ct), ct));
 
 app.MapPost("/api/swap-requests/{id}/reject", async (
     string id, HttpContext ctx, SwapDecisionRequest? request, IdentityCoordinator identities, ScheduleSwapService swaps,
@@ -570,6 +581,44 @@ app.MapPost("/api/swap-requests/{id}/revoke", async (
     string id, HttpContext ctx, IdentityCoordinator identities, ScheduleSwapService swaps, CancellationToken ct) =>
     await SwapCallAsync(ctx, identities, async principal =>
         await swaps.RevokeForcedAsync(principal.User!.Id, await ResolveSwapIdAsync(swaps, principal, id, ct), ct), ct));
+
+// 班主任或系统管理员撤回已生效的换课（含强制换课）。
+app.MapPost("/api/swap-requests/{id}/revert", async (
+    string id, HttpContext ctx, IdentityCoordinator identities, ScheduleSwapService swaps, CancellationToken ct) =>
+    await SwapCallAsync(ctx, identities, async principal =>
+        await swaps.RevertAsync(principal.User!.Id, await ResolveSwapIdAsync(swaps, principal, id, ct), ct), ct));
+
+// ---------- 调课记录：单日调整的权威来源（换课申请、直接换课与教室端本地修改） ----------
+
+app.MapGet("/api/classes/{classId:guid}/schedule-adjustments", async (
+    Guid classId, string? from, HttpContext ctx, IdentityCoordinator identities, ClassAccessService access,
+    ScheduleAdjustmentService adjustments, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (!await access.CanAccessAsync(principal.User.Id, principal.User.Role, classId, ct)) return Forbidden();
+    return Results.Ok(await adjustments.ListAsync(classId, from, ct));
+});
+
+// 删除直接换课或教室端本地修改产生的调课记录（换课申请产生的请走撤回），仅系统管理员与本班班主任。
+app.MapDelete("/api/schedule-adjustments/{id:guid}", async (
+    Guid id, HttpContext ctx, IdentityCoordinator identities, ClassAccessService access, ScheduleAdjustmentService adjustments,
+    IStateStore store, PeerRegistry peers, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (await adjustments.FindAsync(id, ct) is not { } row ||
+        !await access.CanAccessAsync(principal.User.Id, principal.User.Role, row.ClassId, ct))
+        return Results.Json(Error(ApiErrorCodes.NotFound, "调课记录不存在"), statusCode: StatusCodes.Status404NotFound);
+    if (!await access.IsClassAdminAsync(principal.User.Id, principal.User.Role, row.ClassId, ct)) return Forbidden();
+    if (row.SwapRequestId is not null)
+        return Results.Json(Error(ApiErrorCodes.InvalidRequest, "这条调课来自换课申请，请在换课申请中撤回"), statusCode: StatusCodes.Status400BadRequest);
+    if (row.Status != ScheduleAdjustmentStatus.Active)
+        return Results.Json(Error(ApiErrorCodes.InvalidRequest, "这条调课已不再生效"), statusCode: StatusCodes.Status409Conflict);
+    await adjustments.RevertAsync(id, $"{principal.User.DisplayName} 删除了调课记录", ct);
+    if (store.GetLatestSchedule(row.ClassId) is { } bundle) await peers.SendScheduleToWatchesAsync(row.ClassId, bundle, ct);
+    return Results.NoContent();
+});
 
 // 个人通知：WebUI 铃铛、手机离线补齐与 AstrBot 轮询共用；after 为上次读取到的最新通知时间。
 app.MapGet("/api/me/notifications", async (
@@ -1494,7 +1543,12 @@ static async Task<IResult> SwapCallAsync<T>(
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
     try { return Results.Ok(await action(principal)); }
-    catch (SwapOperationException ex) { return Results.Json(Error(ex.Code, ex.Message), statusCode: ex.Status); }
+    catch (SwapOperationException ex)
+    {
+        var error = Error(ex.Code, ex.Message);
+        error.Conflicts = ex.Conflicts?.ToList();
+        return Results.Json(error, statusCode: ex.Status);
+    }
 }
 
 /// <summary>换课申请编号既接受完整 Id，也接受聊天机器人里展示的 8 位短编号。</summary>

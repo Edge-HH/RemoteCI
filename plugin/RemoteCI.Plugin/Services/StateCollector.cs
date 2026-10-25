@@ -20,6 +20,7 @@ public sealed class StateCollector
     private readonly ILogger<StateCollector> _logger;
     private readonly AccountMirror? _accounts;
     private readonly PluginSettings? _settings;
+    private readonly ScheduleOverlayService? _overlays;
     private readonly Stopwatch _stateThrottle = Stopwatch.StartNew();
     private readonly Stopwatch _scheduleThrottle = Stopwatch.StartNew();
     private string? _lastScheduleSignature;
@@ -32,7 +33,8 @@ public sealed class StateCollector
         ClassIslandHostControlService hostControl,
         ILogger<StateCollector> logger,
         AccountMirror? accounts = null,
-        PluginSettings? settings = null)
+        PluginSettings? settings = null,
+        ScheduleOverlayService? overlays = null)
     {
         _stateSource = stateSource;
         _schedules = schedules;
@@ -40,6 +42,7 @@ public sealed class StateCollector
         _logger = logger;
         _accounts = accounts;
         _settings = settings;
+        _overlays = overlays;
     }
 
     public event Action<ClassStateSnapshot>? SnapshotPushed;
@@ -112,6 +115,20 @@ public sealed class StateCollector
 
     public ScheduleBundle BuildSchedule() => _schedules.BuildBundle();
 
+    /// <summary>定时核对托管临时层（丢失、被改、出现外来临时层），在上报课表之前进行。</summary>
+    private void VerifyOverlays()
+    {
+        if (_overlays is null) return;
+        try
+        {
+            _overlays.Verify(DateTime.Now);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "核对托管临时层失败");
+        }
+    }
+
     public void ForceSchedulePush()
     {
         var before = _lastBundle;
@@ -159,10 +176,14 @@ public sealed class StateCollector
         }
     }
 
-    /// <summary>低频推送的变更签名：修订号 + 课表名 + 全部科目名，任一项变化都触发重推。</summary>
+    /// <summary>低频推送的变更签名：修订号 + 课表名 + 全部科目名 + 调课回执，任一项变化都触发重推。</summary>
     internal static string BuildScheduleSignature(ScheduleBundle bundle) =>
         string.Join('|', bundle.Days.Select(x => $"{x.Date}:{x.Revision}:{x.ClassPlanName}"))
-        + "|subjects:" + string.Join(',', bundle.Subjects.Select(x => x.Name));
+        + "|subjects:" + string.Join(',', bundle.Subjects.Select(x => x.Name))
+        + (bundle.Adjustments is { } report
+            ? $"|adjustments:{report.Version}:" + string.Join(',', report.Items.Select(x => $"{x.Id:N}{(int)x.State}")) +
+              ":" + string.Join(',', report.Local.Select(x => x.Id.ToString("N"))) + ":" + string.Join(',', report.UnmanagedDates)
+            : "");
 
     private void PushEvent(ClassEventKind kind, string? subject, string message, bool pushSnapshot = true)
     {
@@ -289,6 +310,7 @@ public sealed class StateCollector
         if (_scheduleThrottle.Elapsed >= TimeSpan.FromSeconds(30))
         {
             _scheduleThrottle.Restart();
+            VerifyOverlays();
             PushSchedule(force: false);
         }
     }

@@ -83,6 +83,11 @@ public sealed class ScheduleBundle
     [JsonPropertyName("source")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Source { get; set; }
+
+    /// <summary>插件的调课回执（schedule.adjustments 能力）；服务端据此对账，转发给手机/手表时不输出。</summary>
+    [JsonPropertyName("adjustments")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ScheduleAdjustmentReport? Adjustments { get; set; }
 }
 
 public static class ScheduleBundleSources
@@ -159,6 +164,21 @@ public sealed class CourseEntry
 
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; }
+
+    /// <summary>该节基础课表的科目；只在当天被调课改动时输出（与 <see cref="SubjectId"/> 不同）。</summary>
+    [JsonPropertyName("baseSubjectId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? BaseSubjectId { get; set; }
+
+    /// <summary>生效于该节的调课记录 ID（服务端调课或插件本地调课）。</summary>
+    [JsonPropertyName("adjustmentId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? AdjustmentId { get; set; }
+
+    /// <summary>服务端已记录、教室端尚未生效的调课（例如教室端离线），课程按记录显示。</summary>
+    [JsonPropertyName("adjustmentPending")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? AdjustmentPending { get; set; }
 }
 
 public sealed class SubjectEntry

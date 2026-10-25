@@ -305,6 +305,9 @@ public static class WebSocketHub
                     await scope.ServiceProvider.GetRequiredService<AppGuardService>()
                         .SendToConnectionAsync(session.ConnectionId, session.Principal.PluginCredentialId, session.CancellationToken);
                 }
+                if (session.Principal.IsPlugin && session.Principal.ClassId is { } adjustmentClassId)
+                    await SendScheduleAdjustmentsAsync(session, adjustmentClassId,
+                        capabilities.Capabilities.Contains(RemoteCiCapabilities.ScheduleAdjustments, StringComparer.Ordinal));
             }
             return;
         }
@@ -389,13 +392,43 @@ public static class WebSocketHub
         await session.Registry.SendSnapshotToWatchesAsync(classId, snapshot, session.CancellationToken);
     }
 
+    /// <summary>
+    /// 插件上报能力后补发该班调课集合（即发即忘：回执随插件之后的课表推送到达，不能在接收循环里等待）。
+    /// 不支持调课集合的旧插件上线时，尚未送达的调课无法生效，置为失效并通知相关老师。
+    /// </summary>
+    private static async Task SendScheduleAdjustmentsAsync(ConnectionSession session, Guid classId, bool supported)
+    {
+        await using var scope = session.Context.RequestServices.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
+        var adjustments = scope.ServiceProvider.GetRequiredService<ScheduleAdjustmentService>();
+        if (supported)
+        {
+            await adjustments.PushAsync(classId, session.CancellationToken);
+            return;
+        }
+        var outcome = await adjustments.InvalidatePendingForOutdatedPluginAsync(classId, session.CancellationToken);
+        if (outcome.Invalidated.Count > 0)
+            await scope.ServiceProvider.GetRequiredService<ScheduleSwapService>().HandleInvalidatedAsync(outcome.Invalidated, session.CancellationToken);
+    }
+
     private static async Task HandleScheduleSyncAsync(Envelope envelope, ConnectionSession session, Guid classId)
     {
         if (ConvertPayload<ScheduleBundle>(envelope.Payload) is not { } schedule) return;
         schedule.ClassId = classId;
+        // 调课回执只用于对账，不落库、不转发给手机/手表。
+        var report = schedule.Adjustments;
+        schedule.Adjustments = null;
         // 老师按显示名绑定课表：新课表可能改变该班匹配到的任教老师集合，变化时刷新插件端授权镜像。
         var teachersBefore = await session.TeacherBinding.GetMatchedTeacherUserIdsAsync(classId, session.CancellationToken);
         session.Store.SaveSchedule(classId, schedule);
+        if (report is not null)
+        {
+            await using var scope = session.Context.RequestServices.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
+            var outcome = await scope.ServiceProvider.GetRequiredService<ScheduleAdjustmentService>()
+                .ReconcileAsync(classId, report, schedule, session.CancellationToken);
+            if (outcome.Invalidated.Count > 0)
+                await scope.ServiceProvider.GetRequiredService<ScheduleSwapService>()
+                    .HandleInvalidatedAsync(outcome.Invalidated, session.CancellationToken);
+        }
         var teachersAfter = await session.TeacherBinding.GetMatchedTeacherUserIdsAsync(classId, session.CancellationToken);
         if (!teachersBefore.SetEquals(teachersAfter))
             await session.AuthorizationSync.SyncAsync(session.CancellationToken);

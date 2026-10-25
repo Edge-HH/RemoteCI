@@ -1,7 +1,9 @@
 package com.remoteci.mobile.ui
 
+import com.remoteci.mobile.data.AdminApiException
 import com.remoteci.mobile.data.Swap
 import com.remoteci.mobile.data.SwapCatalog
+import com.remoteci.mobile.data.SwapConflict
 import com.remoteci.mobile.data.SwapRequestView
 import com.remoteci.mobile.data.UserNotification
 import com.remoteci.mobile.data.protocolJson
@@ -82,5 +84,32 @@ class SwapLogicTest {
         )
         assertEquals(Swap.KIND_REQUESTED, note.kind)
         assertNull(note.readAt)
+    }
+
+    @Test
+    fun `invalidated swap with pending delivery and acknowledged conflicts shows notes`() {
+        val item = protocolJson.decodeFromString(
+            SwapRequestView.serializer(),
+            """{"id":"a2","status":8,"target":{"classId":"c1","date":"2026-10-06","index":1},"canRevert":false,
+               "invalidReason":"该节的基础课表已变化",
+               "acknowledgedConflicts":[{"kind":"teacher_clash","message":"王老师 时间重叠","requiresAcknowledgement":true}]}""",
+        )
+        assertEquals("已失效", Swap.statusText(item.status))
+        assertEquals(listOf("已失效：该节的基础课表已变化", "已确认的冲突：王老师 时间重叠"), swapStatusNotes(item))
+        assertEquals(listOf("教室电脑暂未确认，上线后自动生效"),
+            swapStatusNotes(item.copy(status = Swap.STATUS_APPROVED, delivery = Swap.DELIVERY_PENDING, acknowledgedConflicts = emptyList())))
+    }
+
+    @Test
+    fun `conflict errors are recognised and listed for confirmation`() {
+        val conflicts = listOf(
+            SwapConflict(kind = Swap.CONFLICT_TEACHER_CLASH, message = "王老师 时间重叠", requiresAcknowledgement = true),
+            SwapConflict(kind = Swap.CONFLICT_SLOT_ADJUSTED, message = "当天已调整", requiresAcknowledgement = false),
+        )
+        assertEquals("· 王老师 时间重叠", conflictLines(conflicts))
+        assertNull(conflictLines(conflicts.drop(1)))
+        assertEquals("· 王老师 时间重叠", AdminApiException("冲突", Swap.ERROR_CONFLICTS, conflicts).swapConflictText())
+        assertNull(AdminApiException("课位已变化", "SWAP_SLOT_CHANGED").swapConflictText())
+        assertNull(IllegalStateException("x").swapConflictText())
     }
 }

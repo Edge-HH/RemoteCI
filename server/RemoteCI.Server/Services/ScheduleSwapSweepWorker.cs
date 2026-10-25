@@ -1,6 +1,6 @@
 namespace RemoteCI.Server.Services;
 
-/// <summary>每 10 分钟把过期的待审批换课申请标记为过期，并清理已过日期的临时任课老师覆盖。</summary>
+/// <summary>每 10 分钟把过期的待审批换课申请标记为过期，并把已过日期的调课记录标记为过期。</summary>
 public sealed class ScheduleSwapSweepWorker(
     IServiceScopeFactory scopes, TimeProvider time, ILogger<ScheduleSwapSweepWorker> logger) : BackgroundService
 {

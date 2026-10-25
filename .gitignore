@@ -47,6 +47,8 @@ Thumbs.db
 server/RemoteCI.Server/Data/*.db*
 server/RemoteCI.Server/Data/updates/
 server/RemoteCI.Server/Data/backups/
+server/RemoteCI.Server/Data/file-transfers/
+server/RemoteCI.Server/Data/screenshots/
 *.rcibak
 # 防止把直接 publish 到项目目录产生的运行文件误提交。
 server/RemoteCI.Server/*.dll

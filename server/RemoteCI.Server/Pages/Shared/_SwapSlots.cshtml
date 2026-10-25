@@ -15,3 +15,15 @@
     }
 </div>
 <p class="muted swap-meta">@Model.CreatedAt.ToLocalTime().ToString("M月d日 HH:mm") 提交 · 编号 @Model.ShortId</p>
+@if (Model.Delivery == SwapDeliveryStates.Pending)
+{
+    <p class="notice warning swap-delivery">教室电脑暂未确认，上线后自动生效。</p>
+}
+@if (Model.Status == SwapRequestStatus.Invalidated && !string.IsNullOrWhiteSpace(Model.InvalidReason))
+{
+    <p class="notice warning swap-delivery">已失效：@Model.InvalidReason</p>
+}
+@if (Model.AcknowledgedConflicts.Count > 0)
+{
+    <p class="muted swap-meta">已确认的冲突：@string.Join("；", Model.AcknowledgedConflicts.Select(x => x.Message))</p>
+}

@@ -85,6 +85,9 @@ public sealed class Envelope
     public static Envelope Semester(SemesterSync payload) =>
         New(Protocol.MessageTypeSemester, payload);
 
+    public static Envelope ScheduleAdjustments(ScheduleAdjustmentSet payload) =>
+        New(Protocol.MessageTypeScheduleAdjustments, payload);
+
     public static Envelope AppGuardPolicy(AppGuardPolicy payload) =>
         New(Protocol.MessageTypeAppGuardPolicy, payload);
 

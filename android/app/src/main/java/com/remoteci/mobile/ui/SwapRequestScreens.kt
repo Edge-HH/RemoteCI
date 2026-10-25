@@ -49,6 +49,18 @@ import com.remoteci.mobile.data.SwapRequestView
 import com.remoteci.mobile.data.SwapSlot
 import kotlinx.coroutines.launch
 
+/** 需要确认的换课冲突：列出冲突，确认后带确认标记重新提交。 */
+private data class ConflictPrompt(val title: String, val text: String, val confirm: String, val retry: () -> Unit)
+
+@Composable
+private fun ConflictDialog(prompt: ConflictPrompt, onDismiss: () -> Unit) = AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text(prompt.title) },
+    text = { Text(prompt.text) },
+    confirmButton = { TextButton({ onDismiss(); prompt.retry() }) { Text(prompt.confirm) } },
+    dismissButton = { TextButton(onDismiss) { Text("取消") } },
+)
+
 /** 底栏“换课”：发起申请（可强制）、待我处理、我的申请。申请一律为临时换课，永久换课由班主任在课表页操作。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +71,7 @@ fun SwapRequestsScreen(snackbar: SnackbarHostState, showTopBar: Boolean = true) 
     var outgoing by remember { mutableStateOf<List<SwapRequestView>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var reload by remember { mutableIntStateOf(0) }
+    var conflict by remember { mutableStateOf<ConflictPrompt?>(null) }
     val pending by ConnectionManager.pendingSwapCount.collectAsState()
     val scope = rememberCoroutineScope()
 
@@ -82,13 +95,24 @@ fun SwapRequestsScreen(snackbar: SnackbarHostState, showTopBar: Boolean = true) 
     // 收到新的个人通知（对方提交、通过或撤回）时刷新列表。
     LaunchedEffect(Unit) { ConnectionManager.userNotifications.collect { reload++ } }
 
-    fun act(success: String, block: suspend () -> Unit) {
+    fun act(success: String, onConflict: ((String) -> Unit)? = null, block: suspend () -> Unit) {
         scope.launch {
             runCatching { block() }
                 .onSuccess { snackbar.showSnackbar(success); reload++ }
-                .onFailure { snackbar.showSnackbar("失败：${it.message}") }
+                .onFailure { error ->
+                    val text = error.swapConflictText()
+                    if (text != null && onConflict != null) onConflict(text) else snackbar.showSnackbar("失败：${error.message}")
+                }
         }
     }
+
+    fun approve(item: SwapRequestView, note: String?, acknowledge: Boolean = false) {
+        act("已同意换课", onConflict = { text ->
+            conflict = ConflictPrompt("确认冲突后通过？", text, "仍然通过") { approve(item, note, acknowledge = true) }
+        }) { AdminApi.approveSwap(item.id, note, acknowledge) }
+    }
+
+    conflict?.let { prompt -> ConflictDialog(prompt) { conflict = null } }
 
     Column(Modifier.fillMaxSize()) {
         // 嵌在课表页时由课表页提供顶栏与分段，这里只显示三个子页。
@@ -121,7 +145,7 @@ fun SwapRequestsScreen(snackbar: SnackbarHostState, showTopBar: Boolean = true) 
                         if (item.canDecide) {
                             OutlinedTextField(note, { note = it }, label = { Text("备注（可选）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { act("已同意换课，课表已临时调整") { AdminApi.approveSwap(item.id, note.ifBlank { null }) } }, modifier = Modifier.weight(1f)) { Text("通过") }
+                                Button(onClick = { approve(item, note.ifBlank { null }) }, modifier = Modifier.weight(1f)) { Text("通过") }
                                 OutlinedButton(onClick = { act("已拒绝换课申请") { AdminApi.rejectSwap(item.id, note.ifBlank { null }) } }, modifier = Modifier.weight(1f)) { Text("拒绝") }
                             }
                         }
@@ -139,18 +163,33 @@ fun SwapRequestsScreen(snackbar: SnackbarHostState, showTopBar: Boolean = true) 
                                 confirmButton = { TextButton({ confirm = false; act("已撤回强制换课，课表已恢复") { AdminApi.revokeSwap(item.id) } }) { Text("撤回") } },
                                 dismissButton = { TextButton({ confirm = false }) { Text("取消") } },
                             )
-                        }
+                        } else if (item.canRevert) RevertButton(item) { act("已撤回换课，课表已恢复") { AdminApi.revertSwap(item.id) } }
                     }
                 }
                 else -> if (outgoing.isEmpty()) EmptyState("你还没有发起过换课申请", "在“发起申请”中选择课程并填写理由。")
                 else outgoing.forEach { item ->
                     SwapCard(item) {
                         if (item.canCancel) OutlinedButton(onClick = { act("已撤销换课申请") { AdminApi.cancelSwap(item.id) } }, modifier = Modifier.fillMaxWidth()) { Text("撤销申请") }
+                        else if (item.canRevert) RevertButton(item) { act("已撤回换课，课表已恢复") { AdminApi.revertSwap(item.id) } }
                     }
                 }
             }
         }
     }
+}
+
+/** 班主任或系统管理员撤回已生效的换课（含强制换课）。 */
+@Composable
+private fun RevertButton(item: SwapRequestView, onRevert: () -> Unit) {
+    var confirm by remember(item.id) { mutableStateOf(false) }
+    OutlinedButton(onClick = { confirm = true }, modifier = Modifier.fillMaxWidth()) { Text("撤回换课") }
+    if (confirm) AlertDialog(
+        onDismissRequest = { confirm = false },
+        title = { Text("撤回这次换课？") },
+        text = { Text("撤回后课表恢复原状，并通知申请人和对方老师。") },
+        confirmButton = { TextButton({ confirm = false; onRevert() }) { Text("撤回") } },
+        dismissButton = { TextButton({ confirm = false }) { Text("取消") } },
+    )
 }
 
 @Composable
@@ -183,6 +222,9 @@ private fun SwapCard(item: SwapRequestView, actions: @Composable () -> Unit) {
             Text(swapSummary(item), style = MaterialTheme.typography.bodyMedium)
             Text("理由：${item.reason}", style = MaterialTheme.typography.bodyMedium)
             item.decisionNote?.let { Text("备注：$it", style = MaterialTheme.typography.bodySmall) }
+            swapStatusNotes(item).forEach { note ->
+                Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+            }
             if (item.approverNames.isNotEmpty())
                 Text("审批人：${item.approverNames.joinToString("、")} · 编号 ${item.shortId}", style = MaterialTheme.typography.bodySmall)
             actions()
@@ -200,13 +242,14 @@ private fun CreateSwapForm(catalog: SwapCatalog, snackbar: SnackbarHostState, on
     var reason by remember { mutableStateOf("") }
     var confirmForce by remember { mutableStateOf(false) }
     var submitting by remember { mutableStateOf(false) }
+    var conflict by remember { mutableStateOf<ConflictPrompt?>(null) }
 
     if (catalog.classes.isEmpty()) {
         EmptyState("暂时没有可换的课表", "班级插件在线并同步课表后才能选择课程。")
         return
     }
 
-    fun submit(force: Boolean) {
+    fun submit(force: Boolean, acknowledge: Boolean = false) {
         validateSwap(catalog, exchange, source, target, subject, reason)?.let { message ->
             scope.launch { snackbar.showSnackbar(message) }
             return
@@ -222,12 +265,20 @@ private fun CreateSwapForm(catalog: SwapCatalog, snackbar: SnackbarHostState, on
                     subjectName = if (exchange) null else subject,
                     reason = reason.trim(),
                     force = force,
+                    acknowledgeConflicts = acknowledge,
                 ))
             }.onSuccess { onCreated(it) }
-                .onFailure { snackbar.showSnackbar("提交失败：${it.message}") }
+                .onFailure { error ->
+                    // 任课冲突等需要确认：列出冲突，确认后带确认标记重新提交。
+                    val text = error.swapConflictText()
+                    if (text != null) conflict = ConflictPrompt("确认冲突后提交？", text, "仍然提交") { submit(force, acknowledge = true) }
+                    else snackbar.showSnackbar("提交失败：${error.message}")
+                }
             submitting = false
         }
     }
+
+    conflict?.let { prompt -> ConflictDialog(prompt) { conflict = null } }
 
     Row(horizontalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.fillMaxWidth()) {
         val selected = ButtonDefaults.buttonColors()

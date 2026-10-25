@@ -28,6 +28,7 @@
         <form method="post" asp-page-handler="Create" class="form-grid swap-form" data-swap-form>
             <script type="application/json" data-swap-catalog>@Html.Raw(Model.CatalogJson)</script>
             <input type="hidden" name="Input.Force" value="false" data-swap-force />
+            <input type="hidden" name="Input.AcknowledgeConflicts" value="false" data-swap-acknowledge />
             <fieldset class="swap-mode" aria-label="换课方式">
                 <label><input type="radio" name="Input.Mode" value="Exchange" checked data-swap-mode /> 互换两节课</label>
                 <label><input type="radio" name="Input.Mode" value="Replace" data-swap-mode /> 替换为我的课</label>
@@ -105,12 +106,29 @@
                 @await Html.PartialAsync("_SwapSlots", item)
                 <p class="swap-reason-text"><span class="muted">理由</span>@item.Reason</p>
                 @if (!string.IsNullOrEmpty(item.DecisionNote)) { <p class="muted">备注：@item.DecisionNote</p> }
+                @{ var showConflicts = item.CanDecide && Model.ConflictSwapId == item.Id && Model.Conflicts.Count > 0; }
+                @if (showConflicts)
+                {
+                    <div class="notice warning swap-conflicts">
+                        <strong>通过前请确认以下冲突：</strong>
+                        <ul>
+                            @foreach (var conflict in Model.Conflicts)
+                            {
+                                <li>@conflict.Message</li>
+                            }
+                        </ul>
+                    </div>
+                }
                 @if (item.CanDecide)
                 {
                     <form method="post" class="swap-decision">
                         <input type="hidden" name="id" value="@item.Id" />
+                        @if (showConflicts)
+                        {
+                            <input type="hidden" name="acknowledgeConflicts" value="true" />
+                        }
                         <input name="note" maxlength="200" placeholder="备注（可选）" aria-label="审批备注" />
-                        <button type="submit" asp-page-handler="Approve">通过</button>
+                        <button type="submit" asp-page-handler="Approve">@(showConflicts ? "仍然通过" : "通过")</button>
                         <button type="submit" class="danger ghost" asp-page-handler="Reject">拒绝</button>
                     </form>
                 }
@@ -119,6 +137,13 @@
                     <form method="post" asp-page-handler="Revoke" class="swap-decision" data-confirm="撤回后课表恢复原状，对方当天不能再强制换走这节课。确定撤回？">
                         <input type="hidden" name="id" value="@item.Id" />
                         <button type="submit" class="danger">撤回强制换课</button>
+                    </form>
+                }
+                else if (item.CanRevert)
+                {
+                    <form method="post" asp-page-handler="Revert" class="swap-decision" data-confirm="撤回后课表恢复原状。确定撤回这次换课？">
+                        <input type="hidden" name="id" value="@item.Id" />
+                        <button type="submit" class="danger ghost">撤回换课</button>
                     </form>
                 }
             </article>
@@ -147,6 +172,13 @@
                     <form method="post" asp-page-handler="Cancel" class="swap-decision">
                         <input type="hidden" name="id" value="@item.Id" />
                         <button type="submit" class="ghost">撤销申请</button>
+                    </form>
+                }
+                else if (item.CanRevert)
+                {
+                    <form method="post" asp-page-handler="Revert" class="swap-decision" data-confirm="撤回后课表恢复原状。确定撤回这次换课？">
+                        <input type="hidden" name="id" value="@item.Id" />
+                        <button type="submit" class="danger ghost">撤回换课</button>
                     </form>
                 }
             </article>

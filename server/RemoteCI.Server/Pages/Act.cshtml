@@ -36,6 +36,8 @@
         button { width: 100%; min-height: 48px; border: 0; border-radius: 11px; background: var(--accent); color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
         button.danger { background: var(--danger); }
         form { display: grid; gap: 10px; margin: 0; }
+        .conflicts { margin: 0; padding-left: 18px; }
+        .check { display: flex; gap: 8px; align-items: flex-start; }
     </style>
 </head>
 <body>
@@ -82,6 +84,19 @@
     @if (Model.Result is null && Model.State.Problem is null && Model.State.Token is not null)
     {
         <form method="post">
+            @if (Model.Conflicts.Count > 0)
+            {
+                <div class="card">
+                    <strong>冲突提示</strong>
+                    <ul class="conflicts">
+                        @foreach (var conflict in Model.Conflicts)
+                        {
+                            <li>@conflict.Message</li>
+                        }
+                    </ul>
+                </div>
+                <label class="check"><input type="checkbox" name="AcknowledgeConflicts" value="true" required /> 我已了解上述冲突，仍然同意</label>
+            }
             @if (Model.AllowsNote)
             {
                 <label class="muted" for="note">备注（可选）</label>

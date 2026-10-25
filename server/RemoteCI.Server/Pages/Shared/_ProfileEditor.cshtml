@@ -61,7 +61,7 @@
                     <label class="check"><input type="radio" name="applyMode" value="1" required /> <span><strong>更新当前档案</strong><small>更新所选对象及必要依赖，保留设备中的其他内容。</small></span></label>
                     <label class="check"><input type="radio" name="applyMode" value="2" /> <span><strong>整体替换所选类别</strong><small>清空所选类别后写入此次内容；存在悬空引用时设备将拒绝。</small></span></label>
                     <label class="check"><input type="radio" name="applyMode" value="3" /> <span><strong>创建并启用新档案</strong><small>在设备上创建独立档案；档案名重名时返回错误。</small></span></label>
-                    <label class="check"><input type="radio" name="applyMode" value="4" /> <span><strong>作为临时层下发</strong><small>把档案中按日期安排的临时层写入设备，只替换对应日期的课表，不改动设备的常规课表；已过期的临时层自动跳过。</small></span></label>
+                    <label class="check"><input type="radio" name="applyMode" value="4" /> <span><strong>作为临时层下发</strong><small>把档案中按日期安排的临时层写入设备，只替换对应日期的课表，不改动设备的常规课表；已过期的临时层自动跳过。新版插件会接管下发的临时层：与基础课表不同的节次记为调课记录，覆盖了已有调课的日期会按基础课表重新应用这些调课。</small></span></label>
                 </fieldset>
                 <label data-profile-import-name-label hidden>设备档案名称<input data-profile-import-name maxlength="100" /></label>
                 <fieldset class="profile-apply-sections" data-profile-apply-sections-field><legend>下发内容</legend><label class="check"><input type="checkbox" value="1" data-profile-apply-section checked /> 时间表</label><label class="check"><input type="checkbox" value="2" data-profile-apply-section checked /> 课表</label><label class="check"><input type="checkbox" value="4" data-profile-apply-section checked /> 科目</label></fieldset>

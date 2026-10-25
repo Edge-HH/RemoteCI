@@ -6,7 +6,7 @@ namespace RemoteCI.Plugin.Services;
 
 /// <summary>
 /// 换课执行的纯核心（不依赖 UI 线程与 ClassIsland 具体服务，经防腐层注入依赖），
-/// 覆盖修订号并发控制、临时课表层创建与保存失败回滚，可单元测试。
+/// 覆盖修订号并发控制、临时换课转为本地调课（托管临时层）、永久换课写入源课表与保存失败回滚，可单元测试。
 /// </summary>
 internal static class ScheduleChangeExecutor
 {
@@ -16,7 +16,9 @@ internal static class ScheduleChangeExecutor
         ScheduleCatalog catalog,
         IScheduleBackend backend,
         IProfileWriteOperations profile,
-        Action<Exception>? onSaveFailure = null)
+        Action<Exception>? onSaveFailure = null,
+        ScheduleOverlayService? overlays = null,
+        UserProfile? requestedBy = null)
     {
         var before = catalog.BuildDay(date);
         if (GetPreconditionFailure(date, before, request) is { } precondition)
@@ -24,9 +26,15 @@ internal static class ScheduleChangeExecutor
         if (ValidateMutation(before.Courses.Count, request, profile) is { } beforeValidation)
             return beforeValidation;
 
+        // 临时换课记为本地调课，由托管临时层生效并随课表上报给服务端；该日无法托管时才直接改当天课表。
+        if (!request.Permanent && overlays?.TryApplyLocalChange(date, request, requestedBy, DateTime.Now) is { } local)
+            return local.Success ? BuildSuccessResult(catalog.BuildDay(date), request) : local;
+
         var plan = GetWritablePlan(date, request.Permanent, backend, profile);
         if (plan is null)
-            return CommandResult.Failure(CommandResultCodes.ScheduleUnavailable, $"{date:yyyy-MM-dd} 无法创建临时课表层");
+            return CommandResult.Failure(CommandResultCodes.ScheduleUnavailable, request.Permanent
+                ? $"{date:yyyy-MM-dd} 找不到可写入的源课表"
+                : $"{date:yyyy-MM-dd} 无法创建临时课表层");
         if (ValidateMutation(plan.Classes.Count, request, profile) is { } validationFailure)
             return validationFailure;
 
@@ -44,6 +52,8 @@ internal static class ScheduleChangeExecutor
             return CommandResult.Failure(CommandResultCodes.SaveFailed, "ClassIsland 保存课表失败，操作未确认");
         }
 
+        // 源课表变了：按新的基础课表重建托管临时层，守卫对不上的调课会回报为冲突。
+        if (request.Permanent) overlays?.Recompose(DateTime.Now);
         return BuildSuccessResult(catalog.BuildDay(date), request);
     }
 
@@ -81,13 +91,17 @@ internal static class ScheduleChangeExecutor
         ScheduleRevision = after.Revision,
     };
 
-    /// <summary>取得可写的课表层：已是临时层直接使用，否则创建临时层并取回。</summary>
+    /// <summary>
+    /// 取得可写的课表：永久换课写源课表（当天是临时层时写它的来源课表，而不是只改当天）；
+    /// 临时换课已是临时层直接使用，否则创建临时层并取回。
+    /// </summary>
     internal static ClassPlan? GetWritablePlan(
         DateTime date, bool permanent, IScheduleBackend backend, IProfileWriteOperations profile)
     {
         var plan = backend.GetClassPlan(date, out var planId);
         if (plan is null || planId is null) return null;
-        if (permanent) return plan;
+        if (permanent)
+            return !plan.IsOverlay ? plan : plan.OverlaySourceId is { } source ? profile.ClassPlans.GetValueOrDefault(source) : null;
         if (plan.IsOverlay) return plan;
         var overlayId = profile.CreateTempClassPlan(planId.Value, date);
         if (overlayId is null) return null;

@@ -160,17 +160,49 @@
             if (dialog && typeof dialog.showModal === "function") dialog.showModal();
             else if (window.confirm("仅在需要紧急换课时使用，请提前与对方沟通并达成一致。")) submitForced();
         });
+        const acknowledgeInput = form.querySelector("[data-swap-acknowledge]");
         const submitForced = () => {
             forceInput.value = "true";
-            form.submit();
+            submitChecked();
         };
         dialog?.querySelector("[data-swap-force-cancel]")?.addEventListener("click", () => dialog.close());
         dialog?.querySelector("[data-swap-force-confirm]")?.addEventListener("click", () => {
             dialog.close();
             submitForced();
         });
+
+        // 提交前预检冲突（任课冲突、同一节课的其他待审批申请）：有需要确认的冲突时先列出，确认后才带确认标记提交。
+        // 预检失败（网络问题等）时直接提交，由服务端兜底校验并提示。
+        let checking = false;
+        async function submitChecked() {
+            if (checking) return;
+            checking = true;
+            acknowledgeInput.value = "false";
+            try {
+                const response = await fetch(`${location.pathname}?handler=Preview`, {
+                    method: "POST", credentials: "same-origin", body: new FormData(form), headers: { Accept: "application/json" },
+                });
+                const data = response.ok ? await response.json() : null;
+                const blocking = (data?.conflicts || []).filter(x => x.requiresAcknowledgement);
+                if (blocking.length > 0) {
+                    const lines = blocking.map(x => `· ${x.message}`).join("\n");
+                    if (!window.confirm(`这次换课存在以下冲突：\n${lines}\n\n仍然提交？`)) {
+                        forceInput.value = "false";
+                        return;
+                    }
+                    acknowledgeInput.value = "true";
+                }
+            } catch {
+                /* 交给服务端校验 */
+            } finally {
+                checking = false;
+            }
+            form.submit();
+        }
         form.addEventListener("submit", event => {
             if (event.submitter) forceInput.value = "false";
+            event.preventDefault();
+            submitChecked();
         });
     }
 

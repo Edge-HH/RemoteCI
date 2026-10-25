@@ -41,7 +41,8 @@ public sealed class LessonLedgerTests
             ],
         });
         // 换课申请让“代课老师”临时上第 2 节数学。
-        factory.Services.GetRequiredService<LessonOverrideTable>().Set(new LessonOverride(ClassId, Date, 1, "代课老师", "数学"));
+        factory.Services.GetRequiredService<ScheduleAdjustmentOverlay>().ReplaceClass(ClassId,
+            [new AdjustmentOverlayEntry(Guid.NewGuid(), ClassId, Date, 1, Guid.Empty, Guid.Empty, "数学", "代课老师")]);
 
         Assert.Equal(1, await RecordAsync(factory, Morning.AddMinutes(50)));
         Assert.Equal(1, await RecordAsync(factory, Morning.AddHours(3)));

@@ -17,7 +17,7 @@ public static class ClassPlanSwitch
             : null;
 }
 
-public sealed class ClassIslandHolidayHost(ILessonsService lessons, IProfileService profiles) : IHolidayHostOperations
+public sealed class ClassIslandHolidayHost(ILessonsService lessons) : IHolidayHostOperations
 {
     private readonly PropertyInfo? _switch = ClassPlanSwitch.Resolve(lessons);
 
@@ -29,27 +29,4 @@ public sealed class ClassIslandHolidayHost(ILessonsService lessons, IProfileServ
             if (value is { } enabled) _switch?.SetValue(lessons, enabled);
         }
     }
-
-    public ClassPlan? GetClassPlan(DateTime date, out Guid? planId) => lessons.GetClassPlanByDate(date.Date, out planId);
-
-    public Guid? GetOrderedSchedulePlanId(DateTime date) =>
-        OrderedSchedules.TryGetValue(date.Date, out var schedule) ? schedule.ClassPlanId : null;
-
-    public Guid? CreateTempClassPlan(Guid sourcePlanId, DateTime date) =>
-        profiles.CreateTempClassPlan(sourcePlanId, enableDateTime: date.Date);
-
-    public void RemoveOrderedSchedule(DateTime date, Guid planId)
-    {
-        var ordered = OrderedSchedules;
-        if (!ordered.TryGetValue(date.Date, out var schedule) || schedule.ClassPlanId != planId) return;
-        ordered.Remove(date.Date);
-        var plans = HostApiCompat.ReadProperty<IDictionary<Guid, ClassPlan>>(profiles.Profile, "ClassPlans");
-        // 只删临时层，绝不删除管理员的源课表。
-        if (plans.TryGetValue(planId, out var plan) && plan.IsOverlay) plans.Remove(planId);
-    }
-
-    public void SaveProfile() => profiles.SaveProfile();
-
-    private IDictionary<DateTime, OrderedSchedule> OrderedSchedules =>
-        HostApiCompat.ReadProperty<IDictionary<DateTime, OrderedSchedule>>(profiles.Profile, "OrderedSchedules");
 }

@@ -13,32 +13,36 @@ public sealed class SwapOperationException(string code, string message, int stat
 {
     public string Code { get; } = code;
     public int Status { get; } = status;
+    /// <summary>需要确认的冲突（Code 为 SWAP_CONFLICTS 时）。</summary>
+    public IReadOnlyList<SwapConflict>? Conflicts { get; init; }
 }
 
 /// <summary>
 /// 老师换课申请：老师发起（互换两节课或把目标课替换为自己任教的学科），对方老师审批后
-/// 以临时换课写入教室端；开启强制换课权限的老师可直接生效，对方老师可撤回。
-/// 课表不落库，执行前总是按服务端内存中的最新课表复核课位，避免把过期的选择写进教室端。
+/// 写成服务端调课记录（<see cref="ScheduleAdjustmentService"/>），由教室端插件生成临时层生效；
+/// 开启强制换课权限的老师可直接生效，对方老师可撤回，班主任与系统管理员也可撤回已生效的换课。
+/// 执行前总是按服务端叠加调课后的最新课表复核课位，避免把过期的选择写进教室端。
 /// 永久换课仍由班主任在课表页操作，这里只产生临时（按日期）的改动。
 /// </summary>
 public sealed class ScheduleSwapService(
     AppDbContext db,
     IStateStore state,
-    LessonOverrideTable overrides,
     PeerRegistry peers,
-    IScheduleCommandSender commands,
+    ScheduleAdjustmentService adjustments,
+    ScheduleConflictService conflicts,
+    IScheduleAdjustmentChannel channel,
     UserNotificationService notifications,
     AuthorizationSyncService authorizationSync,
     ILogger<ScheduleSwapService> logger)
 {
     public const int MaxReasonLength = 200;
     public const string ForceWarning = "仅在需要紧急换课时使用，请提前与对方沟通并达成一致。";
-    private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(15);
+    private const string SiblingInvalidReason = "同一节课已有其他换课生效";
 
-    /// <summary>同一时间只执行一个换课：两条命令（跨班/跨日）之间不能插入其他换课。</summary>
+    /// <summary>同一时间只执行一个换课：复核课位、写入调课与等待回执之间不能插入其他换课。</summary>
     private static readonly SemaphoreSlim ApplyGate = new(1, 1);
 
-    /// <summary>实际写入教室端的一节课改动；撤回时按 FromSubjectId 反向替换。</summary>
+    /// <summary>遗留格式：旧版逐节命令下发的单节改动，只用于升级回填（见 ScheduleAdjustmentService.BackfillAsync）。</summary>
     public sealed record AppliedChange(
         Guid ClassId,
         string Date,
@@ -57,6 +61,9 @@ public sealed class ScheduleSwapService(
         public bool SameSlot(ResolvedSlot other) =>
             ClassId == other.ClassId && Day.Date == other.Day.Date && Course.Index == other.Course.Index;
     }
+
+    /// <summary>换课后的一节课：课位、要换入的科目与应上课老师（可能与科目默认老师不同）。</summary>
+    private sealed record SlotChange(ResolvedSlot Slot, SubjectEntry To, string? Teacher);
 
     private sealed record Actor(AppUser User, UserPermissions Permissions)
     {
@@ -139,7 +146,8 @@ public sealed class ScheduleSwapService(
         var actor = await LoadActorAsync(userId, ct);
         var row = await db.ScheduleSwapRequests.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct)
             ?? throw NotFound();
-        if (row.RequesterUserId != userId && !Approvers(row).Contains(userId) && actor.User.Role != UserRole.Admin)
+        // 相关班级的班主任会收到换课通知，可以查看详情并撤回。
+        if (row.RequesterUserId != userId && !Approvers(row).Contains(userId) && !await CanRevertAsync(actor, row, ct))
             throw NotFound();
         return (await ToViewsAsync([row], actor, ct))[0];
     }
@@ -183,6 +191,64 @@ public sealed class ScheduleSwapService(
     public async Task<SwapRequestView> CreateAsync(Guid userId, CreateSwapRequest request, CancellationToken ct = default)
     {
         var actor = await LoadActorAsync(userId, ct);
+        var (row, counterpart, approvers) = await BuildRequestAsync(actor, request, ct);
+
+        if (request.Force && counterpart is not null && await IsForceLockedAsync(row, ct))
+            throw new SwapOperationException(ApiErrorCodes.SwapForceLocked,
+                "你当天对这节课的强制换课已被对方撤回，请提交普通换课申请", StatusCodes.Status409Conflict);
+        if (await HasDuplicatePendingAsync(row, ct))
+            throw new SwapOperationException(ApiErrorCodes.SwapStateConflict,
+                "已有相同的待审批换课申请", StatusCodes.Status409Conflict);
+        var found = await conflicts.CheckAsync(ToLessons(await PlanChangesAsync(row, actor, ct)), null, ct);
+        RequireAcknowledged(found, request.AcknowledgeConflicts);
+        row.AcknowledgedConflictsJson = SerializeAcknowledged(null, found);
+
+        // 两节都是自己的课不需要对方审批；强制换课直接生效。
+        if (counterpart is null || request.Force)
+        {
+            await ApplyAsync(row, actor, ct);
+            row.Status = counterpart is null ? SwapRequestStatus.Approved : SwapRequestStatus.Forced;
+            row.DecidedAt = DateTimeOffset.UtcNow;
+            row.DecidedByUserId = counterpart is null ? userId : null;
+            db.ScheduleSwapRequests.Add(row);
+            await db.SaveChangesAsync(ct);
+            if (row.Status == SwapRequestStatus.Forced)
+            {
+                await notifications.PublishAsync(approvers, UserNotificationKinds.SwapForced,
+                    $"{actor.Name} 强制换走了你的课",
+                    $"{Describe(row)}\n理由：{row.Reason}\n如未事先沟通，可在换课页撤回。", row.Id, ct);
+            }
+            await NotifyHomeroomAsync(row, actor.Name, ct);
+            await InvalidateSiblingsAsync(row, ct);
+        }
+        else
+        {
+            row.Status = SwapRequestStatus.Pending;
+            db.ScheduleSwapRequests.Add(row);
+            await db.SaveChangesAsync(ct);
+            await notifications.PublishAsync(approvers, UserNotificationKinds.SwapRequested,
+                $"{actor.Name} 申请与你换课",
+                $"{Describe(row)}\n理由：{row.Reason}", row.Id, ct);
+        }
+        return (await ToViewsAsync([row], actor, ct))[0];
+    }
+
+    /// <summary>提交前预检冲突（不写入任何数据）：与 CreateAsync 相同的校验，返回检查出的冲突。</summary>
+    public async Task<SwapPreviewResponse> PreviewAsync(Guid userId, CreateSwapRequest request, CancellationToken ct = default)
+    {
+        var actor = await LoadActorAsync(userId, ct);
+        var (row, _, _) = await BuildRequestAsync(actor, request, ct);
+        return new SwapPreviewResponse
+        {
+            Conflicts = [.. await conflicts.CheckAsync(ToLessons(await PlanChangesAsync(row, actor, ct)), null, ct)],
+        };
+    }
+
+    /// <summary>按申请内容解析课位并做基本校验，得到待保存的申请、对方课位（null 表示两节都是自己的课）与审批人。</summary>
+    private async Task<(ScheduleSwapRequest Row, ResolvedSlot? Counterpart, List<Guid> Approvers)> BuildRequestAsync(
+        Actor actor, CreateSwapRequest request, CancellationToken ct)
+    {
+        var userId = actor.User.Id;
         RequirePermission(actor, UserPermissions.RequestScheduleSwap);
         if (request.Force) RequirePermission(actor, UserPermissions.ForceScheduleSwap);
         var reason = request.Reason?.Trim() ?? string.Empty;
@@ -256,44 +322,11 @@ public sealed class ScheduleSwapService(
         row.CounterpartIndex = lockSlot.Course.Index;
         var approvers = counterpart is null ? [] : await ResolveApproversAsync(counterpart, userId, ct);
         row.ApproverUserIdsJson = JsonSerializer.Serialize(approvers);
-
-        if (request.Force && counterpart is not null && await IsForceLockedAsync(row, ct))
-            throw new SwapOperationException(ApiErrorCodes.SwapForceLocked,
-                "你当天对这节课的强制换课已被对方撤回，请提交普通换课申请", StatusCodes.Status409Conflict);
-        if (await HasDuplicatePendingAsync(row, ct))
-            throw new SwapOperationException(ApiErrorCodes.SwapStateConflict,
-                "已有相同的待审批换课申请", StatusCodes.Status409Conflict);
-
-        // 两节都是自己的课不需要对方审批；强制换课直接生效。
-        if (counterpart is null || request.Force)
-        {
-            await ApplyAsync(row, actor, ct);
-            row.Status = counterpart is null ? SwapRequestStatus.Approved : SwapRequestStatus.Forced;
-            row.DecidedAt = DateTimeOffset.UtcNow;
-            row.DecidedByUserId = counterpart is null ? userId : null;
-            db.ScheduleSwapRequests.Add(row);
-            await db.SaveChangesAsync(ct);
-            if (row.Status == SwapRequestStatus.Forced)
-            {
-                await notifications.PublishAsync(approvers, UserNotificationKinds.SwapForced,
-                    $"{actor.Name} 强制换走了你的课",
-                    $"{Describe(row)}\n理由：{row.Reason}\n如未事先沟通，可在换课页撤回。", row.Id, ct);
-            }
-            await NotifyHomeroomAsync(row, actor.Name, ct);
-        }
-        else
-        {
-            row.Status = SwapRequestStatus.Pending;
-            db.ScheduleSwapRequests.Add(row);
-            await db.SaveChangesAsync(ct);
-            await notifications.PublishAsync(approvers, UserNotificationKinds.SwapRequested,
-                $"{actor.Name} 申请与你换课",
-                $"{Describe(row)}\n理由：{row.Reason}", row.Id, ct);
-        }
-        return (await ToViewsAsync([row], actor, ct))[0];
+        return (row, counterpart, approvers);
     }
 
-    public async Task<SwapRequestView> ApproveAsync(Guid userId, Guid id, string? note, CancellationToken ct = default)
+    public async Task<SwapRequestView> ApproveAsync(Guid userId, Guid id, string? note, bool acknowledgeConflicts = false,
+        CancellationToken ct = default)
     {
         var actor = await LoadActorAsync(userId, ct);
         var row = await LoadForDecisionAsync(id, userId, SwapRequestStatus.Pending, ct);
@@ -304,6 +337,9 @@ public sealed class ScheduleSwapService(
             await db.SaveChangesAsync(ct);
             throw new SwapOperationException(ApiErrorCodes.SwapStateConflict, "课程日期已过，申请已失效", StatusCodes.Status409Conflict);
         }
+        var found = await conflicts.CheckAsync(ToLessons(await PlanChangesAsync(row, actor, ct)), row.Id, ct);
+        RequireAcknowledged(found, acknowledgeConflicts);
+        row.AcknowledgedConflictsJson = SerializeAcknowledged(row.AcknowledgedConflictsJson, found);
         await ApplyAsync(row, actor, ct);
         row.Status = SwapRequestStatus.Approved;
         row.DecidedByUserId = userId;
@@ -315,6 +351,7 @@ public sealed class ScheduleSwapService(
             $"{actor.Name} 同意了你的换课申请",
             $"{Describe(row)}{NoteSuffix(row.DecisionNote)}\n课表已临时调整。", row.Id, ct);
         await NotifyHomeroomAsync(row, actor.Name, ct);
+        await InvalidateSiblingsAsync(row, ct);
         return (await ToViewsAsync([row], actor, ct))[0];
     }
 
@@ -349,16 +386,17 @@ public sealed class ScheduleSwapService(
         return (await ToViewsAsync([row], actor, ct))[0];
     }
 
-    /// <summary>对方老师撤回强制换课：课表恢复原状；该申请人当天不能再强制换走这节课。</summary>
+    /// <summary>对方老师撤回强制换课：撤销调课记录，课表恢复原状；该申请人当天不能再强制换走这节课。</summary>
     public async Task<SwapRequestView> RevokeForcedAsync(Guid userId, Guid id, CancellationToken ct = default)
     {
         var actor = await LoadActorAsync(userId, ct);
         var row = await LoadForDecisionAsync(id, userId, SwapRequestStatus.Forced, ct);
-        await RevertAsync(row, actor, ct);
+        await adjustments.RevertBySwapAsync(row.Id, $"{actor.Name} 撤回了强制换课", ct);
         row.Status = SwapRequestStatus.Revoked;
         row.RevokedAt = DateTimeOffset.UtcNow;
         row.DecidedByUserId = userId;
         await db.SaveChangesAsync(ct);
+        await PublishAsync(Classes(row), ct);
         foreach (var approver in Approvers(row)) await notifications.MarkSwapReadAsync(approver, row.Id, ct);
         await notifications.PublishAsync([row.RequesterUserId], UserNotificationKinds.SwapRevoked,
             $"{actor.Name} 撤回了你的强制换课",
@@ -367,7 +405,53 @@ public sealed class ScheduleSwapService(
         return (await ToViewsAsync([row], actor, ct))[0];
     }
 
-    /// <summary>后台清扫：日期已过仍未审批的申请标记为过期，并清理过期的临时任课老师覆盖。</summary>
+    /// <summary>
+    /// 相关班级的班主任或系统管理员撤回已生效的换课（含强制换课）：撤销调课记录，课表恢复。
+    /// 调课记录由服务端掌握，撤回不依赖教室端当前课表，不会因课位已变化而卡住。
+    /// </summary>
+    public async Task<SwapRequestView> RevertAsync(Guid userId, Guid id, CancellationToken ct = default)
+    {
+        var actor = await LoadActorAsync(userId, ct);
+        var row = await db.ScheduleSwapRequests.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw NotFound();
+        if (!await CanRevertAsync(actor, row, ct)) throw NotFound();
+        if (row.Status is not (SwapRequestStatus.Approved or SwapRequestStatus.Forced)) throw StateConflict(row);
+        await adjustments.RevertBySwapAsync(row.Id, $"{actor.Name} 撤回了换课", ct);
+        row.Status = SwapRequestStatus.Revoked;
+        row.RevokedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        await PublishAsync(Classes(row), ct);
+        foreach (var approver in Approvers(row)) await notifications.MarkSwapReadAsync(approver, row.Id, ct);
+        var recipients = Approvers(row).Append(row.RequesterUserId).Where(x => x != userId).ToList();
+        await notifications.PublishAsync(recipients, UserNotificationKinds.SwapRevoked,
+            $"{actor.Name} 撤回了换课", $"{Describe(row)}\n课表已恢复。", row.Id, ct);
+        await NotifyHomeroomAsync(row, actor.Name, ct, revoked: true);
+        return (await ToViewsAsync([row], actor, ct))[0];
+    }
+
+    /// <summary>
+    /// 已生效的换课在教室端无法再应用（基础课表变化、放假、插件过旧等）：申请置为已失效，
+    /// 撤掉同一申请的其余调课（不留半个换课），并通知申请人、对方老师与相关班主任。
+    /// </summary>
+    public async Task HandleInvalidatedAsync(IReadOnlyList<(Guid SwapRequestId, string Reason)> items, CancellationToken ct = default)
+    {
+        foreach (var (swapId, reason) in items.DistinctBy(x => x.SwapRequestId))
+        {
+            var row = await db.ScheduleSwapRequests.SingleOrDefaultAsync(x => x.Id == swapId, ct);
+            // 审批中的申请由审批流程自己处理冲突（保持待审批并提示），这里只处理已生效的。
+            if (row is null || row.Status is not (SwapRequestStatus.Approved or SwapRequestStatus.Forced)) continue;
+            await adjustments.InvalidateBySwapAsync(row.Id, null, reason, ct);
+            row.Status = SwapRequestStatus.Invalidated;
+            row.InvalidReason = TrimNote(reason);
+            await db.SaveChangesAsync(ct);
+            await PublishAsync(Classes(row), ct);
+            var recipients = new HashSet<Guid>(Approvers(row)) { row.RequesterUserId };
+            foreach (var classId in Classes(row)) recipients.UnionWith(await HomeroomTeachersAsync(classId, ct));
+            await notifications.PublishAsync(recipients, UserNotificationKinds.SwapInvalidated,
+                "换课已失效", $"{Describe(row)}\n原因：{reason}\n课表已按教室端当前课表恢复，如仍需换课请重新申请。", row.Id, ct);
+        }
+    }
+
+    /// <summary>后台清扫：日期已过仍未审批的申请标记为过期，日期已过的调课记录标记为过期。</summary>
     public async Task SweepAsync(CancellationToken ct = default)
     {
         var pending = await db.ScheduleSwapRequests.Where(x => x.Status == SwapRequestStatus.Pending).ToListAsync(ct);
@@ -379,82 +463,66 @@ public sealed class ScheduleSwapService(
             row.Status = SwapRequestStatus.Expired;
             foreach (var approver in Approvers(row)) await notifications.MarkSwapReadAsync(approver, row.Id, ct);
         }
-        var stale = (await db.LessonTeacherOverrides.ToListAsync(ct))
-            .Where(x => !IsSelectableDate(x.Date, ClassToday(x.ClassId)))
-            .ToList();
-        db.LessonTeacherOverrides.RemoveRange(stale);
         await db.SaveChangesAsync(ct);
-        foreach (var item in stale) overrides.Remove(item.ClassId, item.Date, item.Index);
-    }
-
-    /// <summary>启动时把数据库中的临时任课老师覆盖加载到内存。</summary>
-    public async Task LoadOverridesAsync(CancellationToken ct = default)
-    {
-        var rows = await db.LessonTeacherOverrides.AsNoTracking().ToListAsync(ct);
-        overrides.ReplaceAll(rows.Select(x => new LessonOverride(x.ClassId, x.Date, x.Index, x.TeacherName, x.ExpectedSubject)));
+        await adjustments.SweepAsync(ct);
     }
 
     // ---------- 执行 ----------
 
+    /// <summary>按最新课表复核课位，算出换课后每节课的科目与应上课老师。</summary>
+    private async Task<List<SlotChange>> PlanChangesAsync(ScheduleSwapRequest row, Actor actor, CancellationToken ct)
+    {
+        var target = await ResolveCurrentAsync(row.TargetClassId, row.TargetDate, row.TargetIndex, row.TargetSubject, row.TargetTeacher, ct);
+        if (row.Mode == SwapMode.Exchange)
+        {
+            var source = await ResolveCurrentAsync(row.SourceClassId!.Value, row.SourceDate!, row.SourceIndex!.Value,
+                row.SourceSubject, row.SourceTeacher, ct);
+            return
+            [
+                new SlotChange(source, FindSubject(source, target.Course.Subject), target.Course.Teacher),
+                new SlotChange(target, FindSubject(target, source.Course.Subject), source.Course.Teacher),
+            ];
+        }
+        var requester = actor.User.Id == row.RequesterUserId ? actor.Name : await RequesterNameAsync(row, ct);
+        return [new SlotChange(target, FindSubject(target, row.ReplacementSubjectName!), requester)];
+    }
+
+    /// <summary>
+    /// 写入调课记录并等待教室端回执：全部生效或教室端离线（待上线生效）都算成功；教室端报告冲突时撤掉这次的记录，
+    /// 申请保持原状并返回 409。教室端插件在线但不支持调课集合时拒绝，提示先升级插件。
+    /// </summary>
     private async Task ApplyAsync(ScheduleSwapRequest row, Actor actor, CancellationToken ct)
     {
         await ApplyGate.WaitAsync(ct);
         try
         {
-            var target = await ResolveCurrentAsync(row.TargetClassId, row.TargetDate, row.TargetIndex, row.TargetSubject, row.TargetTeacher, ct);
-            var changes = new List<(ResolvedSlot Slot, SubjectEntry To, string? Teacher)>();
-            if (row.Mode == SwapMode.Exchange)
+            var changes = await PlanChangesAsync(row, actor, ct);
+            foreach (var slot in changes.Select(x => x.Slot).DistinctBy(x => x.ClassId))
+                if (channel.Supports(slot.ClassId) == false)
+                    throw new SwapOperationException(ApiErrorCodes.CapabilityUnsupported,
+                        $"{slot.Classroom.Name} 的教室端插件版本过旧，请先升级 RemoteCI 插件后再换课", StatusCodes.Status422UnprocessableEntity);
+            var planned = changes.Select(change => new PlannedSlotChange(
+                change.Slot.ClassId,
+                change.Slot.Day.Date,
+                change.Slot.Course.Index,
+                change.Slot.Course.BaseSubjectId ?? change.Slot.Course.SubjectId,
+                BaseSubjectName(change.Slot),
+                change.To.Id,
+                change.To.Name,
+                OverrideTeacher(change))).ToList();
+            var write = await adjustments.AddAsync(planned, ScheduleAdjustmentOrigin.SwapRequest, row.Id, actor.User.Id, actor.Name, ct);
+            await adjustments.WaitForAcksAsync(write.Versions, ct);
+            var ids = write.Rows.Select(x => x.Id).ToList();
+            var failed = await db.ScheduleAdjustments.AsNoTracking()
+                .Where(x => ids.Contains(x.Id) && x.Status == ScheduleAdjustmentStatus.Invalidated).FirstOrDefaultAsync(ct);
+            if (failed is not null)
             {
-                var source = await ResolveCurrentAsync(row.SourceClassId!.Value, row.SourceDate!, row.SourceIndex!.Value,
-                    row.SourceSubject, row.SourceTeacher, ct);
-                changes.Add((source, FindSubject(source, target.Course.Subject), target.Course.Teacher));
-                changes.Add((target, FindSubject(target, source.Course.Subject), source.Course.Teacher));
-                if (source.ClassId == target.ClassId && source.Day.Date == target.Day.Date)
-                {
-                    // 同班同日：一条 Exchange 命令原子完成，学科连同默认老师一起交换。
-                    var result = await SendChangeAsync(source.ClassId, new ScheduleChangeRequest
-                    {
-                        Date = source.Day.Date,
-                        Mode = ScheduleChangeMode.Exchange,
-                        SourceIndex = source.Course.Index,
-                        TargetIndex = target.Course.Index,
-                        ExpectedRevision = source.Day.Revision,
-                    }, actor, ct);
-                    if (!result.Success) throw CommandFailure(result);
-                    await CommitChangesAsync(row, changes, ct);
-                    return;
-                }
+                await adjustments.InvalidateBySwapAsync(row.Id, failed.ConflictCode, failed.StatusReason ?? "教室端无法应用", ct);
+                await PublishAsync(changes.Select(x => x.Slot.ClassId), ct);
+                throw new SwapOperationException(ApiErrorCodes.SwapSlotChanged,
+                    $"教室端无法应用这次换课（{failed.StatusReason}），请刷新后重新申请", StatusCodes.Status409Conflict);
             }
-            else
-            {
-                var subject = FindSubject(target, row.ReplacementSubjectName!);
-                changes.Add((target, subject, actor.User.Id == row.RequesterUserId
-                    ? actor.Name
-                    : await RequesterNameAsync(row, ct)));
-            }
-
-            // 跨班或跨日：逐节 Replace；后一条失败时把已生效的前几条反向替换回去。
-            var done = new List<(ResolvedSlot Slot, string Revision)>();
-            foreach (var change in changes)
-            {
-                var revision = done.LastOrDefault(x => x.Slot.ClassId == change.Slot.ClassId && x.Slot.Day.Date == change.Slot.Day.Date)
-                    .Revision ?? change.Slot.Day.Revision;
-                var result = await SendChangeAsync(change.Slot.ClassId, new ScheduleChangeRequest
-                {
-                    Date = change.Slot.Day.Date,
-                    Mode = ScheduleChangeMode.Replace,
-                    SourceIndex = change.Slot.Course.Index,
-                    ReplacementSubjectId = change.To.Id,
-                    ExpectedRevision = revision,
-                }, actor, ct);
-                if (!result.Success)
-                {
-                    await CompensateAsync(done, actor);
-                    throw CommandFailure(result);
-                }
-                done.Add((change.Slot, result.ScheduleRevision ?? string.Empty));
-            }
-            await CommitChangesAsync(row, changes, ct);
+            await PublishAsync(changes.Select(x => x.Slot.ClassId), ct);
         }
         finally
         {
@@ -462,111 +530,31 @@ public sealed class ScheduleSwapService(
         }
     }
 
-    private async Task CompensateAsync(IEnumerable<(ResolvedSlot Slot, string Revision)> done, Actor actor)
+    /// <summary>通过或强制生效后，触及同一节课的其他待审批申请失效并通知申请人。</summary>
+    private async Task InvalidateSiblingsAsync(ScheduleSwapRequest row, CancellationToken ct)
     {
-        foreach (var (slot, revision) in done.Reverse())
+        var slots = new List<(Guid ClassId, string Date, int Index)> { (row.TargetClassId, row.TargetDate, row.TargetIndex) };
+        if (row.SourceClassId is { } sourceClass) slots.Add((sourceClass, row.SourceDate!, row.SourceIndex!.Value));
+        var pending = await db.ScheduleSwapRequests.Where(x => x.Status == SwapRequestStatus.Pending && x.Id != row.Id).ToListAsync(ct);
+        var hits = pending.Where(x => slots.Any(slot => ScheduleConflictService.Touches(x, slot.ClassId, slot.Date, slot.Index))).ToList();
+        if (hits.Count == 0) return;
+        foreach (var hit in hits)
         {
-            var result = await SendChangeAsync(slot.ClassId, new ScheduleChangeRequest
-            {
-                Date = slot.Day.Date,
-                Mode = ScheduleChangeMode.Replace,
-                SourceIndex = slot.Course.Index,
-                ReplacementSubjectId = slot.Course.SubjectId,
-                ExpectedRevision = revision,
-            }, actor, CancellationToken.None);
-            if (!result.Success)
-                logger.LogWarning("换课补偿失败：班级 {ClassId} {Date} 第 {Index} 节未能恢复：{Message}",
-                    slot.ClassId, slot.Day.Date, slot.Course.Index, result.Message);
+            hit.Status = SwapRequestStatus.Invalidated;
+            hit.InvalidReason = SiblingInvalidReason;
+            hit.DecidedAt = DateTimeOffset.UtcNow;
         }
-    }
-
-    /// <summary>记录改动并写入临时任课老师覆盖：新学科在该班的默认老师不是应上课老师时覆盖为应上课老师。</summary>
-    private async Task CommitChangesAsync(
-        ScheduleSwapRequest row, IReadOnlyList<(ResolvedSlot Slot, SubjectEntry To, string? Teacher)> changes, CancellationToken ct)
-    {
-        var applied = new List<AppliedChange>();
-        foreach (var (slot, to, teacher) in changes)
-        {
-            var existing = await db.LessonTeacherOverrides.SingleOrDefaultAsync(x =>
-                x.ClassId == slot.ClassId && x.Date == slot.Day.Date && x.Index == slot.Course.Index, ct);
-            var desired = string.IsNullOrWhiteSpace(teacher) || string.Equals(teacher.Trim(), to.Teacher?.Trim(), StringComparison.Ordinal)
-                ? null
-                : teacher.Trim();
-            applied.Add(new AppliedChange(slot.ClassId, slot.Day.Date, slot.Course.Index, slot.Course.SubjectId,
-                slot.Course.Subject, to.Name, existing?.TeacherName, existing?.ExpectedSubject, desired));
-            SetOverride(existing, slot.ClassId, slot.Day.Date, slot.Course.Index, desired, to.Name, row.Id);
-        }
-        row.AppliedPlanJson = JsonSerializer.Serialize(applied);
         await db.SaveChangesAsync(ct);
-        await PublishOverlaidSchedulesAsync(changes.Select(x => x.Slot.ClassId), ct);
-    }
-
-    private async Task RevertAsync(ScheduleSwapRequest row, Actor actor, CancellationToken ct)
-    {
-        var applied = string.IsNullOrEmpty(row.AppliedPlanJson)
-            ? []
-            : JsonSerializer.Deserialize<List<AppliedChange>>(row.AppliedPlanJson) ?? [];
-        await ApplyGate.WaitAsync(ct);
-        try
+        foreach (var hit in hits)
         {
-            var revisions = new Dictionary<(Guid, string), string>();
-            foreach (var change in applied)
-            {
-                var slot = await ResolveCurrentAsync(change.ClassId, change.Date, change.Index, change.ToSubject, null, ct);
-                var revision = revisions.GetValueOrDefault((change.ClassId, change.Date)) ?? slot.Day.Revision;
-                var result = await SendChangeAsync(change.ClassId, new ScheduleChangeRequest
-                {
-                    Date = change.Date,
-                    Mode = ScheduleChangeMode.Replace,
-                    SourceIndex = change.Index,
-                    ReplacementSubjectId = change.FromSubjectId,
-                    ExpectedRevision = revision,
-                }, actor, ct);
-                if (!result.Success) throw CommandFailure(result);
-                revisions[(change.ClassId, change.Date)] = result.ScheduleRevision ?? string.Empty;
-                var existing = await db.LessonTeacherOverrides.SingleOrDefaultAsync(x =>
-                    x.ClassId == change.ClassId && x.Date == change.Date && x.Index == change.Index, ct);
-                SetOverride(existing, change.ClassId, change.Date, change.Index,
-                    change.PreviousOverrideTeacher, change.PreviousOverrideSubject ?? change.FromSubject, row.Id);
-            }
-            await db.SaveChangesAsync(ct);
-            await PublishOverlaidSchedulesAsync(applied.Select(x => x.ClassId), ct);
-        }
-        finally
-        {
-            ApplyGate.Release();
+            foreach (var approver in Approvers(hit)) await notifications.MarkSwapReadAsync(approver, hit.Id, ct);
+            await notifications.PublishAsync([hit.RequesterUserId], UserNotificationKinds.SwapInvalidated,
+                "你的换课申请已失效", $"{Describe(hit)}\n原因：{SiblingInvalidReason}，如仍需换课请重新申请。", hit.Id, ct);
         }
     }
 
-    private void SetOverride(LessonTeacherOverride? existing, Guid classId, string date, int index,
-        string? teacher, string expectedSubject, Guid swapRequestId)
-    {
-        if (teacher is null)
-        {
-            if (existing is not null) db.LessonTeacherOverrides.Remove(existing);
-            overrides.Remove(classId, date, index);
-            return;
-        }
-        if (existing is null)
-        {
-            existing = new LessonTeacherOverride
-            {
-                Id = Guid.NewGuid(),
-                ClassId = classId,
-                Date = date,
-                Index = index,
-                CreatedAt = DateTimeOffset.UtcNow,
-            };
-            db.LessonTeacherOverrides.Add(existing);
-        }
-        existing.TeacherName = teacher;
-        existing.ExpectedSubject = expectedSubject;
-        existing.SwapRequestId = swapRequestId;
-        overrides.Set(new LessonOverride(classId, date, index, teacher, expectedSubject));
-    }
-
-    /// <summary>覆盖变化后立刻把叠加后的课表推给手机/手表，并刷新插件端授权镜像（临时任教影响班级访问）。</summary>
-    private async Task PublishOverlaidSchedulesAsync(IEnumerable<Guid> classIds, CancellationToken ct)
+    /// <summary>调课变化后立刻把叠加后的课表推给手机/手表，并刷新插件端授权镜像（临时任教影响班级访问）。</summary>
+    private async Task PublishAsync(IEnumerable<Guid> classIds, CancellationToken ct)
     {
         foreach (var classId in classIds.Distinct())
         {
@@ -583,29 +571,55 @@ public sealed class ScheduleSwapService(
         }
     }
 
-    private async Task<CommandResult> SendChangeAsync(Guid classId, ScheduleChangeRequest change, Actor actor, CancellationToken ct)
+    /// <summary>新科目在该班的默认老师就是应上课老师时不需要临时任课老师。</summary>
+    private static string? OverrideTeacher(SlotChange change) =>
+        string.IsNullOrWhiteSpace(change.Teacher) || string.Equals(change.Teacher.Trim(), change.To.Teacher?.Trim(), StringComparison.Ordinal)
+            ? null
+            : change.Teacher.Trim();
+
+    private static string BaseSubjectName(ResolvedSlot slot) =>
+        slot.Course.BaseSubjectId is { } baseId
+            ? slot.Bundle.Subjects.FirstOrDefault(x => x.Id == baseId)?.Name ?? slot.Course.Subject
+            : slot.Course.Subject;
+
+    private static List<PlannedLesson> ToLessons(IEnumerable<SlotChange> changes) => changes.Select(change => new PlannedLesson(
+        change.Slot.ClassId,
+        change.Slot.Classroom.Name,
+        change.Slot.Day.Date,
+        change.Slot.Course.Index,
+        change.Slot.Course.Label,
+        change.Slot.Course.StartTime,
+        change.Slot.Course.EndTime,
+        change.To.Name,
+        string.IsNullOrWhiteSpace(change.Teacher) ? change.To.Teacher : change.Teacher)).ToList();
+
+    private static void RequireAcknowledged(IReadOnlyList<SwapConflict> found, bool acknowledged)
     {
-        // 审批人或撤回人在哪个入口操作并不代表换课的来源，审计统一记为换课申请流程。
-        using var _ = CommandAuditContext.Begin(CommandAuditSource.SwapWorkflow);
-        return await commands.SendAsync(classId, new CommandMessage
+        if (acknowledged || !found.Any(x => x.RequiresAcknowledgement)) return;
+        var lines = found.Where(x => x.RequiresAcknowledgement).Select(x => x.Message);
+        throw new SwapOperationException(ApiErrorCodes.SwapConflicts,
+            $"存在需要确认的冲突：{string.Join("；", lines)}。请在新版 App 或网页确认后继续。", StatusCodes.Status409Conflict)
         {
-            Command = CommandKind.ChangeSchedule,
-            ClassId = classId,
-            // 换课申请由服务端代为执行：老师本身没有 ManageSchedule，执行身份只携带换课所需权限位，
-            // 显示名标注来源，便于教室端日志审计。
-            RequestedBy = new UserProfile
-            {
-                Id = actor.User.Id,
-                Username = actor.User.UserName ?? string.Empty,
-                DisplayName = $"换课申请 · {actor.Name}",
-                Role = UserRole.User,
-                GrantedPermissions = UserPermissions.None,
-                Permissions = UserPermissions.ViewCurrentCourse | UserPermissions.ManageSchedule,
-                Version = actor.User.Version,
-            },
-            ScheduleChange = change,
-        }, CommandTimeout, ct);
+            Conflicts = found,
+        };
     }
+
+    private static string? SerializeAcknowledged(string? existing, IReadOnlyList<SwapConflict> found)
+    {
+        var items = ReadConflicts(existing).Concat(found.Where(x => x.RequiresAcknowledgement))
+            .DistinctBy(x => x.Message).ToList();
+        return items.Count == 0 ? null : JsonSerializer.Serialize(items, JsonDefaults.Options);
+    }
+
+    private static List<SwapConflict> ReadConflicts(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try { return JsonSerializer.Deserialize<List<SwapConflict>>(json, JsonDefaults.Options) ?? []; }
+        catch (JsonException) { return []; }
+    }
+
+    private static IEnumerable<Guid> Classes(ScheduleSwapRequest row) =>
+        new[] { row.TargetClassId, row.SourceClassId ?? row.TargetClassId }.Distinct();
 
     // ---------- 校验与辅助 ----------
 
@@ -723,15 +737,44 @@ public sealed class ScheduleSwapService(
             x.CounterpartClassId == row.CounterpartClassId && x.CounterpartDate == row.CounterpartDate &&
             x.CounterpartIndex == row.CounterpartIndex, ct);
 
-    private Task<bool> HasDuplicatePendingAsync(ScheduleSwapRequest row, CancellationToken ct) =>
-        db.ScheduleSwapRequests.AnyAsync(x =>
-            x.RequesterUserId == row.RequesterUserId && x.Status == SwapRequestStatus.Pending && x.Mode == row.Mode &&
-            x.TargetClassId == row.TargetClassId && x.TargetDate == row.TargetDate && x.TargetIndex == row.TargetIndex &&
-            x.SourceClassId == row.SourceClassId && x.SourceDate == row.SourceDate && x.SourceIndex == row.SourceIndex, ct);
+    /// <summary>相同的待审批申请：不论谁发起、不论两节课的先后顺序，同一对课位、同一模式与换入学科只保留一份。</summary>
+    private async Task<bool> HasDuplicatePendingAsync(ScheduleSwapRequest row, CancellationToken ct)
+    {
+        var pending = await db.ScheduleSwapRequests.AsNoTracking()
+            .Where(x => x.Status == SwapRequestStatus.Pending && x.Mode == row.Mode &&
+                        (x.TargetClassId == row.TargetClassId || x.SourceClassId == row.TargetClassId))
+            .ToListAsync(ct);
+        var slots = SlotSet(row);
+        return pending.Any(x => SlotSet(x).SetEquals(slots) &&
+            string.Equals(x.ReplacementSubjectName, row.ReplacementSubjectName, StringComparison.Ordinal));
+    }
+
+    private static HashSet<(Guid, string, int)> SlotSet(ScheduleSwapRequest row)
+    {
+        var slots = new HashSet<(Guid, string, int)> { (row.TargetClassId, row.TargetDate, row.TargetIndex) };
+        if (row.SourceClassId is { } sourceClass) slots.Add((sourceClass, row.SourceDate!, row.SourceIndex!.Value));
+        return slots;
+    }
 
     private async Task<string> RequesterNameAsync(ScheduleSwapRequest row, CancellationToken ct) =>
         await db.Users.AsNoTracking().Where(x => x.Id == row.RequesterUserId)
             .Select(x => x.DisplayName).SingleOrDefaultAsync(ct) ?? "未知老师";
+
+    /// <summary>系统管理员或涉及班级的班主任可以撤回已生效的换课。</summary>
+    private async Task<bool> CanRevertAsync(Actor actor, ScheduleSwapRequest row, CancellationToken ct)
+    {
+        if (actor.User.Role == UserRole.Admin) return true;
+        var homeroom = await HomeroomClassesAsync(actor.User.Id, ct);
+        return Classes(row).Any(homeroom.Contains);
+    }
+
+    private async Task<HashSet<Guid>> HomeroomClassesAsync(Guid userId, CancellationToken ct) =>
+        (await db.ClassMemberships.AsNoTracking()
+            .Where(x => x.UserId == userId)
+            .Join(db.AccountRoles, x => x.RoleDefinitionId, y => y.Id, (x, y) => new { x.ClassroomId, y.Kind })
+            .Where(x => x.Kind == AccountRoleKind.ClassAdministrator)
+            .Select(x => x.ClassroomId)
+            .ToListAsync(ct)).ToHashSet();
 
     private async Task<IReadOnlyList<SwapRequestView>> ToViewsAsync(
         IReadOnlyList<ScheduleSwapRequest> rows, Actor actor, CancellationToken ct)
@@ -748,12 +791,21 @@ public sealed class ScheduleSwapService(
             .Where(x => x.UserId == actor.User.Id && x.Kind == UserNotificationKinds.SwapForced && x.ReadAt == null &&
                 x.SwapRequestId != null && forcedIds.Contains(x.SwapRequestId.Value))
             .Select(x => x.SwapRequestId!.Value).ToListAsync(ct)).ToHashSet();
+        var liveIds = rows.Where(x => x.Status is SwapRequestStatus.Approved or SwapRequestStatus.Forced).Select(x => x.Id).ToList();
+        var deliveries = liveIds.Count == 0 ? [] : (await db.ScheduleAdjustments.AsNoTracking()
+            .Where(x => x.SwapRequestId != null && liveIds.Contains(x.SwapRequestId.Value) && x.Status == ScheduleAdjustmentStatus.Active)
+            .Select(x => new { SwapRequestId = x.SwapRequestId!.Value, x.Delivery }).ToListAsync(ct))
+            .GroupBy(x => x.SwapRequestId)
+            .ToDictionary(x => x.Key, x => x.All(y => y.Delivery == ScheduleAdjustmentDelivery.Applied)
+                ? SwapDeliveryStates.Applied : SwapDeliveryStates.Pending);
+        var homeroom = actor.User.Role == UserRole.Admin ? null : await HomeroomClassesAsync(actor.User.Id, ct);
         return rows.Select(row =>
         {
             var approvers = Approvers(row);
             var isApprover = approvers.Contains(actor.User.Id);
             var canDecide = isApprover && row.Status == SwapRequestStatus.Pending;
             var canRevoke = isApprover && row.Status == SwapRequestStatus.Forced;
+            var live = row.Status is SwapRequestStatus.Approved or SwapRequestStatus.Forced;
             return new SwapRequestView
             {
                 Id = row.Id,
@@ -778,6 +830,11 @@ public sealed class ScheduleSwapService(
                 CanRevoke = canRevoke,
                 NeedsAction = canDecide || canRevoke && unseenForced.Contains(row.Id),
                 CanCancel = row.RequesterUserId == actor.User.Id && row.Status == SwapRequestStatus.Pending,
+                CanRevert = live && (homeroom is null || Classes(row).Any(homeroom.Contains)),
+                // 旧版换课（逐节命令时代）没有调课记录，按已生效显示。
+                Delivery = live ? deliveries.GetValueOrDefault(row.Id, SwapDeliveryStates.Applied) : null,
+                InvalidReason = row.Status == SwapRequestStatus.Invalidated ? row.InvalidReason : null,
+                AcknowledgedConflicts = ReadConflicts(row.AcknowledgedConflictsJson),
             };
         }).ToList();
     }
@@ -857,18 +914,8 @@ public sealed class ScheduleSwapService(
             SwapRequestStatus.Cancelled => "该申请已撤销",
             SwapRequestStatus.Expired => "该申请已过期",
             SwapRequestStatus.Forced => "该换课已强制生效",
-            SwapRequestStatus.Revoked => "该强制换课已撤回",
+            SwapRequestStatus.Revoked => "该换课已撤回",
+            SwapRequestStatus.Invalidated => "该申请已失效",
             _ => "申请状态已变化",
         }, StatusCodes.Status409Conflict);
-
-    private static SwapOperationException CommandFailure(CommandResult result) => new(
-        result.Code == CommandResultCodes.ScheduleStale ? ApiErrorCodes.SwapSlotChanged : result.Code,
-        result.Code == CommandResultCodes.ScheduleStale ? "课表刚刚被修改，请重新申请" : result.Message,
-        result.Code switch
-        {
-            CommandResultCodes.PluginOffline => StatusCodes.Status503ServiceUnavailable,
-            CommandResultCodes.Timeout => StatusCodes.Status504GatewayTimeout,
-            CommandResultCodes.ScheduleStale => StatusCodes.Status409Conflict,
-            _ => StatusCodes.Status422UnprocessableEntity,
-        });
 }

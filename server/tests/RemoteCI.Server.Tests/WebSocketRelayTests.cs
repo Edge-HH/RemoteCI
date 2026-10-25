@@ -221,6 +221,66 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     }
 
     [Fact]
+    public async Task ScheduleAdjustments_AreSentOnCapabilities_AndPluginLocalAdjustmentsAreAdopted()
+    {
+        using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
+        await SendAsync(plugin, Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = RemoteCiCapabilities.Current }));
+        var initial = await ReceivePayloadAsync<ScheduleAdjustmentSet>(plugin, Protocol.MessageTypeScheduleAdjustments);
+        Assert.Equal(TestWebApplicationFactory.DefaultClassId, initial.ClassId);
+
+        // 班主任在课表页临时换课：插件记为本地调课并随课表上报，服务端收编后在下一份集合中确认。
+        var date = DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd");
+        var math = new SubjectEntry { Id = Guid.NewGuid(), Name = "数学", Teacher = "王老师" };
+        var english = new SubjectEntry { Id = Guid.NewGuid(), Name = "英语", Teacher = "李老师" };
+        var local = new LocalScheduleAdjustment
+        {
+            Id = Guid.NewGuid(), Date = date, Index = 0, FromSubjectId = math.Id, ToSubjectId = english.Id,
+            Origin = ScheduleAdjustmentOrigins.Direct, RequestedByName = "班主任",
+        };
+        await SendAsync(plugin, Envelope.ScheduleSync(new ScheduleBundle
+        {
+            FromDate = date,
+            Subjects = [math, english],
+            Days = [new ScheduleDay
+            {
+                Date = date,
+                Revision = "relay-adjustments",
+                Enabled = true,
+                Courses = [new CourseEntry
+                {
+                    Index = 0, Label = "第 1 节", SubjectId = english.Id, Subject = "英语", Teacher = "李老师", Enabled = true,
+                    BaseSubjectId = math.Id, AdjustmentId = local.Id,
+                }],
+            }],
+            Adjustments = new ScheduleAdjustmentReport { Version = initial.Version, Local = [local] },
+        }));
+
+        ScheduleAdjustmentSet next;
+        do next = await ReceivePayloadAsync<ScheduleAdjustmentSet>(plugin, Protocol.MessageTypeScheduleAdjustments);
+        while (!next.AcknowledgedLocalIds.Contains(local.Id));
+        Assert.True(next.Version > initial.Version);
+        Assert.Equal(local.Id, Assert.Single(next.Items, x => x.Date == date && x.Index == 0).Id);
+        // 回执只用于对账，不随课表保存。
+        Assert.Null(_factory.Services.GetRequiredService<IStateStore>().GetSourceSchedule(TestWebApplicationFactory.DefaultClassId)!.Adjustments);
+
+        var admin = await _factory.LoginAsync();
+        var listed = await _factory.CreateClient().SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get,
+            $"/api/classes/{TestWebApplicationFactory.DefaultClassId}/schedule-adjustments?from={date}", admin.AccessToken));
+        listed.EnsureSuccessStatusCode();
+        var row = Assert.Single((await listed.Content.ReadFromJsonAsync<List<ScheduleAdjustmentView>>())!, x => x.Id == local.Id);
+        Assert.Equal(("direct", "applied", "数学", "英语", "班主任"), (row.Origin, row.Delivery, row.FromSubject, row.ToSubject, row.CreatedByName));
+
+        // 删除这条直接换课：服务端下发不含它的集合，教室端随之恢复。
+        var deleted = await _factory.CreateClient().SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Delete,
+            $"/api/schedule-adjustments/{local.Id}", admin.AccessToken));
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, deleted.StatusCode);
+        var afterDelete = await ReceivePayloadAsync<ScheduleAdjustmentSet>(plugin, Protocol.MessageTypeScheduleAdjustments);
+        Assert.DoesNotContain(afterDelete.Items, x => x.Id == local.Id);
+        Assert.Contains(local.Id, afterDelete.AcknowledgedLocalIds);
+    }
+
+    [Fact]
     public async Task SoftwareInventory_IsCachedPersistedAndReturnedForDevicePage()
     {
         using var plugin = await ConnectPluginAsync();
