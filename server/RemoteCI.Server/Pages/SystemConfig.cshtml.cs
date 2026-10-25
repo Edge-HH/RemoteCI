@@ -33,6 +33,7 @@ public sealed class SystemConfigModel(
     [BindProperty] public ExportInput ExportOptions { get; set; } = new();
     [BindProperty] public ImportInput ImportOptions { get; set; } = new();
     [BindProperty] public bool ForceSenderInTitle { get; set; }
+    [BindProperty] public bool ScreenshotNotifyClassroom { get; set; }
     [BindProperty, StringLength(OrganizationNameMaxLength)] public string? OrganizationName { get; set; }
     public const int OrganizationNameMaxLength = 60;
     [BindProperty] public IFormFile? UpdatePackage { get; set; }
@@ -58,8 +59,10 @@ public sealed class SystemConfigModel(
         if (await RequireAdminAsync() is { } denied) return denied;
         await LoadBackupAsync();
         ForceSenderInTitle = await identities.GetForceSenderInTitleAsync();
-        OrganizationName = await db.SystemMetadata.AsNoTracking().Where(x => x.Id == 1)
-            .Select(x => x.OrganizationName).SingleAsync();
+        var metadata = await db.SystemMetadata.AsNoTracking().Where(x => x.Id == 1)
+            .Select(x => new { x.OrganizationName, x.ScreenshotNotifyClassroom }).SingleAsync();
+        OrganizationName = metadata.OrganizationName;
+        ScreenshotNotifyClassroom = metadata.ScreenshotNotifyClassroom;
         OperationsOptions = OperationsInput.From(await operations.GetAsync());
         return Page();
     }
@@ -100,6 +103,16 @@ public sealed class SystemConfigModel(
         await peers.SendSettingsToWatchesAsync(settings, ct);
         TempData["Message"] = ForceSenderInTitle ? "已开启强制显示发送人" : "已关闭强制显示发送人";
         return RedirectToPage(null, null, "notification-sender");
+    }
+
+    public async Task<IActionResult> OnPostSaveScreenshotSettingsAsync(CancellationToken ct)
+    {
+        if (await RequireAdminAsync() is { } denied) return denied;
+        var row = await db.SystemMetadata.SingleAsync(x => x.Id == 1, ct);
+        row.ScreenshotNotifyClassroom = ScreenshotNotifyClassroom;
+        await db.SaveChangesAsync(ct);
+        TempData["Message"] = ScreenshotNotifyClassroom ? "截图后将在教室端显示提示" : "截图将不再在教室端提示";
+        return RedirectToPage(null, null, "screenshot");
     }
 
     public async Task<IActionResult> OnPostCheckUpdateAsync(CancellationToken ct)

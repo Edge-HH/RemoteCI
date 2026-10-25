@@ -279,6 +279,7 @@ public static class CommandAuditSummary
         CommandKind.ApplyExtensionSettings => "扩展设置",
         CommandKind.ApplyProfile => "应用档案",
         CommandKind.ReadProfile => "收集档案",
+        CommandKind.CaptureScreen => "屏幕截图",
         _ => $"命令 {(int)kind}",
     };
 

@@ -131,6 +131,7 @@ public sealed class RemoteCiService : IDisposable
             _loggerFactory.CreateLogger<CloudClient>(),
             tokenStore: _tokenStore);
         _commandHandler.Files.Channel = _cloudClient;
+        _commandHandler.Screenshots.Channel = _cloudClient;
         _cloudClient.Connected += OnCloudConnected;
         _cloudClient.ConnectionStatusChanged += OnCloudConnectionStatusChanged;
         _cloudClient.HolidayCalendarReceived += _holidayCalendar.Apply;

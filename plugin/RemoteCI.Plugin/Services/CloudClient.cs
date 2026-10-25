@@ -11,7 +11,7 @@ using RemoteCI.Shared.Models;
 namespace RemoteCI.Plugin.Services;
 
 /// <summary>插件云端通道：长期插件凭据、版本化授权同步和真实命令回执。</summary>
-public sealed class CloudClient : IDisposable, IFileTransferChannel
+public sealed class CloudClient : IDisposable, IFileTransferChannel, IScreenshotChannel
 {
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan MaxReconnectDelay = TimeSpan.FromMinutes(1);
@@ -141,6 +141,30 @@ public sealed class CloudClient : IDisposable, IFileTransferChannel
 
     public Task<bool> ReportFileProgressAsync(FileTransferProgress progress) =>
         TrySendAsync(Envelope.FileTransferProgress(progress));
+
+    /// <summary>以插件长期凭据加一次性上传凭据把截图 PNG 上传到服务端。</summary>
+    public async Task<string?> UploadScreenshotAsync(string id, string uploadKey, byte[] png, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"{_settings.CloudServerUrl.TrimEnd('/')}/api/plugin/screenshots/{Uri.EscapeDataString(id)}");
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(Protocol.BearerScheme, Token ?? string.Empty);
+        request.Headers.Add(ScreenshotRequest.UploadKeyHeader, uploadKey);
+        request.Content = new ByteArrayContent(png);
+        request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+        try
+        {
+            using var response = await _http.SendAsync(request, ct);
+            if (response.IsSuccessStatusCode) return null;
+            _logger.LogWarning("RemoteCI 截图上传被拒绝：{Status}", (int)response.StatusCode);
+            return $"截图上传失败（HTTP {(int)response.StatusCode}）";
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex, "RemoteCI 截图上传失败");
+            return "截图上传失败，请检查教室端网络";
+        }
+    }
 
     private async Task RunLoopAsync(CancellationToken ct)
     {

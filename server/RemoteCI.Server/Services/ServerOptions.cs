@@ -42,4 +42,10 @@ public sealed class ServerOptions
 
     /// <summary>中转目录总容量上限（字节），默认 20 GiB；0 表示不限制。</summary>
     public long FileTransferQuotaBytes { get; set; } = 20L * 1024 * 1024 * 1024;
+
+    /// <summary>单张屏幕截图上限（字节），默认 20 MiB，也是协议上限。</summary>
+    public int ScreenshotMaxBytes { get; set; } = 20 * 1024 * 1024;
+
+    /// <summary>屏幕截图在服务端的保留时长，过期后删除；每个班级另外最多保留 30 张。</summary>
+    public TimeSpan ScreenshotRetention { get; set; } = TimeSpan.FromHours(24);
 }

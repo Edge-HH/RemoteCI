@@ -22,6 +22,25 @@ object AdminApi {
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
     private val media = "application/json; charset=utf-8".toMediaType()
+    // 截图要等插件截屏、编码并上传完成，服务端最长等待 45 秒。
+    private val slowHttp = http.newBuilder().readTimeout(60, TimeUnit.SECONDS).build()
+
+    /** 让当前班级的教室电脑截屏；返回已上传到服务端的截图信息。 */
+    suspend fun captureScreen(classId: String): ScreenshotInfo =
+        json.decodeFromString(ScreenshotInfo.serializer(), request("POST", "/api/classes/${enc(classId)}/screenshot", client = slowHttp))
+    suspend fun screenshots(classId: String): List<ScreenshotInfo> =
+        get("/api/classes/${enc(classId)}/screenshots", ListSerializer(ScreenshotInfo.serializer()))
+
+    /** 下载截图 PNG（url 为服务端返回的相对路径）。 */
+    suspend fun screenshotBytes(url: String): ByteArray = withContext(Dispatchers.IO) {
+        val base = ConnectionManager.restBaseUrl() ?: throw AdminApiException("尚未连接服务器")
+        val token = ConnectionManager.restToken() ?: throw AdminApiException("尚未登录")
+        val request = Request.Builder().url("$base$url").header("Authorization", "Bearer $token").get().build()
+        http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw AdminApiException("截图已过期或无权查看（HTTP ${response.code}）")
+            response.body.bytes()
+        }
+    }
 
     suspend fun users(): List<UserListItem> = get("/api/users", ListSerializer(UserListItem.serializer()))
     suspend fun createUser(body: CreateUserRequest): UserListItem = post("/api/users", body, CreateUserRequest.serializer(), UserListItem.serializer())
@@ -193,7 +212,12 @@ object AdminApi {
         return json.decodeFromString(serializer, text)
     }
 
-    private suspend fun request(method: String, path: String, body: String? = null): String = withContext(Dispatchers.IO) {
+    private suspend fun request(
+        method: String,
+        path: String,
+        body: String? = null,
+        client: OkHttpClient = http,
+    ): String = withContext(Dispatchers.IO) {
         val base = ConnectionManager.restBaseUrl() ?: throw AdminApiException("尚未连接服务器")
         val token = ConnectionManager.restToken() ?: throw AdminApiException("尚未登录")
         val builder = Request.Builder()
@@ -206,7 +230,7 @@ object AdminApi {
             "PUT" -> builder.put((body ?: "{}").toRequestBody(media))
             else -> error(method)
         }
-        http.newCall(builder.build()).execute().use { response ->
+        client.newCall(builder.build()).execute().use { response ->
             val text = response.body.string()
             if (!response.isSuccessful) {
                 val message = runCatching { json.decodeFromString(ApiError.serializer(), text).message }.getOrNull()
@@ -223,6 +247,21 @@ private object UnitSerializer : kotlinx.serialization.DeserializationStrategy<Un
 }
 
 @Serializable data class EmptyBody(val ok: Boolean = true)
+
+/** 服务端保存的一张屏幕截图；url 为相对服务器根、需带访问令牌的 PNG 地址。 */
+@Serializable
+data class ScreenshotInfo(
+    val id: String = "",
+    @SerialName("deviceName") val deviceName: String = "",
+    @SerialName("requestedBy") val requestedBy: String = "",
+    val width: Int = 0,
+    val height: Int = 0,
+    val size: Long = 0,
+    @SerialName("capturedAt") val capturedAt: String = "",
+    val url: String = "",
+)
+
+/** /api/auth/web-ticket 的响应：path 是相对服务器根的一次性登录地址。 */
 
 /** /api/auth/web-ticket 的响应：path 是相对服务器根的一次性登录地址。 */
 @Serializable data class WebLoginTicket(val ticket: String = "", val path: String = "")

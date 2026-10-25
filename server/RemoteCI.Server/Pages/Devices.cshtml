@@ -26,4 +26,22 @@
 <div data-device-grid data-refresh-url="@Url.Page("/Devices", "Grid", new { group = Model.Group, offlineOnly = Model.OfflineOnly })">
     <partial name="_DeviceGrid" model="Model" />
 </div>
+<dialog id="screenshot-dialog" class="user-edit-dialog screenshot-dialog" data-user-edit-dialog data-screenshot-dialog
+        data-capture-url="@Url.Page("/Devices", "Screenshot")" aria-labelledby="screenshot-dialog-title">
+    <div class="user-edit-dialog-shell">
+        <header class="user-edit-dialog-header"><div><p class="eyebrow" data-screenshot-target-name>教室电脑</p><h2 id="screenshot-dialog-title">屏幕截图</h2><p class="muted">截取该设备全部显示器的当前画面，保留 24 小时；每次截图都会写入操作记录。</p></div><button type="button" class="ghost dialog-close-button" data-user-edit-close aria-label="关闭屏幕截图"><i class="icon icon-close" aria-hidden="true"></i></button></header>
+        <div class="user-edit-form screenshot-body">
+            <form method="post" class="screenshot-actions" data-screenshot-form>
+                @Html.AntiForgeryToken()
+                <button type="submit" data-screenshot-capture>立即截图</button>
+                <span class="control-note" data-screenshot-status aria-live="polite"></span>
+            </form>
+            <figure class="screenshot-preview" data-screenshot-preview hidden>
+                <a data-screenshot-open target="_blank" rel="noopener"><img data-screenshot-image alt="教室电脑屏幕截图" /></a>
+                <figcaption><span data-screenshot-caption></span> <a data-screenshot-download>下载</a></figcaption>
+            </figure>
+        </div>
+    </div>
+</dialog>
 <script src="~/devices.js" asp-append-version="true"></script>
+<script src="~/screenshot.js" asp-append-version="true" defer></script>

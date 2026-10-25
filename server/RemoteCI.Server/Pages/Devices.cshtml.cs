@@ -10,7 +10,11 @@ namespace RemoteCI.Server.Pages;
 
 /// <summary>设备状态大屏：所有教室电脑的在线情况、版本、当前课程与今日在线时间条，每 15 秒刷新。</summary>
 [Authorize]
-public sealed class DevicesModel(UserManager<AppUser> users, DeviceHealthService health) : WebPageModel(users)
+public sealed class DevicesModel(
+    UserManager<AppUser> users,
+    DeviceHealthService health,
+    ScreenshotDispatcher screenshots,
+    IdentityCoordinator identities) : WebPageModel(users)
 {
     [BindProperty(SupportsGet = true)] public string? Group { get; set; }
     [BindProperty(SupportsGet = true)] public bool OfflineOnly { get; set; }
@@ -31,6 +35,23 @@ public sealed class DevicesModel(UserManager<AppUser> users, DeviceHealthService
         if (await LoadAsync(ct) is { } denied) return denied;
         Response.Headers.CacheControl = "no-store";
         return Partial("_DeviceGrid", this);
+    }
+
+    /// <summary>截取指定教室电脑的屏幕（系统管理员）；返回与控制页相同的 JSON。</summary>
+    public async Task<IActionResult> OnPostScreenshotAsync(Guid classId, Guid credentialId, CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (CurrentUser.Role != UserRole.Admin)
+            return new JsonResult(CommandResult.Failure(CommandResultCodes.Forbidden, "仅系统管理员可以按设备截图"));
+        if (await identities.GetProfileAsync(CurrentUser.Id, ct) is not { } profile)
+            return new JsonResult(CommandResult.Failure(CommandResultCodes.Unauthorized, "登录已失效"));
+        var outcome = await screenshots.CaptureAsync(classId, credentialId, profile.WithPermissions(UserPermissions.All), ct);
+        return new JsonResult(new
+        {
+            success = outcome.Record is not null,
+            message = outcome.Record is null ? outcome.Result.Message : "截图已获取",
+            screenshot = outcome.Record is { } record ? ControlModel.ScreenshotPageView(Url, record) : null,
+        });
     }
 
     private async Task<IActionResult?> LoadAsync(CancellationToken ct)

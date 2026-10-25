@@ -25,8 +25,9 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | 4096 | `RequestScheduleSwap`（老师主动换课：发起与审批换课申请） |
 | 8192 | `ForceScheduleSwap`（强制换课：不经审批立即生效，对方可撤回） |
 | 16384 | `SendFiles`（文件分发：经服务端中转把文件发到有权班级设备的桌面、下载或文档文件夹） |
+| 32768 | `CaptureScreen`（屏幕截图：获取有权班级教室电脑的当前屏幕） |
 
-管理员的有效权限固定为 32767（全部位）。`SendFiles` 默认不授予任何内置角色，由系统管理员按需开启。`RequestScheduleSwap` 与 `ForceScheduleSwap` 是全局权限，由系统管理员在“角色配置”中开关：内置老师和班主任默认开启前者（升级迁移会为已有的两个内置角色补上一次），后者默认关闭。普通用户固定包含值 1，其余权限来自服务端授权。权限设置界面将值 2 显示为“概览”；七日课表查看只要求账号已登录，手动拉取课表允许系统管理员，以及班级自治策略允许时的本班班主任；定时自动拉取间隔是全局设置，只有系统管理员可以修改，值 16 保护换课。`TeacherComing` 权限位和命令仅为旧客户端兼容保留，当前不在 WebUI、各端 App 或权限设置中显示；`SendNotifications` 只保护自定义通知与清除提醒，`SendVoiceMessages` 独立保护语音消息，`RunExtensions` 是所有插件扩展的独立权限，`MainMenuControl` 保护主界面显隐，`PowerControl` 保护音量和 Windows 电源操作，`ChangeDisplayName` 仅保留为兼容旧权限数据，实际只有系统管理员可以修改用户可见用户名（DisplayName，登录 ID 不变）；用户名会影响老师获取的日程信息。`ApiAccess` 允许账号创建 API Key 并调用 REST API；管理员、班主任与老师默认拥有 API 访问。
+管理员的有效权限固定为 65535（全部位）。`SendFiles` 默认不授予任何内置角色，由系统管理员按需开启；`CaptureScreen` 默认授予内置班主任角色（升级迁移会为已有的班主任角色补上一次），老师需由系统管理员在账号或角色中开启。`RequestScheduleSwap` 与 `ForceScheduleSwap` 是全局权限，由系统管理员在“角色配置”中开关：内置老师和班主任默认开启前者（升级迁移会为已有的两个内置角色补上一次），后者默认关闭。普通用户固定包含值 1，其余权限来自服务端授权。权限设置界面将值 2 显示为“概览”；七日课表查看只要求账号已登录，手动拉取课表允许系统管理员，以及班级自治策略允许时的本班班主任；定时自动拉取间隔是全局设置，只有系统管理员可以修改，值 16 保护换课。`TeacherComing` 权限位和命令仅为旧客户端兼容保留，当前不在 WebUI、各端 App 或权限设置中显示；`SendNotifications` 只保护自定义通知与清除提醒，`SendVoiceMessages` 独立保护语音消息，`RunExtensions` 是所有插件扩展的独立权限，`MainMenuControl` 保护主界面显隐，`PowerControl` 保护音量和 Windows 电源操作，`ChangeDisplayName` 仅保留为兼容旧权限数据，实际只有系统管理员可以修改用户可见用户名（DisplayName，登录 ID 不变）；用户名会影响老师获取的日程信息。`ApiAccess` 允许账号创建 API Key 并调用 REST API；管理员、班主任与老师默认拥有 API 访问。
 
 账号密码只用于 `POST /api/auth/login` 登录请求，不在设备上持久化。启用二步验证时，首次请求返回 `twoFactorRequired: true`，不签发会话；客户端提示验证码后，在同一端点重发账号、密码和 `twoFactorCode`，使用恢复码时再传 `useRecoveryCode: true`。`/api/auth/mobile-login` 同样支持这两个可选字段，提示验证时原票据保持有效，完成后一次性消费。验证码错误返回 401，并计入账号锁定。旧客户端需升级才能登录已启用二步验证的账号，详见 [二步验证](two-factor.md)。生产环境必须使用 HTTPS；Android 手机端为兼容尚未配置 TLS 的现有部署，允许用户在持续显示风险提示的情况下明确连接 HTTP 云服务器。成功响应包含 1 小时 `accessToken`、30 天 `deviceSessionId/deviceSecret` 和用户有效权限。`POST /api/auth/refresh` 会同时轮换访问令牌和设备密钥；旧值立即失效。
 
@@ -98,7 +99,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 ## 能力协商
 
-V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings`、`schedule.holiday-calendar`、`profile.read`、`profile.temp-layer`、`schedule.semester`、`file.transfer` 和 `host.app-guard` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
+V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings`、`schedule.holiday-calendar`、`profile.read`、`profile.temp-layer`、`schedule.semester`、`file.transfer`、`host.app-guard` 和 `screen.capture` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
 
 WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手机的有效能力是“本地 ∩ 服务端 ∩ 当前班级主插件”。服务端在 `capabilities_sync.classPlugins` 中按接收方可访问的班级逐个下发主插件能力，客户端切换班级时按新班级重算；没有对应条目表示该班插件离线。旧服务端没有该字段时客户端退回 `plugin`。多插件时，当前主插件仍是最早接入的健康插件；主插件切换、断开或能力更新后，服务端重新广播能力快照。界面应隐藏缺失能力的入口，服务端转发命令前仍需按统一映射复核主插件能力，缺少能力时返回 `CAPABILITY_UNSUPPORTED`。能力声明不能绕过账号权限或扩展策略检查。
 
@@ -334,6 +335,18 @@ ClassIsland 的临时层是 `ClassPlans` 中 `IsOverlay=true` 的课表：`Overl
 两种方式共用同一校验：文件名剥掉目录部分并过滤非法字符，拦截 Windows 保留设备名，长度上限 200；保存目录只允许 `targetFolder` 枚举列出的用户文件夹（下载目录按系统已知文件夹解析），不接收任意路径。`overwrite` 为 `false`（默认）时同名文件自动追加序号，绝不覆盖。
 
 WebUI 在“批量控制”与班级“控制”页的远程维护区开放这两个功能，均需先勾选高风险确认。终端结果逐设备展示输出；文件分发先显示上传进度，再每秒刷新逐台下载进度条与最终保存路径。
+
+## 屏幕截图（screen.capture）
+
+命令值 27 为 `CaptureScreen`，要求 `CaptureScreen` 权限（值 32768）与 `screen.capture` 能力。它和档案命令一样只能由服务端截图入口构造：通用 `POST /api/commands`、手机/手表 WebSocket 与插件局域网直连一律拒绝，因为服务端必须先登记上传凭据。
+
+1. `POST /api/classes/{classId}/screenshot`：请求体可省略；系统管理员可传 `{ "credentialId": "<插件凭据 Id>" }` 指定同班某台设备（其他账号传该字段返回 403），缺省时与普通命令一样取该班最早接入的教室电脑。服务端为目标插件凭据登记一条待上传记录（5 分钟内有效），下发命令并最多等待 45 秒。成功返回 201 和 `ScreenshotView {id, classId, deviceName, requestedBy, width, height, size, capturedAt, expiresAt, url}`；插件离线 503、插件不支持 `screen.capture` 409、超时 504、截图或上传失败 422（响应体为 `CommandResult`）。
+2. `GET /api/classes/{classId}/screenshots`：该班保留期内的截图，新到旧。
+3. `GET /api/screenshots/{id}`：返回 `image/png`。以上接口都要求对截图所属班级拥有 `CaptureScreen`（系统管理员始终拥有），无权或已过期统一返回 404。
+
+命令载荷 `screenshot` 为 `{id, uploadKey, notify, maxWidth}`：`id` 为 32 位小写十六进制，`maxWidth` 默认 1920（320-7680），`notify` 取自系统设置“截图后在教室端提示”（默认关闭）。插件截取全部显示器拼成的虚拟桌面（按物理像素，宽度超出 `maxWidth` 时等比缩小），编码为 PNG，再用插件长期凭据（`Authorization: Bearer`）加 `X-RemoteCI-Upload-Key: <uploadKey>` 请求 `POST /api/plugin/screenshots/{id}` 上传，请求体为 PNG 原始字节。服务端只接受登记的插件凭据、校验 PNG 签名、每条记录只接受一次，单张上限 `Server:ScreenshotMaxBytes`（默认与协议上限均为 20 MiB）。上传成功后插件才回执成功，`command_result.data` 为 `{width, height, size}`；`notify` 为 `true` 时随后在 ClassIsland 显示不带音效和朗读的“远程截图”提示，提示不会出现在截图里。插件回执成功但服务端没有收到截图时按失败处理。
+
+截图保存在数据目录的 `screenshots` 下，保留 `Server:ScreenshotRetention`（默认 24 小时），每个班级最多保留 30 张；备份不包含截图。每次截图都会写入命令操作记录。WebUI 在班级“控制”页“当前班级”区提供“屏幕截图”，系统管理员还可在“设备状态”页对每台在线设备单独截图；Android 应用在“课堂控制 → 屏幕截图”中提供同样功能。
 
 ## 扩展分组与扩展设置
 

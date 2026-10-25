@@ -103,6 +103,7 @@ fun SecondaryHost(
         Screen.Notify -> NotifyScreen(onBack)
         Screen.Voice -> VoiceScreen(onBack)
         Screen.Volume -> VolumeScreen(onBack)
+        Screen.Screenshot -> ScreenshotScreen(onBack)
         Screen.Power -> PowerScreen(onBack)
         Screen.MainMenu -> MainMenuScreen(onBack)
         Screen.Extensions -> ExtensionsScreen(onBack)

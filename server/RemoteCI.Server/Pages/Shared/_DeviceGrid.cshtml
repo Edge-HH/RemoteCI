@@ -41,6 +41,10 @@ else
                         <div><dt>档案</dt><dd><a asp-page="/Profiles">与服务端不一致 @device.ProfileDriftCount 处</a></dd></div>
                     }
                 </dl>
+                @if (device.Online)
+                {
+                    <button type="button" class="ghost device-screenshot" data-screenshot-target data-class-id="@device.ClassId" data-credential-id="@device.CredentialId" data-target-name="@device.ClassName · @device.DeviceName"><i class="icon icon-desktop-windows" aria-hidden="true"></i> 屏幕截图</button>
+                }
                 <div class="device-timeline" title="今日在线时间（0 点至现在）">
                     @foreach (var segment in device.Timeline)
                     {

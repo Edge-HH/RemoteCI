@@ -602,6 +602,16 @@ textarea { resize: vertical; }
 .class-chip { display: inline-flex; align-items: center; }
 .class-info-body { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
 .class-info-body form.stack { min-width: min(320px, 100%); }
+.screenshot-dialog { width: min(1100px,calc(100vw - 32px)); }
+.screenshot-body { display: grid; gap: 16px; }
+.screenshot-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.screenshot-actions .control-note.error { color: var(--danger); }
+.screenshot-preview { margin: 0; display: grid; gap: 8px; }
+.screenshot-preview img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
+.screenshot-preview figcaption { color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; }
+.screenshot-history h3 { margin: 0 0 8px; font-size: 1rem; }
+.device-screenshot { justify-self: start; }
+.screenshot-history ul { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
 
 /* ---------- 导航分区与登录后选班 ---------- */
 .nav-divider { margin: 6px 18px; border: 0; border-top: 1px solid var(--line); }

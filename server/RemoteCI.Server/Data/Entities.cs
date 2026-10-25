@@ -185,6 +185,9 @@ public sealed class SystemMetadata
     /// <summary>组织名（如学校名称），用于应用守护恢复提示“当前ClassIsland由xx统一管理”；null 时显示 RemoteCI。</summary>
     public string? OrganizationName { get; set; }
 
+    /// <summary>远程截图后是否在教室端弹出“已远程获取本机屏幕截图”的轻提示；默认静默。</summary>
+    public bool ScreenshotNotifyClassroom { get; set; }
+
     // ---------- 应用守护（全局默认策略，单设备可在 AppGuardOverride 中覆盖） ----------
 
     public bool AppGuardEnabled { get; set; }

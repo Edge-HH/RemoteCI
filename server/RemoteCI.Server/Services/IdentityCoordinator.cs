@@ -46,11 +46,12 @@ public sealed partial class IdentityCoordinator(
     /// <summary>API Key 的固定前缀，便于与设备访问令牌区分且不改变现有 Bearer 鉴权格式。</summary>
     public const string ApiKeyPrefix = "rci_";
 
-    /// <summary>内置“班主任”角色的默认权限：班内日常管理，不含用户管理、电源/主菜单控制等系统级权限。</summary>
+    /// <summary>内置“班主任”角色的默认权限：班内日常管理（含屏幕截图），不含用户管理、电源/主菜单控制等系统级权限。</summary>
     public const UserPermissions ClassAdministratorDefaultPermissions =
         UserPermissions.ViewCurrentCourse | UserPermissions.AccessWebUi | UserPermissions.ManageSchedule |
         UserPermissions.SendNotifications | UserPermissions.SendVoiceMessages | UserPermissions.TeacherComing |
-        UserPermissions.RunExtensions | UserPermissions.ApiAccess | UserPermissions.RequestScheduleSwap;
+        UserPermissions.RunExtensions | UserPermissions.ApiAccess | UserPermissions.RequestScheduleSwap |
+        UserPermissions.CaptureScreen;
 
     /// <summary>
     /// 内置“老师”角色的默认权限：查看当前课程、发送通知与语音消息、发起换课申请，以及用 API Key 读取自己的日程。

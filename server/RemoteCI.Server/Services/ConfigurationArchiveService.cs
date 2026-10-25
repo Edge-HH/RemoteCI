@@ -76,7 +76,8 @@ public sealed class ConfigurationArchiveService(
                     metadata.ClassAdminCanChangeAvatar,
                     metadata.ClassAdminCanPullSchedule),
                 SemesterStartDate: metadata.SemesterStartDate,
-                SemesterSyncToClassrooms: metadata.SemesterSyncToClassrooms),
+                SemesterSyncToClassrooms: metadata.SemesterSyncToClassrooms,
+                ScreenshotNotifyClassroom: metadata.ScreenshotNotifyClassroom),
             new BackupSettingsSnapshot(backup.Enabled, backup.Cadence, backup.TimeOfDay, backup.DayOfWeek, backup.MaxBackups),
             // 课表按班级缓存在 ClassStateCaches，插件重连后自动同步，不再写入配置包。
             null, extensionPolicies, extensionPreferences,
@@ -251,6 +252,7 @@ public sealed class ConfigurationArchiveService(
         metadata.SchedulePullIntervalMinutes = snapshot.Metadata.SchedulePullIntervalMinutes;
         metadata.SemesterStartDate = snapshot.Metadata.SemesterStartDate;
         metadata.SemesterSyncToClassrooms = snapshot.Metadata.SemesterSyncToClassrooms;
+        metadata.ScreenshotNotifyClassroom = snapshot.Metadata.ScreenshotNotifyClassroom;
         // autoEnter 只在存在开放访客的班级时有效；v1/v2 旧包的全局访客开关已映射到默认班级。
         metadata.AutoEnterVisitorPage =
             (classrooms.Any(x => x.VisitorAccessEnabled) || snapshot.Metadata.VisitorAccessEnabled) &&
@@ -450,5 +452,7 @@ public sealed record MetadataSnapshot(
     ClassSelfServicePolicy? ClassSelfService = null,
     // 学期设置；旧包缺失时为未设置。
     DateOnly? SemesterStartDate = null,
-    bool SemesterSyncToClassrooms = true);
+    bool SemesterSyncToClassrooms = true,
+    // 截图后是否提示教室端；旧包缺失时为静默。
+    bool ScreenshotNotifyClassroom = false);
 public sealed record BackupSettingsSnapshot(bool Enabled,BackupCadence Cadence,TimeSpan TimeOfDay,DayOfWeek DayOfWeek,int MaxBackups);

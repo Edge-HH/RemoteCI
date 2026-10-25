@@ -17,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.DesktopWindows
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Notifications
@@ -103,6 +104,8 @@ fun ControlListScreen(embedded: Boolean, snackbar: androidx.compose.material3.Sn
         Row("大屏", "主界面", if (snapshot?.isMainMenuVisible == true) "当前显示中，点击可隐藏" else "当前已隐藏，点击可显示",
             Icons.Rounded.Visibility,
             can(Protocol.PERMISSION_MAIN_MENU_CONTROL) && Protocol.CAP_MAIN_MENU_VISIBILITY in caps, Screen.MainMenu),
+        Row("大屏", "屏幕截图", "查看教室电脑当前屏幕", Icons.Rounded.DesktopWindows,
+            can(Protocol.PERMISSION_CAPTURE_SCREEN) && Protocol.CAP_SCREEN_CAPTURE in caps, Screen.Screenshot),
         Row("大屏", "音量", "音量调节和切换静音", Icons.Rounded.VolumeUp,
             can(Protocol.PERMISSION_POWER_CONTROL) && Protocol.CAP_VOLUME_CONTROL in caps, Screen.Volume),
         Row("大屏", "电源控制", "关机、睡眠或休眠", Icons.Rounded.PowerSettingsNew,

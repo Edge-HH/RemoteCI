@@ -119,6 +119,9 @@ builder.Services.AddScoped<ClassBroadcastService>();
 builder.Services.AddSingleton<FileTransferService>();
 builder.Services.AddHostedService<FileTransferCleanupWorker>();
 builder.Services.AddScoped<FileTransferDispatcher>();
+builder.Services.AddSingleton<ScreenshotService>();
+builder.Services.AddHostedService<ScreenshotCleanupWorker>();
+builder.Services.AddScoped<ScreenshotDispatcher>();
 builder.Services.AddScoped<UserImportService>();
 builder.Services.AddScoped<MemberExcelService>();
 builder.Services.AddScoped<ClassExcelService>();
@@ -1466,6 +1469,7 @@ app.MapHolidayEndpoints();
 app.MapProfileEndpoints();
 app.MapOperationsEndpoints();
 app.MapFileTransferEndpoints();
+app.MapScreenshotEndpoints();
 app.Run();
 
 static async Task<AuthPrincipal?> AuthorizeAsync(HttpContext ctx, IdentityCoordinator identities, CancellationToken ct)

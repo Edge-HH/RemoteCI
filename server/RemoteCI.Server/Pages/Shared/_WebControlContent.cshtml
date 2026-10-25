@@ -35,6 +35,10 @@
         {
             <button type="button" class="batch-action-card" data-user-edit-open="volume-dialog" aria-controls="volume-dialog"><span class="batch-action-icon"><i class="icon icon-volume-up" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>音量调节</strong><small>调节设备音量或静音。</small></span></button>
         }
+        @if (Model.CanCaptureScreen)
+        {
+            <button type="button" class="batch-action-card" data-user-edit-open="screenshot-dialog" aria-controls="screenshot-dialog"><span class="batch-action-icon"><i class="icon icon-desktop-windows" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>屏幕截图</strong><small>查看教室电脑当前屏幕。</small></span></button>
+        }
         @if (Model.CanManageClassInfo)
         {
             <button type="button" class="batch-action-card" data-user-edit-open="class-info-dialog" aria-controls="class-info-dialog"><span class="batch-action-icon"><i class="icon icon-library-books" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>班级设置</strong><small>@(Model.ClassSelfService.CanRename && Model.ClassSelfService.CanChangeAvatar ? "修改班级名称与头像。" : Model.ClassSelfService.CanRename ? "修改班级名称。" : "修改班级头像。")</small></span></button>
@@ -73,6 +77,32 @@
             </div>
         </div>
     </dialog>
+}
+
+@if (Model.CanCaptureScreen)
+{
+    <dialog id="screenshot-dialog" class="user-edit-dialog screenshot-dialog" data-user-edit-dialog data-screenshot-dialog
+            data-capture-url="@Url.Page("/Control", "Screenshot")" data-list-url="@Url.Page("/Control", "Screenshots")" aria-labelledby="screenshot-dialog-title">
+        <div class="user-edit-dialog-shell">
+            <header class="user-edit-dialog-header"><div><p class="eyebrow">当前班级</p><h2 id="screenshot-dialog-title">屏幕截图</h2><p class="muted">截取教室电脑全部显示器的当前画面，保留 24 小时；每次截图都会写入操作记录。</p></div><button type="button" class="ghost dialog-close-button" data-user-edit-close aria-label="关闭屏幕截图"><i class="icon icon-close" aria-hidden="true"></i></button></header>
+            <div class="user-edit-form screenshot-body">
+                <form method="post" class="screenshot-actions" data-screenshot-form>
+                    @Html.AntiForgeryToken()
+                    <button type="submit" data-screenshot-capture disabled="@(!Model.PluginOnline)">立即截图</button>
+                    <span class="control-note" data-screenshot-status aria-live="polite">@(Model.PluginOnline ? "" : "插件离线，无法截图")</span>
+                </form>
+                <figure class="screenshot-preview" data-screenshot-preview hidden>
+                    <a data-screenshot-open target="_blank" rel="noopener"><img data-screenshot-image alt="教室电脑屏幕截图" /></a>
+                    <figcaption><span data-screenshot-caption></span> <a data-screenshot-download>下载</a></figcaption>
+                </figure>
+                <div class="screenshot-history" data-screenshot-history hidden>
+                    <h3>最近截图</h3>
+                    <ul data-screenshot-list></ul>
+                </div>
+            </div>
+        </div>
+    </dialog>
+    <script src="~/screenshot.js" asp-append-version="true" defer></script>
 }
 
 @if (Model.CanControlVolume)

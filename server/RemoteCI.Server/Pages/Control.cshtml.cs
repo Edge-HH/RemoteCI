@@ -20,7 +20,9 @@ public sealed class ControlModel(
     ExtensionPolicyService extensionPolicies,
     AuthorizationSyncService authorizationSync,
     ClassroomService classesService,
-    ExtensionGroupService extensionGroups) : BatchControlModel(users, classrooms, devices, identities)
+    ExtensionGroupService extensionGroups,
+    ScreenshotDispatcher screenshotDispatcher,
+    ScreenshotService screenshots) : BatchControlModel(users, classrooms, devices, identities)
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(15);
 
@@ -75,6 +77,7 @@ public sealed class ControlModel(
     public bool CanControlPower => ClassPermissions.HasFlag(UserPermissions.PowerControl) && Supports(RemoteCiCapabilities.PowerControl);
     public bool CanControlVolume => ClassPermissions.HasFlag(UserPermissions.PowerControl) && Supports(RemoteCiCapabilities.VolumeControl);
     public bool CanUseExtensions => ClassPermissions.HasFlag(UserPermissions.RunExtensions) && Supports(RemoteCiCapabilities.ExtensionsRun);
+    public bool CanCaptureScreen => ClassPermissions.HasFlag(UserPermissions.CaptureScreen) && Supports(RemoteCiCapabilities.ScreenCapture);
     public override bool IsSingleControl => true;
 
     public override async Task<IActionResult> OnGetAsync(CancellationToken ct)
@@ -83,6 +86,60 @@ public sealed class ControlModel(
         RestoreResults();
         return Page();
     }
+
+    /// <summary>截取当前班级教室电脑的屏幕；插件上传完成后返回截图信息（JSON）。</summary>
+    public async Task<IActionResult> OnPostScreenshotAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (!ClassPermissions.HasFlag(UserPermissions.CaptureScreen))
+            return new JsonResult(CommandResult.Failure(CommandResultCodes.Forbidden, "没有该班级的屏幕截图权限"));
+        var requestedBy = (await Identities.GetProfileAsync(CurrentUser.Id, ct))?.WithPermissions(ClassPermissions);
+        if (requestedBy is null) return new JsonResult(CommandResult.Failure(CommandResultCodes.Unauthorized, "登录已失效"));
+        var outcome = await screenshotDispatcher.CaptureAsync(CurrentClassId, null, requestedBy, ct);
+        return new JsonResult(new
+        {
+            success = outcome.Record is not null,
+            message = outcome.Record is null ? outcome.Result.Message : "截图已获取",
+            screenshot = outcome.Record is { } record ? ScreenshotPageView(Url, record) : null,
+        });
+    }
+
+    /// <summary>当前班级保留期内的截图（新到旧）。</summary>
+    public async Task<IActionResult> OnGetScreenshotsAsync()
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (!ClassPermissions.HasFlag(UserPermissions.CaptureScreen)) return new JsonResult(Array.Empty<object>());
+        return new JsonResult(screenshots.ListForClass(CurrentClassId).Select(x => ScreenshotPageView(Url, x)));
+    }
+
+    /// <summary>截图 PNG：要求对截图所属班级拥有 CaptureScreen，不限于当前选中的班级。</summary>
+    public async Task<IActionResult> OnGetScreenshotImageAsync(string id, bool download = false)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (screenshots.Get(id) is not { } record ||
+            AccessibleClasses.FirstOrDefault(x => x.Id == record.ClassId)?.Permissions is not { } permissions ||
+            !permissions.HasFlag(UserPermissions.CaptureScreen))
+            return NotFound();
+        Response.Headers.CacheControl = "private, max-age=3600";
+        var path = screenshots.ContentPath(record.Id);
+        return download
+            ? PhysicalFile(path, "image/png", $"screenshot-{record.CreatedAt.ToLocalTime():yyyyMMdd-HHmmss}.png")
+            : PhysicalFile(path, "image/png");
+    }
+
+    /// <summary>网页端截图信息：图片走控制页的 Cookie 鉴权处理器，设备状态页共用。</summary>
+    internal static object ScreenshotPageView(IUrlHelper url, ScreenshotRecord record) => new
+    {
+        id = record.Id,
+        deviceName = record.DeviceName,
+        requestedBy = record.RequestedByName,
+        width = record.Width,
+        height = record.Height,
+        size = record.Size,
+        capturedAt = record.CreatedAt,
+        url = url.Page("/Control", "ScreenshotImage", new { id = record.Id }),
+        downloadUrl = url.Page("/Control", "ScreenshotImage", new { id = record.Id, download = true }),
+    };
 
     public async Task<IActionResult> OnPostTeacherComingAsync(CancellationToken ct)
     {

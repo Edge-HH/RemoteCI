@@ -1649,6 +1649,9 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Property<int>("SchedulePullIntervalMinutes")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("ScreenshotNotifyClassroom")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateOnly?>("SemesterStartDate")
                         .HasColumnType("TEXT");
 

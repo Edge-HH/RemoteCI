@@ -100,6 +100,8 @@ object Protocol {
     const val PERMISSION_REQUEST_SWAP = 4096
     /** 不经审批的强制换课；对方老师可撤回。 */
     const val PERMISSION_FORCE_SWAP = 8192
+    /** 获取有权班级教室电脑的当前屏幕截图；班主任角色默认拥有。 */
+    const val PERMISSION_CAPTURE_SCREEN = 32768
 
     const val SCHEDULE_SOURCE_PLUGIN = 1
     const val SCHEDULE_SOURCE_WEB_UI = 2
@@ -125,6 +127,8 @@ object Protocol {
     const val CAP_POWER_CONTROL = "power.control"
     const val CAP_VOLUME_CONTROL = "volume.control"
     const val CAP_EXTENSIONS_RUN = "extensions.run"
+    /** 屏幕截图：经服务端 REST 发起，插件截屏后上传到服务端。 */
+    const val CAP_SCREEN_CAPTURE = "screen.capture"
 
     val BASELINE_CAPABILITIES = setOf(
         CAP_CLASS_STATE_READ,
@@ -139,7 +143,7 @@ object Protocol {
         CAP_VOLUME_CONTROL,
         CAP_EXTENSIONS_RUN,
     )
-    val CURRENT_CAPABILITIES = BASELINE_CAPABILITIES + CAP_VOICE_MESSAGE_SEND
+    val CURRENT_CAPABILITIES = BASELINE_CAPABILITIES + CAP_VOICE_MESSAGE_SEND + CAP_SCREEN_CAPTURE
 }
 
 @Serializable

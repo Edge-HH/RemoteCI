@@ -96,6 +96,11 @@ public sealed class CommandMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public FileDistributionRequest? FileDistribution { get; set; }
 
+    /// <summary>屏幕截图参数；仅 CaptureScreen 命令使用，由服务端截图入口构造。</summary>
+    [JsonPropertyName("screenshot")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ScreenshotRequest? Screenshot { get; set; }
+
     /// <summary>命令目标班级；缺省时由服务端路由到该用户的第一个可访问班级。</summary>
     [JsonPropertyName("classId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

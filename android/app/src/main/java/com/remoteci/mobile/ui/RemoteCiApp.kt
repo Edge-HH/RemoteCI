@@ -54,6 +54,7 @@ sealed interface Screen {
     data object Notify : Screen
     data object Voice : Screen
     data object Volume : Screen
+    data object Screenshot : Screen
     data object Power : Screen
     data object MainMenu : Screen
     data object Extensions : Screen

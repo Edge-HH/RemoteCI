@@ -22,6 +22,7 @@ public sealed class CommandHandler
     private readonly ManagementJoinService _managementJoin;
     private readonly TerminalCommandService _terminal;
     private readonly FileReceiveService _files;
+    private readonly ScreenCaptureService _screenshots;
     private readonly ILogger _logger;
     private readonly ExtensionCommandRouter _extensionRouter;
     private readonly VoiceMessagePlayer _voiceMessages;
@@ -40,7 +41,8 @@ public sealed class CommandHandler
         ILoggerFactory loggerFactory,
         VoiceMessagePlayer? voiceMessages = null,
         TerminalCommandService? terminal = null,
-        FileReceiveService? files = null)
+        FileReceiveService? files = null,
+        ScreenCaptureService? screenshots = null)
     {
         _schedules = schedules;
         _scheduleBackend = scheduleBackend;
@@ -53,6 +55,7 @@ public sealed class CommandHandler
         _notifications = hostedServices.OfType<RemoteNotificationProvider>().Single();
         _terminal = terminal ?? new TerminalCommandService(loggerFactory.CreateLogger<TerminalCommandService>());
         _files = files ?? new FileReceiveService(loggerFactory.CreateLogger<FileReceiveService>());
+        _screenshots = screenshots ?? new ScreenCaptureService(loggerFactory.CreateLogger<ScreenCaptureService>());
         _logger = loggerFactory.CreateLogger<CommandHandler>();
         _extensionRouter = new ExtensionCommandRouter(extensions, loggerFactory);
         _voiceMessages = voiceMessages ?? new VoiceMessagePlayer();
@@ -60,6 +63,9 @@ public sealed class CommandHandler
 
     /// <summary>文件接收服务；云端客户端建立后注入下载通道。</summary>
     public FileReceiveService Files => _files;
+
+    /// <summary>屏幕截图服务；云端客户端建立后注入上传通道。</summary>
+    public ScreenCaptureService Screenshots => _screenshots;
 
     public event Action<ClassEvent>? NotificationSent;
     public event Action? ScheduleChanged;
@@ -126,6 +132,9 @@ public sealed class CommandHandler
                 CommandKind.RestartClassIsland => HandleClassIslandRestart(),
                 CommandKind.ExecuteTerminalCommand => await _terminal.ExecuteAsync(command.TerminalCommand),
                 CommandKind.SendFile => await _files.SaveAsync(command.FileDistribution),
+                CommandKind.CaptureScreen => await _screenshots.CaptureAndUploadAsync(
+                    command.Screenshot,
+                    () => ShowScreenshotNoticeAsync(GetNotificationSenderName(command.RequestedBy))),
                 _ => CommandResult.Failure(CommandResultCodes.InvalidRequest, $"未知指令：{command.Command}"),
             };
         }
@@ -203,6 +212,17 @@ public sealed class CommandHandler
         });
         return Success("通知已在 ClassIsland 显示并广播到在线手表");
     }
+
+    /// <summary>系统设置开启“截图时提示教室端”时，在截图上传后显示一条不朗读的轻提示。</summary>
+    private Task<CommandResult> ShowScreenshotNoticeAsync(string senderName) => HandleNotificationAsync(new NotificationRequest
+    {
+        Title = "远程截图",
+        Message = string.IsNullOrWhiteSpace(senderName) ? "已远程获取本机屏幕截图" : $"{senderName}远程获取了本机屏幕截图",
+        ForceSenderInTitle = false,
+        IsNotificationEffectEnabled = false,
+        IsNotificationSoundEnabled = false,
+        IsSpeechEnabled = false,
+    }, string.Empty);
 
     private async Task<CommandResult> HandleVoiceMessageAsync(VoiceMessageRequest? request, string senderName)
     {

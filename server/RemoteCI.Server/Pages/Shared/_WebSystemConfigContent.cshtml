@@ -28,6 +28,15 @@
     </form>
 </section>
 
+<section class="panel" id="screenshot" data-tab="general">
+    <h2>屏幕截图</h2>
+    <p class="muted">拥有“屏幕截图”权限的账号（系统管理员、默认的班主任角色）可在控制页获取教室电脑当前屏幕；每次截图都会写入操作记录。</p>
+    <form method="post" asp-page-handler="SaveScreenshotSettings" class="stack system-config-form">
+        <label class="check"><input asp-for="ScreenshotNotifyClassroom" /> 截图后在教室端提示“已远程获取本机屏幕截图”</label>
+        <button type="submit">保存截图设置</button>
+    </form>
+</section>
+
 <section class="panel" id="device-alerts" data-tab="general">
     <h2>集控运维</h2>
     <p class="muted">设备离线告警推送给系统管理员和该班班主任（个人通知、浏览器推送与 AstrBot）；操作记录保存下发到教室电脑的每一条命令。</p>

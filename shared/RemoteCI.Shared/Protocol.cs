@@ -88,9 +88,11 @@ public enum UserPermissions
     ForceScheduleSwap = 1 << 13,
     // 经服务端文件中转把文件发到有权班级的设备桌面、下载或文档文件夹；只能用服务端上传的文件，不能指定任意路径。
     SendFiles = 1 << 14,
+    // 获取有权班级教室电脑的当前屏幕截图；班级管理员默认拥有。
+    CaptureScreen = 1 << 15,
     All = ViewCurrentCourse | AccessWebUi | ManageUsers | SendNotifications | ManageSchedule |
           PowerControl | TeacherComing | RunExtensions | MainMenuControl | SendVoiceMessages |
-          ChangeDisplayName | ApiAccess | RequestScheduleSwap | ForceScheduleSwap | SendFiles,
+          ChangeDisplayName | ApiAccess | RequestScheduleSwap | ForceScheduleSwap | SendFiles | CaptureScreen,
 }
 
 public static class RolePermissions
@@ -100,7 +102,7 @@ public static class RolePermissions
         UserPermissions.SendNotifications | UserPermissions.ManageSchedule | UserPermissions.PowerControl |
         UserPermissions.TeacherComing | UserPermissions.RunExtensions | UserPermissions.MainMenuControl |
         UserPermissions.SendVoiceMessages | UserPermissions.ApiAccess | UserPermissions.RequestScheduleSwap |
-        UserPermissions.ForceScheduleSwap | UserPermissions.SendFiles;
+        UserPermissions.ForceScheduleSwap | UserPermissions.SendFiles | UserPermissions.CaptureScreen;
 
     public static UserPermissions Effective(
         UserRole role,
@@ -189,6 +191,8 @@ public enum CommandKind
     ApplyProfile = 25,
     /// <summary>读取设备当前档案 JSON，供服务端档案管理收集后编辑；仅档案管理入口可以发起。</summary>
     ReadProfile = 26,
+    /// <summary>截取设备当前屏幕并上传到服务端；仅服务端截图入口可以发起（需先登记上传凭据）。</summary>
+    CaptureScreen = 27,
 }
 
 public enum PowerActionKind
@@ -206,7 +210,8 @@ public static class CommandPermissions
     /// 通用 REST 命令接口、手机/手表命令通道和插件局域网直连一律拒绝。各通道共用这一份清单。
     /// </summary>
     public static bool IsServerOnly(CommandKind command) =>
-        command is CommandKind.ApplyExtensionSettings or CommandKind.ApplyProfile or CommandKind.ReadProfile;
+        command is CommandKind.ApplyExtensionSettings or CommandKind.ApplyProfile or CommandKind.ReadProfile or
+            CommandKind.CaptureScreen;
 
     public static UserPermissions Required(CommandKind command) => command switch
     {
@@ -220,6 +225,7 @@ public static class CommandPermissions
         CommandKind.ApplyExtensionSettings => UserPermissions.RunExtensions,
         // 文件分发只写入固定的用户文件夹；内联文件（旧方式）另外仅限系统管理员，由通用命令通道与插件分别复核。
         CommandKind.SendFile => UserPermissions.SendFiles,
+        CommandKind.CaptureScreen => UserPermissions.CaptureScreen,
         // 远程升级、插件管理、集控与终端都会改变教室端程序、配置或系统状态，
         // 与账号管理同属高风险管理员操作。
         CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
@@ -282,6 +288,8 @@ public static class RemoteCiCapabilities
     public const string Semester = "schedule.semester";
     /// <summary>接收应用守护策略：退出自启、意外退出重启、防删除备份与恢复。</summary>
     public const string AppGuard = "host.app-guard";
+    /// <summary>截取当前屏幕并凭一次性上传凭据上传到服务端。</summary>
+    public const string ScreenCapture = "screen.capture";
 
     /// <summary>没有上报能力列表的旧 V3 端自动获得的基础能力。</summary>
     public static IReadOnlyList<string> Baseline { get; } =
@@ -304,7 +312,7 @@ public static class RemoteCiCapabilities
         [.. Baseline, VoiceMessageSend, SoftwareInventory, SoftwareUpgradePlugins, SoftwareUpgradeClassIsland,
             PluginInstall, PluginUninstall, PluginEnable, PluginManagementPolicy, ProfileDistribute, TimeLayoutUpdate, ManagementJoin,
             ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings, ProfileApply, HolidayCalendar,
-            ProfileRead, ProfileTempLayer, Semester, FileTransfer, AppGuard];
+            ProfileRead, ProfileTempLayer, Semester, FileTransfer, AppGuard, ScreenCapture];
 
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
@@ -342,6 +350,7 @@ public static class RemoteCiCapabilities
         HolidayCalendar => "调休自动适配",
         Semester => "同步学期开始日期",
         AppGuard => "应用守护",
+        ScreenCapture => "屏幕截图",
         _ => "未知能力",
     };
 
@@ -372,6 +381,7 @@ public static class RemoteCiCapabilities
         CommandKind.ApplyExtensionSettings => ExtensionsSettings,
         CommandKind.ApplyProfile => ProfileApply,
         CommandKind.ReadProfile => ProfileRead,
+        CommandKind.CaptureScreen => ScreenCapture,
         _ => null,
     };
 }
