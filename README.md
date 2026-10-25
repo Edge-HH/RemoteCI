@@ -222,7 +222,7 @@ Windows 用户也可以双击 [`Build-Latest-Cipx.cmd`](Build-Latest-Cipx.cmd)�
 | 二步验证与恢复码 | [账号二步验证](docs/two-factor.md) |
 | 协议、API 与平台差异 | [通信协议 V3](docs/protocol.md) · [平台说明](docs/platform-notes.md) |
 | ClassIsland 插件与扩展接入 | [插件说明](plugin/RemoteCI.Plugin/README.md) |
-| 版本变更 | [发布记录](https://github.com/Edge-HH/RemoteCI/releases) · [3.3.0.2 发布说明](docs/releases/3.3.0.2.md) |
+| 版本变更 | [发布记录](https://github.com/Edge-HH/RemoteCI/releases) · [3.3.1.8 发布说明](docs/releases/3.3.1.8.md) |
 | 参与开发与问题反馈 | [贡献指南](CONTRIBUTING.md) · [行为准则](CODE_OF_CONDUCT.md) · [GitHub Issues](https://github.com/Edge-HH/RemoteCI/issues) |
 
 从旧 `v3.2.0` 标签迁移到四段数字版本的已有安装，首次升级需手动安装对应组件，完成迁移后再使用后续自动更新。升级前请备份数据库，并结合发布说明同步更新需要新能力的客户端与教室端插件。

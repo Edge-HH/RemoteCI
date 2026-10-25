@@ -394,6 +394,16 @@ jobs:
           test -f "artifacts/fnos-fpk/RemoteCI-${version}-fnos-x86_64-offline.fpk"
           test -f "artifacts/fnos-fpk/RemoteCI-${version}-fnos-arm64-offline.fpk"
           grep -Fq '<!-- CLASSISLAND_PKG_MD5 {"RemoteCI.Plugin.cipx":"' artifacts/plugin-cipx/checksums.md
+      - name: 组合发布说明
+        run: |
+          # docs/releases/<版本>.md 存在时作为更新日志放在最前；checksums.md 必须保留（ClassIsland 市场读取其中的 MD5）。
+          source .github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
+          notes="docs/releases/${version}.md"
+          if [ -f "$notes" ]; then
+            { cat "$notes"; echo; cat artifacts/plugin-cipx/checksums.md; } > release-body.md
+          else
+            cp artifacts/plugin-cipx/checksums.md release-body.md
+          fi
       - name: 发布
         uses: softprops/action-gh-release@v2
         with:
@@ -406,7 +416,7 @@ jobs:
             artifacts/watch-apk/**
             artifacts/mobile-apk/**
             artifacts/fnos-fpk/**
-          body_path: artifacts/plugin-cipx/checksums.md
+          body_path: release-body.md
           generate_release_notes: true
           fail_on_unmatched_files: true
           # 只有 v3.x.x-beta.y 是预发布，稳定四段标签必须进入正式渠道。
