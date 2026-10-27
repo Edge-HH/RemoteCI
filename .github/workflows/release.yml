@@ -405,7 +405,7 @@ jobs:
             cp artifacts/plugin-cipx/checksums.md release-body.md
           fi
       - name: 发布
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             artifacts/server-linux-x64/**
