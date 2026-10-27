@@ -28,11 +28,11 @@
       .NET 会允许较新的宿主程序集满足较低版本引用，从而覆盖整个 2.x 系列。
       SDK 运行时由 ClassIsland 宿主提供，插件包内不携带，避免类型冲突。
     -->
-    <PackageReference Include="ClassIsland.PluginSdk" Version="2.0.0-dev-v2">
+    <PackageReference Include="ClassIsland.PluginSdk" Version="2.1.0.1">
       <ExcludeAssets>runtime; native</ExcludeAssets>
     </PackageReference>
     <!-- ClassIsland SDK 经 Avalonia 传入的 0.21.2 存在 GHSA-xrw6-gwf8-vvr9；固定到兼容分支的修复版。 -->
-    <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3">
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.95.2">
       <ExcludeAssets>runtime; native</ExcludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
@@ -48,9 +48,9 @@
       <ExcludeAssets>runtime; native</ExcludeAssets>
     </PackageReference>
     <!-- NAudio.Wasapi：通过 Windows Core Audio 读取和控制默认播放设备的主音量。 -->
-    <PackageReference Include="NAudio.Wasapi" Version="2.3.0" />
+    <PackageReference Include="NAudio.Wasapi" Version="2.4.0" />
     <!-- DPAPI（Windows 数据保护接口）：加密插件长期凭据；非 Windows 时按明文回退。 -->
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.14" />
   </ItemGroup>
 
   <ItemGroup>
