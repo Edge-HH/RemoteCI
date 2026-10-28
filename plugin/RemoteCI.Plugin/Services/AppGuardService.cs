@@ -185,7 +185,7 @@ public sealed class AppGuardService : IDisposable
                     Message = string.IsNullOrEmpty(version) ? "守护已更新并重新启动" : $"守护已更新到 {version} 并重新启动",
                 };
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException or ArgumentException)
             {
                 _logger.LogWarning(ex, "远程更新应用守护失败");
                 return CommandResult.Failure(CommandResultCodes.InternalError, $"更新守护失败：{ex.Message}");
@@ -334,9 +334,9 @@ public sealed class AppGuardService : IDisposable
         }
         var enhancedMarker = _host.EnhancedMarkerPath;
         var enhanced = File.Exists(enhancedMarker) ? GuardJson.ReadFile<EnhancedGuardConfig>(enhancedMarker) : null;
+        // 早期守护写的 enhanced.json 没有 agentExecutablePath，缺字段时按“需要更新增强配置”处理。
         var enhancedCurrent = enhanced is not null &&
-            string.Equals(Path.GetFullPath(enhanced.AgentDirectory), Path.GetFullPath(Directory), StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(Path.GetFullPath(enhanced.AgentExecutablePath), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase);
+            SamePath(enhanced.AgentDirectory, Directory) && SamePath(enhanced.AgentExecutablePath, target);
         var enhancedPending = policy.EnhancedMode ? !enhancedCurrent : File.Exists(enhancedMarker);
         // 不允许授权时保留增强服务现状，也不删除改名前的程序，留给下次策略下发处理。
         var enhancedFailed = enhancedPending && !allowElevation;
@@ -439,6 +439,13 @@ public sealed class AppGuardService : IDisposable
     {
         var line = GuardJson.Serialize(new GuardEventLine { Kind = kind, AtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Detail = detail });
         File.AppendAllText(Path.Combine(Directory, GuardFiles.Events), line + "\n");
+    }
+
+    private static bool SamePath(string? left, string right)
+    {
+        if (string.IsNullOrWhiteSpace(left)) return false;
+        try { return string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
     }
 
     private static bool SameContent(string left, string right)

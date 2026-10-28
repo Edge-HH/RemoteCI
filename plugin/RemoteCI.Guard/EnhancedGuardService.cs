@@ -102,7 +102,7 @@ internal sealed class EnhancedGuardService : ServiceBase
         {
             var config = GuardJson.ReadFile<EnhancedGuardConfig>(
                 Path.Combine(EnhancedGuardSetup.ProgramDataDirectory(), "enhanced.json"));
-            if (config is null) return;
+            if (config is null || string.IsNullOrWhiteSpace(config.AgentDirectory)) return;
             var policy = GuardJson.ReadFile<GuardConfig>(Path.Combine(config.AgentDirectory, GuardFiles.Policy));
             if (policy is not { Enabled: true, EnhancedMode: true }) return;
             using var process = Process.Start(new ProcessStartInfo

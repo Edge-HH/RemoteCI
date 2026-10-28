@@ -81,8 +81,8 @@ public sealed class AppGuardServiceTests : IDisposable
     public void Maintenance_RestoresDeletedGuard()
     {
         var (store, service) = Create();
-        service.Start();
         store.Apply(Enabled());
+        service.Apply();
         _host.StopGuard(service.GuardExecutablePath);
         Directory.Delete(GuardDirectory, true);
         _host.SetRunKey(null);
@@ -93,17 +93,16 @@ public sealed class AppGuardServiceTests : IDisposable
         Assert.True(File.Exists(Path.Combine(GuardDirectory, GuardFiles.Policy)));
         Assert.Equal($"\"{service.GuardExecutablePath}\"", _host.RunKey);
         Assert.True(_host.GuardRunning);
-        service.Stop();
     }
 
     [Fact]
     public void Maintenance_UpdatesOutdatedGuardWithoutUac()
     {
         var (store, service) = Create();
-        service.Start();
         var enhanced = Enabled();
         enhanced.EnhancedMode = true;
         store.Apply(enhanced);
+        service.Apply();
         var enhancedCalls = _host.EnhancedCalls;
         File.Delete(_host.EnhancedMarkerPath);
         File.WriteAllText(_host.BundledGuardPath, "guard-v2");
@@ -113,15 +112,14 @@ public sealed class AppGuardServiceTests : IDisposable
         Assert.Equal("guard-v2", File.ReadAllText(service.GuardExecutablePath));
         Assert.Equal(enhancedCalls, _host.EnhancedCalls);
         Assert.True(_host.GuardRunning);
-        service.Stop();
     }
 
     [Fact]
     public void Maintenance_LeavesGuardStoppedByRemoteCommand()
     {
         var (store, service) = Create();
-        service.Start();
         store.Apply(Enabled());
+        service.Apply();
         var policyPath = Path.Combine(GuardDirectory, GuardFiles.Policy);
         var policy = GuardJson.ReadFile<GuardConfig>(policyPath)!;
         policy.Enabled = false;
@@ -134,7 +132,6 @@ public sealed class AppGuardServiceTests : IDisposable
 
         Assert.False(File.Exists(service.GuardExecutablePath));
         Assert.Equal(starts, _host.Starts);
-        service.Stop();
     }
 
     [Fact]
@@ -304,14 +301,39 @@ public sealed class AppGuardServiceTests : IDisposable
     }
 
     [Fact]
+    public void LegacyEnhancedMarkerWithoutAgentPath_DoesNotBreakDeployOrUpdate()
+    {
+        var (store, service) = Create();
+        Directory.CreateDirectory(Path.GetDirectoryName(_host.EnhancedMarkerPath)!);
+        File.WriteAllText(_host.EnhancedMarkerPath,
+            $"{{\"agentDirectory\":{System.Text.Json.JsonSerializer.Serialize(GuardDirectory)},\"taskName\":\"RemoteCI\\\\Guard Agent\"}}");
+        var enhanced = Enabled();
+        enhanced.EnhancedMode = true;
+
+        store.Apply(enhanced);
+        service.Apply();
+
+        Assert.True(_host.GuardRunning);
+        Assert.Equal(1, _host.EnhancedCalls);
+        Assert.Equal(service.GuardExecutablePath, GuardJson.ReadFile<EnhancedGuardConfig>(_host.EnhancedMarkerPath)!.AgentExecutablePath);
+
+        File.WriteAllText(_host.EnhancedMarkerPath,
+            $"{{\"agentDirectory\":{System.Text.Json.JsonSerializer.Serialize(GuardDirectory)}}}");
+        var result = service.UpdateNow();
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(1, _host.EnhancedCalls);
+    }
+
+    [Fact]
     public void UpdateNow_ForcesOverwriteAndRestartsGuard()
     {
         var (store, service) = Create();
-        service.Start();
 
         Assert.False(service.UpdateNow().Success);
 
         store.Apply(Enabled());
+        service.Apply();
         var stops = _host.Stops;
         var result = service.UpdateNow();
 
@@ -320,7 +342,6 @@ public sealed class AppGuardServiceTests : IDisposable
         Assert.True(_host.Stops > stops);
         Assert.True(_host.GuardRunning);
         Assert.Equal("guard-v1", File.ReadAllText(service.GuardExecutablePath));
-        service.Stop();
     }
 
     [Fact]
