@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -21,7 +22,12 @@ internal sealed class GuardRuntime : IDisposable
     private readonly string _directory;
     private readonly GuardStateMachine _machine = new();
     private readonly object _tickLock = new();
-    private readonly string _version = typeof(GuardRuntime).Assembly.GetName().Version?.ToString() ?? string.Empty;
+    /// <summary>与插件上报的版本同一口径（InformationalVersion 去掉构建元数据），服务端据此判断守护是否为插件随附的最新版。</summary>
+    internal static string Version { get; } =
+        typeof(GuardRuntime).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
+        ?? typeof(GuardRuntime).Assembly.GetName().Version?.ToString() ?? string.Empty;
+
+    private readonly string _version = Version;
     private Timer? _timer;
     private GuardCloudClient? _cloud;
     private volatile bool _stopping;

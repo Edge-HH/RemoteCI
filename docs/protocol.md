@@ -194,7 +194,9 @@ WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手
 
 守护使用相同设备令牌连接 `/ws?token=...&client=guard`，声明 `host.app-guard`、`host.app-guard-launch` 与 `host.app-guard-manage`。插件与守护按凭据合并为同一设备，完整插件优先参与普通路由；守护只接收 `app_guard_policy` 与命令 28 `LaunchClassIsland`、32 `StopAppGuard`、33 `UninstallAppGuard`，不接收账号或课表数据。三条命令仅限具有 `ManageUsers` 的系统管理员，执行端复核 `requestedBy.role=Admin` 和权限位；课表已运行时命令 28 幂等成功。命令 32 停用策略并退出守护进程，保留安装文件；命令 33 先请求 UAC 移除增强服务与登录任务，再停用策略、退出守护并延迟删除默认目录和额外备份。守护先发送 `command_result`，成功后才断开连接；`app_guard_event` 与 `command_result` 是守护允许上报的其他消息。WebUI 只在守护在线且声明 `host.app-guard-manage` 时提供关闭/卸载入口，命令成功后把该设备保存为停用的单设备覆盖。同一凭据有多条守护连接时（旧守护被替换后连接尚未超时断开），服务端按最新接入的守护判断能力并发送守护命令。
 
-命令 34 `UpdateAppGuard` 发给课表插件而不是守护：插件结束守护，用插件包随附的 `RemoteCI.Guard.exe` 强制覆盖后重新部署并启动，在 `command_result.message` 中返回新版本或失败原因；策略未启用时返回 `INVALID_REQUEST`。它同样仅限系统管理员（`ManageUsers` 且 `role=Admin`），是服务端专用命令，需要插件声明 `host.app-guard-update`；该过程不弹 UAC，不改动增强服务。WebUI 在策略启用、课表插件在线且声明该能力时显示“更新守护”。
+命令 34 `UpdateAppGuard` 发给课表插件而不是守护：插件结束守护，用插件包随附的 `RemoteCI.Guard.exe` 强制覆盖后重新部署并启动，在 `command_result.message` 中返回新版本或失败原因；策略未启用时返回 `INVALID_REQUEST`。它同样仅限系统管理员（`ManageUsers` 且 `role=Admin`），是服务端专用命令，需要插件声明 `host.app-guard-update`；该过程不弹 UAC，不改动增强服务。WebUI 在策略启用、课表插件在线且声明该能力，并且守护不是最新时显示“更新守护”；守护在线、声明 `host.app-guard-manage` 且 `peer_capabilities.softwareVersion` 与插件相同即视为最新。守护与插件都上报去掉构建元数据（`+` 之后部分）的 InformationalVersion。
+
+守护使用 .NET Framework 的 `DataContractJsonSerializer`，信封 `timestamp` 必须按 ISO 8601 字符串收发；`DateTimeOffset` 的默认对象格式会让服务端丢弃整条消息。
 
 守护进程记录的事件由插件或独立守护通道以 `app_guard_event` 上报，`kind` 取值：
 

@@ -300,6 +300,47 @@ public sealed class AppGuardTests
         await staleGuard.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "test finished", CancellationToken.None);
     }
 
+    [Fact]
+    public async Task AdminPage_HidesUpdateButton_WhenGuardMatchesPluginVersion()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        var credentialId = await PluginCredentialIdAsync(factory);
+        using (var scope = factory.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<AppGuardService>().SetGlobalAsync(new AppGuardPolicy { Enabled = true });
+        var token = await factory.GetPluginTokenAsync();
+        using var plugin = await factory.Server.CreateWebSocketClient().ConnectAsync(
+            new Uri(factory.Server.BaseAddress, $"/ws?token={Uri.EscapeDataString(token)}"), CancellationToken.None);
+        await plugin.SendAsync(
+            JsonSerializer.SerializeToUtf8Bytes(Envelope.PeerCapabilities(new PeerCapabilities
+            {
+                SoftwareVersion = "3.3.1.9",
+                Capabilities = [.. RemoteCiCapabilities.Current],
+            }), JsonDefaults.Options),
+            WebSocketMessageType.Text, true, CancellationToken.None);
+        string[] guardCapabilities = [RemoteCiCapabilities.AppGuard, RemoteCiCapabilities.AppGuardLaunch, RemoteCiCapabilities.AppGuardManage];
+        using var oldGuard = await ConnectGuardAsync(factory, "3.3.1.8", guardCapabilities);
+        var registry = factory.Services.GetRequiredService<PeerRegistry>();
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            while (registry.SoftwareVersionsForCredential(credentialId) != ("3.3.1.9", "3.3.1.8"))
+                await Task.Delay(20, timeout.Token);
+        using var browser = await LoggedInBrowserAsync(factory);
+
+        var outdated = WebUtility.HtmlDecode(await browser.GetStringAsync("/AppGuard"));
+        Assert.Contains("守护 3.3.1.8", outdated);
+        Assert.Contains("更新守护</button>", outdated);
+
+        using var currentGuard = await ConnectGuardAsync(factory, "3.3.1.9", guardCapabilities);
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            while (registry.SoftwareVersionsForCredential(credentialId) != ("3.3.1.9", "3.3.1.9"))
+                await Task.Delay(20, timeout.Token);
+        var current = WebUtility.HtmlDecode(await browser.GetStringAsync("/AppGuard"));
+        Assert.Contains("守护 3.3.1.9", current);
+        Assert.DoesNotContain("更新守护</button>", current);
+        Assert.Contains("关闭守护", current);
+        await currentGuard.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "test finished", CancellationToken.None);
+        await oldGuard.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "test finished", CancellationToken.None);
+    }
+
     internal static async Task<Guid> PluginCredentialIdAsync(TestWebApplicationFactory factory)
     {
         // 默认插件的凭据在首次配对时固定下来；其他测试会额外配对设备，不能再用“最新凭据”指代它。
@@ -307,7 +348,10 @@ public sealed class AppGuardTests
         return factory.PluginCredentialId;
     }
 
-    private static async Task<WebSocket> ConnectGuardAsync(TestWebApplicationFactory factory, params string[] capabilities)
+    private static Task<WebSocket> ConnectGuardAsync(TestWebApplicationFactory factory, params string[] capabilities) =>
+        ConnectGuardAsync(factory, null, capabilities);
+
+    private static async Task<WebSocket> ConnectGuardAsync(TestWebApplicationFactory factory, string? softwareVersion, string[] capabilities)
     {
         var token = await factory.GetPluginTokenAsync();
         var socket = await factory.Server.CreateWebSocketClient().ConnectAsync(
@@ -315,7 +359,7 @@ public sealed class AppGuardTests
             CancellationToken.None);
         await socket.SendAsync(
             JsonSerializer.SerializeToUtf8Bytes(
-                Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = capabilities }), JsonDefaults.Options),
+                Envelope.PeerCapabilities(new PeerCapabilities { SoftwareVersion = softwareVersion ?? string.Empty, Capabilities = capabilities }), JsonDefaults.Options),
             WebSocketMessageType.Text, true, CancellationToken.None);
         return socket;
     }

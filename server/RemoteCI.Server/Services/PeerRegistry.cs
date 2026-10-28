@@ -238,6 +238,17 @@ public sealed class PeerRegistry(
         .OrderBy(peer => peer.RegisteredAt)
         .FirstOrDefault() is { } peer && EffectiveCapabilities(peer).Contains(capability, StringComparer.Ordinal);
 
+    /// <summary>该设备完整插件（最早接入）与守护（最新接入）各自上报的软件版本；未在线或未上报时为 null。</summary>
+    public (string? Plugin, string? Guard) SoftwareVersionsForCredential(Guid credentialId)
+    {
+        var peers = _pluginPeers.Values
+            .Where(peer => IsLocallyAuthorized(peer) && peer.Principal.PluginCredentialId == credentialId)
+            .ToList();
+        return (
+            peers.Where(peer => !peer.IsGuard).OrderBy(peer => peer.RegisteredAt).FirstOrDefault()?.SoftwareVersion,
+            peers.Where(peer => peer.IsGuard).OrderByDescending(peer => peer.RegisteredAt).FirstOrDefault()?.SoftwareVersion);
+    }
+
     public bool HasGuardForCredential(Guid credentialId) => _pluginPeers.Values.Any(peer =>
         peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.PluginCredentialId == credentialId);
 

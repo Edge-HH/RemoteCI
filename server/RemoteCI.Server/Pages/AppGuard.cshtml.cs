@@ -124,6 +124,11 @@ public sealed class AppGuardModel(
                 var pluginOnline = peers.HasPluginForCredential(x.Id);
                 var guardOnline = peers.HasGuardForCredential(x.Id);
                 var effective = overrides.TryGetValue(x.Id, out var deviceOverride) ? deviceOverride : global;
+                var canManage = guardOnline && peers.GuardForCredentialSupports(x.Id, RemoteCiCapabilities.AppGuardManage);
+                var (pluginVersion, guardVersion) = peers.SoftwareVersionsForCredential(x.Id);
+                // 守护随插件包分发：在线、能力完整且版本与插件一致即为最新，不再提供更新入口。
+                var guardCurrent = canManage && pluginVersion is not null &&
+                    string.Equals(pluginVersion, guardVersion, StringComparison.OrdinalIgnoreCase);
                 return new DeviceRow(
                     x.Id,
                     DeviceAlertEvaluator.DeviceName(x),
@@ -131,8 +136,10 @@ public sealed class AppGuardModel(
                     pluginOnline,
                     guardOnline,
                     pluginOnline ? peers.PluginForCredentialSupports(x.Id, RemoteCiCapabilities.AppGuard) : null,
-                    guardOnline && peers.GuardForCredentialSupports(x.Id, RemoteCiCapabilities.AppGuardManage),
-                    effective.Enabled && pluginOnline && peers.PluginForCredentialSupports(x.Id, RemoteCiCapabilities.AppGuardUpdate),
+                    canManage,
+                    !guardCurrent && effective.Enabled && pluginOnline &&
+                        peers.PluginForCredentialSupports(x.Id, RemoteCiCapabilities.AppGuardUpdate),
+                    guardOnline ? guardVersion : null,
                     overrides.TryGetValue(x.Id, out var policy) ? policy : null,
                     effective);
             })
@@ -155,7 +162,8 @@ public sealed class AppGuardModel(
 
     /// <param name="Supported">课表插件在线时是否声明了应用守护能力；离线时为 null。</param>
     /// <param name="CanManageGuard">守护在线且声明了远程关闭/卸载能力。</param>
-    /// <param name="CanUpdateGuard">策略启用、课表插件在线且声明了立即更新守护能力。</param>
+    /// <param name="CanUpdateGuard">守护不是最新（离线、能力不全或版本与插件不同），且策略启用、课表插件在线并声明了立即更新守护能力。</param>
+    /// <param name="GuardVersion">在线守护上报的版本。</param>
     public sealed record DeviceRow(
         Guid CredentialId,
         string DeviceName,
@@ -165,6 +173,7 @@ public sealed class AppGuardModel(
         bool? Supported,
         bool CanManageGuard,
         bool CanUpdateGuard,
+        string? GuardVersion,
         AppGuardPolicy? Override,
         AppGuardPolicy Effective);
 

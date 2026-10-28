@@ -93,6 +93,7 @@
                                     @if (row.GuardOnline) { <span class="ops-badge ok">守护在线</span> }
                                 }
                                 else { <span class="ops-badge bad">插件版本过旧</span> }
+                                @if (row.GuardVersion is not null) { <small class="ops-sub">守护 @row.GuardVersion</small> }
                             </td>
                             <td>@(row.Override is null ? "沿用全局" : "单独设置")</td>
                             <td class="ops-summary">@row.Effective.Describe()</td>
