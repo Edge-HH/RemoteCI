@@ -183,7 +183,7 @@ public sealed class AppGuardTests
         Assert.DoesNotContain("隐藏主界面", html);
         Assert.DoesNotContain("显示主界面", html);
         var guardPage = WebUtility.HtmlDecode(await browser.GetStringAsync("/AppGuard"));
-        Assert.Contains("守护版本过旧，无法远程关闭或卸载", guardPage);
+        Assert.Contains("守护版本过旧，课表插件上线后自动更新", guardPage);
         Assert.DoesNotContain("关闭守护", guardPage);
         Assert.DoesNotContain("卸载守护", guardPage);
         await guard.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "test finished", CancellationToken.None);

@@ -78,6 +78,66 @@ public sealed class AppGuardServiceTests : IDisposable
     }
 
     [Fact]
+    public void Maintenance_RestoresDeletedGuard()
+    {
+        var (store, service) = Create();
+        service.Start();
+        store.Apply(Enabled());
+        _host.StopGuard(service.GuardExecutablePath);
+        Directory.Delete(GuardDirectory, true);
+        _host.SetRunKey(null);
+
+        service.Maintain();
+
+        Assert.Equal("guard-v1", File.ReadAllText(service.GuardExecutablePath));
+        Assert.True(File.Exists(Path.Combine(GuardDirectory, GuardFiles.Policy)));
+        Assert.Equal($"\"{service.GuardExecutablePath}\"", _host.RunKey);
+        Assert.True(_host.GuardRunning);
+        service.Stop();
+    }
+
+    [Fact]
+    public void Maintenance_UpdatesOutdatedGuardWithoutUac()
+    {
+        var (store, service) = Create();
+        service.Start();
+        var enhanced = Enabled();
+        enhanced.EnhancedMode = true;
+        store.Apply(enhanced);
+        var enhancedCalls = _host.EnhancedCalls;
+        File.Delete(_host.EnhancedMarkerPath);
+        File.WriteAllText(_host.BundledGuardPath, "guard-v2");
+
+        service.Maintain();
+
+        Assert.Equal("guard-v2", File.ReadAllText(service.GuardExecutablePath));
+        Assert.Equal(enhancedCalls, _host.EnhancedCalls);
+        Assert.True(_host.GuardRunning);
+        service.Stop();
+    }
+
+    [Fact]
+    public void Maintenance_LeavesGuardStoppedByRemoteCommand()
+    {
+        var (store, service) = Create();
+        service.Start();
+        store.Apply(Enabled());
+        var policyPath = Path.Combine(GuardDirectory, GuardFiles.Policy);
+        var policy = GuardJson.ReadFile<GuardConfig>(policyPath)!;
+        policy.Enabled = false;
+        GuardJson.WriteFile(policyPath, policy);
+        _host.StopGuard(service.GuardExecutablePath);
+        File.Delete(service.GuardExecutablePath);
+        var starts = _host.Starts;
+
+        service.Maintain();
+
+        Assert.False(File.Exists(service.GuardExecutablePath));
+        Assert.Equal(starts, _host.Starts);
+        service.Stop();
+    }
+
+    [Fact]
     public void DisabledPolicy_StopsGuardRemovesRunKeyAndDeletesBackups()
     {
         var (store, service) = Create();

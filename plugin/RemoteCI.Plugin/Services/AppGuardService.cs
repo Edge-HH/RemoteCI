@@ -95,7 +95,7 @@ public sealed class AppGuardService : IDisposable
         {
             try
             {
-                if (policy.Enabled) Deploy(policy);
+                if (policy.Enabled) Deploy(policy, allowElevation: true);
                 else if (HasStopRequest()) StopWithoutCleanup();
                 else Teardown();
             }
@@ -117,29 +117,53 @@ public sealed class AppGuardService : IDisposable
         _logger.LogInformation("应用守护已关闭，保留 {Path} 供之后重新启用", Directory);
     }
 
-    /// <summary>每分钟：守护进程被结束时重新拉起，并上报守护事件。</summary>
-    private void Maintain()
+    /// <summary>
+    /// 每分钟：守护程序或配置消失时重新部署，插件包里的守护版本更新时替换旧版，进程被结束时重新拉起，并上报守护事件。
+    /// 守护刚执行过远程关闭或卸载时不干预，等服务端下发停用策略。
+    /// </summary>
+    internal void Maintain()
     {
-        if (_store.Current is { Enabled: true })
+        if (_store.Current is { Enabled: true } policy)
         {
             lock (_lock)
             {
                 try
                 {
-                    SyncConnection();
-                    if (File.Exists(GuardExecutablePath) && !_host.IsGuardRunning(GuardExecutablePath))
+                    if (StoppedByGuard()) { }
+                    else if (NeedsRedeploy())
                     {
-                        _logger.LogInformation("应用守护进程未运行，重新启动");
-                        _host.StartGuard(GuardExecutablePath, Directory);
+                        _logger.LogInformation("应用守护程序缺失或版本过旧，重新部署");
+                        Deploy(policy, allowElevation: false);
+                    }
+                    else
+                    {
+                        SyncConnection();
+                        if (!_host.IsGuardRunning(GuardExecutablePath))
+                        {
+                            _logger.LogInformation("应用守护进程未运行，重新启动");
+                            _host.StartGuard(GuardExecutablePath, Directory);
+                        }
                     }
                 }
-                catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception or InvalidOperationException)
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException)
                 {
-                    _logger.LogWarning(ex, "重新启动应用守护进程失败");
+                    _logger.LogWarning(ex, "维护应用守护进程失败");
                 }
             }
         }
         _ = FlushEventsAsync();
+    }
+
+    /// <summary>守护通过云端通道执行了关闭或卸载：本地配置已被它改为停用，或留下了保留式关闭标记。</summary>
+    private bool StoppedByGuard() =>
+        HasStopRequest() || GuardJson.ReadFile<GuardConfig>(Path.Combine(Directory, GuardFiles.Policy)) is { Enabled: false };
+
+    private bool NeedsRedeploy()
+    {
+        var target = GuardExecutablePath;
+        var bundled = _host.BundledGuardPath;
+        if (!File.Exists(bundled)) return false;
+        return !File.Exists(Path.Combine(Directory, GuardFiles.Policy)) || !File.Exists(target) || !SameContent(bundled, target);
     }
 
     /// <summary>
@@ -226,7 +250,8 @@ public sealed class AppGuardService : IDisposable
         };
     }
 
-    private void Deploy(AppGuardPolicy policy)
+    /// <param name="allowElevation">是否允许为增强守护请求 UAC；每分钟的维护不弹授权，避免被拒绝后反复打扰。</param>
+    private void Deploy(AppGuardPolicy policy, bool allowElevation)
     {
         var info = _host.Describe();
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -273,8 +298,11 @@ public sealed class AppGuardService : IDisposable
         var enhancedCurrent = enhanced is not null &&
             string.Equals(Path.GetFullPath(enhanced.AgentDirectory), Path.GetFullPath(Directory), StringComparison.OrdinalIgnoreCase) &&
             string.Equals(Path.GetFullPath(enhanced.AgentExecutablePath), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase);
-        var enhancedFailed = false;
-        if (policy.EnhancedMode && !enhancedCurrent)
+        var enhancedPending = policy.EnhancedMode ? !enhancedCurrent : File.Exists(enhancedMarker);
+        // 不允许授权时保留增强服务现状，也不删除改名前的程序，留给下次策略下发处理。
+        var enhancedFailed = enhancedPending && !allowElevation;
+        if (!allowElevation) { }
+        else if (policy.EnhancedMode && !enhancedCurrent)
         {
             enhancedFailed = !_host.ConfigureEnhanced(true, target, Directory);
             if (enhancedFailed)
