@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- ClassIsland 2.0.x 运行在 .NET 8；以最低共同运行时为基线可兼容后续 2.x 宿主。 -->
+    <!-- 最低支持 ClassIsland 2.1.0（.NET 8）；2.1.1 起宿主运行在 .NET 10，仍可加载 net8.0 插件。 -->
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -24,11 +24,12 @@
 
   <ItemGroup>
     <!--
-      插件只使用 ClassIsland 2.0 公共 API，并以程序集版本为 2.0.0.0 的首个 2.x SDK 编译。
-      .NET 会允许较新的宿主程序集满足较低版本引用，从而覆盖整个 2.x 系列。
+      以最后一个 .NET 8 SDK（2.1.0.1）编译，最低支持 ClassIsland 2.1.0；2.0.x 不再适配。
+      2.1.1 起少数公开成员改了类型（见 HostApiCompat），这些成员按名称反射访问；
+      PluginApiCompatibilityTests 会核对插件对 2.1.0.1 与 2.1.1.1 宿主的全部引用。
       SDK 运行时由 ClassIsland 宿主提供，插件包内不携带，避免类型冲突。
     -->
-    <PackageReference Include="ClassIsland.PluginSdk" Version="2.0.0-dev-v2">
+    <PackageReference Include="ClassIsland.PluginSdk" Version="2.1.0.1">
       <ExcludeAssets>runtime; native</ExcludeAssets>
     </PackageReference>
     <!-- ClassIsland SDK 经 Avalonia 传入的 0.21.2 存在 GHSA-xrw6-gwf8-vvr9；固定到兼容分支的修复版。 -->

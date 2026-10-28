@@ -6,7 +6,7 @@
 
 **让 ClassIsland 的课堂状态、课表与控制，从教室延伸到浏览器、手机和手表。**
 
-RemoteCI 是面向 **ClassIsland 2.x** 的课堂联动与集控系统。你可以随时查看课程、发送通知、申请换课，也可以集中维护全校的班级档案、教室电脑与插件，让日常管理按课表自动执行。
+RemoteCI 是面向 **ClassIsland 2.1 及以上**的课堂联动与集控系统。你可以随时查看课程、发送通知、申请换课，也可以集中维护全校的班级档案、教室电脑与插件，让日常管理按课表自动执行。
 
 系统由 ClassIsland 插件、ASP.NET Core 服务端、桌面与手机 WebUI、Android 和 Wear OS 应用组成，支持 Windows、Linux、Docker 与飞牛 fnOS 部署。各组件通过 **V3 协议**协商能力，具体操作取决于账号权限与教室端支持情况。
 
@@ -177,7 +177,7 @@ Wear OS ── 可信局域网直连 ── 教室端插件
 | 目录 | 内容 |
 | --- | --- |
 | [`server/`](server/) | ASP.NET Core、Razor WebUI、Identity、SQLite 与集控服务 |
-| [`plugin/`](plugin/) | ClassIsland 2.x 插件与 CIPX 打包 |
+| [`plugin/`](plugin/) | ClassIsland 2.1+ 插件与 CIPX 打包 |
 | [`shared/`](shared/) | C# V3 协议、能力声明与共享模型 |
 | [`android/`](android/) | Kotlin / Jetpack Compose 手机应用 |
 | [`wearos/`](wearos/) | Kotlin / Compose for Wear OS 应用 |

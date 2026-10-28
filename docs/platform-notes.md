@@ -122,7 +122,7 @@ remoteci.buildDir=C:/Users/<用户名>/AppData/Local/RemoteCI/wearos-build
 
 ### 5.1 工具链（本机已就绪）
 
-- .NET SDK **10.0.x**（`C:\Program Files\dotnet`）。服务端目标 net10.0；插件与共享协议库目标 **net8.0**（ClassIsland 2.x 最低运行时），三端共用协议库。
+- .NET SDK **10.0.x**（`C:\Program Files\dotnet`）。服务端目标 net10.0；插件与共享协议库目标 **net8.0**（最低支持的 ClassIsland 2.1.0 运行在 .NET 8；2.1.1 起宿主为 .NET 10，仍可加载），三端共用协议库。
 - PowerShell 7（pwsh 7.6.4）：ClassIsland 打包工具依赖它生成 cipx 校验文件，**必须安装**。
   - 安装命令：`winget install --id Microsoft.PowerShell --exact`。
   - 若缺失，`-p:CreateCipx=true` 打包会报 `'pwsh' 不是内部或外部命令`（zip 已生成但构建失败）。
@@ -158,7 +158,7 @@ $r = Invoke-RestMethod -Uri 'http://127.0.0.1:8080/api/plugin/pair' -Method Post
 
 - 开发模式：设环境变量 `ClassIsland_DebugBinaryFile` 指向 `plugin/RemoteCI.Plugin/bin/Debug/net8.0/RemoteCI.Plugin.dll`，ClassIsland 启动时自动加载。
 - 分发模式：把 `cipx/RemoteCI.Plugin.cipx` 放入 ClassIsland 插件目录，或在应用内"插件市场"离线安装。
-- 插件端依赖：`ClassIsland.PluginSdk`（LGPLv3，仅编译期，ExcludeAssets runtime/native）+ `Fleck`（MIT，局域网 WebSocket 服务器）。
+- 插件端依赖：`ClassIsland.PluginSdk` 2.1.0.1（LGPLv3，仅编译期，ExcludeAssets runtime/native；最后一个 .NET 8 SDK，对应 manifest `apiVersion: 2.1.0.0`，不再适配 ClassIsland 2.0.x）+ `Fleck`（MIT，局域网 WebSocket 服务器）。
 ## Wear OS 构建环境
 
 手表端固定使用 JDK 17。Windows 上应设置用户级 `JAVA_HOME`，并确保 `wearos/local.properties` 指向已安装的 Android SDK：

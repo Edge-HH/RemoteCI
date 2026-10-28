@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- 测试项目固定在 ClassIsland 2.x 的最低运行时，较新的插件目标将无法被引用。 -->
+    <!-- 测试项目固定在插件支持的最低宿主运行时（ClassIsland 2.1.0，.NET 8），较新的插件目标将无法被引用。 -->
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -10,12 +10,36 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="ClassIsland.PluginSdk" Version="2.0.0-dev-v2" />
+    <PackageReference Include="ClassIsland.PluginSdk" Version="2.1.0.1" />
     <!-- 与插件项目保持同一安全覆盖版本，避免测试依赖图回退到有漏洞的 0.21.2。 -->
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" PrivateAssets="all" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- 只读程序集元数据，用于 PluginApiCompatibilityTests 核对插件对新版宿主的二进制引用。 -->
+    <PackageReference Include="Mono.Cecil" Version="0.11.6" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      ClassIsland 2.1.1.1 宿主（.NET 10）随附的程序集，仅下载不引用，供兼容测试读取元数据。
+      版本取自 ClassIsland.Core 2.1.1.1 的依赖；宿主升级时在这里追加新版本即可扩大检查范围。
+    -->
+    <PackageDownload Include="ClassIsland.Core" Version="[2.1.1.1]" />
+    <PackageDownload Include="ClassIsland.Shared" Version="[2.1.1.1]" />
+    <PackageDownload Include="ClassIsland.Shared.IPC" Version="[2.1.1.1]" />
+    <PackageDownload Include="ClassIsland.Platforms.Abstractions" Version="[2.1.1.1]" />
+    <PackageDownload Include="Avalonia" Version="[12.1.1]" />
+    <PackageDownload Include="FluentAvaloniaUI" Version="[3.0.0]" />
+    <PackageDownload Include="CommunityToolkit.Mvvm" Version="[8.2.1]" />
+    <PackageDownload Include="Lib.Harmony.Thin" Version="[2.4.2]" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>NuGetPackageRoot</_Parameter1>
+      <_Parameter2>$(NuGetPackageRoot)</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
 
   <ItemGroup>

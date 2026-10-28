@@ -150,7 +150,7 @@ public sealed class ClassIslandAppGuardHost : IAppGuardHost
 
     public void ShowNotice(string header, string message) => Dispatcher.UIThread.Post(async () =>
     {
-        try { await CommonTaskDialogs.ShowDialog(header, message, AppBase.Current.GetRootWindow()); }
+        try { await CommonTaskDialogs.ShowDialog(header, message, HostApiCompat.RootWindow(AppBase.Current)); }
         catch (Exception ex) { Console.Error.WriteLine($"RemoteCI 应用守护提示显示失败：{ex}"); }
     });
 

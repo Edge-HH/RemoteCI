@@ -42,6 +42,34 @@ public sealed class HostApiCompatTests
         public NewDecorations WindowDecorations { get; set; } = NewDecorations.Full;
     }
 
+    // 模拟 2.1.0（返回 Window）与 2.1.1（返回 TopLevel）：插件只关心返回值是可作对话框所有者的 Visual。
+    private sealed class HostWithRootWindow(Border root)
+    {
+        public Border GetRootWindow() => root;
+        public Border MainWindow { get; } = new();
+    }
+
+    private sealed class HostWithoutRootWindow(Border main)
+    {
+        public Border MainWindow { get; } = main;
+    }
+
+    [Fact]
+    public void RootWindowCallsGetRootWindowWhateverItsReturnType()
+    {
+        var root = new Border();
+
+        Assert.Same(root, HostApiCompat.RootWindow(new HostWithRootWindow(root)));
+    }
+
+    [Fact]
+    public void RootWindowFallsBackToMainWindow()
+    {
+        var main = new Border();
+
+        Assert.Same(main, HostApiCompat.RootWindow(new HostWithoutRootWindow(main)));
+    }
+
     [Fact]
     public void ReadPropertyConvertsDifferentDictionaryImplementationToInterface()
     {

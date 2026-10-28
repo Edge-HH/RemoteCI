@@ -7,8 +7,9 @@ using Avalonia.Markup.Xaml.MarkupExtensions;
 namespace RemoteCI.Plugin;
 
 /// <summary>
-/// 宿主 API 兼容层：ClassIsland 2.2 预览版（2.1.1.x）改了少量公开 API 的类型，
-/// 例如 Profile 的字典实现、FluentAvalonia 的 FontIcon 基类、Avalonia 的窗口装饰枚举。
+/// 宿主 API 兼容层：插件以 ClassIsland 2.1.0 SDK 编译，而 2.1.1.x（2.2 预览）改了少量公开 API 的类型，
+/// 例如 Profile 的字典实现、FluentAvalonia 的 FontIcon 基类、Avalonia 的窗口装饰枚举、
+/// <c>AppBase.GetRootWindow()</c> 的返回类型（Window → TopLevel）。
 /// 直接编译绑定会让同一份插件包在旧宿主可用、在新宿主抛 MissingMethodException，
 /// 因此这些成员改为按成员名反射访问，让新旧宿主共用同一条代码路径。
 /// </summary>
@@ -36,6 +37,18 @@ internal static class HostApiCompat
     {
         ArgumentNullException.ThrowIfNull(instance);
         ResolveProperty(instance.GetType(), propertyName).SetValue(instance, value);
+    }
+
+    /// <summary>
+    /// 宿主当前的根窗口，用作对话框的所有者。2.1.1 把 <c>GetRootWindow()</c> 的返回类型从 <c>Window</c>
+    /// 改成 <c>TopLevel</c>，直接调用会在新宿主抛 MissingMethodException，因此按方法名反射调用；
+    /// 方法不存在或返回空时退回主窗口。
+    /// </summary>
+    public static Visual? RootWindow(object app)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+        var getRootWindow = app.GetType().GetMethod("GetRootWindow", BindingFlags.Public | BindingFlags.Instance, Type.EmptyTypes);
+        return getRootWindow?.Invoke(app, null) as Visual ?? ResolvePropertyOrNull(app.GetType(), "MainWindow")?.GetValue(app) as Visual;
     }
 
     /// <summary>

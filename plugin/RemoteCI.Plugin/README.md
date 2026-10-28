@@ -14,6 +14,8 @@
 
 ## 🚀 使用方法
 
+需要 ClassIsland 2.1.0 及以上版本。
+
 1. 部署 RemoteCI 服务端，并安装 Wear OS 客户端。
 2. 在服务端 WebUI 的“概览”页生成插件配对码。
 3. 在 ClassIsland 的“RemoteCI 设置”中填写服务器地址和配对码。

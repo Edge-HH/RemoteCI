@@ -6,7 +6,7 @@ icon: icon.png
 readme: README.md
 url: https://github.com/Edge-HH/RemoteCI
 version: 3.3.1.8
-apiVersion: 2.0.0.0
+apiVersion: 2.1.0.0
 author: Edge-HH
 repoOwner: Edge-HH
 repoName: RemoteCI
