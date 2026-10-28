@@ -235,7 +235,7 @@ public sealed class PluginManagementService
         }
     }
 
-    private PluginManagementPolicyRequest LoadPolicy()
+    internal PluginManagementPolicyRequest LoadPolicy()
     {
         try
         {

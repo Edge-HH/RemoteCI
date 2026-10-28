@@ -80,6 +80,14 @@ public class BatchControlModel(
     [BindProperty]
     public string? PluginIdsText { get; set; }
 
+    /// <summary>安装或升级插件时先由服务端从插件市场下载插件包，再经文件中转分发到设备。</summary>
+    [BindProperty]
+    public bool ServerPreDownload { get; set; }
+
+    /// <summary>“从 CIPX 安装”已上传到服务端中转的插件包传输编号。</summary>
+    [BindProperty]
+    public List<string> PluginPackageTransferIds { get; set; } = [];
+
     [BindProperty]
     public string? TimeLayoutName { get; set; }
 
@@ -188,6 +196,7 @@ public class BatchControlModel(
     public bool HasSoftwareOperations =>
         CanUseOperation(BatchOperationKind.InstallPlugins) ||
         CanUseOperation(BatchOperationKind.UninstallPlugins) ||
+        CanUseOperation(BatchOperationKind.InstallPluginPackages) ||
         CanUseOperation(BatchOperationKind.SetPluginEnabled) ||
         CanUseOperation(BatchOperationKind.RefreshSoftwareInventory) ||
         CanUseOperation(BatchOperationKind.UpgradePlugins) ||
@@ -219,6 +228,7 @@ public class BatchControlModel(
         BatchOperationKind.DistributeProfile => CommandKind.DistributeProfile,
         BatchOperationKind.InstallPlugins => CommandKind.InstallPlugins,
         BatchOperationKind.UninstallPlugins => CommandKind.UninstallPlugins,
+        BatchOperationKind.InstallPluginPackages => CommandKind.InstallPluginPackages,
         BatchOperationKind.SetPluginEnabled => CommandKind.SetPluginEnabled,
         BatchOperationKind.RefreshSoftwareInventory => CommandKind.RefreshSoftwareInventory,
         BatchOperationKind.UpgradePlugins => CommandKind.UpgradePlugins,
@@ -630,12 +640,15 @@ public class BatchControlModel(
                 ProfileDistribution = BuildProfileDistributionRequest(),
                 RequestedBy = profile,
             },
+            BatchOperationKind.InstallPlugins when ServerPreDownload =>
+                await BuildMarketInstallFactoryAsync(profile, ct),
             BatchOperationKind.InstallPlugins => _ => new CommandMessage
             {
                 Command = CommandKind.InstallPlugins,
                 PluginManagement = BuildPluginRequest(PluginActionKind.Install),
                 RequestedBy = profile,
             },
+            BatchOperationKind.InstallPluginPackages => BuildUploadedPackagesFactory(profile),
             BatchOperationKind.UninstallPlugins => _ => new CommandMessage
             {
                 Command = CommandKind.UninstallPlugins,
@@ -653,10 +666,17 @@ public class BatchControlModel(
                 Command = CommandKind.RefreshSoftwareInventory,
                 RequestedBy = profile,
             },
+            BatchOperationKind.UpgradePlugins when ServerPreDownload =>
+                await BuildMarketUpgradeFactoryAsync(profile, ct),
             BatchOperationKind.UpgradePlugins => _ => new CommandMessage
             {
                 Command = CommandKind.UpgradePlugins,
-                SoftwareUpgrade = new SoftwareUpgradeRequest { Force = Force },
+                // 未勾选具体插件时沿用旧语义：升级设备上全部可更新插件。
+                SoftwareUpgrade = new SoftwareUpgradeRequest
+                {
+                    Force = Force,
+                    PluginIds = SelectedPluginIds() is { Count: > 0 } ids ? ids : null,
+                },
                 RequestedBy = profile,
             },
             BatchOperationKind.UpgradeClassIsland => _ => new CommandMessage
@@ -726,15 +746,191 @@ public class BatchControlModel(
         return BuildPluginRequest(PluginAction);
     }
 
+    /// <summary>勾选的插件与手动填写的插件 Id 合并去重。</summary>
+    private List<string> SelectedPluginIds() => PluginIds
+        .Concat((PluginIdsText ?? string.Empty)
+            .Split([',', '，', ';', '；', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        .Select(value => value.Trim())
+        .Where(value => value.Length > 0)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    /// <summary>服务端预下载安装：按插件市场解析必选依赖，下载后经文件中转分发。</summary>
+    private async Task<Func<DeviceInventory, CommandMessage>> BuildMarketInstallFactoryAsync(
+        UserProfile? profile, CancellationToken ct)
+    {
+        var ids = SelectedPluginIds();
+        if (ids.Count == 0)
+            throw new InvalidOperationException("请至少选择一个插件，或填写插件 Id。");
+        if (ids.Contains(RemoteCiPluginId, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("不能远程安装 RemoteCI 自身；更新 RemoteCI 请使用“升级插件”或“从 CIPX 安装”。");
+        var prepared = await PrepareMarketPackagesAsync(profile, async catalog =>
+            PluginMarketCatalog.ResolveInstallSet(await catalog.GetAsync(ct: ct), ids), ct);
+        return PackageFactory(prepared, PluginPackageInstallMode.Install, force: false, profile);
+    }
+
+    /// <summary>服务端预下载升级：未勾选时取目标范围内设备上报的全部可更新插件。</summary>
+    private async Task<Func<DeviceInventory, CommandMessage>> BuildMarketUpgradeFactoryAsync(
+        UserProfile? profile, CancellationToken ct)
+    {
+        var ids = SelectedPluginIds();
+        if (ids.Count == 0)
+        {
+            if (KnownPlugins.Count == 0) await LoadBatchAsync(ct);
+            ids = KnownPlugins.Where(x => x.UpdateAvailable).Select(x => x.Id).ToList();
+        }
+        if (ids.Count == 0)
+            throw new InvalidOperationException("设备上报的插件均已是最新版本；如需强制更新，请勾选要更新的插件。");
+        var prepared = await PrepareMarketPackagesAsync(profile, async catalog =>
+        {
+            var index = await catalog.GetAsync(ct: ct);
+            var found = ids.Select(index.Find).OfType<MarketPlugin>().ToList();
+            if (found.Count == 0) throw new PluginMarketException("所选插件均不在 ClassIsland 插件市场中。");
+            return found.Select(plugin => (plugin, false)).ToList();
+        }, ct);
+        return PackageFactory(prepared, PluginPackageInstallMode.Upgrade, Force, profile);
+    }
+
+    /// <summary>从 CIPX 安装：使用本页先行上传到中转的插件包，已安装的同名插件被覆盖。</summary>
+    private Func<DeviceInventory, CommandMessage> BuildUploadedPackagesFactory(UserProfile? profile)
+    {
+        if (profile is null) throw new InvalidOperationException("会话已失效，请刷新后重试。");
+        var packages = HttpContext.RequestServices.GetRequiredService<PluginPackageService>();
+        var prepared = PluginPackageTransferIds
+            .Distinct(StringComparer.Ordinal)
+            .Select(id => packages.FindUploaded(id, profile))
+            .OfType<PreparedPluginPackage>()
+            .GroupBy(x => x.Manifest.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.Last())
+            .ToList();
+        if (prepared.Count == 0)
+            throw new InvalidOperationException("请先上传 .cipx 插件包（上传后在保留期内有效）。");
+        if (prepared.Count > PluginPackageInstallRequest.MaxPackages)
+            throw new InvalidOperationException($"一次最多安装 {PluginPackageInstallRequest.MaxPackages} 个插件包。");
+        return PackageFactory(prepared, PluginPackageInstallMode.Install, force: false, profile);
+    }
+
+    private async Task<IReadOnlyList<PreparedPluginPackage>> PrepareMarketPackagesAsync(
+        UserProfile? profile,
+        Func<PluginMarketCatalog, Task<IReadOnlyList<(MarketPlugin Plugin, bool IsDependency)>>> resolve,
+        CancellationToken ct)
+    {
+        if (profile is null) throw new InvalidOperationException("会话已失效，请刷新后重试。");
+        var services = HttpContext.RequestServices;
+        try
+        {
+            var plugins = await resolve(services.GetRequiredService<PluginMarketCatalog>());
+            if (plugins.Count > PluginPackageInstallRequest.MaxPackages)
+                throw new InvalidOperationException($"一次最多安装 {PluginPackageInstallRequest.MaxPackages} 个插件包（含依赖）。");
+            return await services.GetRequiredService<PluginPackageService>().PrepareFromMarketAsync(plugins, profile, ct);
+        }
+        catch (Exception ex) when (ex is PluginMarketException or FileTransferException)
+        {
+            throw new InvalidOperationException(ex.Message);
+        }
+    }
+
+    /// <summary>每台目标设备单独登记下载权限；不支持插件包安装的旧插件由能力检查逐台拒绝。</summary>
+    private Func<DeviceInventory, CommandMessage> PackageFactory(
+        IReadOnlyList<PreparedPluginPackage> prepared, PluginPackageInstallMode mode, bool force, UserProfile? profile)
+    {
+        var packages = HttpContext.RequestServices.GetRequiredService<PluginPackageService>();
+        return device => new CommandMessage
+        {
+            Command = CommandKind.InstallPluginPackages,
+            PluginPackages = new PluginPackageInstallRequest
+            {
+                Mode = mode,
+                Force = force,
+                RestartAfter = true,
+                Packages = prepared.Select(package => packages.CreateRef(package, device)).ToList(),
+            },
+            RequestedBy = profile,
+        };
+    }
+
+    private const string RemoteCiPluginId = "remoteci.plugin";
+
+    /// <summary>插件市场列表（AJAX）：供安装弹窗展示名称、Id、下载量与星标。</summary>
+    public async Task<IActionResult> OnGetPluginMarketAsync(bool refresh, CancellationToken ct)
+    {
+        if (await RequirePluginManagerAsync() is { } denied) return denied;
+        try
+        {
+            var index = await HttpContext.RequestServices.GetRequiredService<PluginMarketCatalog>().GetAsync(refresh, ct);
+            return new JsonResult(new
+            {
+                success = true,
+                fetchedAt = index.FetchedAt,
+                plugins = index.Plugins.Select(x => new
+                {
+                    id = x.Id,
+                    name = x.Name,
+                    description = x.Description,
+                    author = x.Author,
+                    version = x.Version,
+                    downloadCount = x.DownloadCount,
+                    starsCount = x.StarsCount,
+                    url = x.Url,
+                    dependencies = x.Dependencies.Where(d => d.IsRequired).Select(d => d.Id),
+                }),
+            });
+        }
+        catch (PluginMarketException ex)
+        {
+            return new JsonResult(new { success = false, message = ex.Message });
+        }
+    }
+
+    /// <summary>上传 .cipx（AJAX）：落入文件中转并解析清单，返回插件名称、Id 与版本。</summary>
+    public async Task<IActionResult> OnPostUploadPluginPackageAsync(CancellationToken ct)
+    {
+        if (await RequirePluginManagerAsync(BatchOperationKind.InstallPluginPackages) is { } denied) return denied;
+        var file = Request.Form.Files["file"];
+        if (file is null || file.Length == 0)
+            return new JsonResult(new { success = false, message = "请选择 .cipx 插件包。" });
+        if (file.Length > PluginPackageService.MaxPackageBytes)
+            return new JsonResult(new { success = false, message = "插件包不能超过 512 MB。" });
+        var profile = await Identities.GetProfileAsync(CurrentUser.Id, ct);
+        if (profile is null) return new JsonResult(new { success = false, message = "会话已失效，请刷新后重试。" });
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            var package = await HttpContext.RequestServices.GetRequiredService<PluginPackageService>()
+                .UploadAsync(stream, file.FileName, profile, ct);
+            return new JsonResult(new
+            {
+                success = true,
+                package = new
+                {
+                    transferId = package.Record.Id,
+                    pluginId = package.Manifest.Id,
+                    name = package.Manifest.Name,
+                    version = package.Manifest.Version,
+                    size = FileTransferService.FormatSize(package.Record.Size),
+                },
+            });
+        }
+        catch (FileTransferException ex)
+        {
+            return new JsonResult(new { success = false, message = ex.Message });
+        }
+    }
+
+    /// <summary>批量页要求系统管理员；单班页要求当前班级可以使用对应的插件操作。</summary>
+    private async Task<IActionResult?> RequirePluginManagerAsync(
+        BatchOperationKind operation = BatchOperationKind.InstallPlugins)
+    {
+        if (!IsSingleControl) return await RequireAdminAsync();
+        if (await RequireAsync() is { } denied) return denied;
+        return CanUseOperation(operation)
+            ? null
+            : new JsonResult(new { success = false, message = "没有插件管理权限" });
+    }
+
     private PluginManagementRequest BuildPluginRequest(PluginActionKind action)
     {
-        var ids = PluginIds
-            .Concat((PluginIdsText ?? string.Empty)
-                .Split([',', '，', ';', '；', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            .Select(value => value.Trim())
-            .Where(value => value.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var ids = SelectedPluginIds();
         if (ids.Count == 0)
             throw new InvalidOperationException("请至少选择一个插件，或填写插件 Id。");
         if (action is not PluginActionKind.Install and not PluginActionKind.Uninstall and not PluginActionKind.Enable and not PluginActionKind.Disable)
@@ -746,6 +942,7 @@ public class BatchControlModel(
             RestartAfter = true,
         };
     }
+
 
     private TimeLayoutUpdateRequest BuildTimeLayoutRequest()
     {
@@ -839,19 +1036,24 @@ public class BatchControlModel(
         Classes = await Classrooms.ListAsync(ct);
         Groups = await Classrooms.ListGroupsAsync(ct);
         Devices = await DevicesService.ListAsync(ct);
-        KnownPlugins = Devices
+        // 单班页只汇总当前班级设备上报的插件，避免看到其他班级的设备信息。
+        var pluginSources = IsSingleControl ? Devices.Where(device => device.ClassId == CurrentClassId) : Devices;
+        KnownPlugins = pluginSources
             .SelectMany(device => device.Plugins.Select(plugin => (device, plugin)))
             .Where(x => !string.IsNullOrWhiteSpace(x.plugin.Id))
             .GroupBy(x => x.plugin.Id, StringComparer.OrdinalIgnoreCase)
             .Select(group =>
             {
                 var first = group.First().plugin;
+                var outdated = group.Where(x => x.plugin.IsUpdateAvailable).ToList();
                 return new KnownPlugin(
                     first.Id,
                     string.IsNullOrWhiteSpace(first.Name) ? first.Id : first.Name,
                     first.Version,
                     first.IsEnabled,
-                    group.Select(x => x.device.DeviceName).Distinct(StringComparer.CurrentCulture).ToList());
+                    group.Select(x => x.device.DeviceName).Distinct(StringComparer.CurrentCulture).ToList(),
+                    outdated.Select(x => x.plugin.LatestVersion).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)),
+                    outdated.Select(x => x.device.DeviceName).Distinct(StringComparer.CurrentCulture).ToList());
             })
             .OrderBy(x => x.Name, StringComparer.CurrentCulture)
             .ToList();
@@ -891,6 +1093,7 @@ public class BatchControlModel(
         BatchOperationKind.Power or
         BatchOperationKind.DistributeProfile or
         BatchOperationKind.UninstallPlugins or
+        BatchOperationKind.InstallPluginPackages or
         BatchOperationKind.UpgradePlugins or
         BatchOperationKind.UpgradeClassIsland or
         BatchOperationKind.RestartClassIsland or
@@ -908,6 +1111,7 @@ public class BatchControlModel(
         BatchOperationKind.DistributeProfile => "档案分发",
         BatchOperationKind.InstallPlugins => "插件安装",
         BatchOperationKind.UninstallPlugins => "插件卸载",
+        BatchOperationKind.InstallPluginPackages => "插件包安装",
         BatchOperationKind.SetPluginEnabled => "插件启停",
         BatchOperationKind.RefreshSoftwareInventory => "版本刷新",
         BatchOperationKind.UpgradePlugins => "插件升级",
@@ -971,5 +1175,10 @@ public class BatchControlModel(
         string Name,
         string Version,
         bool Enabled,
-        IReadOnlyList<string> DeviceNames);
+        IReadOnlyList<string> DeviceNames,
+        string? LatestVersion,
+        IReadOnlyList<string> OutdatedDeviceNames)
+    {
+        public bool UpdateAvailable => OutdatedDeviceNames.Count > 0;
+    }
 }

@@ -32,7 +32,6 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
     private readonly TextBlock _connectionError;
     private readonly TextBlock _connectionTestHint;
     private readonly TextBlock _hint;
-    private readonly TextBlock _appGuardStatus;
     private readonly ToggleSwitch _showDeveloperSettingsToggle;
 
     public RemoteCiSettingsPage(PluginSettings settings, RemoteCiService? service = null)
@@ -91,12 +90,6 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
             TextWrapping = Avalonia.Media.TextWrapping.Wrap,
         };
         _hint = new TextBlock { Text = string.Empty, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
-        _appGuardStatus = new TextBlock
-        {
-            Text = service?.AppGuardSummary ?? "应用守护：服务尚未启动",
-            Opacity = 0.7,
-            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-        };
 
         var panel = new StackPanel
         {
@@ -116,7 +109,6 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
                         _connectionError,
                         _testConnectionButton,
                         _connectionTestHint,
-                        _appGuardStatus,
                     },
                 },
                 new StackPanel

@@ -36,28 +36,37 @@ public sealed class PeerRegistry(
         PluginPeersFor(classId).FirstOrDefault() is { } peer &&
         EffectiveCapabilities(peer).Contains(capability, StringComparer.Ordinal);
 
-    /// <summary>归属指定班级的健康插件，最早接入优先。</summary>
+    /// <summary>归属指定班级的健康完整插件，最早接入优先；守护代理不接收普通课表或控制命令。</summary>
     private IEnumerable<WsPeer> PluginPeersFor(Guid classId) =>
         _pluginPeers.Values
-            .Where(peer => IsLocallyAuthorized(peer) && peer.Principal.ClassId == classId)
+            .Where(peer => !peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.ClassId == classId)
             .OrderBy(peer => peer.RegisteredAt);
 
-    /// <summary>在线插件连接及其归属班级，供按班级生成授权镜像使用。</summary>
+    /// <summary>在线完整插件连接及其归属班级，供按班级生成授权镜像使用。</summary>
     public IReadOnlyList<(Guid ConnectionId, Guid ClassId)> GetOnlinePluginConnections() =>
-        _pluginPeers.Values.Where(IsLocallyAuthorized)
+        _pluginPeers.Values.Where(x => !x.IsGuard && IsLocallyAuthorized(x))
             .Where(x => x.Principal.ClassId is { } classId)
             .OrderBy(x => x.RegisteredAt)
             .Select(x => (x.Id, x.Principal.ClassId!.Value))
             .ToList();
 
+    public IReadOnlyList<(Guid ConnectionId, Guid CredentialId)> GetAppGuardConnections() =>
+        _pluginPeers.Values.Where(IsLocallyAuthorized)
+            .Where(x => x.Principal.PluginCredentialId is not null &&
+                EffectiveCapabilities(x).Contains(RemoteCiCapabilities.AppGuard, StringComparer.Ordinal))
+            .Select(x => (x.Id, x.Principal.PluginCredentialId!.Value))
+            .ToList();
+
     /// <summary>插件连接接入或断开；设备状态页与离线告警据此记录在线时间线。处理方不得阻塞或抛出。</summary>
     public event Action<PluginPresenceChange>? PluginPresenceChanged;
 
-    public Guid Register(WebSocket socket, string token, AuthPrincipal principal)
+    public Guid Register(WebSocket socket, string token, AuthPrincipal principal, bool isGuard = false)
     {
         var id = Guid.NewGuid();
-        TableFor(principal.PeerRole)[id] = new WsPeer(id, token, principal, socket);
-        if (principal.IsPlugin) RaisePresence(id, principal, online: true);
+        TableFor(principal.PeerRole)[id] = new WsPeer(id, token, principal, socket, isGuard);
+        if (principal.IsPlugin && (principal.PluginCredentialId is not { } credentialId ||
+            _pluginPeers.Values.Count(x => x.Principal.PluginCredentialId == credentialId) == 1))
+            RaisePresence(id, principal, online: true);
         return id;
     }
 
@@ -187,24 +196,101 @@ public sealed class PeerRegistry(
             .ToArray();
     }
 
-    /// <summary>返回在线插件连接及最近软件清单，包含尚未分配班级的设备。</summary>
+    /// <summary>按设备凭据合并插件与守护连接；完整插件优先，只有守护在线时保留设备可见。</summary>
     public IReadOnlyList<PluginDeviceSnapshot> GetPluginDeviceSnapshots() =>
         _pluginPeers.Values
             .Where(IsLocallyAuthorized)
+            .GroupBy(peer => peer.Principal.PluginCredentialId)
+            .Select(group => group.OrderBy(peer => peer.IsGuard).ThenBy(peer => peer.RegisteredAt).First())
             .OrderBy(peer => peer.Principal.ClassId)
             .ThenBy(peer => peer.RegisteredAt)
             .Select(peer => new PluginDeviceSnapshot(
                 peer.Id,
                 peer.Principal.PluginCredentialId,
                 peer.Principal.ClassId ?? Guid.Empty,
-                peer.SoftwareInventory?.DeviceName ?? "ClassIsland 插件",
+                peer.SoftwareInventory?.DeviceName ?? (peer.IsGuard ? "RemoteCI 守护" : "ClassIsland 插件"),
                 peer.SoftwareVersion,
                 peer.SoftwareInventoryAt,
                 peer.SoftwareInventory,
                 peer.HasExplicitCapabilities,
                 EffectiveCapabilities(peer),
-                peer.Principal.ClassId is not null))
+                peer.Principal.ClassId is not null,
+                peer.IsGuard))
             .ToArray();
+
+    public bool HasGuardFor(Guid classId) => _pluginPeers.Values.Any(peer =>
+        peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.ClassId == classId);
+
+    public bool PrimaryGuardSupports(Guid classId, string capability) => _pluginPeers.Values
+        .Where(peer => peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.ClassId == classId)
+        .OrderBy(peer => peer.RegisteredAt)
+        .FirstOrDefault() is { } peer && EffectiveCapabilities(peer).Contains(capability, StringComparer.Ordinal);
+
+    public bool HasPluginForCredential(Guid credentialId) => _pluginPeers.Values.Any(peer =>
+        !peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.PluginCredentialId == credentialId);
+
+    public bool PluginForCredentialSupports(Guid credentialId, string capability) => _pluginPeers.Values
+        .Where(peer => !peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.PluginCredentialId == credentialId)
+        .OrderBy(peer => peer.RegisteredAt)
+        .FirstOrDefault() is { } peer && EffectiveCapabilities(peer).Contains(capability, StringComparer.Ordinal);
+
+    public bool HasGuardForCredential(Guid credentialId) => _pluginPeers.Values.Any(peer =>
+        peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.PluginCredentialId == credentialId);
+
+    public bool GuardForCredentialSupports(Guid credentialId, string capability) => _pluginPeers.Values
+        .Where(peer => peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.PluginCredentialId == credentialId)
+        .OrderBy(peer => peer.RegisteredAt)
+        .FirstOrDefault() is { } peer && EffectiveCapabilities(peer).Contains(capability, StringComparer.Ordinal);
+
+    public Task<CommandResult> ManageAppGuardAsync(
+        Guid credentialId,
+        CommandKind command,
+        UserProfile requestedBy,
+        TimeSpan timeout,
+        CancellationToken ct = default)
+    {
+        if (command is not (CommandKind.StopAppGuard or CommandKind.UninstallAppGuard))
+            return Task.FromResult(CommandResult.Failure(CommandResultCodes.InvalidRequest, "不支持的守护管理操作"));
+        var peer = _pluginPeers.Values
+            .Where(peer => peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.PluginCredentialId == credentialId)
+            .OrderBy(peer => peer.RegisteredAt)
+            .FirstOrDefault();
+        return peer is null
+            ? Task.FromResult(CommandResult.Failure(CommandResultCodes.PluginOffline, "守护未在线，操作未执行"))
+            : SendCommandAndWaitToConnectionAsync(new CommandMessage
+            {
+                Command = command,
+                ClassId = peer.Principal.ClassId,
+                RequestedBy = requestedBy,
+            }, peer.Id, timeout, ct);
+    }
+
+    public Task<bool> SendToGuardAsync(Guid classId, Envelope envelope, CancellationToken ct = default)
+    {
+        var peer = _pluginPeers.Values
+            .Where(peer => peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.ClassId == classId)
+            .OrderBy(peer => peer.RegisteredAt)
+            .FirstOrDefault();
+        return peer is null ? Task.FromResult(false) : SendToPluginConnectionAsync(peer.Id, envelope, ct);
+    }
+
+    public Task<CommandResult> LaunchClassIslandAsync(
+        Guid classId, UserProfile requestedBy, TimeSpan timeout, CancellationToken ct = default)
+    {
+        var peer = _pluginPeers.Values
+            .Where(peer => peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.ClassId == classId)
+            .OrderBy(peer => peer.RegisteredAt)
+            .FirstOrDefault();
+        return peer is null
+            ? Task.FromResult(CommandResult.Failure(CommandResultCodes.PluginOffline, "守护未在线，操作未执行"))
+            : SendCommandAndWaitToConnectionAsync(new CommandMessage
+            {
+                Command = CommandKind.LaunchClassIsland,
+                ClassId = classId,
+                RequestedBy = requestedBy,
+            }, peer.Id, timeout, ct);
+    }
+
     /// <summary>读取握手或后台刷新后缓存的连接身份，不访问数据库。</summary>
     public AuthPrincipal? GetPrincipal(Guid connectionId)
     {
@@ -248,10 +334,12 @@ public sealed class PeerRegistry(
     }
 
     /// <summary>班级配对码只允许一台设备：新连接完成注册后主动断开旧连接。</summary>
-    public async Task DisconnectOtherPluginClassAsync(Guid classId, Guid keepConnectionId, CancellationToken ct = default)
+    public async Task DisconnectOtherPluginClassAsync(
+        Guid classId, Guid keepConnectionId, CancellationToken ct = default, Guid? keepCredentialId = null)
     {
         foreach (var peer in _pluginPeers.Values
-                     .Where(peer => peer.Id != keepConnectionId && peer.Principal.ClassId == classId)
+                     .Where(peer => peer.Id != keepConnectionId && peer.Principal.ClassId == classId &&
+                         (keepCredentialId is null || peer.Principal.PluginCredentialId != keepCredentialId))
                      .ToList())
         {
             ct.ThrowIfCancellationRequested();
@@ -271,9 +359,9 @@ public sealed class PeerRegistry(
                      .ToList())
         {
             ct.ThrowIfCancellationRequested();
-            await DisconnectOtherPluginClassAsync(classId, peer.Id, ct);
+            await DisconnectOtherPluginClassAsync(classId, peer.Id, ct, credentialId);
             peer.Principal = peer.Principal with { ClassId = classId };
-            await SendToPluginConnectionAsync(peer.Id, Envelope.AccountSync(sync), ct);
+            if (!peer.IsGuard) await SendToPluginConnectionAsync(peer.Id, Envelope.AccountSync(sync), ct);
         }
         await BroadcastCapabilitiesToWatchesAsync(ct);
     }
@@ -294,7 +382,9 @@ public sealed class PeerRegistry(
             : null;
         if (peer is null) return;
         var wasPlugin = peer.Principal.IsPlugin;
-        if (wasPlugin) RaisePresence(connectionId, peer.Principal, online: false);
+        if (wasPlugin && !_pluginPeers.Values.Any(x =>
+                x.Principal.PluginCredentialId == peer.Principal.PluginCredentialId))
+            RaisePresence(connectionId, peer.Principal, online: false);
 
         foreach (var pending in _pendingCommands.Where(x => x.Value.WatchConnectionId == connectionId).ToList())
         {
@@ -427,7 +517,7 @@ public sealed class PeerRegistry(
     {
         var sent = 0;
         var targets = _pluginPeers.Values
-            .Where(IsLocallyAuthorized)
+            .Where(peer => !peer.IsGuard && IsLocallyAuthorized(peer))
             .Where(peer => EffectiveCapabilities(peer).Contains(capability, StringComparer.Ordinal))
             .ToList();
         foreach (var peer in targets)
@@ -445,7 +535,7 @@ public sealed class PeerRegistry(
     public async Task<bool> SendToPluginAsync(Guid classId, Envelope envelope, CancellationToken ct = default)
     {
         // 按注册时间排序才是真正的“最早接入优先”；Guid 顺序与接入时间无关。
-        foreach (var peer in _pluginPeers.Values.Where(x => x.Principal.ClassId == classId).OrderBy(x => x.RegisteredAt))
+        foreach (var peer in PluginPeersFor(classId))
         {
             if (IsLocallyAuthorized(peer) && await TrySendAsync(peer, envelope, ct))
                 return true;
@@ -586,7 +676,11 @@ public sealed class PeerRegistry(
         if (GetNotificationError(command) is { } notificationError)
             return CommandResult.Failure(CommandResultCodes.InvalidRequest, notificationError);
         if (!_pluginPeers.TryGetValue(connectionId, out var peer) || !IsLocallyAuthorized(peer))
-            return CommandResult.Failure(CommandResultCodes.PluginOffline, "插件未在线，操作未执行");
+            return CommandResult.Failure(CommandResultCodes.PluginOffline, "设备未在线，操作未执行");
+        var requiresGuard = command.Command is CommandKind.LaunchClassIsland or
+            CommandKind.StopAppGuard or CommandKind.UninstallAppGuard;
+        if (peer.IsGuard != requiresGuard)
+            return CommandResult.Failure(CommandResultCodes.Forbidden, "该命令与当前连接类型不匹配");
         if (RemoteCiCapabilities.Required(command.Command) is { } capability &&
             !EffectiveCapabilities(peer).Contains(capability, StringComparer.Ordinal))
             return CommandResult.Failure(
@@ -695,7 +789,7 @@ public sealed class PeerRegistry(
             : null;
 
     private WsPeer? PrimaryPlugin() => _pluginPeers.Values
-        .Where(IsLocallyAuthorized)
+        .Where(peer => !peer.IsGuard && IsLocallyAuthorized(peer))
         .OrderBy(peer => peer.RegisteredAt)
         .FirstOrDefault();
 
@@ -705,7 +799,7 @@ public sealed class PeerRegistry(
     private CapabilitiesSync CreateCapabilitiesSync(WsPeer viewer)
     {
         var classPlugins = _pluginPeers.Values
-            .Where(peer => IsLocallyAuthorized(peer) &&
+            .Where(peer => !peer.IsGuard && IsLocallyAuthorized(peer) &&
                 peer.Principal.ClassId is { } classId &&
                 viewer.Principal.CoversClass(classId))
             .GroupBy(peer => peer.Principal.ClassId!.Value)
@@ -881,12 +975,13 @@ public sealed class PeerRegistry(
         TaskCompletionSource<CommandResult>? Completion,
         Guid? AuditId = null);
 
-    private sealed class WsPeer(Guid id, string token, AuthPrincipal principal, WebSocket socket)
+    private sealed class WsPeer(Guid id, string token, AuthPrincipal principal, WebSocket socket, bool isGuard)
     {
         public Guid Id { get; } = id;
         public string Token { get; } = token;
         public AuthPrincipal Principal { get; set; } = principal;
         public WebSocket Socket { get; } = socket;
+        public bool IsGuard { get; } = isGuard;
         public SemaphoreSlim SendLock { get; } = new(1, 1);
         public SemaphoreSlim RefreshLock { get; } = new(1, 1);
         public string? SoftwareVersion { get; set; }
@@ -916,7 +1011,8 @@ public sealed record PluginDeviceSnapshot(
     SoftwareInventory? SoftwareInventory,
     bool HasExplicitCapabilities,
     IReadOnlyList<string> EffectiveCapabilities,
-    bool Assigned);
+    bool Assigned,
+    bool IsGuard = false);
 
 public sealed record PeerCapabilityDiagnostic(
     Guid ConnectionId,

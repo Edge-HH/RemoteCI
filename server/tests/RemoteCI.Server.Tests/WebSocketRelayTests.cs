@@ -48,7 +48,8 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     }
 
     private Task WaitForNoPluginAsync() => WaitUntilAsync(() =>
-        !_factory.Services.GetRequiredService<PeerRegistry>().HasPluginFor(TestWebApplicationFactory.DefaultClassId));
+        !_factory.Services.GetRequiredService<PeerRegistry>().HasPluginFor(TestWebApplicationFactory.DefaultClassId) &&
+        !_factory.Services.GetRequiredService<PeerRegistry>().HasGuardFor(TestWebApplicationFactory.DefaultClassId));
 
     [Fact]
     public async Task VoiceMessage_RelaysFullMinuteWithAuthenticatedSenderAndCorrelatedReply()
@@ -398,9 +399,9 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     {
         using var pluginA = await ConnectPluginAsync();
         await ReceiveEnvelopeAsync(pluginA, Protocol.MessageTypeSchedulePull); // 连接后的初始拉取。
-        using var pluginB = await ConnectPluginAsync();
+        using var pluginB = await ConnectAsync(await PairAnotherPluginAsync());
         await ReceiveEnvelopeAsync(pluginB, Protocol.MessageTypeSchedulePull);
-        // 班级配对码只允许一台设备，新连接会让旧连接失效。
+        // 同一凭据的插件与守护可以共存；不同设备接入同一班级时仍会让旧连接失效。
         await AssertWebSocketClosedAsync(pluginA);
         using var watch = await ConnectWatchAsync();
 
@@ -1193,6 +1194,40 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
         Assert.NotNull(entry.ConnectionId);
     }
 
+    [Fact]
+    public async Task GuardAndPlugin_CoexistAndLaunchCommandTargetsGuard()
+    {
+        var registry = _factory.Services.GetRequiredService<PeerRegistry>();
+        using var guard = await ConnectAsync(await _factory.GetPluginTokenAsync(), "guard");
+        await SendAsync(guard, Envelope.PeerCapabilities(new PeerCapabilities
+        {
+            Capabilities = [RemoteCiCapabilities.AppGuard, RemoteCiCapabilities.AppGuardLaunch],
+        }));
+        await ReceiveEnvelopeAsync(guard, Protocol.MessageTypeAppGuardPolicy);
+        await WaitUntilAsync(() => registry.HasGuardFor(TestWebApplicationFactory.DefaultClassId));
+        Assert.False(registry.HasPluginFor(TestWebApplicationFactory.DefaultClassId));
+
+        using var plugin = await ConnectPluginAsync();
+        await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeSchedulePull);
+        Assert.True(registry.HasPluginFor(TestWebApplicationFactory.DefaultClassId));
+        Assert.Single(registry.GetPluginDeviceSnapshots());
+
+        using var watch = await ConnectWatchAsync();
+        await SendAsync(watch, Envelope.Command(new CommandMessage { Command = CommandKind.LaunchClassIsland }));
+        var forwarded = await ReceiveEnvelopeAsync(guard, Protocol.MessageTypeCommand);
+        var command = ConvertPayload<CommandMessage>(forwarded.Payload);
+        Assert.Equal(CommandKind.LaunchClassIsland, command.Command);
+        Assert.Equal(UserRole.Admin, command.RequestedBy!.Role);
+        await SendAsync(guard, new Envelope
+        {
+            Type = Protocol.MessageTypeCommandResult,
+            ReplyToMessageId = forwarded.MessageId,
+            Payload = new CommandResult { Success = true, Code = CommandResultCodes.Ok },
+        });
+        var reply = await ReceivePayloadAsync<CommandResult>(watch, Protocol.MessageTypeCommandResult);
+        Assert.True(reply.Success);
+    }
+
     /// <summary>审计由后台批量写库，等到这条命令的结果回填后再断言。</summary>
     private async Task<CommandAuditEntry> WaitForAuditAsync(string messageId)
     {
@@ -1210,6 +1245,24 @@ public sealed class WebSocketRelayTests : IClassFixture<TestWebApplicationFactor
     }
 
     private async Task<WebSocket> ConnectPluginAsync() => await ConnectAsync(await _factory.GetPluginTokenAsync());
+
+    private async Task<string> PairAnotherPluginAsync()
+    {
+        using var client = _factory.CreateClient();
+        var auth = await _factory.LoginAsync();
+        using var code = await client.SendAsync(TestWebApplicationFactory.Bearer(
+            HttpMethod.Post, "/api/plugin/pairing-code", auth.AccessToken,
+            new { classId = TestWebApplicationFactory.DefaultClassId }));
+        code.EnsureSuccessStatusCode();
+        var pairCode = (await code.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("pairCode").GetString()!;
+        using var response = await client.PostAsJsonAsync("/api/plugin/pair", new PairRequest
+        {
+            PairCode = pairCode,
+            Role = "plugin",
+        });
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<PairResponse>())!.Token;
+    }
 
     private async Task<WebSocket> ConnectWatchAsync(
         string username = TestWebApplicationFactory.AdminUsername,

@@ -28,6 +28,7 @@ public sealed class CommandHandler
     private readonly ExtensionCommandRouter _extensionRouter;
     private readonly VoiceMessagePlayer _voiceMessages;
     private readonly ScheduleOverlayService? _overlays;
+    private readonly PluginPackageInstallService _pluginPackages;
 
     public CommandHandler(
         ScheduleCatalog schedules,
@@ -46,7 +47,8 @@ public sealed class CommandHandler
         FileReceiveService? files = null,
         ScheduleOverlayService? overlays = null,
         ScreenCaptureService? screenshots = null,
-        MainWindowLayoutService? mainWindowLayouts = null)
+        MainWindowLayoutService? mainWindowLayouts = null,
+        PluginPackageInstallService? pluginPackages = null)
     {
         _overlays = overlays;
         _schedules = schedules;
@@ -62,6 +64,8 @@ public sealed class CommandHandler
         _files = files ?? new FileReceiveService(loggerFactory.CreateLogger<FileReceiveService>());
         _screenshots = screenshots ?? new ScreenCaptureService(loggerFactory.CreateLogger<ScreenCaptureService>());
         _mainWindowLayouts = mainWindowLayouts ?? new MainWindowLayoutService(loggerFactory.CreateLogger<MainWindowLayoutService>());
+        _pluginPackages = pluginPackages ?? new PluginPackageInstallService(
+            _files, softwareInventory, pluginManagement, loggerFactory.CreateLogger<PluginPackageInstallService>());
         _logger = loggerFactory.CreateLogger<CommandHandler>();
         _extensionRouter = new ExtensionCommandRouter(extensions, loggerFactory);
         _voiceMessages = voiceMessages ?? new VoiceMessagePlayer();
@@ -92,6 +96,7 @@ public sealed class CommandHandler
         // 远程升级、插件管理、集控、终端与文件分发属于宿主级维护，即使账号被授予 ManageUsers 也只允许系统管理员执行。
         if (command.Command is (CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
             CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
+            CommandKind.InstallPluginPackages or
             CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
             CommandKind.JoinManagement or CommandKind.RestartClassIsland or
             CommandKind.ExecuteTerminalCommand) && command.RequestedBy?.Role != UserRole.Admin)
@@ -131,6 +136,7 @@ public sealed class CommandHandler
                 CommandKind.UpgradeClassIsland => _softwareInventory.StartClassIslandUpgrade(command.SoftwareUpgrade),
                 CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled =>
                     await _pluginManagement.HandleAsync(command.Command, command.PluginManagement),
+                CommandKind.InstallPluginPackages => _pluginPackages.Start(command.PluginPackages),
                 CommandKind.SetPluginManagementPolicy => _pluginManagement.SetPolicy(command.PluginManagementPolicy),
                 CommandKind.UpdateTimeLayout => await _profileManagement.UpdateTimeLayoutAsync(command.TimeLayoutUpdate),
                 CommandKind.DistributeProfile => await _profileManagement.DistributeProfileAsync(command.ProfileDistribution),

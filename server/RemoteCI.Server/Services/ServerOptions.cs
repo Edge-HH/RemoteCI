@@ -43,6 +43,15 @@ public sealed class ServerOptions
     /// <summary>中转目录总容量上限（字节），默认 20 GiB；0 表示不限制。</summary>
     public long FileTransferQuotaBytes { get; set; } = 20L * 1024 * 1024 * 1024;
 
+    /// <summary>ClassIsland 插件市场索引地址（index.zip，{time} 会替换为时间戳）；留空使用官方地址。</summary>
+    public string? PluginMarketIndexUrl { get; set; }
+
+    /// <summary>
+    /// 服务端预下载插件包时优先使用的市场镜像键（例如 github、ghproxy、moeyy，以索引中的 DownloadMirrors 为准）；
+    /// 留空时先用 github，失败后依次回退其余镜像。
+    /// </summary>
+    public string? PluginMarketMirror { get; set; }
+
     /// <summary>单张屏幕截图上限（字节），默认 20 MiB，也是协议上限。</summary>
     public int ScreenshotMaxBytes { get; set; } = 20 * 1024 * 1024;
 

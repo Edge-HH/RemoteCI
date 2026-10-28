@@ -94,6 +94,36 @@ public sealed class AppGuardServiceTests : IDisposable
     }
 
     [Fact]
+    public void RemoteClose_StopsGuardWithoutDeletingInstallation()
+    {
+        var (store, service) = Create();
+        service.Start();
+        var enabled = Enabled();
+        enabled.EnhancedMode = true;
+        store.Apply(enabled);
+        var backup = Path.Combine(GuardDirectory, "backup", "current");
+        Directory.CreateDirectory(backup);
+        File.WriteAllText(Path.Combine(GuardDirectory, GuardFiles.StopRequested), "1");
+
+        var closed = Enabled();
+        closed.Enabled = false;
+        store.Apply(closed);
+
+        Assert.True(Directory.Exists(GuardDirectory));
+        Assert.True(Directory.Exists(backup));
+        Assert.True(File.Exists(service.GuardExecutablePath));
+        Assert.True(File.Exists(Path.Combine(GuardDirectory, GuardFiles.StopRequested)));
+        Assert.Null(_host.RunKey);
+        Assert.True(_host.Stops >= 1);
+        Assert.True(_host.EnhancedCalls >= 1);
+
+        store.Apply(enabled);
+        Assert.False(File.Exists(Path.Combine(GuardDirectory, GuardFiles.StopRequested)));
+        Assert.True(_host.GuardRunning);
+        service.Stop();
+    }
+
+    [Fact]
     public void NoPolicyYet_LeavesMachineUntouched()
     {
         var (_, service) = Create();
@@ -102,7 +132,6 @@ public sealed class AppGuardServiceTests : IDisposable
 
         Assert.False(Directory.Exists(GuardDirectory));
         Assert.Equal("untouched", _host.RunKey);
-        Assert.Equal("应用守护：未由管理员配置", service.Summary);
         service.Stop();
     }
 
@@ -196,6 +225,122 @@ public sealed class AppGuardServiceTests : IDisposable
         Assert.False(AppGuardPolicyMessage.TryRead(Envelope.HolidayCalendar(new HolidayCalendar()), out _));
     }
 
+    [Fact]
+    public void GuardManagementCommands_AreServerOnlyAdminOperations()
+    {
+        foreach (var command in new[] { CommandKind.StopAppGuard, CommandKind.UninstallAppGuard })
+        {
+            Assert.True(CommandPermissions.IsServerOnly(command));
+            Assert.Equal(UserPermissions.ManageUsers, CommandPermissions.Required(command));
+            Assert.Equal(RemoteCiCapabilities.AppGuardManage, RemoteCiCapabilities.Required(command));
+        }
+        Assert.DoesNotContain(RemoteCiCapabilities.AppGuardManage, RemoteCiCapabilities.Baseline);
+        Assert.Contains(RemoteCiCapabilities.AppGuardManage, RemoteCiCapabilities.Current);
+    }
+
+    [Fact]
+    public void EnhancedFailure_FallsBackToStandardGuardAndConnectionTokenIsProtected()
+    {
+        const string token = "device-secret-token";
+        _host.EnhancedResult = false;
+        var (store, service) = Create();
+        service.ConnectionInfoProvider = () => (true, "https://example.test", token);
+        service.Start();
+
+        var policy = Enabled();
+        policy.EnhancedMode = true;
+        store.Apply(policy);
+
+        Assert.True(_host.GuardRunning);
+        Assert.True(_host.EnhancedCalls >= 1);
+        var events = File.ReadAllText(Path.Combine(GuardDirectory, GuardFiles.Events));
+        Assert.Contains("enhanced-failed", events);
+        var connection = File.ReadAllText(Path.Combine(GuardDirectory, GuardFiles.Connection));
+        Assert.DoesNotContain(token, connection);
+        service.Stop();
+    }
+
+    [Fact]
+    public async Task CachedEnhancedPolicy_DoesNotBlockServiceStart()
+    {
+        var (store, service) = Create();
+        var policy = Enabled();
+        policy.EnhancedMode = true;
+        store.Apply(policy);
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        _host.EnhancedHandler = () =>
+        {
+            entered.Set();
+            release.Wait(TimeSpan.FromSeconds(5));
+            return true;
+        };
+
+        var start = Task.Run(service.Start);
+        try
+        {
+            await start.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(5)), "缓存策略仍应在后台部署");
+        }
+        finally
+        {
+            release.Set();
+        }
+        service.Stop();
+    }
+
+    [Theory]
+    [InlineData("Campus.Agent.exe", "Campus.Agent")]
+    [InlineData(" invalid / name ", "RemoteCI.Guard")]
+    [InlineData(".hidden", "RemoteCI.Guard")]
+    public void ProcessName_IsNormalized(string value, string expected)
+    {
+        Assert.Equal(expected, GuardFiles.NormalizeProcessName(value));
+        Assert.Equal(expected, new AppGuardPolicy { ProcessName = value }.Normalized().ProcessName);
+    }
+
+    [Fact]
+    public void ProcessRename_DeploysOutsideClassIsland_StopsOldGuardAndUpdatesRunKey()
+    {
+        var (store, service) = Create();
+        service.Start();
+        store.Apply(Enabled());
+        var previous = service.GuardExecutablePath;
+
+        var renamed = Enabled();
+        renamed.ProcessName = "Campus.Agent";
+        store.Apply(renamed);
+
+        Assert.EndsWith("Campus.Agent.exe", service.GuardExecutablePath);
+        Assert.False(GuardBackup.IsUnder(service.GuardExecutablePath, _host.Info.PackageRoot));
+        Assert.False(File.Exists(previous));
+        Assert.Contains(previous, _host.StoppedPaths);
+        Assert.Equal($"\"{service.GuardExecutablePath}\"", _host.RunKey);
+        Assert.Equal("Campus.Agent", GuardJson.ReadFile<GuardConfig>(Path.Combine(GuardDirectory, GuardFiles.Policy))!.ProcessName);
+        service.Stop();
+    }
+
+    [Fact]
+    public void ProcessRename_UpdatesEnhancedAgentPath()
+    {
+        var (store, service) = Create();
+        service.Start();
+        var enhanced = Enabled();
+        enhanced.EnhancedMode = true;
+        store.Apply(enhanced);
+        var firstTarget = service.GuardExecutablePath;
+
+        enhanced.ProcessName = "Campus.Agent";
+        store.Apply(enhanced);
+
+        Assert.Equal(2, _host.EnhancedCalls);
+        Assert.Equal(service.GuardExecutablePath, _host.LastEnhancedExecutablePath);
+        Assert.NotEqual(firstTarget, _host.LastEnhancedExecutablePath);
+        var marker = GuardJson.ReadFile<EnhancedGuardConfig>(_host.EnhancedMarkerPath)!;
+        Assert.Equal(service.GuardExecutablePath, marker.AgentExecutablePath);
+        service.Stop();
+    }
+
     private sealed class FakeHost : IAppGuardHost
     {
         public FakeHost(string root)
@@ -211,17 +356,24 @@ public sealed class AppGuardServiceTests : IDisposable
                 "2.1.1.1",
                 false);
             BundledGuardPath = Path.Combine(root, "plugin", GuardFiles.ExecutableName);
+            EnhancedMarkerPath = Path.Combine(root, "ProgramData", "enhanced.json");
             Directory.CreateDirectory(Path.GetDirectoryName(BundledGuardPath)!);
             File.WriteAllText(BundledGuardPath, "guard-v1");
         }
 
         public AppGuardHostInfo Info { get; }
         public string BundledGuardPath { get; }
+        public string EnhancedMarkerPath { get; }
         public int CurrentProcessId => 4242;
         public string? RunKey { get; private set; } = "untouched";
         public bool GuardRunning { get; private set; }
         public int Starts { get; private set; }
         public int Stops { get; private set; }
+        public int EnhancedCalls { get; private set; }
+        public bool EnhancedResult { get; set; } = true;
+        public Func<bool>? EnhancedHandler { get; set; }
+        public string? LastEnhancedExecutablePath { get; private set; }
+        public List<string> StoppedPaths { get; } = [];
         public List<(string Header, string Message)> Notices { get; } = [];
 
         public AppGuardHostInfo Describe() => Info;
@@ -230,6 +382,7 @@ public sealed class AppGuardServiceTests : IDisposable
         public void StopGuard(string executablePath)
         {
             Stops++;
+            StoppedPaths.Add(executablePath);
             GuardRunning = false;
         }
 
@@ -240,6 +393,23 @@ public sealed class AppGuardServiceTests : IDisposable
         }
 
         public void SetRunKey(string? command) => RunKey = command;
+        public bool ConfigureEnhanced(bool enabled, string executablePath, string directory)
+        {
+            EnhancedCalls++;
+            LastEnhancedExecutablePath = executablePath;
+            if (EnhancedHandler is not null) return EnhancedHandler();
+            if (EnhancedResult)
+            {
+                if (enabled)
+                    GuardJson.WriteFile(EnhancedMarkerPath, new EnhancedGuardConfig
+                    {
+                        AgentDirectory = directory,
+                        AgentExecutablePath = executablePath,
+                    });
+                else if (File.Exists(EnhancedMarkerPath)) File.Delete(EnhancedMarkerPath);
+            }
+            return EnhancedResult;
+        }
         public void ShowNotice(string header, string message) => Notices.Add((header, message));
     }
 }

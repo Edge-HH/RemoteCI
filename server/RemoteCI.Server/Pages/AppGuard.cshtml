@@ -21,6 +21,19 @@
         <label>备份间隔（小时，@AppGuardPolicy.MinBackupIntervalHours-@AppGuardPolicy.MaxBackupIntervalHours；ClassIsland 版本变化时也会立即备份）
             <input type="number" name="@(prefix).BackupIntervalHours" value="@input.BackupIntervalHours" min="@AppGuardPolicy.MinBackupIntervalHours" max="@AppGuardPolicy.MaxBackupIntervalHours" />
         </label>
+        <label class="check"><input type="checkbox" name="@(prefix).EnhancedMode" value="true" checked="@input.EnhancedMode" /> 增强守护：首次启用时请求管理员权限，安装自动启动服务并维护标准权限用户代理</label>
+        <input type="hidden" name="@(prefix).EnhancedMode" value="false" />
+        <label class="check"><input type="checkbox" name="@(prefix).RandomBackupPath" value="true" checked="@input.RandomBackupPath" /> 安全备份：在 %LOCALAPPDATA%\RemoteCI\ProtectedBackups 下创建目录，通过 ACL 限制其他普通用户访问</label>
+        <input type="hidden" name="@(prefix).RandomBackupPath" value="false" />
+        <label>安全备份子目录名（留空则随机生成并复用；仅字母、数字、点、下划线和连字符，最长 @AppGuardPolicy.MaxBackupDirectoryNameLength 字符）
+            <input type="text" name="@(prefix).BackupDirectoryName" value="@input.BackupDirectoryName" maxlength="@AppGuardPolicy.MaxBackupDirectoryNameLength" placeholder="留空使用随机名称" />
+        </label>
+        <label>守护进程名（不含 .exe；仅字母、数字、点、下划线和连字符，最长 @AppGuardPolicy.MaxProcessNameLength 字符）
+            <input type="text" name="@(prefix).ProcessName" value="@input.ProcessName" maxlength="@AppGuardPolicy.MaxProcessNameLength" />
+        </label>
+        <label>额外备份目标（每行一个绝对路径，最多 @AppGuardPolicy.MaxBackupPaths 个；实际备份写入目标下的 RemoteCI.Guard.Backup）
+            <textarea name="@(prefix).BackupPaths" rows="3">@input.BackupPaths</textarea>
+        </label>
     }
 }
 <link rel="stylesheet" href="~/operations.css" asp-append-version="true" />
@@ -72,14 +85,32 @@
                         <tr>
                             <td>@row.ClassName<small class="ops-sub">@row.DeviceName</small></td>
                             <td>
-                                @if (!row.Online) { <span class="ops-badge wait">离线</span> }
-                                else if (row.Supported == true) { <span class="ops-badge ok">在线</span> }
+                                @if (!row.PluginOnline && !row.GuardOnline) { <span class="ops-badge wait">离线</span> }
+                                else if (!row.PluginOnline) { <span class="ops-badge ok">守护在线 · 课表离线</span> }
+                                else if (row.Supported == true)
+                                {
+                                    <span class="ops-badge ok">课表在线</span>
+                                    @if (row.GuardOnline) { <span class="ops-badge ok">守护在线</span> }
+                                }
                                 else { <span class="ops-badge bad">插件版本过旧</span> }
                             </td>
                             <td>@(row.Override is null ? "沿用全局" : "单独设置")</td>
                             <td class="ops-summary">@row.Effective.Describe()</td>
                             <td class="ops-nowrap">
                                 <a class="button ghost" asp-page="/AppGuard" asp-route-edit="@row.CredentialId" asp-fragment="device-override">单独设置</a>
+                                @if (row.CanManageGuard)
+                                {
+                                    <form method="post" asp-page-handler="CloseGuard" asp-route-credentialId="@row.CredentialId" style="display:inline" onsubmit="return confirm('关闭守护会停止守护进程并停用该设备策略，但保留安装文件。确定关闭？')">
+                                        <button type="submit" class="secondary">关闭守护</button>
+                                    </form>
+                                    <form method="post" asp-page-handler="UninstallGuard" asp-route-credentialId="@row.CredentialId" style="display:inline" onsubmit="return confirm('卸载守护会移除增强服务、登录任务、守护进程与备份文件。确定卸载？')">
+                                        <button type="submit" class="danger ghost">卸载守护</button>
+                                    </form>
+                                }
+                                else if (row.GuardOnline)
+                                {
+                                    <small class="ops-sub">守护版本过旧，无法远程关闭或卸载</small>
+                                }
                                 @if (row.Override is not null)
                                 {
                                     <form method="post" asp-page-handler="ClearDevice" asp-route-credentialId="@row.CredentialId" style="display:inline">

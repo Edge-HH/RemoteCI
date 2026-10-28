@@ -42,11 +42,13 @@ public static class WebSocketHub
             string.Equals(context.Request.Query["client"], "mobile", StringComparison.OrdinalIgnoreCase))
             principal = principal with { PeerRole = PeerRole.Mobile };
 
+        var isGuard = principal.IsPlugin &&
+            string.Equals(context.Request.Query["client"], "guard", StringComparison.OrdinalIgnoreCase);
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
-        var connectionId = registry.Register(socket, token, principal);
+        var connectionId = registry.Register(socket, token, principal, isGuard);
         var session = new ConnectionSession(
             context, identities, registry, store, extensionPolicies, authorizationSync, scheduleSync, classAccess,
-            teacherBinding, scheduleViews, logger, socket, connectionId, principal);
+            teacherBinding, scheduleViews, logger, socket, connectionId, principal, isGuard);
         logger.LogInformation(
             "WebSocket connected: {Role}/{User} ({Id})",
             principal.PeerRole,
@@ -84,14 +86,16 @@ public static class WebSocketHub
             return;
         }
 
-        await session.Registry.DisconnectOtherPluginClassAsync(classId, session.ConnectionId, session.CancellationToken);
+        await session.Registry.DisconnectOtherPluginClassAsync(
+            classId, session.ConnectionId, session.CancellationToken, session.Principal.PluginCredentialId);
+        await session.Registry.BroadcastCapabilitiesToWatchesAsync(session.CancellationToken);
+        if (session.IsGuard) return;
 
         var ct = session.CancellationToken;
         // 授权镜像按班级生成并定向发给本连接：插件只需要自己班级的账号。
         var sync = await session.Identities.CreateSyncAsync(classId, ct);
         await session.Registry.SendToPluginConnectionAsync(
             session.ConnectionId, Envelope.AccountSync(sync), ct);
-        await session.Registry.BroadcastCapabilitiesToWatchesAsync(ct);
         await session.ScheduleSync.StartFromPluginAsync(
             session.ConnectionId, classId, ScheduleSyncSource.Connection, ct);
     }
@@ -164,7 +168,7 @@ public static class WebSocketHub
         finally
         {
             // 未分配设备没有班级，也不会启动课表任务，断开时不应误伤其他班级的进行中任务。
-            if (session.Principal.IsPlugin && session.Principal.ClassId is { } activeClassId)
+            if (session.Principal.IsPlugin && !session.IsGuard && session.Principal.ClassId is { } activeClassId)
                 await session.ScheduleSync.FailActiveAsync(
                     "插件连接已断开，课表任务未完成",
                     activeClassId);
@@ -285,6 +289,13 @@ public static class WebSocketHub
             {
                 await session.Registry.ReportCapabilitiesAsync(
                     session.ConnectionId, capabilities, session.CancellationToken);
+                if (session.IsGuard)
+                {
+                    await using var scope = session.Context.RequestServices.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
+                    await scope.ServiceProvider.GetRequiredService<AppGuardService>()
+                        .SendToConnectionAsync(session.ConnectionId, session.Principal.PluginCredentialId, session.CancellationToken);
+                    return;
+                }
                 // 能力上报晚于连接建立，因此调休日历在这里补发；旧插件不声明能力就不会收到。
                 if (session.Principal.IsPlugin &&
                     capabilities.Capabilities.Contains(RemoteCiCapabilities.HolidayCalendar, StringComparer.Ordinal))
@@ -329,6 +340,11 @@ public static class WebSocketHub
 
     private static async Task DispatchPluginAsync(Envelope envelope, ConnectionSession session)
     {
+        if (session.IsGuard && envelope.Type is not (Protocol.MessageTypeAppGuardEvent or Protocol.MessageTypeCommandResult))
+        {
+            LogUnhandled(envelope, session);
+            return;
+        }
         // 文件接收进度按插件凭据归属，未分配班级的统一连接码设备同样需要上报。
         if (envelope.Type == Protocol.MessageTypeFileTransferProgress)
         {
@@ -648,7 +664,7 @@ public static class WebSocketHub
         if ((command.Command is CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
             CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
             CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
-            CommandKind.JoinManagement or CommandKind.RestartClassIsland or
+            CommandKind.JoinManagement or CommandKind.RestartClassIsland or CommandKind.LaunchClassIsland or
             CommandKind.ExecuteTerminalCommand or CommandKind.SendFile) && session.Principal.User!.Role != UserRole.Admin)
         {
             await SendFailureAsync(
@@ -675,14 +691,16 @@ public static class WebSocketHub
             return;
         }
 
-        if (session.Registry.HasPluginFor(classId.Value) &&
-            RemoteCiCapabilities.Required(command.Command) is { } capability &&
-            !session.Registry.PrimaryPluginSupports(classId.Value, capability))
+        if (RemoteCiCapabilities.Required(command.Command) is { } capability &&
+            (command.Command == CommandKind.LaunchClassIsland
+                ? !session.Registry.PrimaryGuardSupports(classId.Value, capability)
+                : session.Registry.HasPluginFor(classId.Value) &&
+                    !session.Registry.PrimaryPluginSupports(classId.Value, capability)))
         {
             await SendFailureAsync(
                 envelope, session.ConnectionId, session.Registry,
                 CommandResultCodes.CapabilityUnsupported,
-                $"当前班级的插件未声明能力 {capability}", session.CancellationToken);
+                $"目标设备未声明能力 {capability}", session.CancellationToken);
             return;
         }
 
@@ -808,7 +826,10 @@ public static class WebSocketHub
         command.RequestedBy = session.Principal.User!.WithPermissions(classPermissions);
         envelope.Payload = command;
         session.Registry.RegisterWatchCommand(envelope.MessageId, session.ConnectionId, command, classId);
-        if (await session.Registry.SendToPluginAsync(classId, envelope, session.CancellationToken)) return;
+        var sent = command.Command == CommandKind.LaunchClassIsland
+            ? await session.Registry.SendToGuardAsync(classId, envelope, session.CancellationToken)
+            : await session.Registry.SendToPluginAsync(classId, envelope, session.CancellationToken);
+        if (sent) return;
 
         await session.Registry.CompleteCommandAsync(
             new Envelope
@@ -842,8 +863,10 @@ public static class WebSocketHub
         ILogger logger,
         WebSocket socket,
         Guid connectionId,
-        AuthPrincipal principal)
+        AuthPrincipal principal,
+        bool isGuard)
     {
+        public bool IsGuard { get; } = isGuard;
         public HttpContext Context { get; } = context;
         public IdentityCoordinator Identities { get; } = identities;
         public PeerRegistry Registry { get; } = registry;

@@ -195,10 +195,18 @@ public enum CommandKind
     ReadProfile = 26,
     /// <summary>截取设备当前屏幕并上传到服务端；仅服务端截图入口可以发起（需先登记上传凭据）。</summary>
     CaptureScreen = 27,
+    /// <summary>由设备外守护代理启动 ClassIsland；课表已经运行时幂等成功。</summary>
+    LaunchClassIsland = 28,
     /// <summary>上传 ClassIsland 主界面文件（组件配置），覆盖当前文件或新建并可立即使用。</summary>
     ApplyMainWindowLayout = 29,
     /// <summary>读取设备当前使用的 ClassIsland 主界面文件（组件配置）。</summary>
     ReadMainWindowLayout = 30,
+    /// <summary>从服务端文件中转下载一组 .cipx 插件包，放入 ClassIsland 插件包缓存并重启安装（安装或更新）。</summary>
+    InstallPluginPackages = 31,
+    /// <summary>停用设备外守护并退出，保留安装文件以便之后重新启用。</summary>
+    StopAppGuard = 32,
+    /// <summary>停用并卸载设备外守护，移除增强服务、登录任务、登录自启与守护文件。</summary>
+    UninstallAppGuard = 33,
 }
 
 public enum PowerActionKind
@@ -217,7 +225,7 @@ public static class CommandPermissions
     /// </summary>
     public static bool IsServerOnly(CommandKind command) =>
         command is CommandKind.ApplyExtensionSettings or CommandKind.ApplyProfile or CommandKind.ReadProfile or
-            CommandKind.CaptureScreen;
+            CommandKind.CaptureScreen or CommandKind.InstallPluginPackages or CommandKind.StopAppGuard or CommandKind.UninstallAppGuard;
 
     public static UserPermissions Required(CommandKind command) => command switch
     {
@@ -237,9 +245,10 @@ public static class CommandPermissions
         // 与账号管理同属高风险管理员操作。
         CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
         CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
+        CommandKind.InstallPluginPackages or
         CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
         CommandKind.JoinManagement
-        or CommandKind.RestartClassIsland
+        or CommandKind.RestartClassIsland or CommandKind.LaunchClassIsland or CommandKind.StopAppGuard or CommandKind.UninstallAppGuard
         or CommandKind.ExecuteTerminalCommand
             => UserPermissions.ManageUsers,
         _ => UserPermissions.None,
@@ -299,10 +308,16 @@ public static class RemoteCiCapabilities
     public const string ScheduleAdjustments = "schedule.adjustments";
     /// <summary>截取当前屏幕并凭一次性上传凭据上传到服务端。</summary>
     public const string ScreenCapture = "screen.capture";
+    /// <summary>课表离线时由设备外守护代理启动 ClassIsland。</summary>
+    public const string AppGuardLaunch = "host.app-guard-launch";
+    /// <summary>由设备外守护代理执行关闭或完整卸载。</summary>
+    public const string AppGuardManage = "host.app-guard-manage";
     /// <summary>上传 ClassIsland 主界面文件：覆盖当前文件，或新建并可立即使用。</summary>
     public const string MainWindowLayoutApply = "main-window.layout-apply";
     /// <summary>读取设备当前使用的 ClassIsland 主界面文件。</summary>
     public const string MainWindowLayoutRead = "main-window.layout-read";
+    /// <summary>从服务端文件中转接收 .cipx 插件包并安装或更新（服务端预下载与上传 CIPX 共用）。</summary>
+    public const string PluginPackageInstall = "plugin.package-install";
 
     /// <summary>没有上报能力列表的旧 V3 端自动获得的基础能力。</summary>
     public static IReadOnlyList<string> Baseline { get; } =
@@ -326,7 +341,7 @@ public static class RemoteCiCapabilities
             PluginInstall, PluginUninstall, PluginEnable, PluginManagementPolicy, ProfileDistribute, TimeLayoutUpdate, ManagementJoin,
             ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings, ProfileApply, HolidayCalendar,
             ProfileRead, ProfileTempLayer, Semester, FileTransfer, AppGuard, ScheduleChangePermanent, ScheduleAdjustments,
-            ScreenCapture, MainWindowLayoutApply, MainWindowLayoutRead];
+            ScreenCapture, AppGuardLaunch, AppGuardManage, MainWindowLayoutApply, MainWindowLayoutRead, PluginPackageInstall];
 
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
@@ -367,8 +382,11 @@ public static class RemoteCiCapabilities
         ScheduleChangePermanent => "永久换课",
         ScheduleAdjustments => "按调课记录生成临时层",
         ScreenCapture => "屏幕截图",
+        AppGuardLaunch => "守护代理远程打开 ClassIsland",
+        AppGuardManage => "守护代理关闭与卸载",
         MainWindowLayoutApply => "上传主界面文件",
         MainWindowLayoutRead => "获取主界面文件",
+        PluginPackageInstall => "从服务端安装插件包",
         _ => "未知能力",
     };
 
@@ -400,8 +418,11 @@ public static class RemoteCiCapabilities
         CommandKind.ApplyProfile => ProfileApply,
         CommandKind.ReadProfile => ProfileRead,
         CommandKind.CaptureScreen => ScreenCapture,
+        CommandKind.LaunchClassIsland => AppGuardLaunch,
+        CommandKind.StopAppGuard or CommandKind.UninstallAppGuard => AppGuardManage,
         CommandKind.ApplyMainWindowLayout => MainWindowLayoutApply,
         CommandKind.ReadMainWindowLayout => MainWindowLayoutRead,
+        CommandKind.InstallPluginPackages => PluginPackageInstall,
         _ => null,
     };
 }

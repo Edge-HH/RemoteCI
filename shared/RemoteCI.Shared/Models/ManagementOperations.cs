@@ -17,6 +17,8 @@ public enum BatchOperationKind
     UninstallPlugins = 21,
     SetPluginEnabled = 22,
     SetPluginManagementPolicy = 23,
+    /// <summary>上传 .cipx 插件包到服务端，再分发到设备安装或更新。</summary>
+    InstallPluginPackages = 24,
     RefreshSoftwareInventory = 30,
     UpgradePlugins = 31,
     UpgradeClassIsland = 32,
@@ -46,6 +48,75 @@ public sealed class PluginManagementRequest
     public List<string> PluginIds { get; set; } = [];
 
     /// <summary>操作完成后是否请求 ClassIsland 自动重启；下载类操作默认等待下载完成再重启。</summary>
+    [JsonPropertyName("restartAfter")]
+    public bool RestartAfter { get; set; } = true;
+}
+
+public enum PluginPackageInstallMode
+{
+    /// <summary>安装插件；已安装的显式插件包会被覆盖安装，已安装的依赖包跳过。</summary>
+    Install = 1,
+    /// <summary>只更新本机已安装且插件包版本更高的插件（Force 时不比较版本）。</summary>
+    Upgrade = 2,
+}
+
+/// <summary>
+/// 服务端中转的一个 .cipx 插件包。插件按 transferId + downloadKey 从服务端文件中转分段下载并校验 SHA-256，
+/// 再核对包内 manifest.yml 的插件 Id，最后放入 ClassIsland 插件包缓存，重启后由宿主安装。
+/// </summary>
+public sealed class PluginPackageRef
+{
+    [JsonPropertyName("pluginId")]
+    public string PluginId { get; set; } = string.Empty;
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("version")]
+    public string Version { get; set; } = string.Empty;
+
+    /// <summary>作为其他插件的必选依赖被一并下发；安装模式下本机已安装时跳过。</summary>
+    [JsonPropertyName("isDependency")]
+    public bool IsDependency { get; set; }
+
+    [JsonPropertyName("transferId")]
+    public string TransferId { get; set; } = string.Empty;
+
+    [JsonPropertyName("downloadKey")]
+    public string DownloadKey { get; set; } = string.Empty;
+
+    [JsonPropertyName("size")]
+    public long Size { get; set; }
+
+    [JsonPropertyName("sha256")]
+    public string Sha256 { get; set; } = string.Empty;
+
+    /// <summary>复用文件中转的参数校验口径。</summary>
+    public FileDistributionRequest ToTransferRequest() => new()
+    {
+        FileName = $"{PluginId}.cipx",
+        TransferId = TransferId,
+        DownloadKey = DownloadKey,
+        Size = Size,
+        Sha256 = Sha256,
+    };
+}
+
+/// <summary>InstallPluginPackages 命令参数：一组服务端中转的插件包。</summary>
+public sealed class PluginPackageInstallRequest
+{
+    public const int MaxPackages = 32;
+
+    [JsonPropertyName("mode")]
+    public PluginPackageInstallMode Mode { get; set; } = PluginPackageInstallMode.Install;
+
+    [JsonPropertyName("packages")]
+    public List<PluginPackageRef> Packages { get; set; } = [];
+
+    /// <summary>更新模式下不比较版本，强制覆盖已安装插件。</summary>
+    [JsonPropertyName("force")]
+    public bool Force { get; set; }
+
     [JsonPropertyName("restartAfter")]
     public bool RestartAfter { get; set; } = true;
 }
@@ -180,4 +251,56 @@ public sealed class BatchDeviceItemResult
     [JsonPropertyName("message")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Message { get; set; }
+}
+
+/// <summary>.cipx 插件包根目录 manifest.yml 的关键字段。</summary>
+public sealed record PluginPackageManifest(string Id, string Name, string Version)
+{
+    public const string ManifestFileName = "manifest.yml";
+
+    /// <summary>插件 Id 同时用作插件包文件名，只允许常见的标识字符，杜绝路径分隔符。</summary>
+    public static bool IsValidId(string? id) =>
+        !string.IsNullOrWhiteSpace(id) && id.Length <= 128 && char.IsAsciiLetterOrDigit(id[0]) &&
+        id.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '.' or '_' or '-');
+
+    /// <summary>
+    /// 读取插件包清单的顶层 id、name、version。ClassIsland 清单是扁平 YAML，这里只按顶层键逐行解析，
+    /// 不引入 YAML 依赖；不是有效 zip、缺少清单或缺少 id 时返回 null。
+    /// </summary>
+    public static PluginPackageManifest? TryRead(Stream package)
+    {
+        try
+        {
+            using var archive = new System.IO.Compression.ZipArchive(package, System.IO.Compression.ZipArchiveMode.Read, leaveOpen: true);
+            var entry = archive.GetEntry(ManifestFileName);
+            if (entry is null || entry.Length > 1024 * 1024) return null;
+            using var reader = new StreamReader(entry.Open());
+            string? id = null, name = null, version = null;
+            while (reader.ReadLine() is { } line)
+            {
+                // 缩进行属于嵌套对象（例如依赖列表），只读取顶层键。
+                if (line.Length == 0 || char.IsWhiteSpace(line[0]) || line[0] == '-') continue;
+                var colon = line.IndexOf(':');
+                if (colon <= 0) continue;
+                var key = line[..colon].Trim();
+                var value = line[(colon + 1)..].Trim().Trim('"', '\'');
+                if (key.Equals("id", StringComparison.OrdinalIgnoreCase)) id ??= value;
+                else if (key.Equals("name", StringComparison.OrdinalIgnoreCase)) name ??= value;
+                else if (key.Equals("version", StringComparison.OrdinalIgnoreCase)) version ??= value;
+            }
+            return string.IsNullOrWhiteSpace(id)
+                ? null
+                : new PluginPackageManifest(id, string.IsNullOrWhiteSpace(name) ? id : name, version ?? string.Empty);
+        }
+        catch (InvalidDataException)
+        {
+            return null;
+        }
+    }
+
+    public static PluginPackageManifest? TryRead(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return TryRead(stream);
+    }
 }

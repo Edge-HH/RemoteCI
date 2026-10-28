@@ -58,6 +58,11 @@ public sealed class ControlModel(
     public bool HasAvatar => CurrentClass?.HasAvatar == true;
 
     public bool PluginOnline => peers.HasPluginFor(CurrentClassId);
+    public bool GuardOnline => peers.HasGuardFor(CurrentClassId);
+    public bool GuardOnly => GuardOnline && !PluginOnline;
+    public bool CanLaunchClassIsland => CurrentUser.Role == UserRole.Admin &&
+        ClassPermissions.HasFlag(UserPermissions.ManageUsers) &&
+        peers.PrimaryGuardSupports(CurrentClassId, RemoteCiCapabilities.AppGuardLaunch);
     public ClassStateSnapshot? Snapshot { get; private set; }
     public IReadOnlyList<ExtensionControlItem> Extensions { get; private set; } = [];
 
@@ -339,6 +344,16 @@ public sealed class ControlModel(
         {
             Command = CommandKind.RestartClassIsland,
         }, ct));
+    }
+
+    public async Task<IActionResult> OnPostLaunchClassIslandAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (RequireClass(UserPermissions.ManageUsers) is { } classDenied) return classDenied;
+        var requestedBy = (await Identities.GetProfileAsync(CurrentUser.Id, ct))?.WithPermissions(ClassPermissions);
+        if (requestedBy is null) return RedirectToPage("/Login");
+        return RedirectWithResult(await peers.LaunchClassIslandAsync(CurrentClassId, requestedBy, CommandTimeout, ct));
     }
 
     public async Task<IActionResult> OnPostExtensionAsync(string extensionId, CancellationToken ct)

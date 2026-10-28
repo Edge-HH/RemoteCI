@@ -37,27 +37,22 @@ public sealed class AppGuardService : IDisposable
     /// <summary>上报守护事件的通道（云端连接）；返回 false 表示未送达，下次重试。</summary>
     public Func<AppGuardEventBatch, Task<bool>>? EventSender { get; set; }
 
-    public string GuardExecutablePath => Path.Combine(Directory, GuardFiles.ExecutableName);
+    /// <summary>当前云端开关、服务器地址和长期设备凭据；仅在内存中读取并加密同步给守护代理。</summary>
+    public Func<(bool Enabled, string ServerUrl, string? Token)>? ConnectionInfoProvider { get; set; }
 
-    /// <summary>设置页显示的一句话状态。</summary>
-    public string Summary
-    {
-        get
-        {
-            if (_store.Current is not { } policy) return "应用守护：未由管理员配置";
-            if (!policy.Enabled) return "应用守护：未启用";
-            var status = GuardJson.ReadFile<GuardStatus>(Path.Combine(Directory, GuardFiles.Status));
-            var backup = status is { LastBackupUnixMs: > 0 }
-                ? $"，最近备份 {DateTimeOffset.FromUnixTimeMilliseconds(status.LastBackupUnixMs).ToLocalTime():MM-dd HH:mm}"
-                : string.Empty;
-            return $"应用守护：已由管理员启用（{policy.Describe()}）{backup}";
-        }
-    }
+    public string GuardExecutablePath => ExecutablePath(Directory, _store.Current?.ProcessName);
+
+    internal static string ExecutablePath(string directory, string? processName) =>
+        Path.Combine(directory, GuardFiles.ExecutableNameFor(processName));
 
     public void Start()
     {
         _store.Changed += Apply;
-        Apply();
+        _ = Task.Run(() =>
+        {
+            try { Apply(); }
+            catch (Exception ex) { _logger.LogError(ex, "应用守护初始部署失败"); }
+        });
         ShowPendingNotice();
         _timer = new Timer(_ => Maintain(), null, MaintenanceInterval, MaintenanceInterval);
     }
@@ -101,6 +96,7 @@ public sealed class AppGuardService : IDisposable
             try
             {
                 if (policy.Enabled) Deploy(policy);
+                else if (HasStopRequest()) StopWithoutCleanup();
                 else Teardown();
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException)
@@ -108,6 +104,17 @@ public sealed class AppGuardService : IDisposable
                 _logger.LogWarning(ex, "应用守护{Action}失败", policy.Enabled ? "部署" : "清理");
             }
         }
+    }
+
+    private bool HasStopRequest() => File.Exists(Path.Combine(Directory, GuardFiles.StopRequested));
+
+    private void StopWithoutCleanup()
+    {
+        var config = GuardJson.ReadFile<GuardConfig>(Path.Combine(Directory, GuardFiles.Policy));
+        var target = ExecutablePath(Directory, config?.ProcessName);
+        if (File.Exists(target)) _host.StopGuard(target);
+        _host.SetRunKey(null);
+        _logger.LogInformation("应用守护已关闭，保留 {Path} 供之后重新启用", Directory);
     }
 
     /// <summary>每分钟：守护进程被结束时重新拉起，并上报守护事件。</summary>
@@ -119,6 +126,7 @@ public sealed class AppGuardService : IDisposable
             {
                 try
                 {
+                    SyncConnection();
                     if (File.Exists(GuardExecutablePath) && !_host.IsGuardRunning(GuardExecutablePath))
                     {
                         _logger.LogInformation("应用守护进程未运行，重新启动");
@@ -185,6 +193,7 @@ public sealed class AppGuardService : IDisposable
 
     internal static GuardConfig BuildConfig(AppGuardPolicy policy, AppGuardHostInfo info, long nowUnixMs)
     {
+        policy = policy.Normalized();
         var roots = new List<string> { info.PackageRoot };
         foreach (var root in info.DataRoots)
         {
@@ -194,6 +203,10 @@ public sealed class AppGuardService : IDisposable
         return new GuardConfig
         {
             Enabled = policy.Enabled,
+            EnhancedMode = policy.EnhancedMode,
+            RandomBackupPath = policy.RandomBackupPath,
+            BackupDirectoryName = policy.BackupDirectoryName,
+            ProcessName = policy.ProcessName,
             RestartAfterExit = policy.RestartAfterExit,
             RestartDelayMinutes = policy.RestartAfterExitDelayMinutes,
             RestartOnCrash = policy.RestartOnCrash,
@@ -206,6 +219,7 @@ public sealed class AppGuardService : IDisposable
             // 有启动器时只以启动器判断是否被删除：升级会换掉 app-版本 目录，以它为准会误判。
             Sentinels = [GuardBackup.IsUnder(info.LaunchPath, info.PackageRoot) ? info.LaunchPath : info.ProcessPath],
             BackupRoots = roots,
+            BackupPaths = policy.BackupPaths.ToList(),
             Excludes = info.Excludes.ToList(),
             ClassIslandVersion = info.ClassIslandVersion,
             UpdatedAtUnixMs = nowUnixMs,
@@ -217,7 +231,18 @@ public sealed class AppGuardService : IDisposable
         var info = _host.Describe();
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var config = BuildConfig(policy, info, now);
+        var previous = GuardJson.ReadFile<GuardConfig>(Path.Combine(Directory, GuardFiles.Policy));
+        config.RandomBackupPath = previous?.RandomBackupPath == true;
+        config.ProtectedBackupPath = previous?.ProtectedBackupPath;
+        config.ProtectedBackupReady = previous?.ProtectedBackupReady == true;
+        GuardBackup.ConfigureProtectedBackup(config, policy.RandomBackupPath,
+            message => _logger.LogWarning("{Message}", message));
         System.IO.Directory.CreateDirectory(Directory);
+        try { File.Delete(Path.Combine(Directory, GuardFiles.StopRequested)); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "清理过期的守护关闭标记失败");
+        }
         GuardJson.WriteFile(Path.Combine(Directory, GuardFiles.Policy), config);
         WriteState(GuardRunStates.Running);
         if (policy.PreventDeletion && info.IsMsix && !_msixNoticeRecorded)
@@ -227,6 +252,9 @@ public sealed class AppGuardService : IDisposable
         }
 
         var target = GuardExecutablePath;
+        var previousTarget = ExecutablePath(Directory, previous?.ProcessName);
+        var renamed = !string.Equals(previousTarget, target, StringComparison.OrdinalIgnoreCase);
+        if (renamed && File.Exists(previousTarget)) _host.StopGuard(previousTarget);
         var bundled = _host.BundledGuardPath;
         if (File.Exists(bundled) && (!File.Exists(target) || !SameContent(bundled, target)))
         {
@@ -240,15 +268,81 @@ public sealed class AppGuardService : IDisposable
             _logger.LogWarning("插件包中缺少 {File}，应用守护无法运行", GuardFiles.ExecutableName);
             return;
         }
+        var enhancedMarker = _host.EnhancedMarkerPath;
+        var enhanced = File.Exists(enhancedMarker) ? GuardJson.ReadFile<EnhancedGuardConfig>(enhancedMarker) : null;
+        var enhancedCurrent = enhanced is not null &&
+            string.Equals(Path.GetFullPath(enhanced.AgentDirectory), Path.GetFullPath(Directory), StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(Path.GetFullPath(enhanced.AgentExecutablePath), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase);
+        var enhancedFailed = false;
+        if (policy.EnhancedMode && !enhancedCurrent)
+        {
+            enhancedFailed = !_host.ConfigureEnhanced(true, target, Directory);
+            if (enhancedFailed)
+                AppendEvent("enhanced-failed", "增强守护安装或路径更新未完成，已保留普通守护；请允许管理员授权后重试");
+        }
+        else if (!policy.EnhancedMode && File.Exists(enhancedMarker))
+        {
+            enhancedFailed = !_host.ConfigureEnhanced(false, target, Directory);
+            if (enhancedFailed) AppendEvent("enhanced-failed", "增强守护服务卸载未完成，请允许管理员授权后重试");
+        }
         _host.SetRunKey($"\"{target}\"");
+        SyncConnection();
         if (!_host.IsGuardRunning(target)) _host.StartGuard(target, Directory);
+        if (renamed && !enhancedFailed && File.Exists(previousTarget))
+        {
+            try { File.Delete(previousTarget); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(ex, "清理改名前的应用守护程序失败：{Path}", previousTarget);
+            }
+        }
+    }
+
+    private void SyncConnection()
+    {
+        if (ConnectionInfoProvider?.Invoke() is not { } info || !System.IO.Directory.Exists(Directory)) return;
+        string? protectedToken = null;
+        if (!string.IsNullOrEmpty(info.Token))
+        {
+            var plain = System.Text.Encoding.UTF8.GetBytes(info.Token);
+            var encrypted = OperatingSystem.IsWindows()
+                ? ProtectedData.Protect(plain, System.Text.Encoding.UTF8.GetBytes("RemoteCI.CloudToken.v1"), DataProtectionScope.CurrentUser)
+                : plain;
+            protectedToken = Convert.ToBase64String(encrypted);
+        }
+        var path = Path.Combine(Directory, GuardFiles.Connection);
+        GuardJson.WriteFile(path, new GuardConnectionConfig
+        {
+            Enabled = info.Enabled,
+            ServerUrl = info.ServerUrl,
+            ProtectedToken = protectedToken,
+            UpdatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        });
+        FileProtection.RestrictToCurrentUser(path);
     }
 
     private void Teardown()
     {
-        var target = GuardExecutablePath;
+        var config = GuardJson.ReadFile<GuardConfig>(Path.Combine(Directory, GuardFiles.Policy));
+        var target = ExecutablePath(Directory, config?.ProcessName);
         if (File.Exists(target)) _host.StopGuard(target);
+        var enhancedMarker = _host.EnhancedMarkerPath;
+        var enhanced = File.Exists(enhancedMarker) ? GuardJson.ReadFile<EnhancedGuardConfig>(enhancedMarker) : null;
+        if (File.Exists(enhancedMarker))
+        {
+            var enhancedTarget = !string.IsNullOrWhiteSpace(enhanced?.AgentExecutablePath) ? enhanced.AgentExecutablePath : target;
+            if (!string.Equals(enhancedTarget, target, StringComparison.OrdinalIgnoreCase) && File.Exists(enhancedTarget))
+                _host.StopGuard(enhancedTarget);
+            _host.ConfigureEnhanced(false, enhancedTarget, Directory);
+        }
         _host.SetRunKey(null);
+        if (config is not null)
+        {
+            foreach (var backup in GuardBackup.BackupTargets(config, Directory, null).Skip(1))
+            {
+                if (System.IO.Directory.Exists(backup)) System.IO.Directory.Delete(backup, true);
+            }
+        }
         if (!System.IO.Directory.Exists(Directory)) return;
         // 未上报的事件随目录一起丢弃即可：关闭守护后不再需要。
         System.IO.Directory.Delete(Directory, true);

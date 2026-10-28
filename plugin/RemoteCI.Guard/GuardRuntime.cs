@@ -23,6 +23,7 @@ internal sealed class GuardRuntime : IDisposable
     private readonly object _tickLock = new();
     private readonly string _version = typeof(GuardRuntime).Assembly.GetName().Version?.ToString() ?? string.Empty;
     private Timer? _timer;
+    private GuardCloudClient? _cloud;
     private volatile bool _stopping;
     private int _backupRunning;
     private long _lastBackupAttemptMs;
@@ -41,6 +42,18 @@ internal sealed class GuardRuntime : IDisposable
         Directory.CreateDirectory(_directory);
         _status = GuardJson.ReadFile<GuardStatus>(Path.Combine(_directory, GuardFiles.Status)) ?? new GuardStatus();
         Log($"守护进程启动，版本 {_version}");
+        _cloud = new GuardCloudClient(_directory)
+        {
+            CommandHandler = HandleRemoteCommand,
+            CommandHandled = HandleRemoteCommandHandled,
+            StatusChanged = (connected, status) =>
+            {
+                _status.CloudConnected = connected;
+                _status.CloudStatus = status;
+            },
+            Log = Log,
+        };
+        _cloud.Start();
         _timer = new Timer(_ => Tick(), null, 0, TickMs);
     }
 
@@ -49,10 +62,15 @@ internal sealed class GuardRuntime : IDisposable
         if (_stopping) return;
         _stopping = true;
         _timer?.Dispose();
+        _cloud?.Dispose();
         Log("会话结束，守护进程停止");
     }
 
-    public void Dispose() => _timer?.Dispose();
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        _cloud?.Dispose();
+    }
 
     private void Tick()
     {
@@ -70,6 +88,11 @@ internal sealed class GuardRuntime : IDisposable
                 return;
             }
 
+            if (policy.RandomBackupPath && !policy.ProtectedBackupReady)
+            {
+                GuardBackup.ConfigureProtectedBackup(policy, true, Log);
+                TryWrite(Path.Combine(_directory, GuardFiles.Policy), policy);
+            }
             var now = GuardJson.NowUnixMs();
             EnsureRunKey(now);
             var state = GuardJson.ReadFile<GuardRunState>(Path.Combine(_directory, GuardFiles.State));
@@ -232,6 +255,129 @@ internal sealed class GuardRuntime : IDisposable
         }
     }
 
+    private GuardCommandResult HandleRemoteCommand(GuardCommand command)
+    {
+        lock (_tickLock)
+        {
+            if (command.Command is GuardCommands.StopAppGuard or GuardCommands.UninstallAppGuard)
+                return PrepareRemoteStop(command.Command == GuardCommands.UninstallAppGuard);
+            var policy = GuardJson.ReadFile<GuardConfig>(Path.Combine(_directory, GuardFiles.Policy));
+            if (policy is not { Enabled: true }) return GuardCommandResult.Failure("PLUGIN_OFFLINE", "应用守护未启用");
+            var state = GuardJson.ReadFile<GuardRunState>(Path.Combine(_directory, GuardFiles.State));
+            if (IsClassIslandRunning(policy, state)) return GuardCommandResult.Ok("ClassIsland 已在运行");
+            if (!IsInstallPresent(policy)) return GuardCommandResult.Failure("INTERNAL_ERROR", "ClassIsland 启动器不存在，等待守护恢复");
+            if (!TryLaunch(policy, out var error)) return GuardCommandResult.Failure("INTERNAL_ERROR", $"启动失败：{error}");
+            RecordEvent("remote-launched", "系统管理员通过守护通道远程打开 ClassIsland");
+            return GuardCommandResult.Ok("已向 ClassIsland 发出启动请求");
+        }
+    }
+
+    private GuardCommandResult PrepareRemoteStop(bool uninstall)
+    {
+        var path = Path.Combine(_directory, GuardFiles.Policy);
+        var policy = GuardJson.ReadFile<GuardConfig>(path);
+        if (policy is not { Enabled: true }) return GuardCommandResult.Failure("PLUGIN_OFFLINE", "应用守护未启用");
+        if (uninstall && !TryUninstallEnhanced(policy, out var uninstallError))
+            return GuardCommandResult.Failure("INTERNAL_ERROR", uninstallError ?? "增强守护卸载未完成");
+        var stopMarker = Path.Combine(_directory, GuardFiles.StopRequested);
+        if (!uninstall)
+        {
+            try { File.WriteAllText(stopMarker, GuardJson.NowUnixMs().ToString(), new UTF8Encoding(false)); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return GuardCommandResult.Failure("INTERNAL_ERROR", $"无法标记保留式关闭：{ex.Message}");
+            }
+        }
+        else
+        {
+            try { File.Delete(stopMarker); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+        policy.Enabled = false;
+        if (uninstall) policy.EnhancedMode = false;
+        policy.UpdatedAtUnixMs = GuardJson.NowUnixMs();
+        try { GuardJson.WriteFile(path, policy); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            if (!uninstall)
+            {
+                try { File.Delete(stopMarker); }
+                catch (Exception deleteError) when (deleteError is IOException or UnauthorizedAccessException) { }
+            }
+            return GuardCommandResult.Failure("INTERNAL_ERROR", $"无法保存守护停用状态：{ex.Message}");
+        }
+        return GuardCommandResult.Ok(uninstall ? "应用守护已卸载" : "应用守护已关闭");
+    }
+
+    private bool TryUninstallEnhanced(GuardConfig policy, out string? error)
+    {
+        error = null;
+        var marker = Path.Combine(EnhancedGuardSetup.ProgramDataDirectory(), "enhanced.json");
+        if (!policy.EnhancedMode && !File.Exists(marker)) return true;
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = typeof(GuardRuntime).Assembly.Location,
+                Arguments = "--uninstall-enhanced",
+                Verb = "runas",
+                UseShellExecute = true,
+                WorkingDirectory = _directory,
+                WindowStyle = ProcessWindowStyle.Hidden,
+            });
+            if (process is null)
+            {
+                error = "无法启动增强守护卸载程序";
+                return false;
+            }
+            process.WaitForExit();
+            if (process.ExitCode == 0) return true;
+            error = $"增强守护卸载程序返回错误 {process.ExitCode}";
+            return false;
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            error = $"增强守护卸载已取消或失败：{ex.Message}";
+            return false;
+        }
+    }
+
+    private void HandleRemoteCommandHandled(GuardCommand command, GuardCommandResult result)
+    {
+        if (!result.Success ||
+            command.Command is not (GuardCommands.StopAppGuard or GuardCommands.UninstallAppGuard)) return;
+        var uninstall = command.Command == GuardCommands.UninstallAppGuard;
+        var policy = GuardJson.ReadFile<GuardConfig>(Path.Combine(_directory, GuardFiles.Policy));
+        RemoveRunKey();
+        _stopping = true;
+        _timer?.Dispose();
+        if (uninstall && policy is not null) StartDeferredCleanup(policy);
+        Log(uninstall ? "应用守护已卸载，守护进程退出" : "应用守护已关闭，守护进程退出");
+        Exited?.Invoke();
+    }
+
+    private void StartDeferredCleanup(GuardConfig policy)
+    {
+        try
+        {
+            var targets = GuardBackup.BackupTargets(policy, _directory, null).Skip(1).ToList();
+            targets.Add(_directory);
+            var remove = string.Join(" & ", targets.Select(path => $"rmdir /s /q \"{path}\""));
+            using var _ = Process.Start(new ProcessStartInfo
+            {
+                FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"),
+                Arguments = $"/d /c timeout /t 2 /nobreak >nul & {remove}",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+            });
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
+        {
+            Log($"守护文件延迟清理失败：{ex.Message}");
+        }
+    }
+
     private bool TryLaunch(GuardConfig policy, out string? error)
     {
         error = null;
@@ -259,7 +405,7 @@ internal sealed class GuardRuntime : IDisposable
         _lastRunKeyCheckMs = now;
         try
         {
-            var command = $"\"{Path.Combine(_directory, GuardFiles.ExecutableName)}\"";
+            var command = $"\"{typeof(GuardRuntime).Assembly.Location}\"";
             using var key = Registry.CurrentUser.CreateSubKey(GuardFiles.RunKeyPath);
             if (!string.Equals(key?.GetValue(GuardFiles.RunValueName) as string, command, StringComparison.OrdinalIgnoreCase))
                 key?.SetValue(GuardFiles.RunValueName, command);
@@ -291,6 +437,7 @@ internal sealed class GuardRuntime : IDisposable
             try
             {
                 File.AppendAllText(Path.Combine(_directory, GuardFiles.Events), line + "\n", new UTF8Encoding(false));
+                _cloud?.NotifyEvent();
                 return;
             }
             catch (IOException) { Thread.Sleep(100); }

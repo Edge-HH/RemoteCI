@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RemoteCI.Server.Data;
 using RemoteCI.Shared;
@@ -36,6 +37,11 @@ public sealed class AppGuardService(
         row.AppGuardRestartOnCrash = normalized.RestartOnCrash;
         row.AppGuardPreventDeletion = normalized.PreventDeletion;
         row.AppGuardBackupIntervalHours = normalized.BackupIntervalHours;
+        row.AppGuardEnhancedMode = normalized.EnhancedMode;
+        row.AppGuardRandomBackupPath = normalized.RandomBackupPath;
+        row.AppGuardBackupDirectoryName = normalized.BackupDirectoryName;
+        row.AppGuardProcessName = normalized.ProcessName;
+        row.AppGuardBackupPathsJson = SerializePaths(normalized);
         await db.SaveChangesAsync(ct);
         await PushToOnlineAsync(null, ct);
         return FromGlobal(row);
@@ -73,6 +79,11 @@ public sealed class AppGuardService(
         entry.RestartOnCrash = normalized.RestartOnCrash;
         entry.PreventDeletion = normalized.PreventDeletion;
         entry.BackupIntervalHours = normalized.BackupIntervalHours;
+        entry.EnhancedMode = normalized.EnhancedMode;
+        entry.RandomBackupPath = normalized.RandomBackupPath;
+        entry.BackupDirectoryName = normalized.BackupDirectoryName;
+        entry.ProcessName = normalized.ProcessName;
+        entry.BackupPathsJson = SerializePaths(normalized);
         entry.UpdatedAt = time.GetUtcNow();
         await db.SaveChangesAsync(ct);
         await PushToOnlineAsync(credentialId, ct);
@@ -183,20 +194,18 @@ public sealed class AppGuardService(
         }).ToList();
     }
 
-    /// <summary>向在线且声明守护能力的插件下发各自的生效策略；<paramref name="onlyCredential"/> 非空时只发给该设备。</summary>
+    /// <summary>向在线且声明守护能力的插件与守护连接下发各自的生效策略。</summary>
     private async Task PushToOnlineAsync(Guid? onlyCredential, CancellationToken ct)
     {
-        var targets = peers.GetPluginDeviceSnapshots()
-            .Where(x => x.PluginCredentialId is not null)
-            .Where(x => onlyCredential is null || x.PluginCredentialId == onlyCredential)
-            .Where(x => x.EffectiveCapabilities.Contains(RemoteCiCapabilities.AppGuard, StringComparer.Ordinal))
+        var targets = peers.GetAppGuardConnections()
+            .Where(x => onlyCredential is null || x.CredentialId == onlyCredential)
             .ToList();
         if (targets.Count == 0) return;
         var row = await db.SystemMetadata.AsNoTracking().SingleAsync(x => x.Id == 1, ct);
         var overrides = await db.AppGuardOverrides.AsNoTracking().ToDictionaryAsync(x => x.CredentialId, ct);
         foreach (var target in targets)
         {
-            var policy = overrides.TryGetValue(target.PluginCredentialId!.Value, out var entry)
+            var policy = overrides.TryGetValue(target.CredentialId, out var entry)
                 ? FromOverride(entry, row.OrganizationName)
                 : FromGlobal(row);
             await peers.SendToPluginConnectionAsync(target.ConnectionId, Envelope.AppGuardPolicy(policy), ct);
@@ -217,6 +226,11 @@ public sealed class AppGuardService(
         RestartOnCrash = row.AppGuardRestartOnCrash,
         PreventDeletion = row.AppGuardPreventDeletion,
         BackupIntervalHours = row.AppGuardBackupIntervalHours,
+        EnhancedMode = row.AppGuardEnhancedMode,
+        RandomBackupPath = row.AppGuardRandomBackupPath,
+        BackupDirectoryName = row.AppGuardBackupDirectoryName,
+        ProcessName = row.AppGuardProcessName,
+        BackupPaths = DeserializePaths(row.AppGuardBackupPathsJson),
         OrganizationName = row.OrganizationName ?? AppGuardPolicy.DefaultOrganizationName,
     }.Normalized();
 
@@ -228,8 +242,24 @@ public sealed class AppGuardService(
         RestartOnCrash = entry.RestartOnCrash,
         PreventDeletion = entry.PreventDeletion,
         BackupIntervalHours = entry.BackupIntervalHours,
+        EnhancedMode = entry.EnhancedMode,
+        RandomBackupPath = entry.RandomBackupPath,
+        BackupDirectoryName = entry.BackupDirectoryName,
+        ProcessName = entry.ProcessName,
+        BackupPaths = DeserializePaths(entry.BackupPathsJson),
         OrganizationName = organizationName ?? AppGuardPolicy.DefaultOrganizationName,
     }.Normalized();
+
+    private static string SerializePaths(AppGuardPolicy policy) => JsonSerializer.Serialize(policy.BackupPaths);
+
+    internal static List<string> DeserializeBackupPaths(string? json) => DeserializePaths(json);
+
+    private static List<string> DeserializePaths(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try { return JsonSerializer.Deserialize<List<string>>(json) ?? []; }
+        catch (JsonException) { return []; }
+    }
 
     private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
 }

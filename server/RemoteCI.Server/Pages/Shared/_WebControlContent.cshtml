@@ -10,10 +10,25 @@
         <p class="eyebrow">ClassIsland 远程操作</p>
         <h1>控制</h1>
     </div>
-    <span class="status @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "插件在线" : "插件离线")</span>
+    <span class="status @(Model.PluginOnline || Model.GuardOnline ? "online" : "offline")">@(Model.PluginOnline ? "课表在线" : Model.GuardOnline ? "守护在线 · 课表离线" : "设备离线")</span>
 </div>
 
 @await Html.PartialAsync("_BatchResults", Model)
+@if (Model.GuardOnly)
+{
+    <section class="panel batch-section control-command-section" aria-labelledby="guard-launch-title">
+        <div class="panel-heading"><div><h2 id="guard-launch-title">独立守护</h2><p class="muted">课表与插件当前离线，仅可通过设备外守护执行启动操作。</p></div></div>
+        <div class="batch-action-grid">
+            @if (Model.CanLaunchClassIsland)
+            {
+                <form method="post" asp-page-handler="LaunchClassIsland" class="batch-action-card-form">
+                    <button type="submit" class="batch-action-card"><span class="batch-action-icon"><i class="icon icon-desktop-windows" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>远程打开 ClassIsland</strong><small>由独立守护在已登录的 Windows 用户会话中启动课表。</small></span></button>
+                </form>
+            }
+        </div>
+    </section>
+    return;
+}
 @if (MobileUi.IsMobile(Context) && !Model.HasClassroomOperations && !Model.CanControlMainMenu && !Model.CanControlVolume && !Model.CanUseExtensions)
 { <section class="panel mobile-empty"><i class="icon icon-tune"></i><h2>没有可用的控制项</h2><p>可用操作取决于账号权限和当前插件能力。</p></section> }
 
@@ -42,6 +57,12 @@
         @if (Model.CanCaptureScreen)
         {
             <button type="button" class="batch-action-card" data-user-edit-open="screenshot-dialog" aria-controls="screenshot-dialog"><span class="batch-action-icon"><i class="icon icon-desktop-windows" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>屏幕截图</strong><small>查看教室电脑当前屏幕。</small></span></button>
+        }
+        @if (Model.CanLaunchClassIsland)
+        {
+            <form method="post" asp-page-handler="LaunchClassIsland" class="batch-action-card-form">
+                <button type="submit" class="batch-action-card"><span class="batch-action-icon"><i class="icon icon-desktop-windows" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>远程打开 ClassIsland</strong><small>由独立守护在已登录的 Windows 用户会话中启动课表。</small></span></button>
+            </form>
         }
         @if (Model.CanManageClassInfo)
         {

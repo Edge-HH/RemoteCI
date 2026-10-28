@@ -100,7 +100,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 ## 能力协商
 
-V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings`、`schedule.holiday-calendar`、`profile.read`、`profile.temp-layer`、`schedule.semester`、`file.transfer`、`host.app-guard`、`schedule.change-permanent`、`schedule.adjustments` 和 `screen.capture` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
+V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings`、`schedule.holiday-calendar`、`profile.read`、`profile.temp-layer`、`schedule.semester`、`file.transfer`、`host.app-guard`、`host.app-guard-launch`、`host.app-guard-manage`、`schedule.change-permanent`、`schedule.adjustments`、`screen.capture` 和 `plugin.package-install` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
 
 WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手机的有效能力是“本地 ∩ 服务端 ∩ 当前班级主插件”。服务端在 `capabilities_sync.classPlugins` 中按接收方可访问的班级逐个下发主插件能力，客户端切换班级时按新班级重算；没有对应条目表示该班插件离线。旧服务端没有该字段时客户端退回 `plugin`。多插件时，当前主插件仍是最早接入的健康插件；主插件切换、断开或能力更新后，服务端重新广播能力快照。界面应隐藏缺失能力的入口，服务端转发命令前仍需按统一映射复核主插件能力，缺少能力时返回 `CAPABILITY_UNSUPPORTED`。能力声明不能绕过账号权限或扩展策略检查。
 
@@ -183,11 +183,18 @@ WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手
 | `restartOnCrash` | 意外退出时重启 |
 | `preventDeletion` | 定时备份，被删除后恢复 |
 | `backupIntervalHours` | 备份间隔小时数，1–168，默认 24 |
+| `enhancedMode` | 安装自动启动 Windows 服务，维护普通权限用户代理 |
+| `randomBackupPath` | 启用 ACL 受限的安全备份目录 |
+| `backupDirectoryName` | `%LOCALAPPDATA%\RemoteCI\ProtectedBackups` 下的子目录名；空表示随机生成并复用，最长 64 字符 |
+| `processName` | 守护代理文件名（可省略 `.exe`），默认 `RemoteCI.Guard`，最长 48 字符 |
+| `backupPaths` | 最多 3 个额外绝对备份路径，每项最长 260 字符 |
 | `organizationName` | 系统配置中的组织名，未设置时为 `RemoteCI` |
 
-越界数值由服务端与插件各自截断。插件把策略缓存为 `AppGuardPolicy.json`，并部署设备外的守护进程 `%LOCALAPPDATA%\RemoteCI\Guard\RemoteCI.Guard.exe`。
+越界数值由服务端与插件各自截断。插件把策略缓存为 `AppGuardPolicy.json`，并把守护进程部署到 `%LOCALAPPDATA%\RemoteCI\Guard\<processName>.exe`，从不直接运行 ClassIsland 安装目录内的守护副本。
 
-守护进程记录的事件由插件以 `app_guard_event` 上报，`kind` 取值：
+守护使用相同设备令牌连接 `/ws?token=...&client=guard`，声明 `host.app-guard`、`host.app-guard-launch` 与 `host.app-guard-manage`。插件与守护按凭据合并为同一设备，完整插件优先参与普通路由；守护只接收 `app_guard_policy` 与命令 28 `LaunchClassIsland`、32 `StopAppGuard`、33 `UninstallAppGuard`，不接收账号或课表数据。三条命令仅限具有 `ManageUsers` 的系统管理员，执行端复核 `requestedBy.role=Admin` 和权限位；课表已运行时命令 28 幂等成功。命令 32 停用策略并退出守护进程，保留安装文件；命令 33 先请求 UAC 移除增强服务与登录任务，再停用策略、退出守护并延迟删除默认目录和额外备份。守护先发送 `command_result`，成功后才断开连接；`app_guard_event` 与 `command_result` 是守护允许上报的其他消息。WebUI 只在守护在线且声明 `host.app-guard-manage` 时提供关闭/卸载入口，命令成功后把该设备保存为停用的单设备覆盖。
+
+守护进程记录的事件由插件或独立守护通道以 `app_guard_event` 上报，`kind` 取值：
 
 - `restored`：已自动恢复；
 - `restore-failed`：恢复失败；
@@ -271,6 +278,8 @@ RemoteCI 插件在云端连接建立后通过 `software_inventory` 上报设备�
 命令值 13 为 `InstallPlugins`、14 为 `UninstallPlugins`、15 为 `SetPluginEnabled`、16 为 `SetPluginManagementPolicy`、17 为 `DistributeProfile`、18 为 `UpdateTimeLayout`、19 为 `JoinManagement`。这些命令都要求 `ManageUsers` 权限，并在服务端和插件端再次确认系统管理员身份；能力标识分别为 `plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`schedule.time-layout` 和 `management.join`。
 
 - 插件安装使用 ClassIsland 官方插件市场解析依赖并下载 `.cipx` 缓存，卸载和启停使用宿主公开的 `PluginInfo` 状态接口；RemoteCI 拒绝操作自身，避免远程控制链路被卸载或禁用。
+- 命令值 31 为 `InstallPluginPackages`（能力 `plugin.package-install`，同样要求 `ManageUsers` 并仅限系统管理员；与截图一样只能由服务端入口构造，因为服务端要先为目标设备登记插件包下载权限，通用 `POST /api/commands`、手机/手表通道与局域网直连一律拒绝）：插件从服务端文件中转下载一组 `.cipx` 插件包并安装或更新。参数 `pluginPackages` 为 `{mode, packages, force, restartAfter}`：`mode=1`（Install）安装插件，已安装的显式插件包会被覆盖安装、`isDependency=true` 且本机已安装的依赖包跳过；`mode=2`（Upgrade）只更新本机已安装且包版本更高的插件，`force=true` 时不比较版本。每个 `packages[]` 为 `{pluginId, name, version, isDependency, transferId, downloadKey, size, sha256}`，最多 32 个，下载方式与文件中转相同（`GET /api/plugin/files/{transferId}` + `X-RemoteCI-Transfer-Key`，断点续传、SHA-256 校验），下载进度经 `file_transfer_progress` 回报到对应传输。插件核对包内 `manifest.yml` 的 `id` 与 `pluginId` 一致后，把包放入宿主插件包缓存（`PluginPackages/<id>.cipx`，与 ClassIsland“从本地安装插件”相同），全部处理完后按 `restartAfter` 重启 ClassIsland 由宿主安装。命令立即回执，最终结果随 `software_inventory.lastUpdate`（`operation=2`）回传。该命令可以更新 RemoteCI 自身。
+- WebUI 的“安装插件”直接列出 ClassIsland 插件市场（服务端读取与宿主相同的 `index.zip`，显示名称、Id、作者、版本、下载量与星标），“升级插件”列出设备上报的可更新插件供勾选（不勾选时升级全部）。两者都可开启“服务端预下载”：服务端从市场下载插件包（按 `Server:PluginMarketMirror` 选择镜像并依次回退，校验 MD5，安装时连同必选依赖），再以 `InstallPluginPackages` 分发；不开启时仍发送 `InstallPlugins` / `UpgradePlugins`，由设备自己访问插件市场。“从 CIPX 安装”先把 `.cipx` 上传到服务端中转（单个不超过 512 MB，服务端校验清单），再以 `mode=1` 分发。
 - `DistributeProfile` 只接收 ClassIsland 档案 JSON 和分发范围（时间表、课表、科目），不接收任意文件路径；请求可带 `importProfileName`、`replaceCurrentProfile`（默认 `false`）和 `enableImportedProfile`（默认 `true`）。默认会把选中的内容写入一个新档案并启用该档案；只有明确开启 `replaceCurrentProfile` 才会写入当前档案。旧命令的 `replaceExisting=true` 会先清空整个所选类别，再写入源数据；关闭时按同 Id 更新并保留其他项目。`UpdateTimeLayout` 接收结构化时间点并由插件在 UI 线程写入档案。
 - 插件对 `Profile` 的字典属性按属性名运行时读取，以兼容 ClassIsland 2.0 的 `ObservableDictionary` 与后续 2.x 的字典实现；因此升级宿主后无需重新生成档案 JSON。
 - `JoinManagement` 由管理员上传 ClassIsland 集控配置文件 `ManagementPreset.json`（即宿主 ManagementSettings 的 JSON）发起。插件解析后按配置文件里的服务器类型（Serverless manifest 模板或 ManagementServer 的 API + gRPC）注册，先校验集控清单核心版本，再写入宿主的 Management 配置并重启；配置文件里的 ID（ClassIdentity）由服务端按目标设备所属班级名自动填充，不需要管理员填写。

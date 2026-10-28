@@ -263,13 +263,31 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Property<Guid>("CredentialId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("BackupDirectoryName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("BackupIntervalHours")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("BackupPathsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<bool>("Enabled")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("EnhancedMode")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("PreventDeletion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ProcessName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("RandomBackupPath")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("RestartAfterExit")
@@ -1662,13 +1680,31 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Property<long>("AccountVersion")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("AppGuardBackupDirectoryName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("AppGuardBackupIntervalHours")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("AppGuardBackupPathsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<bool>("AppGuardEnabled")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("AppGuardEnhancedMode")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("AppGuardPreventDeletion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AppGuardProcessName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("AppGuardRandomBackupPath")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("AppGuardRestartAfterExit")

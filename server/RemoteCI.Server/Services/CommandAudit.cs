@@ -282,6 +282,9 @@ public static class CommandAuditSummary
         CommandKind.CaptureScreen => "屏幕截图",
         CommandKind.ApplyMainWindowLayout => "上传主界面文件",
         CommandKind.ReadMainWindowLayout => "获取主界面文件",
+        CommandKind.InstallPluginPackages => "安装插件包",
+        CommandKind.StopAppGuard => "关闭守护",
+        CommandKind.UninstallAppGuard => "卸载守护",
         _ => $"命令 {(int)kind}",
     };
 
@@ -323,6 +326,10 @@ public static class CommandAuditSummary
             CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled
                 when command.PluginManagement is { } plugins =>
                 $"{plugins.Action}：{string.Join("、", plugins.PluginIds.Take(10))}",
+            CommandKind.InstallPluginPackages when command.PluginPackages is { } packages =>
+                $"{(packages.Mode == PluginPackageInstallMode.Upgrade ? "更新" : "安装")}：" +
+                string.Join("、", packages.Packages.Take(10).Select(x => $"{x.PluginId} {x.Version}")) +
+                (packages.Force ? "，强制" : string.Empty),
             CommandKind.DistributeProfile when command.ProfileDistribution is { } distribution =>
                 $"{DescribeSections(distribution.Sections)}{(distribution.ReplaceCurrentProfile ? "，写入当前档案" : string.Empty)}",
             CommandKind.UpdateTimeLayout when command.TimeLayoutUpdate is { } layout =>

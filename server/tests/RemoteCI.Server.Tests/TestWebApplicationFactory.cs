@@ -26,6 +26,10 @@ public sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
     private readonly SemaphoreSlim _pluginGate = new(1, 1);
     private string? _pluginToken;
 
+    /// <summary>默认插件（<see cref="GetPluginTokenAsync"/> 用引导配对码配对的那台）的设备凭据。
+    /// 测试会另外配对别的设备，所以不能再用“最新凭据”来指代它。</summary>
+    public Guid PluginCredentialId { get; private set; }
+
     public TestWebApplicationFactory() : this(null, null, null) { }
 
     private TestWebApplicationFactory(
@@ -133,6 +137,10 @@ public sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
         try
         {
             if (_pluginToken is not null) return _pluginToken;
+            Guid[] before;
+            using (var scope = Services.CreateScope())
+                before = await scope.ServiceProvider.GetRequiredService<AppDbContext>()
+                    .PluginCredentials.AsNoTracking().Select(x => x.Id).ToArrayAsync();
             var response = await CreateClient().PostAsJsonAsync("/api/plugin/pair", new PairRequest
             {
                 PairCode = TestPairCode,
@@ -140,6 +148,13 @@ public sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
             });
             response.EnsureSuccessStatusCode();
             _pluginToken = (await response.Content.ReadFromJsonAsync<PairResponse>())!.Token;
+            using (var scope = Services.CreateScope())
+            {
+                var after = await scope.ServiceProvider.GetRequiredService<AppDbContext>()
+                    .PluginCredentials.AsNoTracking().ToListAsync();
+                PluginCredentialId = (after.FirstOrDefault(x => !before.Contains(x.Id))
+                    ?? after.OrderByDescending(x => x.CreatedAt).First()).Id;
+            }
             return _pluginToken;
         }
         finally { _pluginGate.Release(); }

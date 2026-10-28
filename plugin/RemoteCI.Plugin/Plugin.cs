@@ -98,6 +98,7 @@ public class Plugin : PluginBase
         services.AddSingleton<VoiceMessagePlayer>();
         services.AddSingleton<TerminalCommandService>();
         services.AddSingleton<FileReceiveService>();
+        services.AddSingleton<PluginPackageInstallService>();
         services.AddSingleton<CommandHandler>();
         services.AddSingleton<ClassIslandNotificationBridge>();
         services.AddSingleton<StateCollector>();

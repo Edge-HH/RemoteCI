@@ -14,6 +14,11 @@ public sealed class AppGuardOverride
     public bool RestartOnCrash { get; set; }
     public bool PreventDeletion { get; set; }
     public int BackupIntervalHours { get; set; } = RemoteCI.Shared.Models.AppGuardPolicy.DefaultBackupIntervalHours;
+    public bool EnhancedMode { get; set; }
+    public bool RandomBackupPath { get; set; }
+    public string BackupDirectoryName { get; set; } = string.Empty;
+    public string ProcessName { get; set; } = RemoteCI.Shared.Models.AppGuardPolicy.DefaultProcessName;
+    public string BackupPathsJson { get; set; } = "[]";
     public DateTimeOffset UpdatedAt { get; set; }
 }
 

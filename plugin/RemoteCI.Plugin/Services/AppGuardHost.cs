@@ -25,6 +25,8 @@ public interface IAppGuardHost
     /// <summary>插件包里随附的 RemoteCI.Guard.exe。</summary>
     string BundledGuardPath { get; }
 
+    string EnhancedMarkerPath { get; }
+
     int CurrentProcessId { get; }
 
     bool IsGuardRunning(string executablePath);
@@ -36,6 +38,9 @@ public interface IAppGuardHost
     /// <summary>写入或删除（<paramref name="command"/> 为 null）当前用户的登录自启项。</summary>
     void SetRunKey(string? command);
 
+    /// <summary>通过 UAC 安装或卸载增强守护服务；用户拒绝或执行失败时返回 false。</summary>
+    bool ConfigureEnhanced(bool enabled, string executablePath, string directory);
+
     /// <summary>用 ClassIsland 原生对话框提示。</summary>
     void ShowNotice(string header, string message);
 }
@@ -44,6 +49,9 @@ public sealed class ClassIslandAppGuardHost : IAppGuardHost
 {
     public string BundledGuardPath =>
         Path.Combine(Path.GetDirectoryName(typeof(ClassIslandAppGuardHost).Assembly.Location) ?? AppContext.BaseDirectory, GuardFiles.ExecutableName);
+
+    public string EnhancedMarkerPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RemoteCI", "Guard", "enhanced.json");
 
     public int CurrentProcessId => Environment.ProcessId;
 
@@ -106,6 +114,31 @@ public sealed class ClassIslandAppGuardHost : IAppGuardHost
         else key.SetValue(GuardFiles.RunValueName, command);
     }
 
+    public bool ConfigureEnhanced(bool enabled, string executablePath, string directory)
+    {
+        try
+        {
+            var start = new ProcessStartInfo
+            {
+                FileName = executablePath,
+                Verb = "runas",
+                UseShellExecute = true,
+                WorkingDirectory = directory,
+                WindowStyle = ProcessWindowStyle.Hidden,
+            };
+            if (enabled) start.ArgumentList.Add("--install-enhanced");
+            else start.ArgumentList.Add("--uninstall-enhanced");
+            if (enabled) start.ArgumentList.Add(directory);
+            using var process = Process.Start(start);
+            process?.WaitForExit();
+            return process?.ExitCode == 0;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     public void ShowNotice(string header, string message) => Dispatcher.UIThread.Post(async () =>
     {
         try { await CommonTaskDialogs.ShowDialog(header, message, AppBase.Current.GetRootWindow()); }
@@ -114,7 +147,7 @@ public sealed class ClassIslandAppGuardHost : IAppGuardHost
 
     private static IEnumerable<Process> FindGuards(string executablePath)
     {
-        foreach (var process in Process.GetProcessesByName(GuardFiles.ProcessName))
+        foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(executablePath)))
         {
             string? path = null;
             try { path = process.MainModule?.FileName; }

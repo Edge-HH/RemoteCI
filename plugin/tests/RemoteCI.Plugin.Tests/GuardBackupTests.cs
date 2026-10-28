@@ -121,7 +121,7 @@ public sealed class GuardBackupTests : IDisposable
         var result = GuardBackup.Restore(Config(), GuardDirectory, _log.Add);
 
         Assert.False(result.Success);
-        Assert.Equal("没有可用的备份", result.Error);
+        Assert.Contains("没有可用的备份", result.Error);
     }
 
     [Fact]
@@ -141,6 +141,80 @@ public sealed class GuardBackupTests : IDisposable
         Assert.True(GuardBackup.IsDue(new GuardConfig { ClassIslandVersion = "2.2.0.0", BackupRoots = config.BackupRoots }, manifest, 0, now));
         Assert.True(GuardBackup.IsDue(config, manifest, 0, now + 24 * 60 * 60_000L));
         Assert.False(GuardBackup.IsDue(config, null, now - 10 * 60_000, now));
+    }
+
+    [Fact]
+    public void ExtraBackupTarget_SurvivesDefaultBackupLoss()
+    {
+        SeedInstall();
+        var extraRoot = Path.Combine(_root, "external");
+        var config = Config();
+        config.BackupPaths = [extraRoot];
+
+        var backup = GuardBackup.Mirror(config, GuardDirectory, _log.Add);
+
+        Assert.True(backup.Success, backup.Error);
+        var extra = Path.Combine(extraRoot, "RemoteCI.Guard.Backup");
+        Assert.True(File.Exists(GuardBackup.ManifestPath(extra)));
+        Directory.Delete(GuardDirectory, true);
+        Directory.Delete(Install, true);
+        var restored = GuardBackup.Restore(config, GuardDirectory, _log.Add);
+        Assert.True(restored.Success, restored.Error);
+        Assert.Equal("launcher", File.ReadAllText(Path.Combine(Install, "ClassIsland.exe")));
+    }
+
+    [Fact]
+    public void ProtectedBackup_CustomDirectorySurvivesDefaultLoss_AndRandomDirectoryIsReused()
+    {
+        SeedInstall();
+        var root = Path.Combine(_root, "ProtectedBackups");
+        var config = Config();
+        config.BackupDirectoryName = "Campus.Backup";
+        GuardBackup.ConfigureProtectedBackup(config, true, _log.Add, root);
+
+        Assert.True(config.ProtectedBackupReady);
+        Assert.Equal(Path.Combine(root, "Campus.Backup"), config.ProtectedBackupPath);
+        if (OperatingSystem.IsWindows())
+        {
+            var users = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.BuiltinUsersSid, null);
+            var rules = new DirectoryInfo(config.ProtectedBackupPath).GetAccessControl()
+                .GetAccessRules(true, false, typeof(System.Security.Principal.SecurityIdentifier))
+                .OfType<System.Security.AccessControl.FileSystemAccessRule>();
+            Assert.DoesNotContain(rules, rule => rule.IdentityReference.Equals(users) &&
+                rule.AccessControlType == System.Security.AccessControl.AccessControlType.Allow);
+        }
+        Assert.True(GuardBackup.Mirror(config, GuardDirectory, _log.Add).Success);
+        Directory.Delete(GuardDirectory, true);
+        Directory.Delete(Install, true);
+        Assert.True(GuardBackup.Restore(config, GuardDirectory, _log.Add).Success);
+        Assert.Equal("launcher", File.ReadAllText(Path.Combine(Install, "ClassIsland.exe")));
+
+        var custom = config.ProtectedBackupPath;
+        config.BackupDirectoryName = string.Empty;
+        GuardBackup.ConfigureProtectedBackup(config, true, _log.Add, root);
+        var random = config.ProtectedBackupPath;
+        Assert.NotEqual(custom, random);
+        Assert.False(Directory.Exists(custom));
+        GuardBackup.ConfigureProtectedBackup(config, true, _log.Add, root);
+        Assert.Equal(random, config.ProtectedBackupPath);
+        Assert.Equal(32, Path.GetFileName(random!).Length);
+
+        GuardBackup.ConfigureProtectedBackup(config, false, _log.Add, root);
+        Assert.False(config.ProtectedBackupReady);
+        Assert.Null(config.ProtectedBackupPath);
+    }
+
+    [Fact]
+    public void ProtectedBackup_InvalidDirectoryNameFallsBackToRandom()
+    {
+        var config = Config();
+        config.BackupDirectoryName = "../outside";
+
+        GuardBackup.ConfigureProtectedBackup(config, true, _log.Add, Path.Combine(_root, "ProtectedBackups"));
+
+        Assert.Equal(string.Empty, config.BackupDirectoryName);
+        Assert.Equal(32, Path.GetFileName(config.ProtectedBackupPath!).Length);
+        Assert.True(GuardBackup.IsUnder(config.ProtectedBackupPath!, Path.Combine(_root, "ProtectedBackups")));
     }
 
     [Fact]

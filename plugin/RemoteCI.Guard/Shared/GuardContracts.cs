@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Text;
@@ -21,6 +22,8 @@ internal static class GuardFiles
     public const string PendingNotice = "pending-notice.json";
     public const string Events = "events.jsonl";
     public const string EventsSending = "events.sending.jsonl";
+    public const string Connection = "connection.json";
+    public const string StopRequested = "stop-requested.json";
     public const string Log = "guard.log";
     public const string BackupFolder = "backup";
     public const string BackupCurrent = "current";
@@ -32,6 +35,42 @@ internal static class GuardFiles
     /// <summary>%LOCALAPPDATA%\RemoteCI\Guard：位于 C 盘当前用户目录，无需管理员权限，普通用户也不易看到。</summary>
     public static string DefaultDirectory() =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RemoteCI", "Guard");
+
+    public static string NormalizeProcessName(string? value)
+    {
+        var name = value?.Trim() ?? string.Empty;
+        if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) name = name.Substring(0, name.Length - 4);
+        return name.Length > 0 && name.Length <= 48 && name[0] != '.' && name[name.Length - 1] != '.' &&
+            name.All(x => x is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '.' or '_' or '-')
+            ? name
+            : ProcessName;
+    }
+
+    public static string ExecutableNameFor(string? processName) => NormalizeProcessName(processName) + ".exe";
+
+    public static string NormalizeBackupDirectoryName(string? value)
+    {
+        var name = value?.Trim() ?? string.Empty;
+        return name.Length > 0 && name.Length <= 64 && name[0] != '.' && name[name.Length - 1] != '.' &&
+            name.All(x => x is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '.' or '_' or '-')
+            ? name
+            : string.Empty;
+    }
+}
+
+internal static class GuardCommands
+{
+    public const int LaunchClassIsland = 28;
+    public const int StopAppGuard = 32;
+    public const int UninstallAppGuard = 33;
+}
+
+[DataContract]
+internal sealed class EnhancedGuardConfig
+{
+    [DataMember(Name = "agentDirectory")] public string AgentDirectory { get; set; } = string.Empty;
+    [DataMember(Name = "agentExecutablePath")] public string AgentExecutablePath { get; set; } = string.Empty;
+    [DataMember(Name = "taskName")] public string TaskName { get; set; } = @"RemoteCI\Guard Agent";
 }
 
 /// <summary>ClassIsland 的运行标记，由插件写入：running 启动后、exiting 正常退出前、updating 升级前。</summary>
@@ -47,6 +86,12 @@ internal static class GuardRunStates
 internal sealed class GuardConfig
 {
     [DataMember(Name = "enabled")] public bool Enabled { get; set; }
+    [DataMember(Name = "enhancedMode")] public bool EnhancedMode { get; set; }
+    [DataMember(Name = "randomBackupPath")] public bool RandomBackupPath { get; set; }
+    [DataMember(Name = "backupDirectoryName")] public string BackupDirectoryName { get; set; } = string.Empty;
+    [DataMember(Name = "protectedBackupPath", EmitDefaultValue = false)] public string? ProtectedBackupPath { get; set; }
+    [DataMember(Name = "protectedBackupReady")] public bool ProtectedBackupReady { get; set; }
+    [DataMember(Name = "processName")] public string ProcessName { get; set; } = GuardFiles.ProcessName;
     [DataMember(Name = "restartAfterExit")] public bool RestartAfterExit { get; set; }
     [DataMember(Name = "restartDelayMinutes")] public int RestartDelayMinutes { get; set; }
     [DataMember(Name = "restartOnCrash")] public bool RestartOnCrash { get; set; }
@@ -65,6 +110,9 @@ internal sealed class GuardConfig
 
     /// <summary>需要备份与恢复的目录；第一项是安装根目录，其余是位于安装目录之外的数据目录。</summary>
     [DataMember(Name = "backupRoots")] public List<string> BackupRoots { get; set; } = new();
+
+    /// <summary>额外备份目标的父目录；副本写入各目标下固定的 RemoteCI.Guard.Backup。</summary>
+    [DataMember(Name = "backupPaths")] public List<string> BackupPaths { get; set; } = new();
 
     /// <summary>不备份的目录（日志、缓存、临时文件等），使用完整路径。</summary>
     [DataMember(Name = "excludes")] public List<string> Excludes { get; set; } = new();
@@ -109,6 +157,19 @@ internal sealed class GuardStatus
     [DataMember(Name = "lastBackupUnixMs")] public long LastBackupUnixMs { get; set; }
     [DataMember(Name = "lastBackupBytes")] public long LastBackupBytes { get; set; }
     [DataMember(Name = "lastError", EmitDefaultValue = false)] public string? LastError { get; set; }
+    [DataMember(Name = "cloudConnected")] public bool CloudConnected { get; set; }
+    [DataMember(Name = "cloudStatus", EmitDefaultValue = false)] public string? CloudStatus { get; set; }
+    [DataMember(Name = "enhancedServiceRunning")] public bool EnhancedServiceRunning { get; set; }
+}
+
+/// <summary>插件写给守护代理的独立云端连接配置；令牌使用 DPAPI CurrentUser 加密。</summary>
+[DataContract]
+internal sealed class GuardConnectionConfig
+{
+    [DataMember(Name = "enabled")] public bool Enabled { get; set; }
+    [DataMember(Name = "serverUrl")] public string ServerUrl { get; set; } = string.Empty;
+    [DataMember(Name = "protectedToken", EmitDefaultValue = false)] public string? ProtectedToken { get; set; }
+    [DataMember(Name = "updatedAtUnixMs")] public long UpdatedAtUnixMs { get; set; }
 }
 
 /// <summary>备份清单（backup\manifest.json）。</summary>

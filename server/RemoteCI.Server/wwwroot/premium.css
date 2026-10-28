@@ -2421,3 +2421,53 @@ body.sidebar-collapsed .nav-group.collapsed > .nav-link:not(.active) { display: 
 .page-tabs a:hover { color: var(--text); background: var(--surface-soft); }
 .page-tabs a.active { color: var(--text); background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
 .page-tabs a:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 1px; }
+
+/* 插件市场：搜索、排序与刷新工具栏，条目复用 batch-plugin-option。 */
+.plugin-market {
+    display: grid;
+    gap: 8px;
+}
+
+.plugin-market-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.plugin-market-toolbar input[type="search"] {
+    flex: 1 1 200px;
+    min-width: 0;
+}
+
+.plugin-market-toolbar select {
+    flex: 0 0 auto;
+    width: auto;
+}
+
+.plugin-market-list {
+    max-height: 46vh;
+}
+
+.plugin-market-item strong .status-pill {
+    margin-left: 4px;
+    font-size: 10px;
+    font-weight: 500;
+}
+
+.plugin-market-description {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.plugin-manual-ids summary {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.plugin-manual-ids[open] summary {
+    margin-bottom: 8px;
+}

@@ -74,7 +74,14 @@
         {
             <button type="button" class="batch-action-card" data-batch-open="InstallPlugins" data-batch-title="安装插件" data-batch-risk="false">
                 <span class="batch-action-icon"><i class="icon icon-add-box" aria-hidden="true"></i></span>
-                <span class="batch-action-copy"><strong>安装插件</strong><small>从 ClassIsland 插件市场下载并安装。</small></span>
+                <span class="batch-action-copy"><strong>安装插件</strong><small>从 ClassIsland 插件市场选择并安装。</small></span>
+            </button>
+        }
+        @if (Model.CanUseOperation(BatchOperationKind.InstallPluginPackages))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="InstallPluginPackages" data-batch-title="从 CIPX 安装" data-batch-risk="true">
+                <span class="batch-action-icon danger"><i class="icon icon-upload-file" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>从 CIPX 安装</strong><small>上传 .cipx 插件包，经服务端分发安装或更新。</small></span>
             </button>
         }
         @if (Model.CanUseOperation(BatchOperationKind.UninstallPlugins))
@@ -102,7 +109,7 @@
         {
             <button type="button" class="batch-action-card" data-batch-open="UpgradePlugins" data-batch-title="升级插件" data-batch-risk="true">
                 <span class="batch-action-icon danger"><i class="icon icon-cloud-upload" aria-hidden="true"></i></span>
-                <span class="batch-action-copy"><strong>升级插件</strong><small>通过插件市场更新全部或指定插件。</small></span>
+                <span class="batch-action-copy"><strong>升级插件</strong><small>查看可更新的插件，选择后通过插件市场更新。</small></span>
             </button>
         }
         @if (Model.CanUseOperation(BatchOperationKind.UpgradeClassIsland))
@@ -313,34 +320,53 @@ foreach (var extension in Model.BatchExtensionGroups.SelectMany(group => group.E
 <dialog id="batch-settings-plugins" class="batch-dialog batch-dialog-wide" data-batch-settings="InstallPlugins" data-batch-title="插件管理" data-batch-risk="false">
     <div class="batch-dialog-shell">
         <header class="batch-dialog-header">
-            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>安装插件</h2><p class="muted">从 ClassIsland 插件市场下载，重启 ClassIsland 后生效。</p></div>
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>安装插件</h2><p class="muted">从 ClassIsland 插件市场选择插件，必选依赖会一并安装，完成后自动重启 ClassIsland。</p></div>
             <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
         </header>
         <div class="batch-dialog-body stack">
             <input type="hidden" name="PluginAction" value="Install" />
-            <fieldset class="batch-check-group batch-plugin-list">
-                <legend>已上报插件</legend>
-                @if (Model.KnownPlugins.Count == 0)
-                {
-                    <p class="muted">设备尚未上报插件清单，可在下方手动填写插件 Id。</p>
-                }
-                else
-                {
-                    @foreach (var plugin in Model.KnownPlugins)
-                    {
-                        <label class="check batch-plugin-option">
-                            <input type="checkbox" name="PluginIds" value="@plugin.Id" />
-                            <span>
-                                <strong>@plugin.Name</strong>
-                                <code>@plugin.Id</code>
-                                <small>@plugin.Version · @(plugin.Enabled ? "已启用" : "已禁用") · @string.Join("、", plugin.DeviceNames)</small>
-                            </span>
-                        </label>
-                    }
-                }
-            </fieldset>
-            <label>手动输入插件 Id<textarea name="PluginIdsText" rows="3" placeholder="每行一个插件 Id，例如 remoteci.plugin"></textarea></label>
+            <div class="plugin-market" data-plugin-market
+                 data-installed="@System.Text.Json.JsonSerializer.Serialize(Model.KnownPlugins.ToDictionary(x => x.Id, x => x.DeviceNames.Count, StringComparer.OrdinalIgnoreCase))">
+                <div class="plugin-market-toolbar">
+                    <input type="search" data-plugin-market-search placeholder="搜索名称、Id 或作者" aria-label="搜索插件" />
+                    <select data-plugin-market-sort aria-label="排序">
+                        <option value="downloads">按下载量</option>
+                        <option value="stars">按星标</option>
+                        <option value="name">按名称</option>
+                    </select>
+                    <button type="button" class="ghost" data-plugin-market-refresh><i class="icon icon-refresh" aria-hidden="true"></i> 刷新</button>
+                </div>
+                <p class="control-note" data-plugin-market-status role="status">打开后自动加载插件市场。</p>
+                <div class="batch-check-group batch-plugin-list plugin-market-list" data-plugin-market-list></div>
+            </div>
+            <details class="plugin-manual-ids">
+                <summary>手动输入插件 Id</summary>
+                <textarea name="PluginIdsText" rows="3" placeholder="每行一个插件 Id"></textarea>
+            </details>
+            <label class="check"><input type="checkbox" name="ServerPreDownload" data-batch-bool /> 服务端预下载：先在服务端下载插件包，再分发到设备安装（设备无法访问插件市场时使用）</label>
             <p class="muted">不能对 RemoteCI 插件自身执行此操作。</p>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseOperation(BatchOperationKind.InstallPluginPackages))
+{
+<dialog id="batch-settings-plugin-packages" class="batch-dialog batch-dialog-wide" data-batch-settings="InstallPluginPackages" data-batch-title="从 CIPX 安装" data-batch-risk="true">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>从 CIPX 安装</h2><p class="muted">插件包先上传到服务端，设备再断点续传下载并校验，放入 ClassIsland 插件包缓存后自动重启安装。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <label>选择插件包（.cipx，可多选）<input type="file" accept=".cipx" multiple data-plugin-package-file /></label>
+            <p class="control-note" data-plugin-package-status role="status">尚未上传插件包。</p>
+            <div class="batch-check-group batch-plugin-list" data-plugin-package-list hidden></div>
+            <p class="muted">已安装的同名插件会被覆盖（可用于更新或回退版本），未安装的插件会被安装；可以用来更新 RemoteCI 自身。</p>
         </div>
         <footer class="batch-dialog-actions">
             <button type="button" class="ghost" data-batch-close>取消</button>
@@ -424,7 +450,46 @@ foreach (var extension in Model.BatchExtensionGroups.SelectMany(group => group.E
             <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
         </header>
         <div class="batch-dialog-body stack">
+            @{
+                var upgradable = Model.KnownPlugins.Where(x => x.UpdateAvailable).ToList();
+                var current = Model.KnownPlugins.Where(x => !x.UpdateAvailable).ToList();
+            }
+            <fieldset class="batch-check-group batch-plugin-list">
+                <legend>可更新的插件（@upgradable.Count）</legend>
+                @if (upgradable.Count == 0)
+                {
+                    <p class="muted">@(Model.KnownPlugins.Count == 0 ? "设备尚未上报插件清单，可先“刷新版本清单”。" : "设备上报的插件均已是最新版本。")</p>
+                }
+                @foreach (var plugin in upgradable)
+                {
+                    <label class="check batch-plugin-option">
+                        <input type="checkbox" name="PluginIds" value="@plugin.Id" checked />
+                        <span>
+                            <strong>@plugin.Name</strong>
+                            <code>@plugin.Id</code>
+                            <small>@plugin.Version → @(plugin.LatestVersion ?? "新版本") · @plugin.OutdatedDeviceNames.Count 台设备可更新@(Model.IsSingleControl ? "" : "：" + string.Join("、", plugin.OutdatedDeviceNames.Take(5)) + (plugin.OutdatedDeviceNames.Count > 5 ? " 等" : ""))</small>
+                        </span>
+                    </label>
+                }
+            </fieldset>
+            @if (current.Count > 0)
+            {
+                <details class="plugin-manual-ids">
+                    <summary>已是最新的插件（@current.Count，勾选“强制重新下载”时可选）</summary>
+                    <div class="batch-check-group batch-plugin-list">
+                        @foreach (var plugin in current)
+                        {
+                            <label class="check batch-plugin-option">
+                                <input type="checkbox" name="PluginIds" value="@plugin.Id" />
+                                <span><strong>@plugin.Name</strong><code>@plugin.Id</code><small>@plugin.Version</small></span>
+                            </label>
+                        }
+                    </div>
+                </details>
+            }
+            <p class="muted">都不勾选时更新设备上全部可更新的插件。</p>
             <label class="check"><input type="checkbox" name="Force" data-batch-bool /> 强制重新下载，即使已经是最新版本</label>
+            <label class="check"><input type="checkbox" name="ServerPreDownload" data-batch-bool /> 服务端预下载：先在服务端下载最新插件包，再分发到设备更新</label>
         </div>
         <footer class="batch-dialog-actions">
             <button type="button" class="ghost" data-batch-close>取消</button>
@@ -672,4 +737,8 @@ foreach (var extension in Model.BatchExtensionGroups.SelectMany(group => group.E
 }
 
 <script src="~/batch-control.js" asp-append-version="true" defer></script>
+@if (Model.CanUseOperation(BatchOperationKind.InstallPlugins) || Model.CanUseOperation(BatchOperationKind.InstallPluginPackages))
+{
+<script src="~/plugin-market.js" asp-append-version="true" defer></script>
+}
 </div>

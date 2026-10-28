@@ -13,6 +13,11 @@ public sealed class AppGuardPolicy
     public const int MaxBackupIntervalHours = 168;
     public const int DefaultBackupIntervalHours = 24;
     public const string DefaultOrganizationName = "RemoteCI";
+    public const string DefaultProcessName = "RemoteCI.Guard";
+    public const int MaxProcessNameLength = 48;
+    public const int MaxBackupDirectoryNameLength = 64;
+    public const int MaxBackupPaths = 3;
+    public const int MaxBackupPathLength = 260;
 
     /// <summary>总开关；关闭后守护进程注销登录自启并退出，插件清理备份。</summary>
     [JsonPropertyName("enabled")]
@@ -38,6 +43,26 @@ public sealed class AppGuardPolicy
     [JsonPropertyName("backupIntervalHours")]
     public int BackupIntervalHours { get; set; } = DefaultBackupIntervalHours;
 
+    /// <summary>安装自动启动的 Windows 服务，由服务维护标准权限用户代理。</summary>
+    [JsonPropertyName("enhancedMode")]
+    public bool EnhancedMode { get; set; }
+
+    /// <summary>在教室端生成并复用一个 ACL 受限的随机备份目录。</summary>
+    [JsonPropertyName("randomBackupPath")]
+    public bool RandomBackupPath { get; set; }
+
+    /// <summary>安全备份在 %LOCALAPPDATA%\RemoteCI\ProtectedBackups 下的子目录名；空表示随机生成。</summary>
+    [JsonPropertyName("backupDirectoryName")]
+    public string BackupDirectoryName { get; set; } = string.Empty;
+
+    /// <summary>守护代理的可执行文件名（不含 .exe），不是隐藏或仿冒系统进程。</summary>
+    [JsonPropertyName("processName")]
+    public string ProcessName { get; set; } = DefaultProcessName;
+
+    /// <summary>默认位置之外的备份目标；每个目标下使用固定的 RemoteCI.Guard.Backup 子目录。</summary>
+    [JsonPropertyName("backupPaths")]
+    public List<string> BackupPaths { get; set; } = [];
+
     /// <summary>恢复后提示中显示的管理方（系统配置中的组织名）。</summary>
     [JsonPropertyName("organizationName")]
     public string OrganizationName { get; set; } = DefaultOrganizationName;
@@ -50,8 +75,38 @@ public sealed class AppGuardPolicy
         RestartOnCrash = RestartOnCrash,
         PreventDeletion = PreventDeletion,
         BackupIntervalHours = Math.Clamp(BackupIntervalHours, MinBackupIntervalHours, MaxBackupIntervalHours),
+        EnhancedMode = EnhancedMode,
+        RandomBackupPath = RandomBackupPath,
+        BackupDirectoryName = NormalizeBackupDirectoryName(BackupDirectoryName),
+        ProcessName = NormalizeProcessName(ProcessName),
+        BackupPaths = (BackupPaths ?? [])
+            .Select(x => x?.Trim())
+            .Where(x => !string.IsNullOrEmpty(x))
+            .Select(x => x![..Math.Min(x!.Length, MaxBackupPathLength)])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxBackupPaths)
+            .ToList(),
         OrganizationName = string.IsNullOrWhiteSpace(OrganizationName) ? DefaultOrganizationName : OrganizationName.Trim(),
     };
+
+    private static string NormalizeProcessName(string? value)
+    {
+        var name = value?.Trim() ?? string.Empty;
+        if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) name = name[..^4];
+        return name.Length > 0 && name.Length <= MaxProcessNameLength && name[0] != '.' && name[^1] != '.' &&
+            name.All(x => char.IsAsciiLetterOrDigit(x) || x is '.' or '_' or '-')
+            ? name
+            : DefaultProcessName;
+    }
+
+    private static string NormalizeBackupDirectoryName(string? value)
+    {
+        var name = value?.Trim() ?? string.Empty;
+        return name.Length > 0 && name.Length <= MaxBackupDirectoryNameLength && name[0] != '.' && name[^1] != '.' &&
+            name.All(x => char.IsAsciiLetterOrDigit(x) || x is '.' or '_' or '-')
+            ? name
+            : string.Empty;
+    }
 
     /// <summary>恢复 ClassIsland 后在新实例中弹出的提示文字。</summary>
     public static string RestoredNotice(string? organizationName) =>
@@ -65,7 +120,10 @@ public sealed class AppGuardPolicy
         if (RestartAfterExit)
             parts.Add(RestartAfterExitDelayMinutes > 0 ? $"退出 {RestartAfterExitDelayMinutes} 分钟后自启" : "退出后立即自启");
         if (RestartOnCrash) parts.Add("意外退出时重启");
-        if (PreventDeletion) parts.Add("禁止删除");
+        if (PreventDeletion) parts.Add(BackupPaths.Count > 0 || RandomBackupPath ? $"禁止删除（{BackupPaths.Count + 1 + (RandomBackupPath ? 1 : 0)} 个备份目标）" : "禁止删除");
+        if (EnhancedMode) parts.Add("增强守护");
+        if (RandomBackupPath) parts.Add(string.IsNullOrEmpty(BackupDirectoryName) ? "随机安全备份" : $"安全备份目录 {BackupDirectoryName}");
+        if (!string.Equals(ProcessName, DefaultProcessName, StringComparison.OrdinalIgnoreCase)) parts.Add($"守护进程名 {ProcessName}");
         return parts.Count == 0 ? "已启用（未开启任何守护项）" : string.Join(" / ", parts);
     }
 }
@@ -95,6 +153,8 @@ public static class AppGuardEventKinds
         CrashLoopPaused => "频繁崩溃，暂停重启",
         BackupCompleted => "备份完成",
         BackupFailed => "备份失败",
+        "enhanced-failed" => "增强守护安装或卸载失败",
+        "remote-launched" => "远程打开 ClassIsland",
         _ => kind ?? "未知事件",
     };
 }

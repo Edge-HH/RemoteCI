@@ -1,5 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Net.WebSockets;
+using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -84,10 +87,20 @@ public sealed class AppGuardTests
         var client = factory.CreateClient();
 
         var put = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Put, "/api/settings/app-guard", admin.AccessToken,
-            new AppGuardPolicy { Enabled = true, RestartAfterExit = true, RestartAfterExitDelayMinutes = 40, BackupIntervalHours = 0 }));
+            new AppGuardPolicy
+            {
+                Enabled = true, RestartAfterExit = true, RestartAfterExitDelayMinutes = 40, BackupIntervalHours = 0,
+                EnhancedMode = true, RandomBackupPath = true, BackupDirectoryName = "Campus.Backup", ProcessName = "Campus.Agent",
+                BackupPaths = [@"D:\Backups\ClassIsland"],
+            }));
         put.EnsureSuccessStatusCode();
         var global = (await put.Content.ReadFromJsonAsync<AppGuardPolicy>())!;
         Assert.True(global.Enabled);
+        Assert.True(global.EnhancedMode);
+        Assert.True(global.RandomBackupPath);
+        Assert.Equal("Campus.Backup", global.BackupDirectoryName);
+        Assert.Equal("Campus.Agent", global.ProcessName);
+        Assert.Equal([@"D:\Backups\ClassIsland"], global.BackupPaths);
         Assert.Equal(AppGuardPolicy.MinBackupIntervalHours, global.BackupIntervalHours);
 
         var device = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Put, $"/api/devices/{credentialId}/app-guard", admin.AccessToken,
@@ -142,14 +155,150 @@ public sealed class AppGuardTests
         Assert.Contains("value=\"实验中学\"", config);
     }
 
+    [Fact]
+    public async Task GuardOnlyControlPage_ShowsOnlyRemoteLaunch()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        var token = await factory.GetPluginTokenAsync();
+        using var guard = await factory.Server.CreateWebSocketClient().ConnectAsync(
+            new Uri(factory.Server.BaseAddress, $"/ws?token={Uri.EscapeDataString(token)}&client=guard"), CancellationToken.None);
+        var capabilities = JsonSerializer.SerializeToUtf8Bytes(
+            Envelope.PeerCapabilities(new PeerCapabilities
+            {
+                Capabilities = [RemoteCiCapabilities.AppGuard, RemoteCiCapabilities.AppGuardLaunch],
+            }), JsonDefaults.Options);
+        await guard.SendAsync(capabilities, WebSocketMessageType.Text, true, CancellationToken.None);
+        var registry = factory.Services.GetRequiredService<PeerRegistry>();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!registry.HasGuardFor(TestWebApplicationFactory.DefaultClassId)) await Task.Delay(20, timeout.Token);
+        using var browser = await LoggedInBrowserAsync(factory);
+
+        var html = WebUtility.HtmlDecode(await browser.GetStringAsync("/Control"));
+
+        Assert.Contains("远程打开 ClassIsland", html);
+        Assert.DoesNotContain("音量调节", html);
+        Assert.DoesNotContain("屏幕截图", html);
+        Assert.DoesNotContain("班级设置", html);
+        Assert.DoesNotContain("插件扩展", html);
+        Assert.DoesNotContain("隐藏主界面", html);
+        Assert.DoesNotContain("显示主界面", html);
+        var guardPage = WebUtility.HtmlDecode(await browser.GetStringAsync("/AppGuard"));
+        Assert.Contains("守护版本过旧，无法远程关闭或卸载", guardPage);
+        Assert.DoesNotContain("关闭守护", guardPage);
+        Assert.DoesNotContain("卸载守护", guardPage);
+        await guard.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "test finished", CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task GuardOnlyAdminPage_ClosesAndUninstallsGuard_AndPersistsDevicePolicy()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        var credentialId = await PluginCredentialIdAsync(factory);
+        using var guard = await ConnectGuardAsync(factory,
+            RemoteCiCapabilities.AppGuard, RemoteCiCapabilities.AppGuardLaunch, RemoteCiCapabilities.AppGuardManage);
+        var registry = factory.Services.GetRequiredService<PeerRegistry>();
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            while (!registry.GuardForCredentialSupports(credentialId, RemoteCiCapabilities.AppGuardManage))
+                await Task.Delay(20, timeout.Token);
+        using var browser = await LoggedInBrowserAsync(factory);
+
+        var html = WebUtility.HtmlDecode(await browser.GetStringAsync("/AppGuard"));
+        Assert.Contains("守护在线 · 课表离线", html);
+        Assert.Contains("关闭守护", html);
+        Assert.Contains("卸载守护", html);
+        var token = WebUtility.HtmlDecode(Regex.Match(html,
+            "name=\"__RequestVerificationToken\"[^>]+value=\"([^\"]+)\"").Groups[1].Value);
+        var form = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["__RequestVerificationToken"] = token,
+        });
+
+        var closeTask = browser.PostAsync($"/AppGuard?handler=CloseGuard&credentialId={credentialId}", form);
+        var closeEnvelope = await ReceiveEnvelopeAsync(guard, Protocol.MessageTypeCommand);
+        var closeCommand = JsonSerializer.Deserialize<CommandMessage>(
+            JsonSerializer.Serialize(closeEnvelope.Payload), JsonDefaults.Options)!;
+        Assert.Equal(CommandKind.StopAppGuard, closeCommand.Command);
+        Assert.Equal(UserRole.Admin, closeCommand.RequestedBy!.Role);
+        await SendResultAsync(guard, closeEnvelope.MessageId);
+        var close = await closeTask;
+        Assert.Equal(HttpStatusCode.Redirect, close.StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var view = await scope.ServiceProvider.GetRequiredService<AppGuardService>().GetDeviceAsync(credentialId);
+            Assert.True(view.Overridden);
+            Assert.False(view.Policy.Enabled);
+        }
+
+        var uninstallTask = browser.PostAsync($"/AppGuard?handler=UninstallGuard&credentialId={credentialId}", form);
+        var uninstallEnvelope = await ReceiveEnvelopeAsync(guard, Protocol.MessageTypeCommand);
+        var uninstallCommand = JsonSerializer.Deserialize<CommandMessage>(
+            JsonSerializer.Serialize(uninstallEnvelope.Payload), JsonDefaults.Options)!;
+        Assert.Equal(CommandKind.UninstallAppGuard, uninstallCommand.Command);
+        await SendResultAsync(guard, uninstallEnvelope.MessageId);
+        var uninstall = await uninstallTask;
+        Assert.Equal(HttpStatusCode.Redirect, uninstall.StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var view = await scope.ServiceProvider.GetRequiredService<AppGuardService>().GetDeviceAsync(credentialId);
+            Assert.True(view.Overridden);
+            Assert.False(view.Policy.Enabled);
+            Assert.False(view.Policy.EnhancedMode);
+        }
+        await guard.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "test finished", CancellationToken.None);
+    }
+
     internal static async Task<Guid> PluginCredentialIdAsync(TestWebApplicationFactory factory)
     {
+        // 默认插件的凭据在首次配对时固定下来；其他测试会额外配对设备，不能再用“最新凭据”指代它。
         await factory.GetPluginTokenAsync();
-        using var scope = factory.Services.CreateScope();
-        // SQLite 不能按 DateTimeOffset 排序，取回后在内存中选最新配对的凭据。
-        var credentials = await scope.ServiceProvider.GetRequiredService<AppDbContext>().PluginCredentials.AsNoTracking().ToListAsync();
-        return credentials.OrderByDescending(x => x.CreatedAt).First().Id;
+        return factory.PluginCredentialId;
     }
+
+    private static async Task<WebSocket> ConnectGuardAsync(TestWebApplicationFactory factory, params string[] capabilities)
+    {
+        var token = await factory.GetPluginTokenAsync();
+        var socket = await factory.Server.CreateWebSocketClient().ConnectAsync(
+            new Uri(factory.Server.BaseAddress, $"/ws?token={Uri.EscapeDataString(token)}&client=guard"),
+            CancellationToken.None);
+        await socket.SendAsync(
+            JsonSerializer.SerializeToUtf8Bytes(
+                Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = capabilities }), JsonDefaults.Options),
+            WebSocketMessageType.Text, true, CancellationToken.None);
+        return socket;
+    }
+
+    private static async Task<Envelope> ReceiveEnvelopeAsync(WebSocket socket, string expectedType)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var buffer = new byte[64 * 1024];
+        while (true)
+        {
+            using var stream = new MemoryStream();
+            WebSocketReceiveResult result;
+            do
+            {
+                result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), timeout.Token);
+                if (result.MessageType == WebSocketMessageType.Close)
+                    throw new InvalidOperationException("守护连接已被服务端关闭");
+                stream.Write(buffer, 0, result.Count);
+            } while (!result.EndOfMessage);
+            var envelope = JsonSerializer.Deserialize<Envelope>(
+                Encoding.UTF8.GetString(stream.ToArray()), JsonDefaults.Options)!;
+            if (envelope.Type == expectedType) return envelope;
+        }
+    }
+
+    private static async Task SendResultAsync(WebSocket socket, string messageId) =>
+        await socket.SendAsync(
+            JsonSerializer.SerializeToUtf8Bytes(new Envelope
+            {
+                Type = Protocol.MessageTypeCommandResult,
+                ReplyToMessageId = messageId,
+                Payload = new CommandResult { Success = true, Code = CommandResultCodes.Ok },
+            }, JsonDefaults.Options),
+            WebSocketMessageType.Text, true, CancellationToken.None);
 
     private static async Task<HttpClient> LoggedInBrowserAsync(TestWebApplicationFactory factory)
     {

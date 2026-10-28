@@ -124,6 +124,36 @@ public sealed class FileReceiveServiceTests : IDisposable
         Assert.True(RolePermissions.Assignable.HasFlag(UserPermissions.SendFiles));
     }
 
+    [Fact]
+    public async Task ReceiveToStaging_VerifiesHashAndLeavesFileForCaller()
+    {
+        var content = RandomNumberGenerator.GetBytes(4096);
+        var channel = new FakeChannel(content);
+        var service = CreateService(channel);
+        var request = Request(content, "demo.plugin.cipx");
+
+        var staged = await service.ReceiveToStagingAsync(request, CancellationToken.None);
+
+        Assert.NotNull(staged);
+        Assert.Equal(content, await File.ReadAllBytesAsync(staged));
+        // 最终状态由调用方（插件包安装）在核对清单后上报。
+        Assert.DoesNotContain(channel.Reports, report => report.State == FileTransferState.Completed);
+        Assert.False(Directory.Exists(Desktop));
+    }
+
+    [Fact]
+    public async Task ReceiveToStaging_ReportsFailureOnHashMismatch()
+    {
+        var content = RandomNumberGenerator.GetBytes(1024);
+        var channel = new FakeChannel(content);
+        var service = CreateService(channel);
+
+        var staged = await service.ReceiveToStagingAsync(Request(content, "x.cipx", new string('0', 64)), CancellationToken.None);
+
+        Assert.Null(staged);
+        Assert.Contains(channel.Reports, report => report.State == FileTransferState.Failed);
+    }
+
     private sealed class FakeChannel(byte[] content) : IFileTransferChannel
     {
         public long? BreakFirstResponseAfter { get; init; }

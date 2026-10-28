@@ -14,6 +14,14 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == "--service")
+        {
+            System.ServiceProcess.ServiceBase.Run(new EnhancedGuardService());
+            return 0;
+        }
+        if (args.Length > 0 && args[0] == "--uninstall-enhanced") return EnhancedGuardSetup.Uninstall();
+        if (args.Length > 1 && args[0] == "--install-enhanced") return EnhancedGuardSetup.Install(args[1]);
+
         using var mutex = new Mutex(true, GuardFiles.MutexName, out var created);
         if (!created) return 0;
 

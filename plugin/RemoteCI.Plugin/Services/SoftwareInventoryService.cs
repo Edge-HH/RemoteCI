@@ -299,6 +299,18 @@ public sealed class SoftwareInventoryService
         }
     }
 
+    /// <summary>与插件市场升级共用的互斥：插件包安装开始前占用，结束后释放。</summary>
+    internal bool TryBeginOperation() => _operationLock.Wait(0);
+
+    internal void EndOperation() => _operationLock.Release();
+
+    /// <summary>插件包安装等外部流程报告插件升级状态，并推送新的软件清单。</summary>
+    internal void ReportPluginStatus(SoftwareUpdateState state, string message)
+    {
+        SetStatus(SoftwareUpdateOperation.Plugins, state, message);
+        RaiseInventoryChanged();
+    }
+
     private SoftwareUpdateStatus? GetLastUpdate()
     {
         lock (_statusLock)

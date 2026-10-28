@@ -27,6 +27,8 @@
   <ItemGroup>
     <!-- 不用 UseWindowsForms：它会引入 Windows Desktop SDK，CI 在 Linux 上构建插件包时无法使用。 -->
     <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="System.Security" />
+    <Reference Include="System.ServiceProcess" />
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
 

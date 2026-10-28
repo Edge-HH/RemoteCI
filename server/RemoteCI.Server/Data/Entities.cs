@@ -203,6 +203,16 @@ public sealed class SystemMetadata
 
     /// <summary>防删除定时备份间隔小时数（1-168）。</summary>
     public int AppGuardBackupIntervalHours { get; set; } = RemoteCI.Shared.Models.AppGuardPolicy.DefaultBackupIntervalHours;
+
+    public bool AppGuardEnhancedMode { get; set; }
+
+    public bool AppGuardRandomBackupPath { get; set; }
+
+    public string AppGuardBackupDirectoryName { get; set; } = string.Empty;
+
+    public string AppGuardProcessName { get; set; } = RemoteCI.Shared.Models.AppGuardPolicy.DefaultProcessName;
+
+    public string AppGuardBackupPathsJson { get; set; } = "[]";
 }
 
 /// <summary>登录页主题策略：跟随访客本地偏好，或由管理员强制浅色/深色。</summary>

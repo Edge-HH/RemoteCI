@@ -159,39 +159,61 @@ public sealed class FileReceiveService
     private async Task RunTransferAsync(
         IFileTransferChannel channel, FileDistributionRequest request, string fileName, string folder, CancellationToken ct)
     {
+        var total = request.Size;
+        var reporter = new ProgressReporter(this, channel, request.TransferId!, total);
+        var partPath = await ReceiveToStagingAsync(channel, request, fileName, reporter, ct);
+        if (partPath is null) return;
+
+        string target;
+        try
+        {
+            Directory.CreateDirectory(folder);
+            target = ResolveTargetPath(folder, fileName, request.Overwrite);
+            File.Move(partPath, target, request.Overwrite);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            _logger.LogError(ex, "文件分发写入失败：{Name}", fileName);
+            await reporter.Report(FileTransferState.Failed, total, "文件写入失败，请检查设备磁盘与权限", force: true);
+            return;
+        }
+        var renamed = !string.Equals(Path.Combine(folder, fileName), target, StringComparison.OrdinalIgnoreCase);
+        _logger.LogInformation("文件分发已接收：{Path}", target);
+        await reporter.Report(FileTransferState.Completed, total,
+            renamed ? $"已保存到 {target}（自动重命名以避免覆盖）" : $"已保存到 {target}", target, force: true);
+    }
+
+    /// <summary>
+    /// 把一个中转文件下载到暂存目录并校验 SHA-256，供插件包安装等内部用途复用；
+    /// 成功返回暂存文件路径（调用方负责移动或删除，并上报最终状态），失败时已上报失败并返回 null。
+    /// </summary>
+    internal async Task<string?> ReceiveToStagingAsync(
+        FileDistributionRequest request, CancellationToken ct)
+    {
+        if (FileDistributionRequest.ValidateTransfer(request) is { } error)
+            throw new ArgumentException(error, nameof(request));
+        if (Channel is not { } channel)
+            throw new InvalidOperationException("插件未连接云端，无法下载文件");
+        var reporter = new ProgressReporter(this, channel, request.TransferId!, request.Size);
+        return await ReceiveToStagingAsync(channel, request, request.FileName, reporter, ct);
+    }
+
+    /// <summary>上报某个中转文件的最终状态（插件包安装完成或失败时使用）。</summary>
+    internal Task ReportFinalAsync(FileDistributionRequest request, bool success, string message)
+    {
+        if (Channel is not { } channel) return Task.CompletedTask;
+        return new ProgressReporter(this, channel, request.TransferId!, request.Size)
+            .Report(success ? FileTransferState.Completed : FileTransferState.Failed,
+                success ? request.Size : 0, message, force: true);
+    }
+
+    private async Task<string?> ReceiveToStagingAsync(
+        IFileTransferChannel channel, FileDistributionRequest request, string fileName, ProgressReporter reporter,
+        CancellationToken ct)
+    {
         var transferId = request.TransferId!;
         var total = request.Size;
         var partPath = Path.Combine(_stagingDirectory, transferId + ".part");
-        var lastReport = DateTime.MinValue;
-
-        async Task Report(FileTransferState state, long received, string? message = null, string? savedPath = null, bool force = false)
-        {
-            if (!force && DateTime.UtcNow - lastReport < ProgressInterval) return;
-            lastReport = DateTime.UtcNow;
-            var progress = new FileTransferProgress
-            {
-                TransferId = transferId,
-                TotalBytes = total,
-                State = state,
-                ReceivedBytes = received,
-                Message = message,
-                SavedPath = savedPath,
-            };
-            var final = state is FileTransferState.Completed or FileTransferState.Failed;
-            // 最终状态必须送达：云端短暂断线时稍后重发，最多等待约 2 分钟。
-            for (var i = 0; i < (final ? 24 : 1); i++)
-            {
-                try
-                {
-                    if (await channel.ReportFileProgressAsync(progress)) return;
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger.LogDebug(ex, "上报文件接收进度失败");
-                }
-                if (final) await Task.Delay(FinalReportRetryDelay, CancellationToken.None);
-            }
-        }
 
         try
         {
@@ -199,13 +221,13 @@ public sealed class FileReceiveService
         }
         catch (OperationCanceledException)
         {
-            await Report(FileTransferState.Failed, 0, "插件已停止，接收中断", force: true);
-            return;
+            await reporter.Report(FileTransferState.Failed, 0, "插件已停止，接收中断", force: true);
+            return null;
         }
         try
         {
             Directory.CreateDirectory(_stagingDirectory);
-            await Report(FileTransferState.Downloading, PartLength(partPath), force: true);
+            await reporter.Report(FileTransferState.Downloading, PartLength(partPath), force: true);
             string? failure = null;
             for (var attempt = 0; ; attempt++)
             {
@@ -219,7 +241,7 @@ public sealed class FileReceiveService
                 try
                 {
                     failure = await DownloadOnceAsync(channel, request, partPath, offset,
-                        received => Report(FileTransferState.Downloading, received), ct);
+                        received => reporter.Report(FileTransferState.Downloading, received), ct);
                     if (failure is not null) break;
                 }
                 catch (Exception ex) when (ex is HttpRequestException or IOException or TimeoutException ||
@@ -231,7 +253,7 @@ public sealed class FileReceiveService
                         break;
                     }
                     _logger.LogWarning(ex, "文件下载中断，第 {Attempt} 次重试：{Name}", attempt + 1, fileName);
-                    await Report(FileTransferState.Downloading, PartLength(partPath), "网络中断，正在续传", force: true);
+                    await reporter.Report(FileTransferState.Downloading, PartLength(partPath), "网络中断，正在续传", force: true);
                     await Task.Delay(RetryDelay(attempt), ct);
                 }
             }
@@ -243,40 +265,61 @@ public sealed class FileReceiveService
             }
             if (failure is not null)
             {
-                await Report(FileTransferState.Failed, PartLength(partPath), failure, force: true);
-                return;
+                await reporter.Report(FileTransferState.Failed, PartLength(partPath), failure, force: true);
+                return null;
             }
-
-            string target;
-            try
-            {
-                Directory.CreateDirectory(folder);
-                target = ResolveTargetPath(folder, fileName, request.Overwrite);
-                File.Move(partPath, target, request.Overwrite);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-            {
-                _logger.LogError(ex, "文件分发写入失败：{Name}", fileName);
-                await Report(FileTransferState.Failed, total, "文件写入失败，请检查设备磁盘与权限", force: true);
-                return;
-            }
-            var renamed = !string.Equals(Path.Combine(folder, fileName), target, StringComparison.OrdinalIgnoreCase);
-            _logger.LogInformation("文件分发已接收：{Path}", target);
-            await Report(FileTransferState.Completed, total,
-                renamed ? $"已保存到 {target}（自动重命名以避免覆盖）" : $"已保存到 {target}", target, force: true);
+            return partPath;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            await Report(FileTransferState.Failed, PartLength(partPath), "插件已停止，接收中断", force: true);
+            await reporter.Report(FileTransferState.Failed, PartLength(partPath), "插件已停止，接收中断", force: true);
+            return null;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "文件分发接收异常：{Name}", fileName);
-            await Report(FileTransferState.Failed, PartLength(partPath), "接收异常，请查看 ClassIsland 日志", force: true);
+            await reporter.Report(FileTransferState.Failed, PartLength(partPath), "接收异常，请查看 ClassIsland 日志", force: true);
+            return null;
         }
         finally
         {
             _downloadSlots.Release();
+        }
+    }
+
+    /// <summary>按时间节流上报进度；最终状态必须送达，云端短暂断线时稍后重发。</summary>
+    private sealed class ProgressReporter(FileReceiveService owner, IFileTransferChannel channel, string transferId, long total)
+    {
+        private DateTime _lastReport = DateTime.MinValue;
+
+        public async Task Report(
+            FileTransferState state, long received, string? message = null, string? savedPath = null, bool force = false)
+        {
+            if (!force && DateTime.UtcNow - _lastReport < owner.ProgressInterval) return;
+            _lastReport = DateTime.UtcNow;
+            var progress = new FileTransferProgress
+            {
+                TransferId = transferId,
+                TotalBytes = total,
+                State = state,
+                ReceivedBytes = received,
+                Message = message,
+                SavedPath = savedPath,
+            };
+            var final = state is FileTransferState.Completed or FileTransferState.Failed;
+            // 最多等待约 2 分钟。
+            for (var i = 0; i < (final ? 24 : 1); i++)
+            {
+                try
+                {
+                    if (await channel.ReportFileProgressAsync(progress)) return;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    owner._logger.LogDebug(ex, "上报文件接收进度失败");
+                }
+                if (final) await Task.Delay(owner.FinalReportRetryDelay, CancellationToken.None);
+            }
         }
     }
 

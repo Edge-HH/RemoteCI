@@ -56,6 +56,11 @@ public sealed class CommandMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public PluginManagementRequest? PluginManagement { get; set; }
 
+    /// <summary>服务端中转插件包的安装或更新参数；仅 InstallPluginPackages 使用。</summary>
+    [JsonPropertyName("pluginPackages")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PluginPackageInstallRequest? PluginPackages { get; set; }
+
     /// <summary>RemoteCI 远程插件管理策略。</summary>
     [JsonPropertyName("pluginManagementPolicy")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

@@ -15,8 +15,11 @@ public sealed class AppGuardModel(
     UserManager<AppUser> users,
     AppDbContext db,
     AppGuardService appGuard,
-    PeerRegistry peers) : WebPageModel(users)
+    PeerRegistry peers,
+    IdentityCoordinator identities) : WebPageModel(users)
 {
+    private static readonly TimeSpan GuardCommandTimeout = TimeSpan.FromSeconds(120);
+
     [BindProperty] public PolicyInput Global { get; set; } = new();
     [BindProperty] public PolicyInput Device { get; set; } = new();
 
@@ -67,27 +70,59 @@ public sealed class AppGuardModel(
         return RedirectToPage();
     }
 
+    public Task<IActionResult> OnPostCloseGuardAsync(Guid credentialId, CancellationToken ct) =>
+        ManageGuardAsync(credentialId, uninstall: false, ct);
+
+    public Task<IActionResult> OnPostUninstallGuardAsync(Guid credentialId, CancellationToken ct) =>
+        ManageGuardAsync(credentialId, uninstall: true, ct);
+
+    private async Task<IActionResult> ManageGuardAsync(Guid credentialId, bool uninstall, CancellationToken ct)
+    {
+        if (await RequireAdminAsync() is { } denied) return denied;
+        var device = await appGuard.GetDeviceAsync(credentialId, ct);
+        var requestedBy = (await identities.GetProfileAsync(CurrentUser.Id, ct))?.WithPermissions(Permissions);
+        if (requestedBy is null) return RedirectToPage("/Login");
+        var result = await peers.ManageAppGuardAsync(
+            credentialId,
+            uninstall ? CommandKind.UninstallAppGuard : CommandKind.StopAppGuard,
+            requestedBy,
+            GuardCommandTimeout,
+            ct);
+        if (result.Success)
+        {
+            var policy = device.Policy;
+            policy.Enabled = false;
+            if (uninstall) policy.EnhancedMode = false;
+            await appGuard.SetOverrideAsync(credentialId, policy, ct);
+        }
+        TempData[result.Success ? "Message" : "Error"] = result.Message;
+        return RedirectToPage();
+    }
+
     private async Task LoadAsync(CancellationToken ct)
     {
         var global = await appGuard.GetGlobalAsync(ct);
         Global = PolicyInput.From(global);
         OrganizationName = global.OrganizationName;
         var overrides = await appGuard.GetOverridesAsync(ct);
-        var online = peers.GetPluginDeviceSnapshots()
-            .Where(x => x.PluginCredentialId is not null)
-            .GroupBy(x => x.PluginCredentialId!.Value)
-            .ToDictionary(x => x.Key, x => x.Any(y => y.EffectiveCapabilities.Contains(RemoteCiCapabilities.AppGuard, StringComparer.Ordinal)));
         var credentials = await db.PluginCredentials.AsNoTracking().Include(x => x.Classroom)
             .Where(x => x.Enabled).ToListAsync(ct);
         Devices = credentials
-            .Select(x => new DeviceRow(
-                x.Id,
-                DeviceAlertEvaluator.DeviceName(x),
-                x.Classroom?.Name ?? "未分配",
-                online.ContainsKey(x.Id),
-                online.TryGetValue(x.Id, out var supported) ? supported : null,
-                overrides.TryGetValue(x.Id, out var policy) ? policy : null,
-                overrides.TryGetValue(x.Id, out var effective) ? effective : global))
+            .Select(x =>
+            {
+                var pluginOnline = peers.HasPluginForCredential(x.Id);
+                var guardOnline = peers.HasGuardForCredential(x.Id);
+                return new DeviceRow(
+                    x.Id,
+                    DeviceAlertEvaluator.DeviceName(x),
+                    x.Classroom?.Name ?? "未分配",
+                    pluginOnline,
+                    guardOnline,
+                    pluginOnline ? peers.PluginForCredentialSupports(x.Id, RemoteCiCapabilities.AppGuard) : null,
+                    guardOnline && peers.GuardForCredentialSupports(x.Id, RemoteCiCapabilities.AppGuardManage),
+                    overrides.TryGetValue(x.Id, out var policy) ? policy : null,
+                    overrides.TryGetValue(x.Id, out var effective) ? effective : global);
+            })
             .OrderBy(x => x.ClassName, StringComparer.CurrentCulture)
             .ThenBy(x => x.DeviceName, StringComparer.CurrentCulture)
             .ToList();
@@ -105,13 +140,16 @@ public sealed class AppGuardModel(
         return CurrentUser.Role == UserRole.Admin ? null : RedirectToPage("/Denied");
     }
 
-    /// <param name="Supported">在线时是否声明了应用守护能力；离线时为 null。</param>
+    /// <param name="Supported">课表插件在线时是否声明了应用守护能力；离线时为 null。</param>
+    /// <param name="CanManageGuard">守护在线且声明了远程关闭/卸载能力。</param>
     public sealed record DeviceRow(
         Guid CredentialId,
         string DeviceName,
         string ClassName,
-        bool Online,
+        bool PluginOnline,
+        bool GuardOnline,
         bool? Supported,
+        bool CanManageGuard,
         AppGuardPolicy? Override,
         AppGuardPolicy Effective);
 
@@ -123,6 +161,11 @@ public sealed class AppGuardModel(
         public bool RestartOnCrash { get; set; }
         public bool PreventDeletion { get; set; }
         public int BackupIntervalHours { get; set; } = AppGuardPolicy.DefaultBackupIntervalHours;
+        public bool EnhancedMode { get; set; }
+        public bool RandomBackupPath { get; set; }
+        public string BackupDirectoryName { get; set; } = string.Empty;
+        public string ProcessName { get; set; } = AppGuardPolicy.DefaultProcessName;
+        public string BackupPaths { get; set; } = string.Empty;
 
         public AppGuardPolicy ToPolicy() => new()
         {
@@ -132,6 +175,11 @@ public sealed class AppGuardModel(
             RestartOnCrash = RestartOnCrash,
             PreventDeletion = PreventDeletion,
             BackupIntervalHours = BackupIntervalHours,
+            EnhancedMode = EnhancedMode,
+            RandomBackupPath = RandomBackupPath,
+            BackupDirectoryName = BackupDirectoryName,
+            ProcessName = ProcessName,
+            BackupPaths = (BackupPaths ?? string.Empty).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
         };
 
         public static PolicyInput From(AppGuardPolicy policy) => new()
@@ -142,6 +190,11 @@ public sealed class AppGuardModel(
             RestartOnCrash = policy.RestartOnCrash,
             PreventDeletion = policy.PreventDeletion,
             BackupIntervalHours = policy.BackupIntervalHours,
+            EnhancedMode = policy.EnhancedMode,
+            RandomBackupPath = policy.RandomBackupPath,
+            BackupDirectoryName = policy.BackupDirectoryName,
+            ProcessName = policy.ProcessName,
+            BackupPaths = string.Join(Environment.NewLine, policy.BackupPaths),
         };
     }
 }

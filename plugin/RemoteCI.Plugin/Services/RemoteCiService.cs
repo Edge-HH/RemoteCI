@@ -83,9 +83,6 @@ public sealed class RemoteCiService : IDisposable
     /// <summary>插件归属班级名称（来自按班级生成的授权镜像）；旧版服务端为 null。</summary>
     public string? CurrentClassName => _accounts.ClassName;
 
-    /// <summary>设置页显示的应用守护状态。</summary>
-    public string AppGuardSummary => _appGuard.Summary;
-
     public void Start()
     {
         if (_cts is not null)
@@ -144,12 +141,14 @@ public sealed class RemoteCiService : IDisposable
         _softwareInventory.ClassIslandUpdateRestarting += _appGuard.MarkUpdating;
         var cloudForGuard = _cloudClient;
         _appGuard.EventSender = batch => cloudForGuard.SendAppGuardEventsAsync(batch);
-        _appGuard.Start();
+        _appGuard.ConnectionInfoProvider = () => (_settings.EnableCloud, _settings.CloudServerUrl, _settings.CloudToken);
+        _ = _cloudClient.StartAsync(_cts.Token);
+        try { _appGuard.Start(); }
+        catch (Exception ex) { _logger.LogError(ex, "应用守护启动失败，云端连接继续运行"); }
         _holidayCalendar.Changed += RunHolidayApply;
         // 每分钟检查一次本地日期，跨天后（含睡眠唤醒）重新应用；启动时立即应用一次缓存的日历。
         _holidayTimer = new Timer(_ => { if (DateTime.Today != _holidayAppliedDate) RunHolidayApply(); },
             null, TimeSpan.Zero, TimeSpan.FromMinutes(1));
-        _ = _cloudClient.StartAsync(_cts.Token);
 
         _collector.Start();
         PublishExtensions(); // 注册表可能在连接建立前已就绪，启动时先推送一次当前快照。

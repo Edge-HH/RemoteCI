@@ -119,6 +119,13 @@ builder.Services.AddScoped<ClassBroadcastService>();
 builder.Services.AddSingleton<FileTransferService>();
 builder.Services.AddHostedService<FileTransferCleanupWorker>();
 builder.Services.AddScoped<FileTransferDispatcher>();
+builder.Services.AddSingleton<PluginMarketCatalog>();
+builder.Services.AddSingleton<PluginPackageService>();
+builder.Services.AddHttpClient(PluginMarketCatalog.HttpClientName, client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(10);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("RemoteCI-Server");
+});
 builder.Services.AddSingleton<ScreenshotService>();
 builder.Services.AddHostedService<ScreenshotCleanupWorker>();
 builder.Services.AddScoped<ScreenshotDispatcher>();
