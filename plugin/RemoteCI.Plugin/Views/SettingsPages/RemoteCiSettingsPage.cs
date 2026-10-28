@@ -5,6 +5,7 @@ using Avalonia.Layout;
 using Avalonia.Threading;
 using ClassIsland.Core.Abstractions.Controls;
 using ClassIsland.Core.Attributes;
+using RemoteCI.Plugin.Extensions;
 using RemoteCI.Plugin.Services;
 using RemoteCI.Plugin.Settings;
 using RemoteCI.Shared;
@@ -33,11 +34,21 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
     private readonly TextBlock _connectionTestHint;
     private readonly TextBlock _hint;
     private readonly ToggleSwitch _showDeveloperSettingsToggle;
+    private readonly ExtensionAccessService? _extensionAccess;
+    private readonly RemoteCiExtensionRegistry? _extensionRegistry;
+    private readonly StackPanel _extensionAccessList = new() { Spacing = 6 };
+    private readonly TextBlock _extensionAccessHint = new() { TextWrapping = Avalonia.Media.TextWrapping.Wrap, Opacity = 0.7 };
 
-    public RemoteCiSettingsPage(PluginSettings settings, RemoteCiService? service = null)
+    public RemoteCiSettingsPage(
+        PluginSettings settings,
+        RemoteCiService? service = null,
+        ExtensionAccessService? extensionAccess = null,
+        IRemoteCiExtensionRegistry? extensionRegistry = null)
     {
         _settings = settings;
         _service = service;
+        _extensionAccess = extensionAccess;
+        _extensionRegistry = extensionRegistry as RemoteCiExtensionRegistry;
 
         _portBox = new TextBox { Text = settings.LanServerPort.ToString(), Watermark = "端口（默认 8765）" };
         _cloudUrlBox = new TextBox { Text = settings.CloudServerUrl, Watermark = "云端地址，如 https://nas:8080" };
@@ -167,6 +178,23 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
                 saveButton,
                 _pushScheduleButton,
                 _hint,
+                new StackPanel
+                {
+                    Spacing = 6,
+                    IsVisible = extensionAccess is not null,
+                    Children =
+                    {
+                        new TextBlock { Text = "扩展接入授权", FontSize = 16, FontWeight = Avalonia.Media.FontWeight.SemiBold },
+                        new TextBlock
+                        {
+                            Text = "其他插件接入 RemoteCI 时会先询问。已授权插件的远程功能会同步到 WebUI、手机与手表；解除授权不影响插件本身运行。",
+                            Opacity = 0.7,
+                            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                        },
+                        _extensionAccessList,
+                        _extensionAccessHint,
+                    },
+                },
             },
         };
 
@@ -176,6 +204,18 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };
 
+        if (_extensionAccess is not null)
+        {
+            _extensionAccess.Changed += OnExtensionAccessChanged;
+            // 新插件注册（含尚未授权的）也要刷新列表，让被关掉弹窗的插件出现在“等待确认”中。
+            if (_extensionRegistry is not null)
+            {
+                _extensionRegistry.ExtensionsChanged += (_, _) => OnExtensionAccessChanged();
+                _extensionRegistry.GroupsChanged += (_, _) => OnExtensionAccessChanged();
+            }
+            RenderExtensionAccess();
+        }
+
         if (_service is not null)
         {
             _service.ScheduleSyncStatusChanged += OnScheduleSyncStatusChanged;
@@ -184,6 +224,91 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
             ApplyCloudConnectionStatus(_service.CurrentCloudConnectionStatus);
         }
     }
+
+    private void OnExtensionAccessChanged() => Dispatcher.UIThread.Post(RenderExtensionAccess);
+
+    /// <summary>已决定的插件来自授权记录，尚未决定（弹窗被关闭）的来自本次运行的注册方。</summary>
+    internal static IReadOnlyList<ExtensionAccessRow> BuildExtensionAccessRows(
+        IReadOnlyList<ExtensionAccessEntry> entries, IReadOnlyList<ExtensionCaller> callers)
+    {
+        var rows = entries.Select(x => new ExtensionAccessRow(new ExtensionCaller(x.PluginId, x.Name), x.State, x.Locked)).ToList();
+        foreach (var caller in callers)
+        {
+            if (rows.Any(x => string.Equals(x.Caller.PluginId, caller.PluginId, StringComparison.OrdinalIgnoreCase))) continue;
+            rows.Add(new ExtensionAccessRow(caller, null, false));
+        }
+        return rows;
+    }
+
+    internal static string ExtensionAccessStateText(ExtensionAccessRow row) => row.State switch
+    {
+        ExtensionAccessState.Allowed when row.Locked => "已授权（服务端保持授权，不能解除）",
+        ExtensionAccessState.Allowed => "已授权",
+        ExtensionAccessState.Denied => "已拒绝",
+        _ => "等待确认",
+    };
+
+    private void RenderExtensionAccess()
+    {
+        if (_extensionAccess is null) return;
+        var rows = BuildExtensionAccessRows(_extensionAccess.Snapshot(), _extensionRegistry?.GetCallers() ?? []);
+        _extensionAccessList.Children.Clear();
+        if (rows.Count == 0)
+        {
+            _extensionAccessList.Children.Add(new TextBlock { Text = "还没有插件请求接入 RemoteCI。", Opacity = 0.7 });
+            return;
+        }
+        foreach (var row in rows)
+        {
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, [Grid.ColumnProperty] = 1 };
+            if (row.State != ExtensionAccessState.Allowed)
+                actions.Children.Add(AccessButton("允许", row.Caller, true));
+            if (row.State != ExtensionAccessState.Denied)
+            {
+                var revoke = AccessButton(row.State is null ? "拒绝" : "解除授权", row.Caller, false);
+                revoke.IsEnabled = !row.Locked;
+                actions.Children.Add(revoke);
+            }
+            _extensionAccessList.Children.Add(new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+                ColumnSpacing = 12,
+                Children =
+                {
+                    new StackPanel
+                    {
+                        Spacing = 2,
+                        Children =
+                        {
+                            new TextBlock { Text = row.Caller.Name, FontWeight = Avalonia.Media.FontWeight.SemiBold },
+                            new TextBlock
+                            {
+                                Text = $"{row.Caller.PluginId} · {ExtensionAccessStateText(row)}",
+                                Opacity = 0.7,
+                                TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                            },
+                        },
+                    },
+                    actions,
+                },
+            });
+        }
+    }
+
+    private Button AccessButton(string text, ExtensionCaller caller, bool allowed)
+    {
+        var button = new Button { Content = text, VerticalAlignment = VerticalAlignment.Center };
+        button.Click += (_, _) =>
+        {
+            if (_extensionAccess is null) return;
+            _extensionAccessHint.Text = _extensionAccess.TrySetLocal(caller, allowed, out var error)
+                ? $"已{(allowed ? "允许" : "拒绝")} {caller.Name} 接入 RemoteCI。"
+                : error ?? string.Empty;
+        };
+        return button;
+    }
+
+    internal sealed record ExtensionAccessRow(ExtensionCaller Caller, ExtensionAccessState? State, bool Locked);
 
     /// <summary>端口必须在 1-65535；云端地址留空或为合法 http/https URI 才有效。</summary>
     internal static (bool PortValid, bool UrlValid) ValidateInput(string? portText, string? urlText)

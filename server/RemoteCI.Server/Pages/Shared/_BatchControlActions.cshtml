@@ -98,6 +98,13 @@
                 <span class="batch-action-copy"><strong>启用或禁用插件</strong><small>批量切换本地插件状态，重启后生效。</small></span>
             </button>
         }
+        @if (Model.CanUseOperation(BatchOperationKind.SetExtensionAccess))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="SetExtensionAccess" data-batch-title="扩展接入授权" data-batch-risk="false">
+                <span class="batch-action-icon"><i class="icon icon-extension" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>扩展接入授权</strong><small>保持插件接入 RemoteCI 的授权，设备端不能解除。</small></span>
+            </button>
+        }
         @if (Model.CanUseOperation(BatchOperationKind.RefreshSoftwareInventory))
         {
             <button type="button" class="batch-action-card" data-batch-open="RefreshSoftwareInventory" data-batch-title="刷新版本清单" data-batch-risk="false">
@@ -344,6 +351,7 @@ foreach (var extension in Model.BatchExtensionGroups.SelectMany(group => group.E
                 <textarea name="PluginIdsText" rows="3" placeholder="每行一个插件 Id"></textarea>
             </details>
             <label class="check"><input type="checkbox" name="ServerPreDownload" data-batch-bool /> 服务端预下载：先在服务端下载插件包，再分发到设备安装（设备无法访问插件市场时使用）</label>
+            <label class="check"><input type="checkbox" name="GrantExtensionAccess" data-batch-bool /> 同时授权这些插件接入 RemoteCI：插件启动后设备端不再弹窗询问（不含依赖）</label>
             <p class="muted">不能对 RemoteCI 插件自身执行此操作。</p>
         </div>
         <footer class="batch-dialog-actions">
@@ -366,6 +374,7 @@ foreach (var extension in Model.BatchExtensionGroups.SelectMany(group => group.E
             <label>选择插件包（.cipx，可多选）<input type="file" accept=".cipx" multiple data-plugin-package-file /></label>
             <p class="control-note" data-plugin-package-status role="status">尚未上传插件包。</p>
             <div class="batch-check-group batch-plugin-list" data-plugin-package-list hidden></div>
+            <label class="check"><input type="checkbox" name="GrantExtensionAccess" data-batch-bool /> 同时授权这些插件接入 RemoteCI：插件启动后设备端不再弹窗询问</label>
             <p class="muted">已安装的同名插件会被覆盖（可用于更新或回退版本），未安装的插件会被安装；可以用来更新 RemoteCI 自身。</p>
         </div>
         <footer class="batch-dialog-actions">
@@ -428,6 +437,41 @@ foreach (var extension in Model.BatchExtensionGroups.SelectMany(group => group.E
                     <label class="check batch-plugin-option">
                         <input type="checkbox" name="PluginIds" value="@plugin.Id" />
                         <span><strong>@plugin.Name</strong><code>@plugin.Id</code><small>@plugin.Version · @(plugin.Enabled ? "已启用" : "已禁用")</small></span>
+                    </label>
+                }
+            </fieldset>
+            <label>手动输入插件 Id<textarea name="PluginIdsText" rows="3" placeholder="每行一个插件 Id"></textarea></label>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseOperation(BatchOperationKind.SetExtensionAccess))
+{
+<dialog id="batch-settings-extension-access" class="batch-dialog batch-dialog-wide" data-batch-settings="SetExtensionAccess" data-batch-title="扩展接入授权" data-batch-risk="false">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div><span class="batch-step">第 1 步 / 共 2 步</span><h2>扩展接入授权</h2><p class="muted">其他插件接入 RemoteCI 时设备端会询问；保持授权后这些插件直接获得授权，设备端也不能在设置页解除。插件尚未安装时同样生效。</p></div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <label>操作
+                <select name="ExtensionAccessAction">
+                    <option value="Lock">保持授权（拒绝设备端取消授权）</option>
+                    <option value="Unlock">解除保持（授权不变，设备端可以解除）</option>
+                </select>
+            </label>
+            <fieldset class="batch-check-group batch-plugin-list">
+                <legend>选择插件</legend>
+                @foreach (var plugin in Model.KnownPlugins.Where(x => !string.Equals(x.Id, "remoteci.plugin", StringComparison.OrdinalIgnoreCase)))
+                {
+                    <label class="check batch-plugin-option">
+                        <input type="checkbox" name="PluginIds" value="@plugin.Id" />
+                        <span><strong>@plugin.Name</strong><code>@plugin.Id</code><small>@plugin.Version · @string.Join("、", plugin.DeviceNames)</small></span>
                     </label>
                 }
             </fieldset>

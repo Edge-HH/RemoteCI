@@ -19,6 +19,8 @@ public enum BatchOperationKind
     SetPluginManagementPolicy = 23,
     /// <summary>上传 .cipx 插件包到服务端，再分发到设备安装或更新。</summary>
     InstallPluginPackages = 24,
+    /// <summary>保持或解除保持一组插件的 RemoteCI 扩展接入授权。</summary>
+    SetExtensionAccess = 25,
     RefreshSoftwareInventory = 30,
     UpgradePlugins = 31,
     UpgradeClassIsland = 32,
@@ -50,6 +52,10 @@ public sealed class PluginManagementRequest
     /// <summary>操作完成后是否请求 ClassIsland 自动重启；下载类操作默认等待下载完成再重启。</summary>
     [JsonPropertyName("restartAfter")]
     public bool RestartAfter { get; set; } = true;
+
+    /// <summary>安装时同时授权这些插件接入 RemoteCI 扩展，插件启动后不再弹窗询问；仅安装操作使用。</summary>
+    [JsonPropertyName("grantExtensionAccess")]
+    public bool GrantExtensionAccess { get; set; }
 }
 
 public enum PluginPackageInstallMode
@@ -119,6 +125,30 @@ public sealed class PluginPackageInstallRequest
 
     [JsonPropertyName("restartAfter")]
     public bool RestartAfter { get; set; } = true;
+
+    /// <summary>同时授权显式安装的插件（不含依赖）接入 RemoteCI 扩展，插件启动后不再弹窗询问。</summary>
+    [JsonPropertyName("grantExtensionAccess")]
+    public bool GrantExtensionAccess { get; set; }
+}
+
+public enum ExtensionAccessAction
+{
+    /// <summary>授权并保持授权：设备端不能在插件设置页解除。</summary>
+    Lock = 1,
+    /// <summary>解除保持：授权状态不变，设备端重新可以解除授权。</summary>
+    Unlock = 2,
+}
+
+/// <summary>SetExtensionAccess 命令参数：按插件 Id 保持或解除保持 RemoteCI 扩展接入授权。</summary>
+public sealed class ExtensionAccessRequest
+{
+    public const int MaxPlugins = 100;
+
+    [JsonPropertyName("action")]
+    public ExtensionAccessAction Action { get; set; }
+
+    [JsonPropertyName("pluginIds")]
+    public List<string> PluginIds { get; set; } = [];
 }
 
 /// <summary>

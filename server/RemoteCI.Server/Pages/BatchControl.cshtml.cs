@@ -84,6 +84,14 @@ public class BatchControlModel(
     [BindProperty]
     public bool ServerPreDownload { get; set; }
 
+    /// <summary>安装插件时同时授权这些插件接入 RemoteCI 扩展，插件启动后设备端不再弹窗询问。</summary>
+    [BindProperty]
+    public bool GrantExtensionAccess { get; set; }
+
+    /// <summary>扩展接入授权：保持授权（设备端不能解除）或解除保持。</summary>
+    [BindProperty]
+    public ExtensionAccessAction ExtensionAccessAction { get; set; } = ExtensionAccessAction.Lock;
+
     /// <summary>“从 CIPX 安装”已上传到服务端中转的插件包传输编号。</summary>
     [BindProperty]
     public List<string> PluginPackageTransferIds { get; set; } = [];
@@ -198,6 +206,7 @@ public class BatchControlModel(
         CanUseOperation(BatchOperationKind.UninstallPlugins) ||
         CanUseOperation(BatchOperationKind.InstallPluginPackages) ||
         CanUseOperation(BatchOperationKind.SetPluginEnabled) ||
+        CanUseOperation(BatchOperationKind.SetExtensionAccess) ||
         CanUseOperation(BatchOperationKind.RefreshSoftwareInventory) ||
         CanUseOperation(BatchOperationKind.UpgradePlugins) ||
         CanUseOperation(BatchOperationKind.UpgradeClassIsland) ||
@@ -230,6 +239,7 @@ public class BatchControlModel(
         BatchOperationKind.UninstallPlugins => CommandKind.UninstallPlugins,
         BatchOperationKind.InstallPluginPackages => CommandKind.InstallPluginPackages,
         BatchOperationKind.SetPluginEnabled => CommandKind.SetPluginEnabled,
+        BatchOperationKind.SetExtensionAccess => CommandKind.SetExtensionAccess,
         BatchOperationKind.RefreshSoftwareInventory => CommandKind.RefreshSoftwareInventory,
         BatchOperationKind.UpgradePlugins => CommandKind.UpgradePlugins,
         BatchOperationKind.UpgradeClassIsland => CommandKind.UpgradeClassIsland,
@@ -661,6 +671,12 @@ public class BatchControlModel(
                 PluginManagement = BuildPluginToggleRequest(),
                 RequestedBy = profile,
             },
+            BatchOperationKind.SetExtensionAccess => _ => new CommandMessage
+            {
+                Command = CommandKind.SetExtensionAccess,
+                ExtensionAccess = BuildExtensionAccessRequest(),
+                RequestedBy = profile,
+            },
             BatchOperationKind.RefreshSoftwareInventory => _ => new CommandMessage
             {
                 Command = CommandKind.RefreshSoftwareInventory,
@@ -766,7 +782,7 @@ public class BatchControlModel(
             throw new InvalidOperationException("不能远程安装 RemoteCI 自身；更新 RemoteCI 请使用“升级插件”或“从 CIPX 安装”。");
         var prepared = await PrepareMarketPackagesAsync(profile, async catalog =>
             PluginMarketCatalog.ResolveInstallSet(await catalog.GetAsync(ct: ct), ids), ct);
-        return PackageFactory(prepared, PluginPackageInstallMode.Install, force: false, profile);
+        return PackageFactory(prepared, PluginPackageInstallMode.Install, force: false, profile, GrantExtensionAccess);
     }
 
     /// <summary>服务端预下载升级：未勾选时取目标范围内设备上报的全部可更新插件。</summary>
@@ -807,7 +823,7 @@ public class BatchControlModel(
             throw new InvalidOperationException("请先上传 .cipx 插件包（上传后在保留期内有效）。");
         if (prepared.Count > PluginPackageInstallRequest.MaxPackages)
             throw new InvalidOperationException($"一次最多安装 {PluginPackageInstallRequest.MaxPackages} 个插件包。");
-        return PackageFactory(prepared, PluginPackageInstallMode.Install, force: false, profile);
+        return PackageFactory(prepared, PluginPackageInstallMode.Install, force: false, profile, GrantExtensionAccess);
     }
 
     private async Task<IReadOnlyList<PreparedPluginPackage>> PrepareMarketPackagesAsync(
@@ -832,7 +848,8 @@ public class BatchControlModel(
 
     /// <summary>每台目标设备单独登记下载权限；不支持插件包安装的旧插件由能力检查逐台拒绝。</summary>
     private Func<DeviceInventory, CommandMessage> PackageFactory(
-        IReadOnlyList<PreparedPluginPackage> prepared, PluginPackageInstallMode mode, bool force, UserProfile? profile)
+        IReadOnlyList<PreparedPluginPackage> prepared, PluginPackageInstallMode mode, bool force, UserProfile? profile,
+        bool grantExtensionAccess = false)
     {
         var packages = HttpContext.RequestServices.GetRequiredService<PluginPackageService>();
         return device => new CommandMessage
@@ -843,6 +860,7 @@ public class BatchControlModel(
                 Mode = mode,
                 Force = force,
                 RestartAfter = true,
+                GrantExtensionAccess = grantExtensionAccess,
                 Packages = prepared.Select(package => packages.CreateRef(package, device)).ToList(),
             },
             RequestedBy = profile,
@@ -940,9 +958,23 @@ public class BatchControlModel(
             Action = action,
             PluginIds = ids,
             RestartAfter = true,
+            GrantExtensionAccess = action == PluginActionKind.Install && GrantExtensionAccess,
         };
     }
 
+    private ExtensionAccessRequest BuildExtensionAccessRequest()
+    {
+        if (!Enum.IsDefined(ExtensionAccessAction))
+            throw new InvalidOperationException("未知扩展接入授权操作。");
+        var ids = SelectedPluginIds()
+            .Where(id => !string.Equals(id, RemoteCiPluginId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (ids.Count == 0)
+            throw new InvalidOperationException("请至少选择一个插件，或填写插件 Id。");
+        if (ids.Count > ExtensionAccessRequest.MaxPlugins)
+            throw new InvalidOperationException($"一次最多设置 {ExtensionAccessRequest.MaxPlugins} 个插件。");
+        return new ExtensionAccessRequest { Action = ExtensionAccessAction, PluginIds = ids };
+    }
 
     private TimeLayoutUpdateRequest BuildTimeLayoutRequest()
     {
@@ -1113,6 +1145,7 @@ public class BatchControlModel(
         BatchOperationKind.UninstallPlugins => "插件卸载",
         BatchOperationKind.InstallPluginPackages => "插件包安装",
         BatchOperationKind.SetPluginEnabled => "插件启停",
+        BatchOperationKind.SetExtensionAccess => "扩展接入授权",
         BatchOperationKind.RefreshSoftwareInventory => "版本刷新",
         BatchOperationKind.UpgradePlugins => "插件升级",
         BatchOperationKind.UpgradeClassIsland => "ClassIsland 升级",

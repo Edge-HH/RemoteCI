@@ -90,9 +90,14 @@ public class Plugin : PluginBase
         services.AddSingleton<ScheduleCatalog>();
         services.AddSingleton<ClassIslandHostControlService>();
         services.AddSingleton<SoftwareInventoryService>();
+        // 扩展接入授权：其他插件首次接入时弹窗询问，结果保存在插件配置目录。
+        services.AddSingleton(new ExtensionAccessService(
+            Path.Combine(PluginConfigFolder, "ExtensionAccess.json"),
+            new ExtensionAccessPrompt()));
         services.AddSingleton(sp => new PluginManagementService(
             PluginConfigFolder,
-            sp.GetRequiredService<ILogger<PluginManagementService>>()));
+            sp.GetRequiredService<ILogger<PluginManagementService>>(),
+            sp.GetRequiredService<ExtensionAccessService>()));
         services.AddSingleton<ProfileManagementService>();
         services.AddSingleton<ManagementJoinService>();
         services.AddSingleton<VoiceMessagePlayer>();
@@ -105,7 +110,9 @@ public class Plugin : PluginBase
         services.AddSingleton<ScheduleSyncTaskCoordinator>();
         services.AddSingleton<RemoteCiService>();
         // 公开扩展注册表：其他 ClassIsland 插件在 AppStarted 后通过 IAppHost.GetService<IRemoteCiExtensionRegistry>() 获取并注册自定义远程功能。
-        services.AddSingleton<IRemoteCiExtensionRegistry, RemoteCiExtensionRegistry>();
+        services.AddSingleton<IRemoteCiExtensionRegistry>(sp => new RemoteCiExtensionRegistry(
+            sp.GetRequiredService<ExtensionAccessService>(),
+            ExtensionCallerResolver.Resolve));
         services.AddNotificationProvider<RemoteNotificationProvider>();
         services.AddSettingsPage<RemoteCiSettingsPage>();
         // 设置页注册表在 ClassIsland 启动时构建，因此开关保存后需重启才会改变菜单。

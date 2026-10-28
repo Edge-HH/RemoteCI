@@ -207,6 +207,8 @@ public enum CommandKind
     StopAppGuard = 32,
     /// <summary>停用并卸载设备外守护，移除增强服务、登录任务、登录自启与守护文件。</summary>
     UninstallAppGuard = 33,
+    /// <summary>保持或解除保持一组插件的 RemoteCI 扩展接入授权（保持后设备端不能解除）。</summary>
+    SetExtensionAccess = 34,
 }
 
 public enum PowerActionKind
@@ -245,7 +247,7 @@ public static class CommandPermissions
         // 与账号管理同属高风险管理员操作。
         CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
         CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
-        CommandKind.InstallPluginPackages or
+        CommandKind.InstallPluginPackages or CommandKind.SetExtensionAccess or
         CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
         CommandKind.JoinManagement
         or CommandKind.RestartClassIsland or CommandKind.LaunchClassIsland or CommandKind.StopAppGuard or CommandKind.UninstallAppGuard
@@ -318,6 +320,8 @@ public static class RemoteCiCapabilities
     public const string MainWindowLayoutRead = "main-window.layout-read";
     /// <summary>从服务端文件中转接收 .cipx 插件包并安装或更新（服务端预下载与上传 CIPX 共用）。</summary>
     public const string PluginPackageInstall = "plugin.package-install";
+    /// <summary>扩展接入授权：其他插件接入前询问，支持安装时预授权与服务端保持授权。</summary>
+    public const string ExtensionAccess = "extensions.access";
 
     /// <summary>没有上报能力列表的旧 V3 端自动获得的基础能力。</summary>
     public static IReadOnlyList<string> Baseline { get; } =
@@ -341,7 +345,8 @@ public static class RemoteCiCapabilities
             PluginInstall, PluginUninstall, PluginEnable, PluginManagementPolicy, ProfileDistribute, TimeLayoutUpdate, ManagementJoin,
             ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings, ProfileApply, HolidayCalendar,
             ProfileRead, ProfileTempLayer, Semester, FileTransfer, AppGuard, ScheduleChangePermanent, ScheduleAdjustments,
-            ScreenCapture, AppGuardLaunch, AppGuardManage, MainWindowLayoutApply, MainWindowLayoutRead, PluginPackageInstall];
+            ScreenCapture, AppGuardLaunch, AppGuardManage, MainWindowLayoutApply, MainWindowLayoutRead, PluginPackageInstall,
+            ExtensionAccess];
 
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
@@ -387,6 +392,7 @@ public static class RemoteCiCapabilities
         MainWindowLayoutApply => "上传主界面文件",
         MainWindowLayoutRead => "获取主界面文件",
         PluginPackageInstall => "从服务端安装插件包",
+        ExtensionAccess => "扩展接入授权",
         _ => "未知能力",
     };
 
@@ -423,6 +429,7 @@ public static class RemoteCiCapabilities
         CommandKind.ApplyMainWindowLayout => MainWindowLayoutApply,
         CommandKind.ReadMainWindowLayout => MainWindowLayoutRead,
         CommandKind.InstallPluginPackages => PluginPackageInstall,
+        CommandKind.SetExtensionAccess => ExtensionAccess,
         _ => null,
     };
 }
