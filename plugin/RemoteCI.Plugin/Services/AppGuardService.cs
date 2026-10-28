@@ -154,6 +154,45 @@ public sealed class AppGuardService : IDisposable
         _ = FlushEventsAsync();
     }
 
+    /// <summary>
+    /// 系统管理员远程要求立即更新：结束守护，用插件包随附版本强制覆盖后重新启动，把失败原因原样返回。
+    /// 普通守护代理在用户目录内，替换不需要 UAC；增强服务的安装或变更仍留给策略下发处理。
+    /// </summary>
+    public CommandResult UpdateNow()
+    {
+        if (_store.Current is not { Enabled: true } policy)
+            return CommandResult.Failure(CommandResultCodes.InvalidRequest, "该设备未启用应用守护");
+        var bundled = _host.BundledGuardPath;
+        if (!File.Exists(bundled))
+            return CommandResult.Failure(CommandResultCodes.InternalError, $"插件包中缺少 {GuardFiles.ExecutableName}，请重新安装 RemoteCI 插件");
+        lock (_lock)
+        {
+            try
+            {
+                var target = GuardExecutablePath;
+                if (File.Exists(target)) _host.StopGuard(target);
+                System.IO.Directory.CreateDirectory(Directory);
+                File.Copy(bundled, target, true);
+                Deploy(policy, allowElevation: false);
+                if (!_host.IsGuardRunning(target))
+                    return CommandResult.Failure(CommandResultCodes.InternalError, "守护程序已更新，但未能启动，请查看 ClassIsland 日志");
+                var version = _host.GuardVersion(target);
+                _logger.LogInformation("系统管理员远程更新应用守护：{Version}", version);
+                return new CommandResult
+                {
+                    Success = true,
+                    Code = CommandResultCodes.Ok,
+                    Message = string.IsNullOrEmpty(version) ? "守护已更新并重新启动" : $"守护已更新到 {version} 并重新启动",
+                };
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException)
+            {
+                _logger.LogWarning(ex, "远程更新应用守护失败");
+                return CommandResult.Failure(CommandResultCodes.InternalError, $"更新守护失败：{ex.Message}");
+            }
+        }
+    }
+
     /// <summary>守护通过云端通道执行了关闭或卸载：本地配置已被它改为停用，或留下了保留式关闭标记。</summary>
     private bool StoppedByGuard() =>
         HasStopRequest() || GuardJson.ReadFile<GuardConfig>(Path.Combine(Directory, GuardFiles.Policy)) is { Enabled: false };

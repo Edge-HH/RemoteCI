@@ -76,6 +76,17 @@ public sealed class AppGuardModel(
     public Task<IActionResult> OnPostUninstallGuardAsync(Guid credentialId, CancellationToken ct) =>
         ManageGuardAsync(credentialId, uninstall: true, ct);
 
+    /// <summary>让在线的课表插件立即用随附版本覆盖并重启守护，不改动策略。</summary>
+    public async Task<IActionResult> OnPostUpdateGuardAsync(Guid credentialId, CancellationToken ct)
+    {
+        if (await RequireAdminAsync() is { } denied) return denied;
+        var requestedBy = (await identities.GetProfileAsync(CurrentUser.Id, ct))?.WithPermissions(Permissions);
+        if (requestedBy is null) return RedirectToPage("/Login");
+        var result = await peers.ManageAppGuardAsync(credentialId, CommandKind.UpdateAppGuard, requestedBy, GuardCommandTimeout, ct);
+        TempData[result.Success ? "Message" : "Error"] = result.Message;
+        return RedirectToPage();
+    }
+
     private async Task<IActionResult> ManageGuardAsync(Guid credentialId, bool uninstall, CancellationToken ct)
     {
         if (await RequireAdminAsync() is { } denied) return denied;
@@ -112,6 +123,7 @@ public sealed class AppGuardModel(
             {
                 var pluginOnline = peers.HasPluginForCredential(x.Id);
                 var guardOnline = peers.HasGuardForCredential(x.Id);
+                var effective = overrides.TryGetValue(x.Id, out var deviceOverride) ? deviceOverride : global;
                 return new DeviceRow(
                     x.Id,
                     DeviceAlertEvaluator.DeviceName(x),
@@ -120,8 +132,9 @@ public sealed class AppGuardModel(
                     guardOnline,
                     pluginOnline ? peers.PluginForCredentialSupports(x.Id, RemoteCiCapabilities.AppGuard) : null,
                     guardOnline && peers.GuardForCredentialSupports(x.Id, RemoteCiCapabilities.AppGuardManage),
+                    effective.Enabled && pluginOnline && peers.PluginForCredentialSupports(x.Id, RemoteCiCapabilities.AppGuardUpdate),
                     overrides.TryGetValue(x.Id, out var policy) ? policy : null,
-                    overrides.TryGetValue(x.Id, out var effective) ? effective : global);
+                    effective);
             })
             .OrderBy(x => x.ClassName, StringComparer.CurrentCulture)
             .ThenBy(x => x.DeviceName, StringComparer.CurrentCulture)
@@ -142,6 +155,7 @@ public sealed class AppGuardModel(
 
     /// <param name="Supported">课表插件在线时是否声明了应用守护能力；离线时为 null。</param>
     /// <param name="CanManageGuard">守护在线且声明了远程关闭/卸载能力。</param>
+    /// <param name="CanUpdateGuard">策略启用、课表插件在线且声明了立即更新守护能力。</param>
     public sealed record DeviceRow(
         Guid CredentialId,
         string DeviceName,
@@ -150,6 +164,7 @@ public sealed class AppGuardModel(
         bool GuardOnline,
         bool? Supported,
         bool CanManageGuard,
+        bool CanUpdateGuard,
         AppGuardPolicy? Override,
         AppGuardPolicy Effective);
 

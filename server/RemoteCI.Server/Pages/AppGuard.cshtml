@@ -109,7 +109,15 @@
                                 }
                                 else if (row.GuardOnline)
                                 {
-                                    <small class="ops-sub">守护版本过旧，课表插件上线后自动更新</small>
+                                    <small class="ops-sub">@(row.CanUpdateGuard ? "守护版本过旧，可点“更新守护”立即升级"
+                                        : row.PluginOnline ? "守护版本过旧，请先升级课表插件"
+                                        : "守护版本过旧，课表插件上线后自动更新")</small>
+                                }
+                                @if (row.CanUpdateGuard)
+                                {
+                                    <form method="post" asp-page-handler="UpdateGuard" asp-route-credentialId="@row.CredentialId" style="display:inline" onsubmit="return confirm('将用课表插件随附的版本覆盖并重启该设备的守护。确定更新？')">
+                                        <button type="submit" class="secondary">更新守护</button>
+                                    </form>
                                 }
                                 @if (row.Override is not null)
                                 {

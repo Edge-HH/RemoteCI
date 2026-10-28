@@ -184,6 +184,7 @@ public sealed class AppGuardTests
         Assert.DoesNotContain("显示主界面", html);
         var guardPage = WebUtility.HtmlDecode(await browser.GetStringAsync("/AppGuard"));
         Assert.Contains("守护版本过旧，课表插件上线后自动更新", guardPage);
+        Assert.DoesNotContain("更新守护</button>", guardPage);
         Assert.DoesNotContain("关闭守护", guardPage);
         Assert.DoesNotContain("卸载守护", guardPage);
         await guard.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "test finished", CancellationToken.None);
@@ -247,6 +248,56 @@ public sealed class AppGuardTests
             Assert.False(view.Policy.EnhancedMode);
         }
         await guard.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "test finished", CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task AdminPage_UsesNewestGuardConnection_AndUpdatesGuardThroughPlugin()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        var credentialId = await PluginCredentialIdAsync(factory);
+        using (var scope = factory.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<AppGuardService>().SetGlobalAsync(new AppGuardPolicy { Enabled = true });
+        var token = await factory.GetPluginTokenAsync();
+        using var plugin = await factory.Server.CreateWebSocketClient().ConnectAsync(
+            new Uri(factory.Server.BaseAddress, $"/ws?token={Uri.EscapeDataString(token)}"), CancellationToken.None);
+        await plugin.SendAsync(
+            JsonSerializer.SerializeToUtf8Bytes(
+                Envelope.PeerCapabilities(new PeerCapabilities { Capabilities = [.. RemoteCiCapabilities.Current] }), JsonDefaults.Options),
+            WebSocketMessageType.Text, true, CancellationToken.None);
+        // 被替换的旧守护连接尚未断开时，新守护已接入：页面应按新守护的能力显示。
+        using var staleGuard = await ConnectGuardAsync(factory, RemoteCiCapabilities.AppGuard);
+        var registry = factory.Services.GetRequiredService<PeerRegistry>();
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            while (!registry.HasGuardForCredential(credentialId) ||
+                   !registry.PluginForCredentialSupports(credentialId, RemoteCiCapabilities.AppGuardUpdate))
+                await Task.Delay(20, timeout.Token);
+        using var guard = await ConnectGuardAsync(factory,
+            RemoteCiCapabilities.AppGuard, RemoteCiCapabilities.AppGuardLaunch, RemoteCiCapabilities.AppGuardManage);
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            while (!registry.GuardForCredentialSupports(credentialId, RemoteCiCapabilities.AppGuardManage))
+                await Task.Delay(20, timeout.Token);
+        using var browser = await LoggedInBrowserAsync(factory);
+
+        var html = WebUtility.HtmlDecode(await browser.GetStringAsync("/AppGuard"));
+        Assert.Contains("关闭守护", html);
+        Assert.DoesNotContain("守护版本过旧", html);
+        Assert.Contains("更新守护</button>", html);
+        var form = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["__RequestVerificationToken"] = WebUtility.HtmlDecode(Regex.Match(html,
+                "name=\"__RequestVerificationToken\"[^>]+value=\"([^\"]+)\"").Groups[1].Value),
+        });
+
+        var updateTask = browser.PostAsync($"/AppGuard?handler=UpdateGuard&credentialId={credentialId}", form);
+        var envelope = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
+        var command = JsonSerializer.Deserialize<CommandMessage>(
+            JsonSerializer.Serialize(envelope.Payload), JsonDefaults.Options)!;
+        Assert.Equal(CommandKind.UpdateAppGuard, command.Command);
+        Assert.Equal(UserRole.Admin, command.RequestedBy!.Role);
+        await SendResultAsync(plugin, envelope.MessageId);
+        Assert.Equal(HttpStatusCode.Redirect, (await updateTask).StatusCode);
+        await guard.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "test finished", CancellationToken.None);
+        await staleGuard.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "test finished", CancellationToken.None);
     }
 
     internal static async Task<Guid> PluginCredentialIdAsync(TestWebApplicationFactory factory)

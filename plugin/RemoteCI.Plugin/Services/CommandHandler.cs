@@ -29,6 +29,7 @@ public sealed class CommandHandler
     private readonly VoiceMessagePlayer _voiceMessages;
     private readonly ScheduleOverlayService? _overlays;
     private readonly PluginPackageInstallService _pluginPackages;
+    private readonly AppGuardService? _appGuard;
 
     public CommandHandler(
         ScheduleCatalog schedules,
@@ -48,8 +49,10 @@ public sealed class CommandHandler
         ScheduleOverlayService? overlays = null,
         ScreenCaptureService? screenshots = null,
         MainWindowLayoutService? mainWindowLayouts = null,
-        PluginPackageInstallService? pluginPackages = null)
+        PluginPackageInstallService? pluginPackages = null,
+        AppGuardService? appGuard = null)
     {
+        _appGuard = appGuard;
         _overlays = overlays;
         _schedules = schedules;
         _scheduleBackend = scheduleBackend;
@@ -98,7 +101,7 @@ public sealed class CommandHandler
             CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
             CommandKind.InstallPluginPackages or
             CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
-            CommandKind.JoinManagement or CommandKind.RestartClassIsland or
+            CommandKind.JoinManagement or CommandKind.RestartClassIsland or CommandKind.UpdateAppGuard or
             CommandKind.ExecuteTerminalCommand) && command.RequestedBy?.Role != UserRole.Admin)
             return CommandResult.Failure(CommandResultCodes.Forbidden, "仅系统管理员可以执行远程维护操作");
         // 文件分发：经服务端中转的文件按 SendFiles 权限放行；旧的内联方式仍只允许系统管理员。
@@ -137,6 +140,8 @@ public sealed class CommandHandler
                 CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled =>
                     await _pluginManagement.HandleAsync(command.Command, command.PluginManagement),
                 CommandKind.InstallPluginPackages => _pluginPackages.Start(command.PluginPackages),
+                CommandKind.UpdateAppGuard => _appGuard?.UpdateNow()
+                    ?? CommandResult.Failure(CommandResultCodes.InternalError, "应用守护服务未加载"),
                 CommandKind.SetPluginManagementPolicy => _pluginManagement.SetPolicy(command.PluginManagementPolicy),
                 CommandKind.UpdateTimeLayout => await _profileManagement.UpdateTimeLayoutAsync(command.TimeLayoutUpdate),
                 CommandKind.DistributeProfile => await _profileManagement.DistributeProfileAsync(command.ProfileDistribution),

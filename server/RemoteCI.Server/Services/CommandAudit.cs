@@ -285,6 +285,7 @@ public static class CommandAuditSummary
         CommandKind.InstallPluginPackages => "安装插件包",
         CommandKind.StopAppGuard => "关闭守护",
         CommandKind.UninstallAppGuard => "卸载守护",
+        CommandKind.UpdateAppGuard => "更新守护",
         _ => $"命令 {(int)kind}",
     };
 

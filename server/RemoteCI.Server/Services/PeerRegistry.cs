@@ -196,12 +196,16 @@ public sealed class PeerRegistry(
             .ToArray();
     }
 
-    /// <summary>按设备凭据合并插件与守护连接；完整插件优先，只有守护在线时保留设备可见。</summary>
+    /// <summary>
+    /// 按设备凭据合并插件与守护连接；完整插件优先（最早接入），只有守护在线时保留设备可见。
+    /// 守护取最新接入的连接：守护每台设备只运行一个实例，更早的连接可能是被替换的旧版本尚未超时断开。
+    /// </summary>
     public IReadOnlyList<PluginDeviceSnapshot> GetPluginDeviceSnapshots() =>
         _pluginPeers.Values
             .Where(IsLocallyAuthorized)
             .GroupBy(peer => peer.Principal.PluginCredentialId)
-            .Select(group => group.OrderBy(peer => peer.IsGuard).ThenBy(peer => peer.RegisteredAt).First())
+            .Select(group => group.OrderBy(peer => peer.IsGuard)
+                .ThenBy(peer => peer.IsGuard ? -peer.RegisteredAt : peer.RegisteredAt).First())
             .OrderBy(peer => peer.Principal.ClassId)
             .ThenBy(peer => peer.RegisteredAt)
             .Select(peer => new PluginDeviceSnapshot(
@@ -223,7 +227,7 @@ public sealed class PeerRegistry(
 
     public bool PrimaryGuardSupports(Guid classId, string capability) => _pluginPeers.Values
         .Where(peer => peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.ClassId == classId)
-        .OrderBy(peer => peer.RegisteredAt)
+        .OrderByDescending(peer => peer.RegisteredAt)
         .FirstOrDefault() is { } peer && EffectiveCapabilities(peer).Contains(capability, StringComparer.Ordinal);
 
     public bool HasPluginForCredential(Guid credentialId) => _pluginPeers.Values.Any(peer =>
@@ -237,9 +241,10 @@ public sealed class PeerRegistry(
     public bool HasGuardForCredential(Guid credentialId) => _pluginPeers.Values.Any(peer =>
         peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.PluginCredentialId == credentialId);
 
+    /// <summary>守护取最新接入的连接，见 <see cref="GetPluginDeviceSnapshots"/>。</summary>
     public bool GuardForCredentialSupports(Guid credentialId, string capability) => _pluginPeers.Values
         .Where(peer => peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.PluginCredentialId == credentialId)
-        .OrderBy(peer => peer.RegisteredAt)
+        .OrderByDescending(peer => peer.RegisteredAt)
         .FirstOrDefault() is { } peer && EffectiveCapabilities(peer).Contains(capability, StringComparer.Ordinal);
 
     public Task<CommandResult> ManageAppGuardAsync(
@@ -249,14 +254,16 @@ public sealed class PeerRegistry(
         TimeSpan timeout,
         CancellationToken ct = default)
     {
-        if (command is not (CommandKind.StopAppGuard or CommandKind.UninstallAppGuard))
+        if (command is not (CommandKind.StopAppGuard or CommandKind.UninstallAppGuard or CommandKind.UpdateAppGuard))
             return Task.FromResult(CommandResult.Failure(CommandResultCodes.InvalidRequest, "不支持的守护管理操作"));
-        var peer = _pluginPeers.Values
-            .Where(peer => peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.PluginCredentialId == credentialId)
-            .OrderBy(peer => peer.RegisteredAt)
+        // 更新守护由课表插件执行（替换守护程序需要先结束它）；关闭与卸载由守护自己执行。
+        var viaPlugin = command == CommandKind.UpdateAppGuard;
+        var candidates = _pluginPeers.Values
+            .Where(peer => peer.IsGuard != viaPlugin && IsLocallyAuthorized(peer) && peer.Principal.PluginCredentialId == credentialId);
+        var peer = (viaPlugin ? candidates.OrderBy(peer => peer.RegisteredAt) : candidates.OrderByDescending(peer => peer.RegisteredAt))
             .FirstOrDefault();
         return peer is null
-            ? Task.FromResult(CommandResult.Failure(CommandResultCodes.PluginOffline, "守护未在线，操作未执行"))
+            ? Task.FromResult(CommandResult.Failure(CommandResultCodes.PluginOffline, viaPlugin ? "课表插件未在线，操作未执行" : "守护未在线，操作未执行"))
             : SendCommandAndWaitToConnectionAsync(new CommandMessage
             {
                 Command = command,
@@ -269,7 +276,7 @@ public sealed class PeerRegistry(
     {
         var peer = _pluginPeers.Values
             .Where(peer => peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.ClassId == classId)
-            .OrderBy(peer => peer.RegisteredAt)
+            .OrderByDescending(peer => peer.RegisteredAt)
             .FirstOrDefault();
         return peer is null ? Task.FromResult(false) : SendToPluginConnectionAsync(peer.Id, envelope, ct);
     }
@@ -279,7 +286,7 @@ public sealed class PeerRegistry(
     {
         var peer = _pluginPeers.Values
             .Where(peer => peer.IsGuard && IsLocallyAuthorized(peer) && peer.Principal.ClassId == classId)
-            .OrderBy(peer => peer.RegisteredAt)
+            .OrderByDescending(peer => peer.RegisteredAt)
             .FirstOrDefault();
         return peer is null
             ? Task.FromResult(CommandResult.Failure(CommandResultCodes.PluginOffline, "守护未在线，操作未执行"))

@@ -296,6 +296,31 @@ public sealed class AppGuardServiceTests : IDisposable
         }
         Assert.DoesNotContain(RemoteCiCapabilities.AppGuardManage, RemoteCiCapabilities.Baseline);
         Assert.Contains(RemoteCiCapabilities.AppGuardManage, RemoteCiCapabilities.Current);
+        Assert.True(CommandPermissions.IsServerOnly(CommandKind.UpdateAppGuard));
+        Assert.Equal(UserPermissions.ManageUsers, CommandPermissions.Required(CommandKind.UpdateAppGuard));
+        Assert.Equal(RemoteCiCapabilities.AppGuardUpdate, RemoteCiCapabilities.Required(CommandKind.UpdateAppGuard));
+        Assert.DoesNotContain(RemoteCiCapabilities.AppGuardUpdate, RemoteCiCapabilities.Baseline);
+        Assert.Contains(RemoteCiCapabilities.AppGuardUpdate, RemoteCiCapabilities.Current);
+    }
+
+    [Fact]
+    public void UpdateNow_ForcesOverwriteAndRestartsGuard()
+    {
+        var (store, service) = Create();
+        service.Start();
+
+        Assert.False(service.UpdateNow().Success);
+
+        store.Apply(Enabled());
+        var stops = _host.Stops;
+        var result = service.UpdateNow();
+
+        Assert.True(result.Success, result.Message);
+        Assert.Contains("3.2.1.4", result.Message);
+        Assert.True(_host.Stops > stops);
+        Assert.True(_host.GuardRunning);
+        Assert.Equal("guard-v1", File.ReadAllText(service.GuardExecutablePath));
+        service.Stop();
     }
 
     [Fact]
@@ -452,6 +477,7 @@ public sealed class AppGuardServiceTests : IDisposable
             GuardRunning = true;
         }
 
+        public string? GuardVersion(string executablePath) => "3.2.1.4";
         public void SetRunKey(string? command) => RunKey = command;
         public bool ConfigureEnhanced(bool enabled, string executablePath, string directory)
         {

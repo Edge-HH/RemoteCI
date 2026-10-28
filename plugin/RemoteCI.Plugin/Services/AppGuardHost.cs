@@ -35,6 +35,9 @@ public interface IAppGuardHost
 
     void StartGuard(string executablePath, string directory);
 
+    /// <summary>守护程序的文件版本；读取失败时为 null。</summary>
+    string? GuardVersion(string executablePath);
+
     /// <summary>写入或删除（<paramref name="command"/> 为 null）当前用户的登录自启项。</summary>
     void SetRunKey(string? command);
 
@@ -105,6 +108,12 @@ public sealed class ClassIslandAppGuardHost : IAppGuardHost
             UseShellExecute = false,
             CreateNoWindow = true,
         });
+    }
+
+    public string? GuardVersion(string executablePath)
+    {
+        try { return FileVersionInfo.GetVersionInfo(executablePath).FileVersion; }
+        catch (Exception ex) when (ex is IOException or ArgumentException) { return null; }
     }
 
     public void SetRunKey(string? command)
