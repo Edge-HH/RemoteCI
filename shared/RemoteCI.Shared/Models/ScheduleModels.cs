@@ -59,6 +59,12 @@ public sealed class ScheduleSyncStatus
 
 public sealed class ScheduleBundle
 {
+    /// <summary>插件上报的课表天数（今天起），也是换课可选的日期范围。旧版插件只上报 7 天。</summary>
+    public const int HorizonDays = 30;
+
+    /// <summary>课表页、我的日程、手表等按周浏览的天数；更远的日期只在换课时按日期选择。</summary>
+    public const int DisplayDays = 7;
+
     [JsonPropertyName("fromDate")]
     public string FromDate { get; set; } = string.Empty;
 

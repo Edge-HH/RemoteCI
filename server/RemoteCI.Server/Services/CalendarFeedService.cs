@@ -70,7 +70,8 @@ public sealed class CalendarFeedService(AppDbContext db, ClassAccessService acce
             name = "RemoteCI " + classroom?.Name;
             var view = await schedules.GetAsync(classId, ct);
             if (view is not null)
-                foreach (var day in view.Bundle.Days.Where(x => x.Enabled))
+                // 与课表页一致只放 7 天；插件多上报的日期只供换课选择。
+                foreach (var day in view.Bundle.Days.Take(ScheduleBundle.DisplayDays).Where(x => x.Enabled))
                     foreach (var course in day.Courses.Where(x => x.Enabled))
                         Add(course, day.Date, classId, classroom?.Name ?? "", view.Bundle.Source,
                             ClassClock.Offset(state, classId, now, TimeSpan.FromMinutes(row.OffsetMinutes)));

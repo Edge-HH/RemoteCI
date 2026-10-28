@@ -5,7 +5,7 @@ using RemoteCI.Shared.Models;
 
 namespace RemoteCI.Plugin.Services;
 
-/// <summary>七日课表读取和修订号计算的唯一入口（经 IScheduleBackend 防腐层，可单元测试）。</summary>
+/// <summary>课表（今天起 <see cref="ScheduleBundle.HorizonDays"/> 天）读取和修订号计算的唯一入口（经 IScheduleBackend 防腐层，可单元测试）。</summary>
 public sealed class ScheduleCatalog(IScheduleBackend backend, IHolidayCalendarLookup? holidays = null, IScheduleOverlayInfo? overlays = null)
 {
     public ScheduleBundle BuildBundle(DateTime? start = null)
@@ -15,7 +15,7 @@ public sealed class ScheduleCatalog(IScheduleBackend backend, IHolidayCalendarLo
         {
             FromDate = from.ToString("yyyy-MM-dd"),
             GeneratedAt = DateTimeOffset.UtcNow,
-            Days = Enumerable.Range(0, 7).Select(offset => BuildDay(from.AddDays(offset))).ToList(),
+            Days = Enumerable.Range(0, ScheduleBundle.HorizonDays).Select(offset => BuildDay(from.AddDays(offset))).ToList(),
             Subjects = backend.Subjects
                 .Where(x => !string.IsNullOrWhiteSpace(x.Value.Name) && x.Value.Name != StateCollector.UnsetSubjectPlaceholder)
                 .Select(x => new SubjectEntry { Id = x.Key, Name = x.Value.Name, Teacher = NormalizeTeacher(x.Value.TeacherName) })

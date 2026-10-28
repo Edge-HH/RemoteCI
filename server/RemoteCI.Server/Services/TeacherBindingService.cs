@@ -89,7 +89,7 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state, Sc
     {
         var teacherFields = new[] { state.GetLatestSchedule(classId), state.GetSourceSchedule(classId) }
             .Where(x => x is not null)
-            .SelectMany(x => x!.Days)
+            .SelectMany(x => WeekDays(x!))
             .SelectMany(x => x.Courses)
             .Where(x => x.Enabled && !string.IsNullOrWhiteSpace(x.Teacher))
             .Select(x => x.Teacher!.Trim())
@@ -140,7 +140,7 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state, Sc
         var taught = await GetScheduledClassesAsync(boundName, fallbackOffset, ct);
         if (taught.Count == 0) return response;
         response.FromDate = taught.Min(x => x.Class.Bundle.FromDate)!;
-        var dates = taught.SelectMany(x => x.Class.Bundle.Days)
+        var dates = taught.SelectMany(x => WeekDays(x.Class.Bundle))
             .Select(x => x.Date)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(x => x, StringComparer.Ordinal);
@@ -212,7 +212,13 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state, Sc
         };
     }
 
-    private static bool HasMatchedCourse(string name, ScheduleBundle? bundle) => bundle?.Days
+    private static bool HasMatchedCourse(string name, ScheduleBundle? bundle) => bundle is not null && WeekDays(bundle)
         .SelectMany(x => x.Courses)
-        .Any(x => x.Enabled && Matches(name, x.Teacher)) == true;
+        .Any(x => x.Enabled && Matches(name, x.Teacher));
+
+    /// <summary>
+    /// 任教绑定与“我的日程”只看从今天起的 7 天：插件上报 30 天只为换课选择日期，
+    /// 不因为几周后的一节代课就提前授予班级访问。
+    /// </summary>
+    private static IEnumerable<ScheduleDay> WeekDays(ScheduleBundle bundle) => bundle.Days.Take(ScheduleBundle.DisplayDays);
 }

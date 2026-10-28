@@ -141,6 +141,12 @@ data class SwapCatalogClass(
     @SerialName("classId") val classId: String,
     @SerialName("className") val className: String,
     val subjects: List<String> = emptyList(),
+    /** 可选日期范围（今天起 30 天，含首尾）；旧服务端不下发，按 days 推算。 */
+    @SerialName("minDate") val minDate: String = "",
+    @SerialName("maxDate") val maxDate: String = "",
+    /** 范围内自己有课的日期，用于默认选中“要换走的课”。 */
+    @SerialName("myDates") val myDates: List<String> = emptyList(),
+    /** 今天起 7 天的课程；更远的日期用 AdminApi.swapCatalogDay 按天读取。 */
     val days: List<SwapCatalogDay> = emptyList(),
 )
 

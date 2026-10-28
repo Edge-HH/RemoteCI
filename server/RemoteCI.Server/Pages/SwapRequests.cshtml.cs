@@ -66,6 +66,20 @@ public sealed class SwapRequestsModel(UserManager<AppUser> users, ScheduleSwapSe
         }
     }
 
+    /// <summary>选中班级与日期后读取当天课程，由 swap-requests.js 调用。</summary>
+    public async Task<IActionResult> OnGetDayAsync(Guid classId, string? date, CancellationToken ct)
+    {
+        if (await RequireAsync(UserPermissions.RequestScheduleSwap) is not null) return Unauthorized();
+        try
+        {
+            return new JsonResult(await swaps.GetCatalogDayAsync(CurrentUser.Id, classId, date ?? "", ct), JsonDefaults.Options);
+        }
+        catch (SwapOperationException ex)
+        {
+            return new JsonResult(new ApiError { Code = ex.Code, Message = ex.Message }, JsonDefaults.Options) { StatusCode = ex.Status };
+        }
+    }
+
     private CreateSwapRequest BuildRequest() => new()
     {
         Mode = Input.Mode,

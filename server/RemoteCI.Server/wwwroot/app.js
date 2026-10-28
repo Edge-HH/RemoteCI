@@ -76,6 +76,12 @@ function openEditDialog(button) {
     else dialog.setAttribute("open", "");
 }
 
+// 自定义课程编辑窗：修改某门课、点了“添加”或保存失败时随页面打开（WebUI 与手机网页共用）。
+document.addEventListener("DOMContentLoaded", () => {
+    const editor = document.querySelector('[data-personal-editor][data-auto-open="true"]');
+    if (editor && !editor.open && typeof editor.showModal === "function") editor.showModal();
+});
+
 function closeEditDialog(dialog) {
     if (!dialog) return;
     if (typeof dialog.close === "function") dialog.close();
@@ -283,37 +289,56 @@ document.querySelectorAll("[data-volume-form]").forEach(form => {
     slider.addEventListener("change", () => queueVolume(true));
 });
 
+// 课表页直接换课：日期可选今天起 30 天内任意一天，按所选日期填充原节次与同一天的目标节次。
+// 手机课表点某节课时派发 schedule-pick 事件（detail: { date, index }）预选该课。
 document.querySelectorAll("[data-schedule-change-form]").forEach(form => {
+    const days = JSON.parse(form.querySelector("[data-schedule-days]")?.textContent || "[]");
     const mode = form.querySelector("[data-schedule-mode]");
+    const dateInput = form.querySelector("[data-schedule-date]");
+    const dateHint = form.querySelector("[data-schedule-date-hint]");
+    const revision = form.querySelector("[data-schedule-revision]");
     const source = form.querySelector("[data-schedule-source]");
     const target = form.querySelector("[data-schedule-target]");
-    const sourceDate = form.querySelector("[data-schedule-source-date]");
-    const sourceRevision = form.querySelector("[data-schedule-source-revision]");
-    const sourceIndex = form.querySelector("[data-schedule-source-index]");
     const exchangeField = form.querySelector("[data-exchange-field]");
     const replaceField = form.querySelector("[data-replace-field]");
     const targetInput = exchangeField?.querySelector("input, select");
     const replacementInput = replaceField?.querySelector("input, select");
-    if (!mode) return;
+    if (!mode || !dateInput || !source) return;
 
-    const syncSourceFields = () => {
-        const selected = source?.selectedOptions[0];
-        if (sourceDate) sourceDate.value = selected?.dataset.date ?? "";
-        if (sourceRevision) sourceRevision.value = selected?.dataset.revision ?? "";
-        if (sourceIndex) sourceIndex.value = selected?.dataset.index ?? "";
+    const option = (value, text) => {
+        const element = document.createElement("option");
+        element.value = value;
+        element.textContent = text;
+        return element;
+    };
+    const selectedDay = () => days.find(day => day.date === dateInput.value);
+    const setHint = text => {
+        if (!dateHint) return;
+        dateHint.textContent = text;
+        dateHint.hidden = !text;
     };
 
-    const syncTargetOptions = () => {
-        if (!source || !target) return;
-        const selectedSource = source.selectedOptions[0];
-        [...target.options].forEach(option => {
-            if (!option.value) return;
-            const available = option.dataset.date === selectedSource?.dataset.date &&
-                option.dataset.index !== selectedSource?.dataset.index;
-            option.hidden = !available;
-            option.disabled = !available;
-        });
-        if (target.selectedOptions[0]?.disabled) target.value = "";
+    const fillTargets = () => {
+        if (!target) return;
+        const previous = target.value;
+        const courses = (selectedDay()?.courses || []).filter(course => String(course.index) !== source.value);
+        target.replaceChildren(option("", "请选择目标节次"), ...courses.map(course => option(String(course.index), `${course.label} · ${course.subject}`)));
+        if (courses.some(course => String(course.index) === previous)) target.value = previous;
+    };
+
+    const fillDay = preferredIndex => {
+        const day = selectedDay();
+        const courses = day?.courses || [];
+        if (revision) revision.value = day?.revision ?? "";
+        source.replaceChildren(...courses.map(course => option(String(course.index), `${course.label} · ${course.subject}`)));
+        if (preferredIndex !== undefined && courses.some(course => String(course.index) === String(preferredIndex)))
+            source.value = String(preferredIndex);
+        if (!dateInput.value) setHint("");
+        else if (!day) setHint(dateInput.max && dateInput.value > dateInput.max
+            ? `教室端只同步到 ${dateInput.max} 的课表，更远的日期需要升级教室端插件。`
+            : "请选择今天起 30 天内的日期。");
+        else setHint(courses.length ? "" : "这一天没有课。");
+        fillTargets();
     };
 
     const syncModeFields = () => {
@@ -322,16 +347,18 @@ document.querySelectorAll("[data-schedule-change-form]").forEach(form => {
         if (replaceField) replaceField.hidden = exchange;
         if (targetInput) targetInput.disabled = !exchange;
         if (replacementInput) replacementInput.disabled = exchange;
-        if (exchange) syncTargetOptions();
     };
 
     mode.addEventListener("change", syncModeFields);
-    source?.addEventListener("change", () => {
-        syncSourceFields();
-        if (target) target.value = "";
-        syncTargetOptions();
+    dateInput.addEventListener("change", () => fillDay());
+    source.addEventListener("change", fillTargets);
+    form.addEventListener("schedule-pick", event => {
+        const { date, index } = event.detail || {};
+        if (date) dateInput.value = date;
+        fillDay(index);
     });
-    syncSourceFields();
+    if (!dateInput.value) dateInput.value = days.find(day => day.courses.length)?.date ?? dateInput.min;
+    fillDay();
     syncModeFields();
 });
 

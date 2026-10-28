@@ -39,6 +39,15 @@ internal fun availableScheduleDays(
         .sortedBy { day -> parseScheduleDate(day.date) ?: LocalDate.MAX }
 }
 
+/** 课表页按周浏览的天数；插件上报 30 天只为换课选择日期（与服务端 ScheduleBundle.DisplayDays 一致）。 */
+internal const val SCHEDULE_DISPLAY_DAYS = 7
+
+internal fun displayScheduleDays(
+    bundle: ScheduleBundle?,
+    afterSchool: Boolean,
+    today: LocalDate = LocalDate.now(),
+): List<ScheduleDay> = availableScheduleDays(bundle, afterSchool, today).take(SCHEDULE_DISPLAY_DAYS)
+
 internal fun initialScheduleDate(
     bundle: ScheduleBundle?,
     afterSchool: Boolean,

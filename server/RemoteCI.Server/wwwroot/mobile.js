@@ -40,7 +40,6 @@
         document.querySelector("[data-install-instructions]").textContent = "点击安装，将 RemoteCI 添加到桌面。";
     });
     document.querySelector("[data-mobile-class-select]")?.addEventListener("change", event => event.target.form.requestSubmit());
-    document.querySelector('[data-personal-editor][data-auto-open="true"]')?.showModal();
     document.querySelector("[data-calendar-offset]")?.setAttribute("value", String(-new Date().getTimezoneOffset()));
     document.querySelector("[data-calendar-create]")?.addEventListener("submit", event => {
         if (!confirm("同一日历已有订阅时，生成新链接会使旧链接失效。继续生成？")) event.preventDefault();
@@ -55,10 +54,13 @@
     dateTabs.forEach(tab => tab.addEventListener("click", () => selectDate(tab.dataset.dateTab)));
     if (dateTabs.length) selectDate(dateTabs[0].dataset.dateTab);
     const dialog = document.querySelector("[data-course-dialog]");
+    // 点某节课预选该课；不带日期的“换其他日期的课”按钮保留当前选择，在弹窗里改日期。
     document.querySelectorAll("[data-course-pick]").forEach(course => course.addEventListener("click", () => {
-        const source = dialog.querySelector("[data-schedule-source]");
-        source.value = `${course.dataset.date}:${course.dataset.index}`;
-        source.dispatchEvent(new Event("change", { bubbles: true }));
+        if (course.dataset.date) {
+            dialog.querySelector("[data-schedule-change-form]")?.dispatchEvent(new CustomEvent("schedule-pick", {
+                detail: { date: course.dataset.date, index: course.dataset.index },
+            }));
+        }
         dialog.showModal();
     }));
     document.querySelector("[data-course-close]")?.addEventListener("click", () => dialog.close());

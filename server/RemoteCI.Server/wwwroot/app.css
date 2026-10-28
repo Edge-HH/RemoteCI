@@ -168,6 +168,7 @@ button:disabled { opacity: .48; cursor: not-allowed; transform: none; }
 
 /* 通用内容页沿用同一套平面卡片与表单语言。 */
 .page-head { margin-bottom: 20px; }
+.schedule-head-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .panel.narrow { width: min(520px,100%); margin: 10vh auto 0; }
 .stack { display: grid; gap: 14px; }
 .form-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); align-items: end; gap: 14px; }
@@ -489,6 +490,9 @@ textarea { resize: vertical; }
 .course-week-hint, [data-personal-course-form] .notice { grid-column: 1 / -1; margin: 0; }
 .my-schedule-class { padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); }
 .my-schedule-class h3 { margin: 0 0 10px; font-size: 15px; }
+.personal-course-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; white-space: nowrap; }
+.personal-course-actions form { margin: 0; }
+.personal-course-dialog-form { padding: 22px; }
 .my-schedule-courses { display: grid; gap: 8px; }
 .my-schedule-course { display: grid; grid-template-columns: minmax(82px, .7fr) minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 6px; background: var(--surface); }
 .my-schedule-course-index, .my-schedule-course-time { color: var(--muted); font-size: 12px; }

@@ -3,6 +3,7 @@ package com.remoteci.mobile.calendar
 import com.remoteci.mobile.data.CourseEntry
 import com.remoteci.mobile.data.MyScheduleResponse
 import com.remoteci.mobile.data.ScheduleBundle
+import com.remoteci.mobile.ui.SCHEDULE_DISPLAY_DAYS
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -63,7 +64,8 @@ internal fun classCalendarEvents(
     now: Instant = Instant.now(),
     deviceZone: ZoneId = ZoneId.systemDefault(),
 ): List<CalendarEvent> = buildList {
-    bundle.days.filter { it.enabled }.forEach { day ->
+    // 与课表页一致只同步 7 天；插件多上报的日期只供换课选择。
+    bundle.days.take(SCHEDULE_DISPLAY_DAYS).filter { it.enabled }.forEach { day ->
         val date = LocalDate.parse(day.date)
         day.courses.filter { it.enabled }.forEach { course ->
             val window = courseWindow(date, course, deviceZone)

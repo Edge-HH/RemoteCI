@@ -704,7 +704,7 @@ fun ScheduleScreen(
     val user by ConnectionManager.currentUser.collectAsState()
     val classes by ConnectionManager.classes.collectAsState()
     val afterSchool = snapshot?.currentState == Protocol.STATE_AFTER_SCHOOL
-    val days = availableScheduleDays(bundle, afterSchool)
+    val days = displayScheduleDays(bundle, afterSchool)
     var selected by remember { mutableIntStateOf(0) }
     if (selected >= days.size) selected = 0
     // 权限按当前班级计算；老师/自定义角色可能只在某个班级拥有换课权限。
@@ -796,8 +796,10 @@ fun ScheduleScreen(
         } else if (mineMode) {
             Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = { editingCourse = null; showCourseEditor = true }) { Text("添加自定义课程") }
-                // 单双周课程本周可能不出现在日程里，从列表进入修改。
-                if (personalCourses.isNotEmpty()) TextButton(onClick = { showCourseList = true }) { Text("全部自定义课程（${personalCourses.size}）") }
+                // 单双周课程本周可能不出现在日程里，统一从列表查看、修改和删除。
+                TextButton(onClick = { showCourseList = true }) {
+                    Text(if (personalCourses.isEmpty()) "管理自定义课程" else "管理自定义课程（${personalCourses.size}）")
+                }
             }
             CalendarSyncRow(snackbar, myScheduleRefresh, CalendarFeed.Personal)
             when {
@@ -921,10 +923,11 @@ fun SwapScreen(date: String?, index: Int?, onBack: () -> Unit, snackbar: Snackba
     val user by ConnectionManager.currentUser.collectAsState()
     val classes by ConnectionManager.classes.collectAsState()
     val afterSchool = snapshot?.currentState == Protocol.STATE_AFTER_SCHOOL
+    // 换课可选插件上报的全部日期（今天起 30 天，旧版插件只有 7 天）。
     val days = availableScheduleDays(bundle, afterSchool)
     var selectedDate by remember { mutableStateOf(date ?: days.firstOrNull()?.date) }
     val day = days.firstOrNull { it.date == selectedDate } ?: days.firstOrNull()
-    val courses = day?.courses.orEmpty().filter { it.enabled }
+    val courses = day?.courses.orEmpty().filter { it.enabled && day?.enabled == true }
     var sourceIndex by remember { mutableIntStateOf(index ?: courses.firstOrNull()?.index ?: 0) }
     var targetIndex by remember { mutableIntStateOf(courses.firstOrNull { it.index != sourceIndex }?.index ?: sourceIndex) }
     var exchange by remember { mutableStateOf(true) }
@@ -981,6 +984,29 @@ fun SwapScreen(date: String?, index: Int?, onBack: () -> Unit, snackbar: Snackba
                 var showTarget by remember { mutableStateOf(false) }
                 var showSource by remember { mutableStateOf(false) }
                 var showSubject by remember { mutableStateOf(false) }
+                var showDate by remember { mutableStateOf(false) }
+                OutlinedButton(onClick = { showDate = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("日期：${swapDateLabel(day.date)}")
+                }
+                val firstDate = days.firstNotNullOfOrNull { parseScheduleDate(it.date) }
+                val lastDate = days.lastOrNull()?.let { parseScheduleDate(it.date) }
+                if (showDate && firstDate != null && lastDate != null) BoundedDatePickerDialog(
+                    initial = parseScheduleDate(day.date),
+                    min = firstDate,
+                    max = lastDate,
+                    onDismiss = { showDate = false },
+                    onPick = { picked ->
+                        // 换日期后默认选当天第一节，目标为第二节，避免沿用前一天的节次。
+                        val pickedCourses = days.firstOrNull { it.date == picked.toString() }
+                            ?.takeIf { it.enabled }?.courses.orEmpty().filter { it.enabled }
+                        selectedDate = picked.toString()
+                        sourceIndex = pickedCourses.firstOrNull()?.index ?: 0
+                        targetIndex = pickedCourses.firstOrNull { it.index != sourceIndex }?.index ?: sourceIndex
+                    },
+                )
+                if (courses.isEmpty()) {
+                    Text("这一天没有课，请选择其他日期。", style = MaterialTheme.typography.bodyMedium)
+                }
                 OutlinedButton(onClick = { showSource = true }, modifier = Modifier.fillMaxWidth()) {
                     Text("源课程：${source?.label ?: "未选"} ${source?.subject ?: ""}")
                 }
@@ -1053,7 +1079,7 @@ fun SwapScreen(date: String?, index: Int?, onBack: () -> Unit, snackbar: Snackba
                         )
                     },
                     modifier = Modifier.fillMaxWidth().height(56.dp),
-                    enabled = canChange,
+                    enabled = canChange && courses.isNotEmpty(),
                 ) { Text("确认换课") }
             }
         }
@@ -1069,7 +1095,7 @@ fun HelpScreen(onBack: () -> Unit) {
             navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } },
         )
         Text(
-            "交换会互换两节课；替换会把源课程改成选定科目。提交前会校验课表修订号，避免覆盖别人刚改过的课表。成功后今日课堂、七日课表和在线手表都会更新。",
+            "交换会互换同一天的两节课；替换会把源课程改成选定科目。日期可选今天起 30 天内的任意一天。提交前会校验课表修订号，避免覆盖别人刚改过的课表。成功后今日课堂、课表和在线手表都会更新。",
             modifier = Modifier.padding(16.dp),
             style = MaterialTheme.typography.bodyLarge,
         )

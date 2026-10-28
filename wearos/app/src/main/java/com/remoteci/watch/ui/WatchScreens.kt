@@ -550,7 +550,8 @@ internal fun ScheduleDatePickerScreen(
     onSelect: (ScheduleDay) -> Unit,
     onBack: () -> Unit,
 ) = WatchList(title = stringResource(R.string.pick_date_title)) {
-    val days = availableScheduleDays(bundle, afterSchool, today)
+    // 浏览只列 7 天；换课的日期列表（DayPickerScreen）列出插件上报的全部日期（今天起 30 天）。
+    val days = availableScheduleDays(bundle, afterSchool, today).take(SCHEDULE_DISPLAY_DAYS)
     if (days.isEmpty()) item { Hint(stringResource(R.string.no_viewable_schedule)) }
     days.forEach { day ->
         item { ActionButton(scheduleDateTitle(day.date, today), null, true, onClick = { onSelect(day) }) }
@@ -1361,6 +1362,9 @@ private fun describeConnectionForScreen(state: ConnectionManager.State): String 
     ConnectionManager.State.CloudConnected -> stringResource(R.string.connection_state_cloud)
     is ConnectionManager.State.Error -> state.message
 }
+
+/** 课表浏览的天数；插件上报 30 天只为换课选择日期。 */
+internal const val SCHEDULE_DISPLAY_DAYS = 7
 
 /** 放学后以明天作为浏览和换课下限，防止继续展示已经结束的当天课表。 */
 internal fun availableScheduleDays(

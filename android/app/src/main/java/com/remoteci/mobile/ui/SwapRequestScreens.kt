@@ -33,6 +33,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -45,9 +46,11 @@ import com.remoteci.mobile.data.ConnectionManager
 import com.remoteci.mobile.data.CreateSwapRequest
 import com.remoteci.mobile.data.Swap
 import com.remoteci.mobile.data.SwapCatalog
+import com.remoteci.mobile.data.SwapCatalogDay
 import com.remoteci.mobile.data.SwapRequestView
 import com.remoteci.mobile.data.SwapSlot
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 
 /** 需要确认的换课冲突：列出冲突，确认后带确认标记重新提交。 */
 private data class ConflictPrompt(val title: String, val text: String, val confirm: String, val retry: () -> Unit)
@@ -243,6 +246,8 @@ private fun CreateSwapForm(catalog: SwapCatalog, snackbar: SnackbarHostState, on
     var confirmForce by remember { mutableStateOf(false) }
     var submitting by remember { mutableStateOf(false) }
     var conflict by remember { mutableStateOf<ConflictPrompt?>(null) }
+    // 各班各天的课程：目录自带 7 天，选到更远的日期时由 SlotPicker 读取后放进来。
+    val days = remember(catalog) { mutableStateMapOf<String, SwapCatalogDay>().apply { putAll(catalog.seedDays()) } }
 
     if (catalog.classes.isEmpty()) {
         EmptyState("暂时没有可换的课表", "班级插件在线并同步课表后才能选择课程。")
@@ -250,7 +255,7 @@ private fun CreateSwapForm(catalog: SwapCatalog, snackbar: SnackbarHostState, on
     }
 
     fun submit(force: Boolean, acknowledge: Boolean = false) {
-        validateSwap(catalog, exchange, source, target, subject, reason)?.let { message ->
+        validateSwap(catalog, exchange, source, target, subject, reason, days)?.let { message ->
             scope.launch { snackbar.showSnackbar(message) }
             return
         }
@@ -260,8 +265,8 @@ private fun CreateSwapForm(catalog: SwapCatalog, snackbar: SnackbarHostState, on
             runCatching {
                 AdminApi.createSwap(CreateSwapRequest(
                     mode = if (exchange) Swap.MODE_EXCHANGE else Swap.MODE_REPLACE,
-                    source = if (exchange) source?.let { SwapSlot(it.classId, it.date, it.index) } else null,
-                    target = SwapSlot(targetPick.classId, targetPick.date, targetPick.index),
+                    source = if (exchange) source?.let { SwapSlot(it.classId, it.date, it.index!!) } else null,
+                    target = SwapSlot(targetPick.classId, targetPick.date, targetPick.index!!),
                     subjectName = if (exchange) null else subject,
                     reason = reason.trim(),
                     force = force,
@@ -291,10 +296,10 @@ private fun CreateSwapForm(catalog: SwapCatalog, snackbar: SnackbarHostState, on
     if (exchange) {
         Text("要换走的课", style = MaterialTheme.typography.titleSmall)
         Text("可以选其他班、其他老师的课，但两节课中至少有一节是你的课。", style = MaterialTheme.typography.bodySmall)
-        SlotPicker(catalog, source) { source = it }
+        SlotPicker(catalog, days, source) { source = it }
     }
     Text("目标课", style = MaterialTheme.typography.titleSmall)
-    SlotPicker(catalog, target) { target = it }
+    SlotPicker(catalog, days, target) { target = it }
     if (!exchange) {
         var open by remember { mutableStateOf(false) }
         Box {
@@ -312,7 +317,7 @@ private fun CreateSwapForm(catalog: SwapCatalog, snackbar: SnackbarHostState, on
     Button({ submit(force = false) }, Modifier.fillMaxWidth().height(52.dp), enabled = !submitting) { Text("申请换课") }
     if (catalog.canForce) {
         Button(
-            onClick = { if (validateSwap(catalog, exchange, source, target, subject, reason) == null) confirmForce = true else submit(true) },
+            onClick = { if (validateSwap(catalog, exchange, source, target, subject, reason, days) == null) confirmForce = true else submit(true) },
             modifier = Modifier.fillMaxWidth().height(52.dp),
             enabled = !submitting,
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
@@ -327,15 +332,38 @@ private fun CreateSwapForm(catalog: SwapCatalog, snackbar: SnackbarHostState, on
     )
 }
 
-/** 班级 → 日期 → 节次 三级选择，数据来自换课目录（所有班级，含非本人任教的班）。 */
+/**
+ * 班级 → 日期 → 节次 三级选择，数据来自换课目录（所有班级，含非本人任教的班）。
+ * 日期用日期选择器在今天起 30 天内任选；目录里没有的日期按需读取当天课程。
+ */
 @Composable
-private fun SlotPicker(catalog: SwapCatalog, value: SwapPick?, onChange: (SwapPick) -> Unit) {
+private fun SlotPicker(
+    catalog: SwapCatalog,
+    days: MutableMap<String, SwapCatalogDay>,
+    value: SwapPick?,
+    onChange: (SwapPick) -> Unit,
+) {
     val cls = catalog.classes.firstOrNull { it.classId == value?.classId }
-    val day = cls?.days?.firstOrNull { it.date == value?.date }
-    val course = catalog.course(value)
+    val range = cls?.dateRange()
+    val day = value?.let { days[swapDayKey(it.classId, it.date)] }
+    val course = catalog.course(value, days)
     var openClass by remember { mutableStateOf(false) }
-    var openDay by remember { mutableStateOf(false) }
+    var openDate by remember { mutableStateOf(false) }
     var openCourse by remember { mutableStateOf(false) }
+    var loadError by remember(value?.classId, value?.date) { mutableStateOf<String?>(null) }
+    LaunchedEffect(value?.classId, value?.date) {
+        val pick = value ?: return@LaunchedEffect
+        val key = swapDayKey(pick.classId, pick.date)
+        if (key in days) return@LaunchedEffect
+        // 旧服务端没有按天读取的接口，目录里没有的日期就是没有课。
+        if (cls?.minDate.isNullOrBlank()) {
+            days[key] = SwapCatalogDay(pick.date)
+            return@LaunchedEffect
+        }
+        runCatching { AdminApi.swapCatalogDay(pick.classId, pick.date) }
+            .onSuccess { days[key] = it }
+            .onFailure { loadError = it.message ?: "读取课程失败，请稍后再试" }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Box {
             OutlinedButton({ openClass = true }, Modifier.fillMaxWidth()) { Text("班级：${cls?.className ?: "选择班级"}") }
@@ -343,32 +371,38 @@ private fun SlotPicker(catalog: SwapCatalog, value: SwapPick?, onChange: (SwapPi
                 catalog.classes.forEach { item ->
                     DropdownMenuItem({ Text(item.className) }, {
                         openClass = false
-                        val firstDay = item.days.firstOrNull() ?: return@DropdownMenuItem
-                        val first = firstDay.courses.firstOrNull() ?: return@DropdownMenuItem
-                        onChange(SwapPick(item.classId, firstDay.date, first.index))
+                        val (min, max) = item.dateRange() ?: return@DropdownMenuItem
+                        // 换班时尽量保留已选日期，超出该班范围时改选自己有课的第一天或该班第一天。
+                        val date = value?.date?.takeIf { it in min..max } ?: item.myDates.firstOrNull() ?: min
+                        onChange(SwapPick(item.classId, date))
                     })
                 }
             }
         }
-        if (cls != null) Box {
-            OutlinedButton({ openDay = true }, Modifier.fillMaxWidth()) { Text("日期：${day?.date?.let(::swapDateLabel) ?: "选择日期"}") }
-            DropdownMenu(openDay, { openDay = false }) {
-                cls.days.forEach { item ->
-                    DropdownMenuItem({ Text(swapDateLabel(item.date)) }, {
-                        openDay = false
-                        item.courses.firstOrNull()?.let { onChange(SwapPick(cls.classId, item.date, it.index)) }
-                    })
-                }
-            }
+        if (cls != null && range != null) {
+            OutlinedButton({ openDate = true }, Modifier.fillMaxWidth()) { Text("日期：${value?.date?.let(::swapDateLabel) ?: "选择日期"}") }
+            if (openDate) BoundedDatePickerDialog(
+                initial = value?.date?.let(::parseScheduleDate),
+                min = parseScheduleDate(range.first) ?: LocalDate.now(),
+                max = parseScheduleDate(range.second) ?: LocalDate.now(),
+                onDismiss = { openDate = false },
+                onPick = { onChange(SwapPick(cls.classId, it.toString())) },
+            )
         }
-        if (cls != null && day != null) Box {
-            OutlinedButton({ openCourse = true }, Modifier.fillMaxWidth()) { Text("节次：${course?.let(::swapCourseLabel) ?: "选择节次"}") }
-            DropdownMenu(openCourse, { openCourse = false }) {
-                day.courses.forEach { item ->
-                    DropdownMenuItem({ Text(swapCourseLabel(item)) }, {
-                        openCourse = false
-                        onChange(SwapPick(cls.classId, day.date, item.index))
-                    })
+        when {
+            value == null || cls == null -> Unit
+            loadError != null -> Text(loadError.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            day == null -> Text("正在读取课程…", style = MaterialTheme.typography.bodySmall)
+            day.courses.isEmpty() -> Text("这一天没有课，请选择其他日期。", style = MaterialTheme.typography.bodySmall)
+            else -> Box {
+                OutlinedButton({ openCourse = true }, Modifier.fillMaxWidth()) { Text("节次：${course?.let(::swapCourseLabel) ?: "选择节次"}") }
+                DropdownMenu(openCourse, { openCourse = false }) {
+                    day.courses.forEach { item ->
+                        DropdownMenuItem({ Text(swapCourseLabel(item)) }, {
+                            openCourse = false
+                            onChange(SwapPick(cls.classId, day.date, item.index))
+                        })
+                    }
                 }
             }
         }

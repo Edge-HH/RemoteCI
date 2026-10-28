@@ -88,14 +88,15 @@ public sealed class SchedulePipelineTests
     }
 
     [Fact]
-    public void BuildBundle_ListsSevenDaysAndMarksMissingPlanAsDisabled()
+    public void BuildBundle_ListsThirtyDaysAndMarksMissingPlanAsDisabled()
     {
         var backend = new FakeBackend(); // 未设置课表。
         var catalog = new ScheduleCatalog(backend);
 
         var bundle = catalog.BuildBundle(new DateTime(2026, 8, 14));
 
-        Assert.Equal(7, bundle.Days.Count);
+        Assert.Equal(30, bundle.Days.Count);
+        Assert.Equal("2026-09-12", bundle.Days[^1].Date);
         Assert.All(bundle.Days, scheduleDay => Assert.False(scheduleDay.Enabled));
         Assert.Empty(bundle.Subjects);
     }
@@ -163,23 +164,23 @@ public sealed class SchedulePipelineTests
         Assert.Equal("换课日期无效", CommandHandler.ValidateScheduleChangeRequest(null, today, out _));
         Assert.Equal("换课日期无效", CommandHandler.ValidateScheduleChangeRequest(
             new ScheduleChangeRequest { Date = "2026/08/14", ExpectedRevision = "rev" }, today, out _));
-        Assert.Equal("只能修改今天起未来七天的课表", CommandHandler.ValidateScheduleChangeRequest(
+        Assert.Equal("只能修改今天起 30 天内的课表", CommandHandler.ValidateScheduleChangeRequest(
             new ScheduleChangeRequest { Date = "2026-08-13", ExpectedRevision = "rev" }, today, out _));
-        Assert.Equal("只能修改今天起未来七天的课表", CommandHandler.ValidateScheduleChangeRequest(
-            new ScheduleChangeRequest { Date = "2026-08-21", ExpectedRevision = "rev" }, today, out _));
+        Assert.Equal("只能修改今天起 30 天内的课表", CommandHandler.ValidateScheduleChangeRequest(
+            new ScheduleChangeRequest { Date = "2026-09-13", ExpectedRevision = "rev" }, today, out _));
         Assert.Equal("缺少课表修订号", CommandHandler.ValidateScheduleChangeRequest(
             new ScheduleChangeRequest { Date = "2026-08-14" }, today, out _));
     }
 
     [Fact]
-    public void ValidateScheduleChangeRequest_AcceptsTodayAndNextSixDays()
+    public void ValidateScheduleChangeRequest_AcceptsTodayAndNext29Days()
     {
         var today = new DateTime(2026, 8, 14);
-        var request = new ScheduleChangeRequest { Date = "2026-08-20", ExpectedRevision = "rev" };
+        var request = new ScheduleChangeRequest { Date = "2026-09-12", ExpectedRevision = "rev" };
 
         var error = CommandHandler.ValidateScheduleChangeRequest(request, today, out var date);
 
         Assert.Null(error);
-        Assert.Equal(new DateTime(2026, 8, 20), date);
+        Assert.Equal(new DateTime(2026, 9, 12), date);
     }
 }

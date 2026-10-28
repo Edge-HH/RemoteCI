@@ -61,7 +61,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | `capabilities_sync` | 服务端/插件 → 手表 | 服务端能力，以及接收方每个可访问班级主插件的能力 `classPlugins: [{classId, plugin}]`；`plugin` 为兼容旧客户端保留 |
 | `software_inventory` | 插件 → 服务端 | 设备名称、ClassIsland 主程序与当前已加载插件的版本、可用更新和最近升级状态 |
 | `state_push` | 插件 → 服务端/手表 | 高频当前课程、提醒播放、主界面显隐与可用电源状态，不含完整课表 |
-| `schedule_sync` | 插件 → 服务端/手表 | 今天起七天的日期、课程、科目清单和每日修订号；新版插件附带调课回执 `adjustments`（只发给服务端，服务端对账后不保存、不转发），见下文“调课记录与托管临时层” |
+| `schedule_sync` | 插件 → 服务端/手表 | 今天起 30 天（旧版插件 7 天）的日期、课程、科目清单和每日修订号；课表页、我的日程、日历与手表浏览只取前 7 天，其余日期供换课选择；新版插件附带调课回执 `adjustments`（只发给服务端，服务端对账后不保存、不转发），见下文“调课记录与托管临时层” |
 | `schedule_pull` | 服务端/手表/手机 → 插件 | 只读请求，载荷可含 `{taskId, source, requestedAt}`，要求插件立即重新生成并推送七日课表；手机端 `source` 为 6。云端拒绝无权请求时向发起方回一条 `Failed` 状态的 `schedule_sync_status` |
 | `schedule_sync_status` | 插件 → 服务端/手表 | 全局课表任务状态：Running、Completed、Failed 或 Busy，以及任务来源和占用任务 ID |
 | `extensions_sync` | 插件 → 服务端/手表 | 扩展功能清单（id、displayName、icon、requiredPermission、parameters，可选 description、groupId） |
@@ -130,7 +130,7 @@ WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手
 
 `ScheduleChangeRequest` 包含：
 
-- `date`：今天起未来七天的 `yyyy-MM-dd`。
+- `date`：今天起 30 天内的 `yyyy-MM-dd`（旧版插件只接受 7 天内）。
 - `mode`：1 为交换，2 为替换。
 - `sourceIndex`：原节次的零基索引。
 - `targetIndex`：交换模式必填。
@@ -150,7 +150,7 @@ WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手
 
 `days[]` 每项为 `{date, kind, name, followWeekday?, followSource?}`：`kind` 为 `off`（放假日）或 `makeup`（调休上学日）；调休上学日的 `followWeekday` 为 1-5（周一至周五），为 null 时表示不补课或无法推算，`followSource` 为 `auto` / `manual` / `skip` / `unresolved`。`enabled` 为 `false` 时 `days` 为空，插件应撤销此前做过的全部调整。
 
-插件把日历缓存到本地，断网时继续生效：放假日把宿主 `LessonsService.IsClassPlanEnabled` 设为 `false`，并且只恢复自己关掉的开关；调休上学日在今天起 7 天内建立托管临时层，基础课表为该周对应工作日按规则匹配的课表（忽略那天的临时层，不会把那天的换课复制过来），当天的调课叠加在上面；管理员给该日预定了普通课表时以管理员为准。调休安排变化时托管临时层按新的基础课表重建，其中的调课保留或按守卫回报冲突。放假日上的调课回报冲突 `HOLIDAY`。旧版插件建立的调休临时课表（`HolidayState.json`）在升级后首次运行时接管，其中旧版换课的改动转为本地调课保留。
+插件把日历缓存到本地，断网时继续生效：放假日把宿主 `LessonsService.IsClassPlanEnabled` 设为 `false`，并且只恢复自己关掉的开关；调休上学日在今天起 30 天内建立托管临时层，基础课表为该周对应工作日按规则匹配的课表（忽略那天的临时层，不会把那天的换课复制过来），当天的调课叠加在上面；管理员给该日预定了普通课表时以管理员为准。调休安排变化时托管临时层按新的基础课表重建，其中的调课保留或按守卫回报冲突。放假日上的调课回报冲突 `HOLIDAY`。旧版插件建立的调休临时课表（`HolidayState.json`）在升级后首次运行时接管，其中旧版换课的改动转为本地调课保留。
 
 插件上报的 `ScheduleDay` 新增可选字段 `dayKind`（`holiday` / `makeup`）和 `holidayName`，普通日期不输出。放假日 `enabled` 为 `false` 且不含课程，因此换课会被拒绝。
 
@@ -488,6 +488,7 @@ WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebU
 - `GET /api/me`、`POST /api/me/password`、`POST /api/me/display-name`
 - `GET /api/me/schedule`、`GET /api/me/schedule/next`
 - `GET /api/swap-requests/catalog`、`GET /api/swap-requests?box=incoming|outgoing|all&status=`、`GET /api/swap-requests/{id}`
+- `GET /api/swap-requests/catalog/day?classId=&date=`：换课选择器按天读取某班某天的课程 `SwapCatalogDay {date, courses[]}`（放假或没有课表时 `courses` 为空）。换课可选今天起 30 天内任意一天：`catalog` 的每个班带 `minDate`、`maxDate`（含；旧版插件只同步 7 天时为其最后一天）与 `myDates`（范围内本人有课的日期），`days` 只含今天起 7 天，更远的日期用本接口读取；超出范围或教室端未同步该日返回 400
 - `POST /api/swap-requests`、`POST /api/swap-requests/{id}/approve|reject|cancel|revoke|revert`（`{id}` 也接受 8 位 `shortId`；`revert` 仅相关班级班主任与系统管理员）
 - `POST /api/swap-requests/preview`：请求体同 `POST /api/swap-requests`，不写入数据，返回 `{conflicts[]}`
 - `GET /api/classes/{classId}/schedule-adjustments?from=`：该班调课记录（默认从班级今天起），`ScheduleAdjustmentView {id, classId, date, index, fromSubject, toSubject, teacher?, origin: swap|direct|classisland|backfill, status: active|reverted|invalidated|expired, delivery: pending|applied|conflict, effective, conflictCode?, reason?, swapRequestId?, createdByName, createdAt}`

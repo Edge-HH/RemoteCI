@@ -8,7 +8,7 @@
     <div>
         <p class="eyebrow">临时换课</p>
         <h1>换课</h1>
-        <p class="muted">向对方老师发起换课申请，对方同意后立即生效；永久换课请联系班主任在课表页操作。</p>
+        <p class="muted">向对方老师发起换课申请，对方同意后立即生效；可选今天起 30 天内的任意一天。永久换课请联系班主任在课表页操作。</p>
     </div>
 </div>
 
@@ -39,18 +39,20 @@
                 <p class="muted">可以选其他班、其他老师的课，但两节课中至少有一节是你的课。</p>
                 <div class="swap-slot-fields">
                     <label>班级<select name="Input.SourceClassId" data-slot-class></select></label>
-                    <label>日期<select name="Input.SourceDate" data-slot-date></select></label>
-                    <label>节次<select name="Input.SourceIndex" data-slot-course></select></label>
+                    <label>日期<input type="date" name="Input.SourceDate" data-slot-date required /></label>
+                    <label>节次<select name="Input.SourceIndex" data-slot-course required></select></label>
                 </div>
+                <p class="muted swap-slot-hint" data-slot-hint aria-live="polite" hidden></p>
             </div>
 
             <div class="swap-slot" data-swap-slot="target">
                 <h3>目标课</h3>
                 <div class="swap-slot-fields">
                     <label>班级<select name="Input.TargetClassId" data-slot-class required></select></label>
-                    <label>日期<select name="Input.TargetDate" data-slot-date required></select></label>
+                    <label>日期<input type="date" name="Input.TargetDate" data-slot-date required /></label>
                     <label>节次<select name="Input.TargetIndex" data-slot-course required></select></label>
                 </div>
+                <p class="muted swap-slot-hint" data-slot-hint aria-live="polite" hidden></p>
             </div>
 
             <label data-swap-subject hidden>换入学科（你任教的学科）

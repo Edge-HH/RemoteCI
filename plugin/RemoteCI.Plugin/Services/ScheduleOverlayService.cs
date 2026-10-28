@@ -32,8 +32,8 @@ public sealed class ScheduleOverlayService(
     IHolidayCalendarLookup? holidays,
     ILogger<ScheduleOverlayService> logger) : IScheduleOverlayInfo
 {
-    /// <summary>调休上学日与接管外来临时层的前瞻天数（与七日课表一致）。</summary>
-    public const int Horizon = 7;
+    /// <summary>调休上学日与接管外来临时层的前瞻天数（与上报的课表天数一致）。</summary>
+    public const int Horizon = ScheduleBundle.HorizonDays;
 
     private readonly Dictionary<Guid, ScheduleAdjustmentItemResult> _results = [];
     private readonly HashSet<string> _unmanaged = new(StringComparer.Ordinal);

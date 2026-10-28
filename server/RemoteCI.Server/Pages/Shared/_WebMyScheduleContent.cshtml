@@ -17,24 +17,57 @@
 {
     <div class="notice ok my-lessons">本月已上 <strong>@lessons.Total</strong> 节课@(lessons.Substitute > 0 ? $"，其中代课 {lessons.Substitute} 节" : "")@(lessons.Substituted > 0 ? $"，被代课 {lessons.Substituted} 节" : "")。</div>
 }
-<section class="panel">
-    <h2>@(Model.Editing is null ? "添加自定义课程" : "修改自定义课程")</h2>
-    <form method="post" asp-page-handler="Save" class="form-grid" data-personal-course-form>
-        <partial name="_PersonalCourseFields" model="Model" />
-        <button type="submit">保存课程</button>
-        @if (Model.Editing is not null) { <a asp-page="/MySchedule">取消修改</a> }
-    </form>
-    <p class="muted">提醒会发送到个人通知；可在<a asp-page="/Inbox">通知页</a>开启浏览器推送。已绑定的 AstrBot 可推送课程提醒。</p>
-    @foreach (var course in Model.Courses)
+<section class="panel" id="personal-courses">
+    <div class="panel-heading">
+        <div>
+            <h2>自定义课程</h2>
+            <p class="muted">@(Model.Courses.Count == 0 ? "还没有自定义课程。" : $"共 {Model.Courses.Count} 门，仅自己可见。单双周课程本周可能不出现在下方日程里，可在这里统一修改。")</p>
+        </div>
+        @if (Model.Editing is null)
+        {
+            <button type="button" data-user-edit-open="personal-course-editor" aria-controls="personal-course-editor">添加自定义课程</button>
+        }
+        else
+        {
+            <a class="button" asp-page="/MySchedule" asp-route-add="true">添加自定义课程</a>
+        }
+    </div>
+    @if (Model.Courses.Count > 0)
     {
-        <article class="my-schedule-class">
-            <strong>@course.Subject</strong> <span>@course.Summary @course.Location</span>
-            <span class="muted">@(course.ReminderMinutes is { } minutes ? $"提前 {minutes} 分钟提醒" : "课前不提醒") · @(course.NotifyAtStart ? "上课提醒" : "上课不提醒")</span>
-            <a asp-page="/MySchedule" asp-route-edit="@course.Id">修改</a>
-            <form method="post" asp-page-handler="Delete"><input type="hidden" name="id" value="@course.Id" /><button type="submit" class="ghost">删除</button></form>
-        </article>
+        <div class="user-account-table-wrap">
+            <table class="user-account-table personal-course-table">
+                <thead><tr><th scope="col">课程</th><th scope="col">时间</th><th scope="col">地点</th><th scope="col">提醒</th><th scope="col"><span class="visually-hidden">操作</span></th></tr></thead>
+                <tbody>
+                @foreach (var course in Model.SortedCourses)
+                {
+                    <tr>
+                        <td data-label="课程"><strong>@course.Subject</strong></td>
+                        <td data-label="时间">@course.Summary</td>
+                        <td data-label="地点">@(string.IsNullOrWhiteSpace(course.Location) ? "—" : course.Location)</td>
+                        <td data-label="提醒" class="muted">@(course.ReminderMinutes is { } minutes ? $"提前 {minutes} 分钟" : "课前不提醒") · @(course.NotifyAtStart ? "上课提醒" : "上课不提醒")</td>
+                        <td class="user-account-action personal-course-actions">
+                            <a class="button ghost" asp-page="/MySchedule" asp-route-edit="@course.Id">修改</a>
+                            <form method="post" asp-page-handler="Delete" onsubmit="return confirm('确定删除这门自定义课程？')"><input type="hidden" name="id" value="@course.Id" /><button type="submit" class="ghost danger">删除</button></form>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
     }
+    <p class="muted">提醒会发送到个人通知；可在<a asp-page="/Inbox">通知页</a>开启浏览器推送。已绑定的 AstrBot 可推送课程提醒。</p>
 </section>
+
+<dialog id="personal-course-editor" class="user-edit-dialog" data-user-edit-dialog data-personal-editor data-auto-open="@(Model.OpenEditor ? "true" : "false")" aria-labelledby="personal-course-editor-title">
+    <div class="user-edit-dialog-shell">
+        <header class="user-edit-dialog-header"><div><p class="eyebrow">自定义课程</p><h2 id="personal-course-editor-title">@(Model.Editing is null ? "添加自定义课程" : "修改自定义课程")</h2></div><button type="button" class="ghost dialog-close-button" data-user-edit-close aria-label="关闭"><i class="icon icon-close" aria-hidden="true"></i></button></header>
+        <form method="post" asp-page-handler="Save" class="stack personal-course-dialog-form" data-personal-course-form>
+            @if (Model.Error is not null) { <div class="notice warning" role="alert">@Model.Error</div> }
+            <partial name="_PersonalCourseFields" model="Model" />
+            <div class="dialog-actions"><button type="button" class="ghost" data-user-edit-close>取消</button><button type="submit">保存课程</button></div>
+        </form>
+    </div>
+</dialog>
 
 @if (Model.Schedule.Days.Count == 0)
 {
@@ -71,6 +104,7 @@ else
                                         <span class="my-schedule-course-index">@course.Label</span>
                                         <strong>@course.Subject</strong>
                                         <span class="my-schedule-course-time">@(course.StartTime ?? "—")–@(course.EndTime ?? "—")</span>
+                                        @if (course.PersonalCourseId is { } personalId) { <a asp-page="/MySchedule" asp-route-edit="@personalId">修改</a> }
                                     </div>
                                 }
                             </div>

@@ -1,7 +1,7 @@
 @page
 @model ScheduleModel
 @{ ViewData["Title"] = "课表"; }
-<div class="page-head"><div><h1>未来七日课表</h1></div><span class="status @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "已连接" : "插件离线")</span></div>
+<div class="page-head"><div><h1>未来七日课表</h1></div><div class="schedule-head-actions">@if (Model.CanRequestSwap) { <a class="button ghost" asp-page="/SwapRequests">申请换课</a> }<span class="status @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "已连接" : "插件离线")</span></div></div>
 @if (Model.CanPullSchedule)
 {
 <section class="panel schedule-pull-panel">
@@ -37,18 +37,6 @@ else
     {
         <div class="notice">插件离线，显示的是 @Model.Bundle.GeneratedAt.ToLocalTime().ToString("M月d日 HH:mm") 最后一次同步的课表；日程、提醒与换课申请仍按此课表工作，插件重新连接后会自动同步最新课表。</div>
     }
-    var courseOptions = Model.Bundle.Days
-        .Where(day => day.Enabled)
-        .SelectMany(day => day.Courses
-            .Where(course => course.Enabled)
-            .Select(course => new
-            {
-                day.Date,
-                day.Revision,
-                course.Index,
-                Label = $"{day.Date} · {course.Label} · {course.Subject}",
-            }))
-        .ToList();
     <partial name="_ScheduleTable" model="Model.Bundle" />
     @if (Model.CanManageSchedule && !Model.FromProfile)
     {
@@ -80,19 +68,16 @@ else
     {
     <section class="panel">
         <h2>换课</h2>
+        <p class="muted">可选今天起 30 天内的任意一天（以教室端已同步的课表为准）。</p>
         <form method="post" class="form-grid schedule-change-form" data-schedule-change-form>
-            <label>日期与原节次
-                <select data-schedule-source required>
-                    @{ var sourceOptionIndex = 0; }
-                    @foreach (var option in courseOptions)
-                    {
-                        <option value="@sourceOptionIndex" data-date="@option.Date" data-revision="@option.Revision" data-index="@option.Index">@option.Label</option>
-                        sourceOptionIndex++;
-                    }
-                </select>
-                <input asp-for="Input.Date" type="hidden" data-schedule-source-date />
-                <input asp-for="Input.ExpectedRevision" type="hidden" data-schedule-source-revision />
-                <input asp-for="Input.SourceIndex" type="hidden" data-schedule-source-index />
+            <script type="application/json" data-schedule-days>@Html.Raw(Model.SwapDaysJson)</script>
+            <label>日期
+                <input asp-for="Input.Date" type="date" min="@Model.SwapMinDate" max="@Model.SwapMaxDate" required data-schedule-date />
+                <small class="muted" data-schedule-date-hint aria-live="polite" hidden></small>
+            </label>
+            <input asp-for="Input.ExpectedRevision" type="hidden" data-schedule-revision />
+            <label>原节次
+                <select asp-for="Input.SourceIndex" data-schedule-source required></select>
             </label>
             <label>模式
                 <select asp-for="Input.Mode" data-schedule-mode>
@@ -100,14 +85,8 @@ else
                     <option value="Replace">替换</option>
                 </select>
             </label>
-            <label data-exchange-field>日期与目标节次
-                <select asp-for="Input.TargetIndex" data-schedule-target required>
-                    <option value="">请选择目标日期与节次</option>
-                    @foreach (var option in courseOptions)
-                    {
-                        <option value="@option.Index" data-date="@option.Date" data-index="@option.Index">@option.Label</option>
-                    }
-                </select>
+            <label data-exchange-field>目标节次（同一天）
+                <select asp-for="Input.TargetIndex" data-schedule-target required></select>
             </label>
             <label data-replace-field hidden>替换科目
                 <select asp-for="Input.ReplacementSubjectId" disabled>

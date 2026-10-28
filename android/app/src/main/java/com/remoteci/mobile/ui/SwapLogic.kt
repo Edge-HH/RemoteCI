@@ -4,7 +4,9 @@ import com.remoteci.mobile.data.AdminApiException
 import com.remoteci.mobile.data.Swap
 import com.remoteci.mobile.data.SwapCatalog
 import com.remoteci.mobile.data.SwapConflict
+import com.remoteci.mobile.data.SwapCatalogClass
 import com.remoteci.mobile.data.SwapCatalogCourse
+import com.remoteci.mobile.data.SwapCatalogDay
 import com.remoteci.mobile.data.SwapRequestView
 import com.remoteci.mobile.data.SwapSlot
 import java.time.LocalDate
@@ -16,19 +18,30 @@ internal enum class ScheduleSegment { Mine, Class, SwapRequests }
 internal fun visibleScheduleSegments(canRequestSwap: Boolean): List<ScheduleSegment> =
     ScheduleSegment.entries.filter { it != ScheduleSegment.SwapRequests || canRequestSwap }
 
-/** 换课页里选中的一节课。 */
-internal data class SwapPick(val classId: String, val date: String, val index: Int)
+/** 换课页里选中的一节课；只选了班级和日期、还没选节次时 index 为 null。 */
+internal data class SwapPick(val classId: String, val date: String, val index: Int? = null)
 
-internal fun SwapCatalog.course(pick: SwapPick?): SwapCatalogCourse? = pick?.let { p ->
-    classes.firstOrNull { it.classId == p.classId }?.days?.firstOrNull { it.date == p.date }
-        ?.courses?.firstOrNull { it.index == p.index }
+internal fun swapDayKey(classId: String, date: String): String = "$classId|$date"
+
+/** 目录自带的课程（今天起 7 天）；更远的日期由换课页按需读取后补进同一张表。 */
+internal fun SwapCatalog.seedDays(): Map<String, SwapCatalogDay> =
+    classes.flatMap { cls -> cls.days.map { swapDayKey(cls.classId, it.date) to it } }.toMap()
+
+internal fun SwapCatalog.course(pick: SwapPick?, days: Map<String, SwapCatalogDay> = seedDays()): SwapCatalogCourse? =
+    pick?.let { p -> days[swapDayKey(p.classId, p.date)]?.courses?.firstOrNull { it.index == p.index } }
+
+/** 可选日期范围（yyyy-MM-dd，含首尾）：新服务端给出今天起 30 天，旧服务端只有 days。 */
+internal fun SwapCatalogClass.dateRange(): Pair<String, String>? {
+    val min = minDate.ifBlank { days.minOfOrNull { it.date } ?: return null }
+    val max = maxDate.ifBlank { days.maxOfOrNull { it.date } ?: return null }
+    return min to max
 }
 
-/** 默认的“要换走的课”：第一节属于自己的课；没有自己的课时为 null。 */
+/** 默认的“要换走的课”：7 天内第一节属于自己的课，其次 30 天内第一个自己有课的日期；都没有时为 null。 */
 internal fun SwapCatalog.firstOwnPick(): SwapPick? {
     for (cls in classes) for (day in cls.days) for (course in day.courses)
         if (course.mine) return SwapPick(cls.classId, day.date, course.index)
-    return null
+    return classes.firstOrNull { it.myDates.isNotEmpty() }?.let { SwapPick(it.classId, it.myDates.first()) }
 }
 
 /**
@@ -42,12 +55,13 @@ internal fun validateSwap(
     target: SwapPick?,
     subject: String?,
     reason: String,
+    days: Map<String, SwapCatalogDay> = catalog.seedDays(),
 ): String? {
-    val targetCourse = catalog.course(target) ?: return "请选择目标课"
+    val targetCourse = catalog.course(target, days) ?: return "请选择目标课"
     if (reason.isBlank()) return "请填写换课理由"
     if (reason.trim().length > 200) return "换课理由不能超过 200 个字"
     if (exchange) {
-        val sourceCourse = catalog.course(source) ?: return "请选择要换走的课"
+        val sourceCourse = catalog.course(source, days) ?: return "请选择要换走的课"
         if (source == target) return "两节课不能是同一节"
         if (!sourceCourse.mine && !targetCourse.mine) return "两节课中至少要有一节是你自己的课"
     } else {

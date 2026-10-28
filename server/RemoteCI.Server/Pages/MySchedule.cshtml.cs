@@ -21,6 +21,16 @@ public sealed class MyScheduleModel(
     public MyScheduleResponse Schedule { get; private set; } = new();
     public List<PersonalCourseView> Courses { get; private set; } = [];
     public PersonalCourseView? Editing { get; private set; }
+    /// <summary>页面打开时弹出课程编辑窗：修改某门课、点了“添加”或保存失败。</summary>
+    public bool OpenEditor => Editing is not null || AddRequested || Error is not null;
+    private bool AddRequested { get; set; }
+    /// <summary>自定义课程列表：单次课程按日期在前，每周课程按周一到周日、开始时间排序。</summary>
+    public IEnumerable<PersonalCourseView> SortedCourses => Courses
+        .OrderBy(x => x.Date is null ? 1 : 0)
+        .ThenBy(x => x.Date, StringComparer.Ordinal)
+        .ThenBy(x => x.WeekDay is { } day ? Array.IndexOf(WeekDayOrder, day) : WeekDayOrder.Length)
+        .ThenBy(x => x.StartTime, StringComparer.Ordinal)
+        .ThenBy(x => x.Subject, StringComparer.Ordinal);
     [BindProperty] public string Subject { get; set; } = "";
     [BindProperty] public string? Location { get; set; }
     [BindProperty] public int WeekDay { get; set; } = 1;
@@ -52,9 +62,10 @@ public sealed class MyScheduleModel(
         return new JsonResult(new { revision = MobileRevision });
     }
 
-    public async Task<IActionResult> OnGetAsync(Guid? edit, CancellationToken ct)
+    public async Task<IActionResult> OnGetAsync(Guid? edit, bool add, CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
+        AddRequested = add;
         await LoadAsync(ct);
         var (from, to) = OperationsEndpoints.LessonStatsRange(null, null);
         MonthLessons = (await lessonStats.GetAsync(null, from, to, teacher: CurrentUser.DisplayName, ct: ct)).Teachers

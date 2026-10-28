@@ -8,7 +8,7 @@ using RemoteCI.Shared.Models;
 
 namespace RemoteCI.Plugin.Services;
 
-/// <summary>高频当前状态与低频七日课表分流收集器。</summary>
+/// <summary>高频当前状态与低频课表分流收集器。</summary>
 public sealed class StateCollector
 {
     /// <summary>ClassIsland 对未设置科目的占位名称（宿主直接写入字面量）。</summary>

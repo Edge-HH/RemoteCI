@@ -112,4 +112,30 @@ class SwapLogicTest {
         assertNull(AdminApiException("课位已变化", "SWAP_SLOT_CHANGED").swapConflictText())
         assertNull(IllegalStateException("x").swapConflictText())
     }
+
+    @Test
+    fun `days beyond the catalog week come from the loaded day map`() {
+        val far = SwapPick("c1", "2026-10-30", 1)
+        assertNull(catalog.course(far))
+        val days = catalog.seedDays() + (swapDayKey("c1", "2026-10-30") to protocolJson.decodeFromString(
+            com.remoteci.mobile.data.SwapCatalogDay.serializer(),
+            """{"date":"2026-10-30","courses":[{"index":1,"label":"第2节","subject":"英语","teacher":"李老师"}]}""",
+        ))
+        assertEquals("英语", catalog.course(far, days)?.subject)
+        assertNull(validateSwap(catalog, true, SwapPick("c1", "2026-10-06", 0), far, null, "外出", days))
+        assertEquals("请选择目标课", validateSwap(catalog, true, SwapPick("c1", "2026-10-06", 0), SwapPick("c1", "2026-10-30"), null, "外出", days))
+    }
+
+    @Test
+    fun `date range and default pick fall back across server versions`() {
+        val newer = protocolJson.decodeFromString(
+            SwapCatalog.serializer(),
+            """{"classes":[{"classId":"c2","className":"二班","minDate":"2026-10-06","maxDate":"2026-11-04","myDates":["2026-10-20"],"days":[]}]}""",
+        )
+        assertEquals("2026-10-06" to "2026-11-04", newer.classes[0].dateRange())
+        // 7 天内没有自己的课时，默认落在 30 天内第一个自己有课的日期，节次待选。
+        assertEquals(SwapPick("c2", "2026-10-20"), newer.firstOwnPick())
+        // 旧服务端没有 minDate/maxDate：按 days 推算。
+        assertEquals("2026-10-06" to "2026-10-06", catalog.classes[0].dateRange())
+    }
 }

@@ -86,39 +86,68 @@ public sealed class ScheduleSwapService(
         {
             if (state.GetLatestSchedule(classroom.Id) is not { } bundle) continue;
             var today = ClassToday(classroom.Id);
+            var selectable = bundle.Days.Where(x => IsSelectableDate(x.Date, today))
+                .OrderBy(x => x.Date, StringComparer.Ordinal).ToList();
+            if (!selectable.Any(x => x.Enabled && x.Courses.Any(c => c.Enabled))) continue;
             var item = new SwapCatalogClass
             {
                 ClassId = classroom.Id,
                 ClassName = classroom.Name,
                 Subjects = bundle.Subjects.Select(x => x.Name).Where(x => !string.IsNullOrWhiteSpace(x))
                     .Distinct(StringComparer.Ordinal).ToList(),
+                MinDate = FormatDate(today),
+                MaxDate = selectable[^1].Date,
             };
             foreach (var subject in bundle.Subjects.Where(x => TeacherBindingService.Matches(actor.Name, x.Teacher)))
                 mySubjects.Add(subject.Name);
-            foreach (var day in bundle.Days.Where(x => x.Enabled && IsSelectableDate(x.Date, today)))
+            foreach (var day in selectable.Where(x => x.Enabled))
             {
-                var courses = day.Courses.Where(x => x.Enabled).OrderBy(x => x.Index).Select(course =>
-                {
-                    var mine = TeacherBindingService.Matches(actor.Name, course.Teacher);
-                    if (mine && !string.IsNullOrWhiteSpace(course.Subject)) mySubjects.Add(course.Subject);
-                    return new SwapCatalogCourse
-                    {
-                        Index = course.Index,
-                        Label = course.Label,
-                        Subject = course.Subject,
-                        Teacher = course.Teacher,
-                        StartTime = course.StartTime,
-                        EndTime = course.EndTime,
-                        Mine = mine,
-                    };
-                }).ToList();
-                if (courses.Count > 0) item.Days.Add(new SwapCatalogDay { Date = day.Date, Courses = courses });
+                var catalogDay = CatalogDay(actor, day);
+                if (catalogDay.Courses.Count == 0) continue;
+                foreach (var course in catalogDay.Courses.Where(x => x.Mine && !string.IsNullOrWhiteSpace(x.Subject)))
+                    mySubjects.Add(course.Subject);
+                if (catalogDay.Courses.Any(x => x.Mine)) item.MyDates.Add(day.Date);
+                // 旧版客户端只读 days：保留今天起 7 天，更远的日期由新版客户端按天读取。
+                if (IsWithinDays(day.Date, today, ScheduleBundle.DisplayDays)) item.Days.Add(catalogDay);
             }
-            if (item.Days.Count > 0) catalog.Classes.Add(item);
+            catalog.Classes.Add(item);
         }
         catalog.MySubjects = [.. mySubjects];
         return catalog;
     }
+
+    /// <summary>换课页选中某班某天后读取当天的课程；当天放假或没有课表时返回空课程列表。</summary>
+    public async Task<SwapCatalogDay> GetCatalogDayAsync(Guid userId, Guid classId, string date, CancellationToken ct = default)
+    {
+        var actor = await LoadActorAsync(userId, ct);
+        RequirePermission(actor, UserPermissions.RequestScheduleSwap);
+        var classroom = await db.Classrooms.AsNoTracking().SingleOrDefaultAsync(x => x.Id == classId, ct)
+            ?? throw Invalid("班级不存在");
+        var bundle = state.GetLatestSchedule(classroom.Id)
+            ?? throw Invalid($"{classroom.Name} 的课表尚未同步，请稍后再试");
+        if (!IsSelectableDate(date, ClassToday(classroom.Id)))
+            throw Invalid($"只能选择今天起 {ScheduleBundle.HorizonDays} 天内的日期");
+        var day = bundle.Days.FirstOrDefault(x => x.Date == date)
+            ?? throw Invalid(bundle.Days.Count == 0
+                ? $"{classroom.Name} 的课表尚未同步，请稍后再试"
+                : $"{classroom.Name} 教室端只同步到 {bundle.Days.Max(x => x.Date)} 的课表，更远的日期需要升级教室端插件");
+        return day.Enabled ? CatalogDay(actor, day) : new SwapCatalogDay { Date = day.Date };
+    }
+
+    private static SwapCatalogDay CatalogDay(Actor actor, ScheduleDay day) => new()
+    {
+        Date = day.Date,
+        Courses = day.Courses.Where(x => x.Enabled).OrderBy(x => x.Index).Select(course => new SwapCatalogCourse
+        {
+            Index = course.Index,
+            Label = course.Label,
+            Subject = course.Subject,
+            Teacher = course.Teacher,
+            StartTime = course.StartTime,
+            EndTime = course.EndTime,
+            Mine = TeacherBindingService.Matches(actor.Name, course.Teacher),
+        }).ToList(),
+    };
 
     /// <summary>box：incoming（待我处理/被强制换走的）、outgoing（我发起的）、all。</summary>
     public async Task<IReadOnlyList<SwapRequestView>> ListAsync(
@@ -884,10 +913,14 @@ public sealed class ScheduleSwapService(
     /// <summary>教室端本地“今天”。</summary>
     private DateOnly ClassToday(Guid classId) => ClassClock.Today(state, classId);
 
-    /// <summary>插件只接受今天起 7 天内的换课。</summary>
-    private static bool IsSelectableDate(string date, DateOnly today) =>
+    /// <summary>插件只接受今天起 30 天内的换课（与上报的课表天数一致）。</summary>
+    private static bool IsSelectableDate(string date, DateOnly today) => IsWithinDays(date, today, ScheduleBundle.HorizonDays);
+
+    private static bool IsWithinDays(string date, DateOnly today, int days) =>
         DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var value) &&
-        value >= today && value <= today.AddDays(6);
+        value >= today && value < today.AddDays(days);
+
+    private static string FormatDate(DateOnly date) => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
     private static List<Guid> Approvers(ScheduleSwapRequest row) =>
         JsonSerializer.Deserialize<List<Guid>>(row.ApproverUserIdsJson) ?? [];

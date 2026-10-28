@@ -1,4 +1,4 @@
-// 换课页：页签切换、班级→日期→节次联动、互换/替换模式切换与强制换课确认。
+// 换课页：页签切换、班级→日期（今天起 30 天内任选）→节次联动、互换/替换模式切换与强制换课确认。
 (() => {
     const weekdays = "日一二三四五六";
 
@@ -61,14 +61,20 @@
     function setupForm(form) {
         const catalog = JSON.parse(form.querySelector("[data-swap-catalog]").textContent || "{}");
         const classes = catalog.classes || [];
+        // 某班某天的课程：catalog 自带今天起 7 天，更远的日期选中后再向服务端读取。
+        const days = new Map();
+        const dayKey = (classId, date) => `${classId}|${date}`;
+        for (const cls of classes) for (const day of cls.days || []) days.set(dayKey(cls.classId, day.date), day);
         const slots = {};
         for (const name of ["source", "target"]) {
             const root = form.querySelector(`[data-swap-slot="${name}"]`);
             slots[name] = {
                 root,
                 classSelect: root.querySelector("[data-slot-class]"),
-                dateSelect: root.querySelector("[data-slot-date]"),
+                dateInput: root.querySelector("[data-slot-date]"),
                 courseSelect: root.querySelector("[data-slot-course]"),
+                hint: root.querySelector("[data-slot-hint]"),
+                loading: 0,
             };
         }
         const subjectField = form.querySelector("[data-swap-subject]");
@@ -77,37 +83,69 @@
         const mode = () => form.querySelector("[data-swap-mode]:checked")?.value || "Exchange";
 
         const findClass = id => classes.find(x => x.classId === id);
-        const findDay = (cls, date) => cls?.days.find(x => x.date === date);
-        const selectedCourse = slot => {
-            const day = findDay(findClass(slot.classSelect.value), slot.dateSelect.value);
-            return day?.courses.find(x => String(x.index) === slot.courseSelect.value);
+        const selectedCourse = slot => days.get(dayKey(slot.classSelect.value, slot.dateInput.value))
+            ?.courses.find(x => String(x.index) === slot.courseSelect.value);
+        const setHint = (slot, text) => {
+            if (!slot.hint) return;
+            slot.hint.textContent = text || "";
+            slot.hint.hidden = !text;
         };
 
         function fillClasses(slot, preferMine) {
             slot.classSelect.replaceChildren(...classes.map(x => option(x.classId, x.className)));
             // 要换走的课默认落在“我有课”的第一个班级，减少选择步骤。
-            const mine = classes.find(x => x.days.some(d => d.courses.some(c => c.mine)));
+            const mine = classes.find(x => (x.myDates || []).length > 0);
             if (preferMine && mine) slot.classSelect.value = mine.classId;
             fillDates(slot, preferMine);
         }
 
         function fillDates(slot, preferMine) {
             const cls = findClass(slot.classSelect.value);
-            const days = cls?.days || [];
-            slot.dateSelect.replaceChildren(...days.map(x => option(x.date, formatDate(x.date))));
-            const mineDay = days.find(d => d.courses.some(c => c.mine));
-            if (preferMine && mineDay) slot.dateSelect.value = mineDay.date;
+            slot.dateInput.min = cls?.minDate || "";
+            slot.dateInput.max = cls?.maxDate || "";
+            const current = slot.dateInput.value;
+            const inRange = current && cls && current >= cls.minDate && current <= cls.maxDate;
+            if (preferMine && cls?.myDates?.length) slot.dateInput.value = cls.myDates[0];
+            else if (!inRange) slot.dateInput.value = cls?.minDate || "";
             fillCourses(slot, preferMine);
         }
 
-        function fillCourses(slot, preferMine) {
-            const day = findDay(findClass(slot.classSelect.value), slot.dateSelect.value);
+        async function fillCourses(slot, preferMine) {
+            const classId = slot.classSelect.value;
+            const date = slot.dateInput.value;
+            const cls = findClass(classId);
+            const loading = ++slot.loading;
+            slot.courseSelect.replaceChildren();
+            setHint(slot, "");
+            updatePreview();
+            if (!cls || !date) return;
+            if (date < cls.minDate || date > cls.maxDate) {
+                setHint(slot, `请选择 ${formatDate(cls.minDate)} 至 ${formatDate(cls.maxDate)} 之间的日期。`);
+                return;
+            }
+            let day = days.get(dayKey(classId, date));
+            if (!day) {
+                setHint(slot, "正在读取课程…");
+                try {
+                    const query = new URLSearchParams({ handler: "Day", classId, date });
+                    const response = await fetch(`${location.pathname}?${query}`, { credentials: "same-origin", headers: { Accept: "application/json" } });
+                    const data = await response.json().catch(() => null);
+                    if (loading !== slot.loading) return;
+                    if (!response.ok) { setHint(slot, data?.message || "读取课程失败，请稍后再试。"); return; }
+                    day = data;
+                    days.set(dayKey(classId, date), day);
+                } catch {
+                    if (loading === slot.loading) setHint(slot, "读取课程失败，请检查网络后再试。");
+                    return;
+                }
+            }
             const courses = day?.courses || [];
             slot.courseSelect.replaceChildren(...courses.map(c => {
                 const time = c.startTime ? ` ${c.startTime}` : "";
                 const teacher = c.teacher ? ` · ${c.teacher}` : "";
                 return option(String(c.index), `${c.label}${time} ${c.subject}${teacher}${c.mine ? "（我的课）" : ""}`);
             }));
+            setHint(slot, courses.length ? "" : `${formatDate(date)} 没有课。`);
             const mine = courses.find(c => c.mine);
             if (preferMine && mine) slot.courseSelect.value = String(mine.index);
             updatePreview();
@@ -132,7 +170,7 @@
         function syncMode() {
             const replace = mode() === "Replace";
             slots.source.root.hidden = replace;
-            for (const select of [slots.source.classSelect, slots.source.dateSelect, slots.source.courseSelect])
+            for (const select of [slots.source.classSelect, slots.source.dateInput, slots.source.courseSelect])
                 select.disabled = replace;
             if (subjectField && subjectSelect) {
                 subjectField.hidden = !replace;
@@ -145,7 +183,7 @@
         for (const [name, slot] of Object.entries(slots)) {
             fillClasses(slot, name === "source");
             slot.classSelect.addEventListener("change", () => fillDates(slot, false));
-            slot.dateSelect.addEventListener("change", () => fillCourses(slot, false));
+            slot.dateInput.addEventListener("change", () => fillCourses(slot, false));
             slot.courseSelect.addEventListener("change", updatePreview);
         }
         subjectSelect?.addEventListener("change", updatePreview);

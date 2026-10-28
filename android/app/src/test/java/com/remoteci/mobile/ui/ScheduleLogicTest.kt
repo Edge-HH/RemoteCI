@@ -137,4 +137,16 @@ class ScheduleLogicTest {
         assertNull(afterAll.current)
         assertEquals("放学", afterAll.title)
     }
+
+    @Test
+    fun `schedule tabs show a week while swaps can use every reported day`() {
+        val today = java.time.LocalDate.of(2026, 10, 6)
+        val bundle = com.remoteci.mobile.data.ScheduleBundle(
+            days = (0L until 30L).map { com.remoteci.mobile.data.ScheduleDay(today.plusDays(it).toString(), "r$it", enabled = true) },
+        )
+        assertEquals(30, availableScheduleDays(bundle, afterSchool = false, today = today).size)
+        val week = displayScheduleDays(bundle, afterSchool = true, today = today)
+        assertEquals(7, week.size)
+        assertEquals("2026-10-07", week.first().date)
+    }
 }

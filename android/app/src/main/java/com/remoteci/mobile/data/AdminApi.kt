@@ -96,8 +96,11 @@ object AdminApi {
         post("/api/me/display-name", UpdateDisplayNameRequest(name), UpdateDisplayNameRequest.serializer(), UnitSerializer)
     }
 
-    /** 换课申请：选择器数据（所有班级七日课表与本人任教学科）。 */
+    /** 换课申请：选择器数据（所有班级、可选日期范围与本人任教学科，自带今天起 7 天的课程）。 */
     suspend fun swapCatalog(): SwapCatalog = get("/api/swap-requests/catalog", SwapCatalog.serializer())
+    /** 换课申请：某班某天的课程（今天起 30 天内任意一天）。 */
+    suspend fun swapCatalogDay(classId: String, date: String): SwapCatalogDay =
+        get("/api/swap-requests/catalog/day?classId=${enc(classId)}&date=${enc(date)}", SwapCatalogDay.serializer())
     /** box：incoming 待我处理 / outgoing 我发起的。 */
     suspend fun swapRequests(box: String): List<SwapRequestView> =
         get("/api/swap-requests?box=${enc(box)}", ListSerializer(SwapRequestView.serializer()))

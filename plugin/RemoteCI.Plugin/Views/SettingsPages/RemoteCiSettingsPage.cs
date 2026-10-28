@@ -105,7 +105,7 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
             Children =
             {
                 new TextBlock { Text = "RemoteCI 课表手表联动", FontSize = 20, FontWeight = Avalonia.Media.FontWeight.Bold },
-                new TextBlock { Text = "把当前状态和七日课表推送到 Wear OS，支持按权限换课与发送通知。", TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                new TextBlock { Text = "把当前状态和课表推送到 Wear OS，支持按权限换课与发送通知。", TextWrapping = Avalonia.Media.TextWrapping.Wrap },
                 new StackPanel
                 {
                     Spacing = 6,

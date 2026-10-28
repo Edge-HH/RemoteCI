@@ -88,6 +88,60 @@ public sealed class ScheduleSwapTests : IDisposable
     }
 
     [Fact]
+    public async Task Catalog_OffersThirtyDays_AndLoadsFarDaysOnDemand()
+    {
+        var classId = await SeedClassAsync("十班", ("数学", "王老师"), ("英语", "李老师"));
+        var oldPlugin = await SeedClassAsync("十一班", ("数学", "王老师"));
+        await CreateTeacherAsync("wang", "王老师");
+        await CreateTeacherAsync("li", "李老师");
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        string Date(int offset) => today.AddDays(offset).ToString("yyyy-MM-dd");
+        // 新版插件上报 30 天以上也只开放今天起 30 天。
+        var store = _factory.Services.GetRequiredService<IStateStore>();
+        var bundle = store.GetSourceSchedule(classId)!;
+        var template = bundle.Days[0].Courses;
+        bundle.Days = Enumerable.Range(0, 31).Select(offset => new ScheduleDay
+        {
+            Date = Date(offset),
+            Revision = $"{Date(offset)}-r0",
+            Enabled = true,
+            Courses = template.Select(x => new CourseEntry
+            {
+                Index = x.Index, Label = x.Label, SubjectId = x.SubjectId, Subject = x.Subject, Teacher = x.Teacher,
+                StartTime = x.StartTime, EndTime = x.EndTime, Enabled = true,
+            }).ToList(),
+        }).ToList();
+        store.SaveSchedule(classId, bundle);
+        var wangToken = await TokenAsync("wang");
+
+        var catalog = await GetAsync<SwapCatalog>(wangToken, "/api/swap-requests/catalog");
+        var item = catalog.Classes.Single(x => x.ClassId == classId);
+        Assert.Equal(Date(0), item.MinDate);
+        Assert.Equal(Date(29), item.MaxDate);
+        Assert.Equal(7, item.Days.Count);
+        Assert.Equal(30, item.MyDates.Count);
+        // 旧版插件只同步了 2 天：最远只能选到第 2 天，更远的日期提示升级插件。
+        var old = catalog.Classes.Single(x => x.ClassId == oldPlugin);
+        Assert.Equal(Date(1), old.MaxDate);
+        var oldFar = await SendAsync(wangToken, HttpMethod.Get, $"/api/swap-requests/catalog/day?classId={oldPlugin}&date={Date(5)}");
+        Assert.Equal(HttpStatusCode.BadRequest, oldFar.StatusCode);
+        Assert.Contains("升级", (await oldFar.Content.ReadFromJsonAsync<ApiError>())!.Message);
+
+        var far = await GetAsync<SwapCatalogDay>(wangToken, $"/api/swap-requests/catalog/day?classId={classId}&date={Date(20)}");
+        Assert.Equal(Date(20), far.Date);
+        Assert.True(far.Courses.Single(x => x.Index == 0).Mine);
+        var outside = await SendAsync(wangToken, HttpMethod.Get, $"/api/swap-requests/catalog/day?classId={classId}&date={Date(30)}");
+        Assert.Equal(HttpStatusCode.BadRequest, outside.StatusCode);
+
+        var created = await PostAsync<SwapRequestView>(wangToken, "/api/swap-requests", Exchange(classId, Date(25), 0, classId, Date(25), 1));
+        Assert.Equal(SwapRequestStatus.Pending, created.Status);
+        await PostAsync<SwapRequestView>(await TokenAsync("li"), $"/api/swap-requests/{created.Id}/approve", new SwapDecisionRequest());
+        Assert.Equal("英语", Day(classId, Date(25)).Courses[0].Subject);
+        var tooFar = await SendAsync(wangToken, HttpMethod.Post, "/api/swap-requests", Exchange(classId, Date(30), 0, classId, Date(30), 1));
+        Assert.Equal(HttpStatusCode.BadRequest, tooFar.StatusCode);
+    }
+
+    [Fact]
     public async Task Create_RequiresOneOwnLesson_AndPermission()
     {
         var classId = await SeedClassAsync("二班", ("数学", "王老师"), ("英语", "李老师"), ("物理", "赵老师"));

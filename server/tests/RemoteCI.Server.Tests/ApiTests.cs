@@ -657,14 +657,16 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Contains("data-schedule-change-form", scheduleHtml);
         Assert.Contains("data-schedule-source", scheduleHtml);
         Assert.Contains("data-schedule-target", scheduleHtml);
-        Assert.Contains("日期与目标节次", scheduleHtml);
-        Assert.Contains("2026-08-17 · 第二节 · 体育", scheduleHtml);
+        // 日期用日期选择器（今天起 30 天内），节次由 app.js 按所选日期从内嵌数据填充。
+        Assert.Contains("目标节次（同一天）", scheduleHtml);
+        Assert.Contains("data-schedule-days", scheduleHtml);
+        Assert.Matches("<input[^>]+type=\"date\"[^>]+name=\"Input.Date\"|<input[^>]+name=\"Input.Date\"[^>]+type=\"date\"", scheduleHtml);
+        Assert.DoesNotContain("2026-08-17 · 第二节 · 体育", scheduleHtml);
         Assert.DoesNotContain("目标节次（从 0 开始）", scheduleHtml);
         Assert.Contains("name=\"Input.Date\"", scheduleHtml);
         Assert.Contains("name=\"Input.ExpectedRevision\"", scheduleHtml);
         Assert.Contains("name=\"Input.SourceIndex\"", scheduleHtml);
         Assert.Contains("name=\"Input.TargetIndex\"", scheduleHtml);
-        Assert.Contains("data-date=\"2026-08-17\"", scheduleHtml);
         Assert.DoesNotMatch("value=\"[^\"]*\\|", scheduleHtml);
         Assert.Contains("data-exchange-field", scheduleHtml);
         Assert.Contains("data-replace-field hidden", scheduleHtml);
@@ -735,7 +737,8 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Contains("[data-backup-settings-form]", script);
         Assert.Contains("weekdayField.hidden = !weekly", script);
         Assert.Contains("[data-schedule-target]", script);
-        Assert.Contains("option.dataset.date === selectedSource?.dataset.date", script);
+        // 目标节次只列所选日期中原节次以外的课。
+        Assert.Contains("filter(course => String(course.index) !== source.value)", script);
         Assert.DoesNotContain("source.value.split", script);
     }
 

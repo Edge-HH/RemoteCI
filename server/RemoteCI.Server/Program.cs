@@ -525,6 +525,11 @@ app.MapGet("/api/swap-requests/catalog", async (
     HttpContext ctx, IdentityCoordinator identities, ScheduleSwapService swaps, CancellationToken ct) =>
     await SwapCallAsync(ctx, identities, principal => swaps.GetCatalogAsync(principal.User!.Id, ct), ct));
 
+// 换课选择器按天读取课程：日期可选今天起 30 天内任意一天（catalog 的 days 只含 7 天）。
+app.MapGet("/api/swap-requests/catalog/day", async (
+    HttpContext ctx, Guid classId, string date, IdentityCoordinator identities, ScheduleSwapService swaps, CancellationToken ct) =>
+    await SwapCallAsync(ctx, identities, principal => swaps.GetCatalogDayAsync(principal.User!.Id, classId, date, ct), ct));
+
 app.MapGet("/api/swap-requests", async (
     HttpContext ctx, string? box, SwapRequestStatus? status, IdentityCoordinator identities, ScheduleSwapService swaps,
     CancellationToken ct) =>

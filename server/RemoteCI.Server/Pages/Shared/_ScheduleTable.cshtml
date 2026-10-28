@@ -1,14 +1,15 @@
 @model ScheduleBundle
 @{
     var weekNames = new[] { "周日", "周一", "周二", "周三", "周四", "周五", "周六" };
-    // 列固定按周一到周日排列；课表是从今天起的七天，所以今天之前的星期几显示的是下周的日期。
+    // 列固定按周一到周日排列；只显示从今天起的七天（插件上报 30 天供换课选择），所以今天之前的星期几显示的是下周的日期。
     var today = ViewData["ScheduleToday"] as string;
-    var days = Model.Days
+    var weekDays = Model.Days.Take(ScheduleBundle.DisplayDays).ToList();
+    var days = weekDays
         .Select(day => (Day: day, Parsed: DateTime.TryParse(day.Date, out var parsed) ? parsed : (DateTime?)null))
         .OrderBy(item => item.Parsed is { } date ? ((int)date.DayOfWeek + 6) % 7 : 7)
         .ThenBy(item => item.Day.Date, StringComparer.Ordinal)
         .ToList();
-    var courseRows = Model.Days
+    var courseRows = weekDays
         .SelectMany(day => day.Courses)
         .GroupBy(course => course.Index)
         .OrderBy(group => group.Key)

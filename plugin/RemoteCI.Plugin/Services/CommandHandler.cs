@@ -189,8 +189,8 @@ public sealed class CommandHandler
         date = default;
         if (request is null || !TryParseDate(request.Date, out date))
             return "换课日期无效";
-        if (date < today || date >= today.AddDays(7))
-            return "只能修改今天起未来七天的课表";
+        if (date < today || date >= today.AddDays(ScheduleBundle.HorizonDays))
+            return $"只能修改今天起 {ScheduleBundle.HorizonDays} 天内的课表";
         if (string.IsNullOrWhiteSpace(request.ExpectedRevision))
             return "缺少课表修订号";
         return null;

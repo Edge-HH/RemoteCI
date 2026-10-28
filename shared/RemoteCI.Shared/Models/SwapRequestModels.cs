@@ -270,7 +270,10 @@ public sealed class SwapRequestView
     public List<SwapConflict> AcknowledgedConflicts { get; set; } = [];
 }
 
-/// <summary>换课页选择器数据：所有班级的七日课表（已叠加临时任课老师）与本人任教学科。</summary>
+/// <summary>
+/// 换课页选择器数据：所有班级（已叠加调课）与本人任教学科。每个班可选今天起 30 天内的任意一天，
+/// 某天的课程用 GET /api/swap-requests/catalog/day 按需读取。
+/// </summary>
 public sealed class SwapCatalog
 {
     [JsonPropertyName("teacherName")]
@@ -297,6 +300,19 @@ public sealed class SwapCatalogClass
     [JsonPropertyName("subjects")]
     public List<string> Subjects { get; set; } = [];
 
+    /// <summary>可选的第一天（该班教室端的今天），yyyy-MM-dd。</summary>
+    [JsonPropertyName("minDate")]
+    public string MinDate { get; set; } = string.Empty;
+
+    /// <summary>可选的最后一天（含）：今天起第 30 天，或教室端已同步课表的最后一天（旧版插件只同步 7 天）。</summary>
+    [JsonPropertyName("maxDate")]
+    public string MaxDate { get; set; } = string.Empty;
+
+    /// <summary>可选范围内当前用户有课的日期，按日期排序；用于默认选中“要换走的课”。</summary>
+    [JsonPropertyName("myDates")]
+    public List<string> MyDates { get; set; } = [];
+
+    /// <summary>今天起 7 天的课程（旧版客户端只读这里）；更远的日期按需读取。</summary>
     [JsonPropertyName("days")]
     public List<SwapCatalogDay> Days { get; set; } = [];
 }

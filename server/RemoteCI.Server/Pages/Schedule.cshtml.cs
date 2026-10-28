@@ -43,6 +43,13 @@ public sealed class ScheduleModel(
     /// <summary>当前班级课表中出现过的科目及其教师名，供“科目教师”编辑区展示。</summary>
     public IReadOnlyList<SubjectEntry> Subjects => Bundle?.Subjects ?? [];
     public string MobileRevision => CalendarFeedService.Hash(System.Text.Json.JsonSerializer.Serialize(Bundle?.Days, JsonDefaults.Options));
+    /// <summary>页头的“申请换课”入口：有老师主动换课权限时显示。</summary>
+    public bool CanRequestSwap => Permissions.HasFlag(UserPermissions.RequestScheduleSwap);
+    /// <summary>直接换课可选的日期：教室端今天起，至已同步课表的最后一天（至多 30 天，旧版插件只同步 7 天）。</summary>
+    public string SwapMinDate { get; private set; } = "";
+    public string SwapMaxDate { get; private set; } = "";
+    /// <summary>直接换课可选日期的课程，以 JSON 内嵌到页面，由 app.js 按所选日期填充节次。</summary>
+    public string SwapDaysJson { get; private set; } = "[]";
 
     public async Task<IActionResult> OnGetRevisionAsync(CancellationToken ct)
     {
@@ -60,8 +67,32 @@ public sealed class ScheduleModel(
         CurrentView = await scheduleViews.GetAsync(CurrentClassId, HttpContext.RequestAborted);
         Bundle = CurrentView?.Bundle;
         CanEditClassProfile = await profiles.CanManageClassAsync(CurrentUser, CurrentClassId, HttpContext.RequestAborted);
-        ViewData["ScheduleToday"] = ClassClock.Today(state, CurrentClassId).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var today = ClassClock.Today(state, CurrentClassId);
+        ViewData["ScheduleToday"] = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        if (Bundle is not null && !FromProfile) BuildSwapDays(Bundle, today);
         return Page();
+    }
+
+    private void BuildSwapDays(ScheduleBundle bundle, DateOnly today)
+    {
+        var first = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var end = today.AddDays(ScheduleBundle.HorizonDays).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var days = bundle.Days
+            .Where(day => string.CompareOrdinal(day.Date, first) >= 0 && string.CompareOrdinal(day.Date, end) < 0)
+            .OrderBy(day => day.Date, StringComparer.Ordinal)
+            .ToList();
+        if (days.Count == 0) return;
+        SwapMinDate = first;
+        SwapMaxDate = days[^1].Date;
+        SwapDaysJson = System.Text.Json.JsonSerializer.Serialize(days.Select(day => new
+        {
+            day.Date,
+            day.Revision,
+            Courses = day.Enabled
+                ? day.Courses.Where(course => course.Enabled).OrderBy(course => course.Index)
+                    .Select(course => new { course.Index, course.Label, course.Subject }).ToList()
+                : [],
+        }), JsonDefaults.Options);
     }
 
     public async Task<IActionResult> OnPostPullAsync(CancellationToken ct)

@@ -10,9 +10,9 @@ else
     @if (Model.FromProfile) { <p class="notice">按班级档案推算，可能与教室端实际课表不同；同步后才能换课。</p> }
     else if (!Model.PluginOnline) { <p class="notice">插件离线，显示最后一次同步的课表。</p> }
     <nav class="mobile-date-tabs" aria-label="课表日期">
-        @foreach (var day in Model.Bundle.Days.Where(x => x.Enabled)) { <button type="button" class="ghost" data-date-tab="@day.Date">@MyScheduleModel.FormatDate(day.Date)</button> }
+        @foreach (var day in Model.Bundle.Days.Take(ScheduleBundle.DisplayDays).Where(x => x.Enabled)) { <button type="button" class="ghost" data-date-tab="@day.Date">@MyScheduleModel.FormatDate(day.Date)</button> }
     </nav>
-    @foreach (var day in Model.Bundle.Days.Where(x => x.Enabled))
+    @foreach (var day in Model.Bundle.Days.Take(ScheduleBundle.DisplayDays).Where(x => x.Enabled))
     {
         <section data-schedule-day="@day.Date">
             <h2 class="mobile-section-title">@MyScheduleModel.FormatDate(day.Date)</h2>
@@ -28,18 +28,17 @@ else
         </section>
     }
     <p class="muted">最后同步 @Model.Bundle.GeneratedAt.ToLocalTime().ToString("MM-dd HH:mm")</p>
+    @if (Model.CanManageSchedule && !Model.FromProfile) { <button type="button" class="ghost" data-course-pick>换其他日期的课（30 天内）</button> }
     @if (Model.CanManageSchedule && !Model.FromProfile)
     {
         <dialog class="user-edit-dialog" data-course-dialog><header><h2>换课</h2><button type="button" class="ghost" data-course-close>关闭</button></header>
             <form method="post" class="stack" data-schedule-change-form>
-                <label>原课程<select data-schedule-source required>
-                    @foreach (var day in Model.Bundle.Days.Where(x => x.Enabled)) { foreach (var course in day.Courses.Where(x => x.Enabled)) { <option value="@(day.Date + ":" + course.Index)" data-date="@day.Date" data-index="@course.Index" data-revision="@day.Revision">@day.Date · @course.Label · @course.Subject</option> } }
-                </select></label>
-                <input asp-for="Input.Date" type="hidden" data-schedule-source-date /><input asp-for="Input.ExpectedRevision" type="hidden" data-schedule-source-revision /><input asp-for="Input.SourceIndex" type="hidden" data-schedule-source-index />
+                <script type="application/json" data-schedule-days>@Html.Raw(Model.SwapDaysJson)</script>
+                <label>日期（今天起 30 天内）<input asp-for="Input.Date" type="date" min="@Model.SwapMinDate" max="@Model.SwapMaxDate" required data-schedule-date /><small class="muted" data-schedule-date-hint aria-live="polite" hidden></small></label>
+                <input asp-for="Input.ExpectedRevision" type="hidden" data-schedule-revision />
+                <label>原课程<select asp-for="Input.SourceIndex" data-schedule-source required></select></label>
                 <label>模式<select asp-for="Input.Mode" data-schedule-mode><option value="Exchange">交换</option><option value="Replace">替换</option></select></label>
-                <label data-exchange-field>目标课程<select asp-for="Input.TargetIndex" data-schedule-target>
-                    @foreach (var day in Model.Bundle.Days.Where(x => x.Enabled)) { foreach (var course in day.Courses.Where(x => x.Enabled)) { <option value="@course.Index" data-date="@day.Date" data-index="@course.Index">@day.Date · @course.Label · @course.Subject</option> } }
-                </select></label>
+                <label data-exchange-field>目标课程（同一天）<select asp-for="Input.TargetIndex" data-schedule-target required></select></label>
                 <label data-replace-field hidden>替换科目<select asp-for="Input.ReplacementSubjectId" disabled>@foreach (var subject in Model.Bundle.Subjects) { <option value="@subject.Id">@subject.Name</option> }</select></label>
                 <label class="check"><input asp-for="Input.Permanent" />永久换课</label><button type="submit" disabled="@(!Model.PluginOnline)">提交换课</button>
             </form>
