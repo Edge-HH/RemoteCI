@@ -41,8 +41,6 @@ public sealed class PluginPackageInstallService
         if (_files.Channel is null)
             return CommandResult.Failure(CommandResultCodes.PluginOffline, "插件未连接云端，无法下载插件包");
 
-        if (request.GrantExtensionAccess)
-            _management.GrantExtensionAccess(request.Packages.Where(x => !x.IsDependency).Select(x => x.PluginId));
         var plan = Plan(request, InstalledVersions());
         if (plan.Apply.Count == 0)
         {

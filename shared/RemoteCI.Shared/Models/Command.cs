@@ -66,11 +66,6 @@ public sealed class CommandMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public PluginManagementPolicyRequest? PluginManagementPolicy { get; set; }
 
-    /// <summary>保持或解除保持插件的扩展接入授权；仅 SetExtensionAccess 使用。</summary>
-    [JsonPropertyName("extensionAccess")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public ExtensionAccessRequest? ExtensionAccess { get; set; }
-
     /// <summary>新增或整体替换 ClassIsland 时间表。</summary>
     [JsonPropertyName("timeLayoutUpdate")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

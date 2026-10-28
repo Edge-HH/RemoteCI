@@ -663,7 +663,7 @@ public static class WebSocketHub
         // 远程升级、插件管理、集控、终端与文件分发属于宿主级维护，即使普通角色被授予 ManageUsers 也仅允许系统管理员执行。
         if ((command.Command is CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
             CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
-            CommandKind.SetPluginManagementPolicy or CommandKind.SetExtensionAccess or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
+            CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
             CommandKind.JoinManagement or CommandKind.RestartClassIsland or CommandKind.LaunchClassIsland or
             CommandKind.ExecuteTerminalCommand or CommandKind.SendFile) && session.Principal.User!.Role != UserRole.Admin)
         {
@@ -759,11 +759,6 @@ public static class WebSocketHub
     {
         if (command.Command == CommandKind.SetPluginManagementPolicy && command.PluginManagementPolicy is null)
             return new CommandError(CommandResultCodes.InvalidRequest, "缺少插件管理策略");
-        if (command.Command == CommandKind.SetExtensionAccess &&
-            (command.ExtensionAccess is null || command.ExtensionAccess.PluginIds.Count == 0 ||
-             command.ExtensionAccess.PluginIds.Count > ExtensionAccessRequest.MaxPlugins ||
-             !Enum.IsDefined(command.ExtensionAccess.Action)))
-            return new CommandError(CommandResultCodes.InvalidRequest, "缺少扩展接入授权参数");
         if (command.Command == CommandKind.UpdateTimeLayout &&
             (command.TimeLayoutUpdate is null || command.TimeLayoutUpdate.Points.Count == 0))
             return new CommandError(CommandResultCodes.InvalidRequest, "缺少时间表参数");

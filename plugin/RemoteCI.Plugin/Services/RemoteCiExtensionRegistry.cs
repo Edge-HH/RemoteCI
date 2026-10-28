@@ -6,29 +6,12 @@ namespace RemoteCI.Plugin.Services;
 /// <summary>
 /// <see cref="IRemoteCiExtensionRegistry"/> 的线程安全实现。
 /// 注册发生在 ClassIsland 插件加载阶段，广播由 RemoteCiService 订阅 ExtensionsChanged / GroupsChanged 完成。
-/// 启用扩展接入授权时，每条注册记下注册方插件；未授权插件的注册照常接受（不影响其运行），
-/// 但不出现在 GetExtensions / GetGroups 中，因而既不会同步给服务端也不能被远程调用。
 /// </summary>
 internal sealed class RemoteCiExtensionRegistry : IRemoteCiExtensionRegistry
 {
     private readonly object _lock = new();
-    private readonly Dictionary<string, Owned<IRemoteCiExtension>> _extensions = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, Owned<IRemoteCiExtensionGroup>> _groups = new(StringComparer.Ordinal);
-    private readonly ExtensionAccessService? _access;
-    private readonly Func<ExtensionCaller?> _resolveCaller;
-
-    /// <summary>不带授权的注册表：全部注册立即可见（测试与无宿主环境）。</summary>
-    public RemoteCiExtensionRegistry()
-        : this(null, () => null)
-    {
-    }
-
-    public RemoteCiExtensionRegistry(ExtensionAccessService? access, Func<ExtensionCaller?> resolveCaller)
-    {
-        _access = access;
-        _resolveCaller = resolveCaller;
-        if (_access is not null) _access.Changed += OnAccessChanged;
-    }
+    private readonly Dictionary<string, IRemoteCiExtension> _extensions = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IRemoteCiExtensionGroup> _groups = new(StringComparer.Ordinal);
 
     public event EventHandler? ExtensionsChanged;
 
@@ -38,7 +21,7 @@ internal sealed class RemoteCiExtensionRegistry : IRemoteCiExtensionRegistry
     {
         lock (_lock)
         {
-            return _extensions.Values.Where(IsVisible).Select(x => x.Item).ToList();
+            return _extensions.Values.ToList();
         }
     }
 
@@ -46,14 +29,12 @@ internal sealed class RemoteCiExtensionRegistry : IRemoteCiExtensionRegistry
     {
         ArgumentNullException.ThrowIfNull(extension);
         var id = ExtensionId.Parse(extension.Id, nameof(extension));
-        var owner = ResolveOwner();
 
         lock (_lock)
         {
-            if (!_extensions.TryAdd(id.Value, new Owned<IRemoteCiExtension>(extension, owner)))
+            if (!_extensions.TryAdd(id.Value, extension))
                 throw new InvalidOperationException($"扩展 Id 已存在：{id}");
         }
-        RequestAccess(owner);
         ExtensionsChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -72,7 +53,7 @@ internal sealed class RemoteCiExtensionRegistry : IRemoteCiExtensionRegistry
     {
         lock (_lock)
         {
-            return _groups.Values.Where(IsVisible).Select(x => x.Item).ToList();
+            return _groups.Values.ToList();
         }
     }
 
@@ -81,14 +62,12 @@ internal sealed class RemoteCiExtensionRegistry : IRemoteCiExtensionRegistry
         ArgumentNullException.ThrowIfNull(group);
         var id = ExtensionId.Parse(group.Id, nameof(group));
         ValidateSettingKeys(group);
-        var owner = ResolveOwner();
 
         lock (_lock)
         {
-            if (!_groups.TryAdd(id.Value, new Owned<IRemoteCiExtensionGroup>(group, owner)))
+            if (!_groups.TryAdd(id.Value, group))
                 throw new InvalidOperationException($"扩展分组 Id 已存在：{id}");
         }
-        RequestAccess(owner);
         GroupsChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -108,42 +87,10 @@ internal sealed class RemoteCiExtensionRegistry : IRemoteCiExtensionRegistry
         bool known;
         lock (_lock)
         {
-            known = _groups.TryGetValue(groupId, out var group) && IsVisible(group);
+            known = _groups.ContainsKey(groupId);
         }
         if (known) GroupsChanged?.Invoke(this, EventArgs.Empty);
     }
-
-    /// <summary>当前已注册扩展或分组的插件（含未授权的），供设置页展示待授权项。</summary>
-    internal IReadOnlyList<ExtensionCaller> GetCallers()
-    {
-        lock (_lock)
-        {
-            return _extensions.Values.Select(x => x.Owner)
-                .Concat(_groups.Values.Select(x => x.Owner))
-                .OfType<ExtensionCaller>()
-                .DistinctBy(x => x.PluginId, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-        }
-    }
-
-    private ExtensionCaller? ResolveOwner() => _access is null ? null : _resolveCaller();
-
-    private void RequestAccess(ExtensionCaller? owner)
-    {
-        if (_access is not null && owner is not null) _access.RequestAccess(owner);
-    }
-
-    /// <summary>无法识别注册方时（不经 ClassIsland 插件加载的调用）按可信处理，保持旧行为。</summary>
-    private bool IsVisible<T>(Owned<T> entry) =>
-        _access is null || entry.Owner is null || _access.IsAllowed(entry.Owner.PluginId);
-
-    private void OnAccessChanged()
-    {
-        ExtensionsChanged?.Invoke(this, EventArgs.Empty);
-        GroupsChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    private sealed record Owned<T>(T Item, ExtensionCaller? Owner);
 
     /// <summary>设置字段 Key 是部分更新的唯一定位依据，必须非空且组内唯一，注册时即失败比运行时静默覆盖更易排查。</summary>
     private static void ValidateSettingKeys(IRemoteCiExtensionGroup group)

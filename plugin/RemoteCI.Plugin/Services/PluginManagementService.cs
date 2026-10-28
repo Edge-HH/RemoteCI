@@ -21,20 +21,12 @@ public sealed class PluginManagementService
     private static readonly TimeSpan DownloadTimeout = TimeSpan.FromMinutes(10);
     private readonly string _policyPath;
     private readonly ILogger<PluginManagementService> _logger;
-    private readonly ExtensionAccessService? _extensionAccess;
 
-    public PluginManagementService(
-        string pluginConfigFolder,
-        ILogger<PluginManagementService> logger,
-        ExtensionAccessService? extensionAccess = null)
+    public PluginManagementService(string pluginConfigFolder, ILogger<PluginManagementService> logger)
     {
         _policyPath = Path.Combine(pluginConfigFolder, "PluginManagementPolicy.json");
         _logger = logger;
-        _extensionAccess = extensionAccess;
     }
-
-    /// <summary>远程安装勾选“同时授权接入 RemoteCI”时，预先授权显式请求的插件（不含依赖）。</summary>
-    internal void GrantExtensionAccess(IEnumerable<string> pluginIds) => _extensionAccess?.Grant(pluginIds);
 
     public CommandResult SetPolicy(PluginManagementPolicyRequest? request)
     {
@@ -71,8 +63,6 @@ public sealed class PluginManagementService
             return CommandResult.Failure(CommandResultCodes.InvalidRequest, "插件操作与命令类型不匹配");
 
         var policy = LoadPolicy();
-        if (request.Action == PluginActionKind.Install && request.GrantExtensionAccess && policy.AllowRemoteInstall)
-            GrantExtensionAccess(ids);
         return request.Action switch
         {
             PluginActionKind.Install => await InstallAsync(ids, request.RestartAfter, policy, ct),

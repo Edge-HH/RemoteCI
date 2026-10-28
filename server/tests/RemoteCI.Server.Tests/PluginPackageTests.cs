@@ -118,7 +118,6 @@ public sealed class PluginPackageTests
             ["Operation"] = nameof(BatchOperationKind.InstallPluginPackages),
             ["SelectedClassIds"] = TestWebApplicationFactory.DefaultClassId.ToString(),
             ["PluginPackageTransferIds"] = transferId,
-            ["GrantExtensionAccess"] = "true",
             ["ConfirmHighRisk"] = "true",
             ["__RequestVerificationToken"] = token,
         }));
@@ -127,7 +126,6 @@ public sealed class PluginPackageTests
         Assert.Equal(CommandKind.InstallPluginPackages, command.Command);
         var request = command.PluginPackages!;
         Assert.Equal(PluginPackageInstallMode.Install, request.Mode);
-        Assert.True(request.GrantExtensionAccess);
         var reference = Assert.Single(request.Packages);
         Assert.Equal(("demo.a", "1.2.0.0", transferId), (reference.PluginId, reference.Version, reference.TransferId));
         Assert.Null(FileDistributionRequest.ValidateTransfer(reference.ToTransferRequest()));
@@ -146,56 +144,6 @@ public sealed class PluginPackageTests
         var response = await factory.CreateClient().SendAsync(download);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(package, await response.Content.ReadAsByteArrayAsync());
-    }
-
-    [Fact]
-    public async Task ExtensionAccessAndGrantOnInstall_AreDispatchedToPlugin()
-    {
-        await using var factory = new TestWebApplicationFactory();
-        using var browser = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = true });
-        await LoginWebUiAsync(browser);
-        var html = await browser.GetStringAsync("/BatchControl");
-        Assert.Contains(@"data-batch-open=""SetExtensionAccess""", html);
-        Assert.Contains(@"name=""GrantExtensionAccess""", html);
-        var token = WebUtility.HtmlDecode(Regex.Match(html, "name=\"__RequestVerificationToken\"[^>]+value=\"([^\"]+)\"").Groups[1].Value);
-        using var plugin = await ConnectPluginAsync(factory);
-
-        async Task<CommandMessage> ExecuteAsync(Dictionary<string, string> form)
-        {
-            form["SelectedClassIds"] = TestWebApplicationFactory.DefaultClassId.ToString();
-            form["ConfirmHighRisk"] = "true";
-            form["__RequestVerificationToken"] = token;
-            var execute = browser.PostAsync("/BatchControl?handler=Execute", new FormUrlEncodedContent(form));
-            var forwarded = await ReceiveEnvelopeAsync(plugin, Protocol.MessageTypeCommand);
-            await SendAsync(plugin, new Envelope
-            {
-                Type = Protocol.MessageTypeCommandResult,
-                ReplyToMessageId = forwarded.MessageId,
-                Payload = new CommandResult { Success = true, Code = CommandResultCodes.Ok, Message = "完成" },
-            });
-            Assert.Equal(HttpStatusCode.Redirect, (await execute).StatusCode);
-            return JsonSerializer.Deserialize<CommandMessage>(JsonSerializer.Serialize(forwarded.Payload), JsonDefaults.Options)!;
-        }
-
-        var access = await ExecuteAsync(new Dictionary<string, string>
-        {
-            ["Operation"] = nameof(BatchOperationKind.SetExtensionAccess),
-            ["ExtensionAccessAction"] = nameof(ExtensionAccessAction.Lock),
-            ["PluginIdsText"] = "demo.a\nremoteci.plugin\ndemo.b",
-        });
-        Assert.Equal(CommandKind.SetExtensionAccess, access.Command);
-        Assert.Equal(ExtensionAccessAction.Lock, access.ExtensionAccess!.Action);
-        Assert.Equal(["demo.a", "demo.b"], access.ExtensionAccess.PluginIds);
-
-        var install = await ExecuteAsync(new Dictionary<string, string>
-        {
-            ["Operation"] = nameof(BatchOperationKind.InstallPlugins),
-            ["PluginAction"] = nameof(PluginActionKind.Install),
-            ["PluginIdsText"] = "demo.a",
-            ["GrantExtensionAccess"] = "true",
-        });
-        Assert.Equal(CommandKind.InstallPlugins, install.Command);
-        Assert.True(install.PluginManagement!.GrantExtensionAccess);
     }
 
     [Fact]

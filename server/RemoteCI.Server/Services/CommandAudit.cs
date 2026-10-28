@@ -269,7 +269,6 @@ public static class CommandAuditSummary
         CommandKind.UninstallPlugins => "卸载插件",
         CommandKind.SetPluginEnabled => "启用或禁用插件",
         CommandKind.SetPluginManagementPolicy => "插件管理策略",
-        CommandKind.SetExtensionAccess => "扩展接入授权",
         CommandKind.DistributeProfile => "分发档案",
         CommandKind.UpdateTimeLayout => "修改时间表",
         CommandKind.JoinManagement => "加入集控",
@@ -326,16 +325,11 @@ public static class CommandAuditSummary
                 }.OfType<string>()),
             CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled
                 when command.PluginManagement is { } plugins =>
-                $"{plugins.Action}：{string.Join("、", plugins.PluginIds.Take(10))}" +
-                (plugins.GrantExtensionAccess ? "，同时授权接入 RemoteCI" : string.Empty),
+                $"{plugins.Action}：{string.Join("、", plugins.PluginIds.Take(10))}",
             CommandKind.InstallPluginPackages when command.PluginPackages is { } packages =>
                 $"{(packages.Mode == PluginPackageInstallMode.Upgrade ? "更新" : "安装")}：" +
                 string.Join("、", packages.Packages.Take(10).Select(x => $"{x.PluginId} {x.Version}")) +
-                (packages.Force ? "，强制" : string.Empty) +
-                (packages.GrantExtensionAccess ? "，同时授权接入 RemoteCI" : string.Empty),
-            CommandKind.SetExtensionAccess when command.ExtensionAccess is { } access =>
-                $"{(access.Action == ExtensionAccessAction.Lock ? "保持授权" : "解除保持")}：" +
-                string.Join("、", access.PluginIds.Take(10)),
+                (packages.Force ? "，强制" : string.Empty),
             CommandKind.DistributeProfile when command.ProfileDistribution is { } distribution =>
                 $"{DescribeSections(distribution.Sections)}{(distribution.ReplaceCurrentProfile ? "，写入当前档案" : string.Empty)}",
             CommandKind.UpdateTimeLayout when command.TimeLayoutUpdate is { } layout =>
