@@ -280,6 +280,8 @@ public static class CommandAuditSummary
         CommandKind.ApplyProfile => "应用档案",
         CommandKind.ReadProfile => "收集档案",
         CommandKind.CaptureScreen => "屏幕截图",
+        CommandKind.ApplyMainWindowLayout => "上传主界面文件",
+        CommandKind.ReadMainWindowLayout => "获取主界面文件",
         _ => $"命令 {(int)kind}",
     };
 
@@ -291,6 +293,10 @@ public static class CommandAuditSummary
             CommandKind.SendNotification when command.Notification is { } note =>
                 $"「{Clip(note.Title, 40)}」{Clip(note.Message, 120)}",
             CommandKind.SetMainMenuVisibility => command.MainMenuVisible == true ? "显示" : "隐藏",
+            CommandKind.ApplyMainWindowLayout when command.MainWindowLayout is { } layout =>
+                layout.Mode == MainWindowLayoutApplyMode.CreateNew
+                    ? $"新建「{Clip(layout.Name, 40)}」{(layout.Activate ? "并使用" : "，不切换")}"
+                    : "覆盖当前主界面文件",
             CommandKind.Power => command.PowerAction switch
             {
                 PowerActionKind.Shutdown => "关机",

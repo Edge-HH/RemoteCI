@@ -118,6 +118,18 @@ public sealed class OperationsTests
         });
         Assert.True(terminal.Length <= CommandAuditLimits.TextLength);
         Assert.StartsWith("远程终端：xxx", terminal);
+
+        var layout = CommandAuditSummary.Describe(new CommandMessage
+        {
+            Command = CommandKind.ApplyMainWindowLayout,
+            MainWindowLayout = new MainWindowLayoutApplyRequest
+            {
+                LayoutJson = "{\"Lines\":[]}",
+                Mode = MainWindowLayoutApplyMode.CreateNew,
+                Name = "考试",
+            },
+        });
+        Assert.Equal("上传主界面文件：新建「考试」并使用", layout);
     }
 
     [Fact]

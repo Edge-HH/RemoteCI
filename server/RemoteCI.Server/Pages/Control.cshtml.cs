@@ -41,6 +41,20 @@ public sealed class ControlModel(
     [BindProperty]
     public IFormFile? AvatarFile { get; set; }
 
+    /// <summary>上传的主界面文件（ClassIsland Config/ComponentLayouts/*.json）。</summary>
+    [BindProperty]
+    public IFormFile? LayoutFile { get; set; }
+
+    [BindProperty]
+    public MainWindowLayoutApplyMode LayoutMode { get; set; } = MainWindowLayoutApplyMode.OverwriteCurrent;
+
+    [BindProperty]
+    public string? LayoutName { get; set; }
+
+    /// <summary>新建后立即使用；未勾选的复选框不提交，因此默认值为 false，页面默认勾选。</summary>
+    [BindProperty]
+    public bool LayoutActivate { get; set; }
+
     public bool HasAvatar => CurrentClass?.HasAvatar == true;
 
     public bool PluginOnline => peers.HasPluginFor(CurrentClassId);
@@ -78,6 +92,8 @@ public sealed class ControlModel(
     public bool CanControlVolume => ClassPermissions.HasFlag(UserPermissions.PowerControl) && Supports(RemoteCiCapabilities.VolumeControl);
     public bool CanUseExtensions => ClassPermissions.HasFlag(UserPermissions.RunExtensions) && Supports(RemoteCiCapabilities.ExtensionsRun);
     public bool CanCaptureScreen => ClassPermissions.HasFlag(UserPermissions.CaptureScreen) && Supports(RemoteCiCapabilities.ScreenCapture);
+    public bool CanUploadMainWindowLayout => ClassPermissions.HasFlag(UserPermissions.MainMenuControl) && Supports(RemoteCiCapabilities.MainWindowLayoutApply);
+    public bool CanReadMainWindowLayout => ClassPermissions.HasFlag(UserPermissions.MainMenuControl) && Supports(RemoteCiCapabilities.MainWindowLayoutRead);
     public override bool IsSingleControl => true;
 
     public override async Task<IActionResult> OnGetAsync(CancellationToken ct)
@@ -222,6 +238,51 @@ public sealed class ControlModel(
             Command = CommandKind.SetMainMenuVisibility,
             MainMenuVisible = visible,
         }, ct));
+    }
+
+    /// <summary>上传主界面文件：覆盖设备当前使用的文件，或新建（可立即使用）。</summary>
+    public async Task<IActionResult> OnPostMainWindowLayoutAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.MainMenuControl) is { } classDenied) return classDenied;
+        if (LayoutFile is null || LayoutFile.Length == 0)
+            return RedirectWithResult(CommandResult.Failure(CommandResultCodes.InvalidRequest, "请选择主界面文件"));
+        if (LayoutFile.Length > MainWindowLayoutRules.MaxUtf8Bytes + 3)
+            return RedirectWithResult(CommandResult.Failure(CommandResultCodes.InvalidRequest, "主界面文件不能超过 2 MB"));
+        string json;
+        using (var reader = new StreamReader(LayoutFile.OpenReadStream(), System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+            json = await reader.ReadToEndAsync(ct);
+        var request = new MainWindowLayoutApplyRequest
+        {
+            LayoutJson = json,
+            Mode = LayoutMode,
+            Name = LayoutMode == MainWindowLayoutApplyMode.CreateNew ? LayoutName : null,
+            Activate = LayoutMode == MainWindowLayoutApplyMode.OverwriteCurrent || LayoutActivate,
+        };
+        // 与插件执行端同一套校验，提前反馈格式与文件名错误。
+        if (MainWindowLayoutRules.Validate(request) is { } error)
+            return RedirectWithResult(CommandResult.Failure(CommandResultCodes.InvalidRequest, error));
+        return RedirectWithResult(await SendAsync(new CommandMessage
+        {
+            Command = CommandKind.ApplyMainWindowLayout,
+            MainWindowLayout = request,
+        }, ct));
+    }
+
+    /// <summary>获取设备当前使用的主界面文件并作为 JSON 下载。</summary>
+    public async Task<IActionResult> OnPostDownloadMainWindowLayoutAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.MainMenuControl) is { } classDenied) return classDenied;
+        var result = await SendAsync(new CommandMessage { Command = CommandKind.ReadMainWindowLayout }, ct);
+        if (!result.Success) return RedirectWithResult(result);
+        MainWindowLayoutSnapshot? snapshot = null;
+        try { snapshot = System.Text.Json.JsonSerializer.Deserialize<MainWindowLayoutSnapshot>(result.Data ?? string.Empty); }
+        catch (System.Text.Json.JsonException) { }
+        if (snapshot is null || string.IsNullOrEmpty(snapshot.LayoutJson))
+            return RedirectWithResult(CommandResult.Failure(CommandResultCodes.InternalError, "设备返回的主界面文件无效"));
+        var fileName = MainWindowLayoutRules.NormalizeName(snapshot.Name, out var name) is null ? name : "主界面";
+        return File(System.Text.Encoding.UTF8.GetBytes(snapshot.LayoutJson), "application/json", fileName + ".json");
     }
 
     public async Task<IActionResult> OnPostVolumeAsync(bool unmute, CancellationToken ct)

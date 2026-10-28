@@ -76,6 +76,11 @@ public sealed class CommandMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ProfileApplyRequest? ProfileApply { get; set; }
 
+    /// <summary>上传主界面文件的参数；仅 ApplyMainWindowLayout 命令使用。</summary>
+    [JsonPropertyName("mainWindowLayout")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MainWindowLayoutApplyRequest? MainWindowLayout { get; set; }
+
     /// <summary>加入 ClassIsland 内置集控的参数。</summary>
     [JsonPropertyName("managementJoin")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

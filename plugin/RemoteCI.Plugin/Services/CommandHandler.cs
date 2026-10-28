@@ -23,6 +23,7 @@ public sealed class CommandHandler
     private readonly TerminalCommandService _terminal;
     private readonly FileReceiveService _files;
     private readonly ScreenCaptureService _screenshots;
+    private readonly MainWindowLayoutService _mainWindowLayouts;
     private readonly ILogger _logger;
     private readonly ExtensionCommandRouter _extensionRouter;
     private readonly VoiceMessagePlayer _voiceMessages;
@@ -44,7 +45,8 @@ public sealed class CommandHandler
         TerminalCommandService? terminal = null,
         FileReceiveService? files = null,
         ScheduleOverlayService? overlays = null,
-        ScreenCaptureService? screenshots = null)
+        ScreenCaptureService? screenshots = null,
+        MainWindowLayoutService? mainWindowLayouts = null)
     {
         _overlays = overlays;
         _schedules = schedules;
@@ -59,6 +61,7 @@ public sealed class CommandHandler
         _terminal = terminal ?? new TerminalCommandService(loggerFactory.CreateLogger<TerminalCommandService>());
         _files = files ?? new FileReceiveService(loggerFactory.CreateLogger<FileReceiveService>());
         _screenshots = screenshots ?? new ScreenCaptureService(loggerFactory.CreateLogger<ScreenCaptureService>());
+        _mainWindowLayouts = mainWindowLayouts ?? new MainWindowLayoutService(loggerFactory.CreateLogger<MainWindowLayoutService>());
         _logger = loggerFactory.CreateLogger<CommandHandler>();
         _extensionRouter = new ExtensionCommandRouter(extensions, loggerFactory);
         _voiceMessages = voiceMessages ?? new VoiceMessagePlayer();
@@ -119,6 +122,8 @@ public sealed class CommandHandler
                 CommandKind.ClearNotifications => await HandleClearNotificationsAsync(),
                 CommandKind.TeacherComing => await HandleTeacherComingAsync(),
                 CommandKind.SetMainMenuVisibility => await HandleMainMenuVisibilityAsync(command.MainMenuVisible),
+                CommandKind.ApplyMainWindowLayout => await _mainWindowLayouts.ApplyAsync(command.MainWindowLayout),
+                CommandKind.ReadMainWindowLayout => await _mainWindowLayouts.ReadAsync(),
                 CommandKind.Power => HandlePowerAction(command.PowerAction),
                 CommandKind.Volume => HandleVolume(command.Volume),
                 CommandKind.RefreshSoftwareInventory => _softwareInventory.Refresh(),

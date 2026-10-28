@@ -31,6 +31,10 @@
                 <button type="submit" class="batch-action-card" disabled="@(!Model.PluginOnline)"><span class="batch-action-icon"><i class="icon @(mainMenuVisible ? "icon-visibility-off" : "icon-visibility")" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>@(mainMenuVisible ? "隐藏主界面" : "显示主界面")</strong><small>切换设备上的 ClassIsland 主界面。</small></span></button>
             </form>
         }
+        @if (Model.CanUploadMainWindowLayout || Model.CanReadMainWindowLayout)
+        {
+            <button type="button" class="batch-action-card" data-user-edit-open="main-window-layout-dialog" aria-controls="main-window-layout-dialog"><span class="batch-action-icon"><i class="icon icon-upload-file" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>主界面文件</strong><small>上传或获取 ClassIsland 主界面文件。</small></span></button>
+        }
         @if (Model.CanControlVolume)
         {
             <button type="button" class="batch-action-card" data-user-edit-open="volume-dialog" aria-controls="volume-dialog"><span class="batch-action-icon"><i class="icon icon-volume-up" aria-hidden="true"></i></span><span class="batch-action-copy"><strong>音量调节</strong><small>调节设备音量或静音。</small></span></button>
@@ -103,6 +107,41 @@
         </div>
     </dialog>
     <script src="~/screenshot.js" asp-append-version="true" defer></script>
+}
+
+@if (Model.CanUploadMainWindowLayout || Model.CanReadMainWindowLayout)
+{
+    <dialog id="main-window-layout-dialog" class="user-edit-dialog" data-user-edit-dialog aria-labelledby="main-window-layout-dialog-title">
+        <div class="user-edit-dialog-shell">
+            <header class="user-edit-dialog-header"><div><p class="eyebrow">当前班级</p><h2 id="main-window-layout-dialog-title">主界面文件</h2><p class="muted">即 ClassIsland 设置中“主界面”的组件配置文件（Config/ComponentLayouts/*.json）。设备处于集控模式时只能获取。</p></div><button type="button" class="ghost dialog-close-button" data-user-edit-close aria-label="关闭主界面文件"><i class="icon icon-close" aria-hidden="true"></i></button></header>
+            <div class="user-edit-form stack">
+                @if (Model.CanUploadMainWindowLayout)
+                {
+                    <form method="post" asp-page-handler="MainWindowLayout" enctype="multipart/form-data" class="stack">
+                        <label>主界面文件（JSON，≤2MB）<input type="file" name="LayoutFile" accept=".json,application/json" required /></label>
+                        <fieldset class="stack">
+                            <legend>写入方式</legend>
+                            <label class="check"><input type="radio" name="LayoutMode" value="@((int)MainWindowLayoutApplyMode.OverwriteCurrent)" checked /> 覆盖当前主界面文件（立即生效）</label>
+                            <label class="check"><input type="radio" name="LayoutMode" value="@((int)MainWindowLayoutApplyMode.CreateNew)" /> 新建主界面文件</label>
+                        </fieldset>
+                        <label>新文件名（仅新建时使用）<input type="text" name="LayoutName" maxlength="@MainWindowLayoutRules.MaxNameLength" placeholder="例如：期末考试" /></label>
+                        <label class="check"><input type="checkbox" name="LayoutActivate" value="true" checked /> 新建后立即使用该主界面文件</label>
+                        <button type="submit" disabled="@(!Model.PluginOnline)">上传</button>
+                    </form>
+                }
+                @if (Model.CanReadMainWindowLayout)
+                {
+                    <form method="post" asp-page-handler="DownloadMainWindowLayout">
+                        <button type="submit" class="ghost" disabled="@(!Model.PluginOnline)"><i class="icon icon-cloud-download" aria-hidden="true"></i> 获取当前主界面文件</button>
+                    </form>
+                }
+                @if (!Model.PluginOnline)
+                {
+                    <p class="control-note">插件离线，无法上传或获取主界面文件。</p>
+                }
+            </div>
+        </div>
+    </dialog>
 }
 
 @if (Model.CanControlVolume)

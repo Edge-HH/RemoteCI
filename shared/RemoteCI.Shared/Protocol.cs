@@ -195,6 +195,10 @@ public enum CommandKind
     ReadProfile = 26,
     /// <summary>截取设备当前屏幕并上传到服务端；仅服务端截图入口可以发起（需先登记上传凭据）。</summary>
     CaptureScreen = 27,
+    /// <summary>上传 ClassIsland 主界面文件（组件配置），覆盖当前文件或新建并可立即使用。</summary>
+    ApplyMainWindowLayout = 29,
+    /// <summary>读取设备当前使用的 ClassIsland 主界面文件（组件配置）。</summary>
+    ReadMainWindowLayout = 30,
 }
 
 public enum PowerActionKind
@@ -221,7 +225,8 @@ public static class CommandPermissions
         CommandKind.SendNotification or CommandKind.ClearNotifications => UserPermissions.SendNotifications,
         CommandKind.SendVoiceMessage => UserPermissions.SendVoiceMessages,
         CommandKind.TeacherComing => UserPermissions.TeacherComing,
-        CommandKind.SetMainMenuVisibility => UserPermissions.MainMenuControl,
+        CommandKind.SetMainMenuVisibility or CommandKind.ApplyMainWindowLayout or CommandKind.ReadMainWindowLayout
+            => UserPermissions.MainMenuControl,
         CommandKind.Power or CommandKind.Volume => UserPermissions.PowerControl,
         // 服务端另按“系统管理员或获准的班管理员”复核，插件端只校验扩展权限位作为纵深防御。
         CommandKind.ApplyExtensionSettings => UserPermissions.RunExtensions,
@@ -294,6 +299,10 @@ public static class RemoteCiCapabilities
     public const string ScheduleAdjustments = "schedule.adjustments";
     /// <summary>截取当前屏幕并凭一次性上传凭据上传到服务端。</summary>
     public const string ScreenCapture = "screen.capture";
+    /// <summary>上传 ClassIsland 主界面文件：覆盖当前文件，或新建并可立即使用。</summary>
+    public const string MainWindowLayoutApply = "main-window.layout-apply";
+    /// <summary>读取设备当前使用的 ClassIsland 主界面文件。</summary>
+    public const string MainWindowLayoutRead = "main-window.layout-read";
 
     /// <summary>没有上报能力列表的旧 V3 端自动获得的基础能力。</summary>
     public static IReadOnlyList<string> Baseline { get; } =
@@ -317,7 +326,7 @@ public static class RemoteCiCapabilities
             PluginInstall, PluginUninstall, PluginEnable, PluginManagementPolicy, ProfileDistribute, TimeLayoutUpdate, ManagementJoin,
             ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings, ProfileApply, HolidayCalendar,
             ProfileRead, ProfileTempLayer, Semester, FileTransfer, AppGuard, ScheduleChangePermanent, ScheduleAdjustments,
-            ScreenCapture];
+            ScreenCapture, MainWindowLayoutApply, MainWindowLayoutRead];
 
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
@@ -358,6 +367,8 @@ public static class RemoteCiCapabilities
         ScheduleChangePermanent => "永久换课",
         ScheduleAdjustments => "按调课记录生成临时层",
         ScreenCapture => "屏幕截图",
+        MainWindowLayoutApply => "上传主界面文件",
+        MainWindowLayoutRead => "获取主界面文件",
         _ => "未知能力",
     };
 
@@ -389,6 +400,8 @@ public static class RemoteCiCapabilities
         CommandKind.ApplyProfile => ProfileApply,
         CommandKind.ReadProfile => ProfileRead,
         CommandKind.CaptureScreen => ScreenCapture,
+        CommandKind.ApplyMainWindowLayout => MainWindowLayoutApply,
+        CommandKind.ReadMainWindowLayout => MainWindowLayoutRead,
         _ => null,
     };
 }
