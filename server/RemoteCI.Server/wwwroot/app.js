@@ -369,26 +369,25 @@ document.querySelectorAll("[data-role-form]").forEach(form => {
     syncRolePermissions(form);
 });
 
-// 登录页与设置新密码的密码框只接受英文字母和数字：输入法、粘贴带入的其他字符直接过滤并提示。
-document.querySelectorAll("[data-alnum-password]").forEach(input => {
+// 登录页与设置新密码的密码框只接受英文字母、数字和英文符号（可见 ASCII 字符）：中文、全角符号、空格等直接过滤并提示。
+document.querySelectorAll("[data-ascii-password]").forEach(input => {
     const hint = document.createElement("small");
     hint.className = "form-error";
-    hint.textContent = "密码只能输入英文字母和数字";
+    hint.textContent = "密码只能输入英文字母、数字和英文符号";
     hint.hidden = true;
     input.insertAdjacentElement("afterend", hint);
-    let hintTimer = 0;
+    // 被过滤时在输入框下方常驻红字，离开输入框后才收起，避免一闪而过像是按键没反应。
     const strip = () => {
-        const cleaned = input.value.replace(/[^A-Za-z0-9]/g, "");
+        const cleaned = input.value.replace(/[^!-~]/g, "");
         if (cleaned === input.value) return;
         const caret = Math.max(0, (input.selectionStart ?? cleaned.length) - (input.value.length - cleaned.length));
         input.value = cleaned;
         try { input.setSelectionRange(caret, caret); } catch { }
         hint.hidden = false;
-        window.clearTimeout(hintTimer);
-        hintTimer = window.setTimeout(() => { hint.hidden = true; }, 2500);
     };
     input.addEventListener("input", event => { if (!event.isComposing) strip(); });
     input.addEventListener("compositionend", strip);
+    input.addEventListener("blur", () => { hint.hidden = true; });
     strip();
 });
 

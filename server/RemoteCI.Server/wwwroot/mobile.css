@@ -51,6 +51,7 @@ html[data-mobile-ui][data-theme=dark][data-palette=pink] { --m-primary:#ffd8e2; 
 .mobile-app h3 { font-size:16px; }
 .mobile-app p { margin:0 0 12px; }
 .mobile-app small, .mobile-app .muted, .mobile-app .control-note { color:var(--m-muted); }
+.mobile-app small.form-error { color:var(--danger); }
 .mobile-app .page-head { margin:0; padding:0; }
 .mobile-app .page-head h1 { margin:0; }
 .mobile-app .page-head .eyebrow, .mobile-app .member-excel-panel, .mobile-app .api-key-panel, .mobile-app .api-key-reveal-panel { display:none; }
