@@ -369,6 +369,29 @@ document.querySelectorAll("[data-role-form]").forEach(form => {
     syncRolePermissions(form);
 });
 
+// 登录页与设置新密码的密码框只接受英文字母和数字：输入法、粘贴带入的其他字符直接过滤并提示。
+document.querySelectorAll("[data-alnum-password]").forEach(input => {
+    const hint = document.createElement("small");
+    hint.className = "form-error";
+    hint.textContent = "密码只能输入英文字母和数字";
+    hint.hidden = true;
+    input.insertAdjacentElement("afterend", hint);
+    let hintTimer = 0;
+    const strip = () => {
+        const cleaned = input.value.replace(/[^A-Za-z0-9]/g, "");
+        if (cleaned === input.value) return;
+        const caret = Math.max(0, (input.selectionStart ?? cleaned.length) - (input.value.length - cleaned.length));
+        input.value = cleaned;
+        try { input.setSelectionRange(caret, caret); } catch { }
+        hint.hidden = false;
+        window.clearTimeout(hintTimer);
+        hintTimer = window.setTimeout(() => { hint.hidden = true; }, 2500);
+    };
+    input.addEventListener("input", event => { if (!event.isComposing) strip(); });
+    input.addEventListener("compositionend", strip);
+    strip();
+});
+
 document.querySelectorAll("[data-password-confirmation]").forEach(form => {
     const newPassword = form.querySelector("[data-new-password]");
     const confirmation = form.querySelector("[data-confirm-password]");
@@ -410,6 +433,19 @@ document.querySelectorAll("[data-backup-settings-form]").forEach(form => {
     syncBackupFields();
 });
 
+
+// 自动下载依赖自动检查：关闭自动检查时同时禁用自动下载。
+document.querySelectorAll("[data-update-settings-form]").forEach(form => {
+    const autoCheck = form.querySelector("[data-update-auto-check]");
+    const autoDownload = form.querySelector("[data-update-auto-download]");
+    if (!autoCheck || !autoDownload) return;
+    const sync = () => {
+        autoDownload.disabled = !autoCheck.checked;
+        if (!autoCheck.checked) autoDownload.checked = false;
+    };
+    autoCheck.addEventListener("change", sync);
+    sync();
+});
 
 // 班级分组树：折叠状态只影响当前页面，不改变服务端选中的分组范围。
 document.querySelectorAll("[data-class-tree-toggle]").forEach(button => {

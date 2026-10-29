@@ -798,6 +798,44 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
     }
 
     [Fact]
+    public async Task RazorWebUi_SystemConfigSavesUpdateChannelAndAutomation()
+    {
+        using var browser = CreateBrowserClient();
+        await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
+        // 测试主机是开发环境，页面不显示更新面板；保存处理器仍按真实绑定工作。
+        var html = await browser.GetStringAsync("/SystemConfig");
+
+        var response = await PostRazorFormAsync(browser, "/SystemConfig?handler=SaveUpdateSettings", html,
+            new Dictionary<string, string>
+            {
+                ["UpdateSettingsOptions.Channel"] = "Beta",
+                ["UpdateSettingsOptions.AutoCheck"] = "true",
+                ["UpdateSettingsOptions.AutoDownload"] = "true",
+            });
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var saved = await scope.ServiceProvider.GetRequiredService<UpdateSettings>().GetAsync();
+            Assert.Equal(new UpdateSettingsValues(UpdateChannel.Beta, AutoCheck: true, AutoDownload: true), saved);
+        }
+        // 关闭自动检查时自动下载一并关闭。
+        response = await PostRazorFormAsync(browser, "/SystemConfig?handler=SaveUpdateSettings", html,
+            new Dictionary<string, string>
+            {
+                ["UpdateSettingsOptions.Channel"] = "Stable",
+                ["UpdateSettingsOptions.AutoCheck"] = "false",
+                ["UpdateSettingsOptions.AutoDownload"] = "true",
+            });
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var saved = await scope.ServiceProvider.GetRequiredService<UpdateSettings>().GetAsync();
+            Assert.Equal(new UpdateSettingsValues(UpdateChannel.Stable, AutoCheck: false, AutoDownload: false), saved);
+        }
+    }
+
+    [Fact]
     public async Task RazorWebUi_DevelopmentBuildDisablesSelfUpdate()
     {
         using var browser = CreateBrowserClient();

@@ -204,6 +204,9 @@ builder.Services.AddHostedService<PeerAuthorizationRefreshWorker>();
 builder.Services.AddHostedService<AutomaticBackupWorker>();
 builder.Services.AddHostedService<ScheduleSwapSweepWorker>();
 builder.Services.AddSingleton(new UpdateService(args));
+builder.Services.AddScoped<UpdateSettings>();
+builder.Services.AddSingleton<UpdateAutomation>();
+builder.Services.AddHostedService<UpdateCheckWorker>();
 
 var app = builder.Build();
 // 更新安装器启动本进程时会通过环境变量指定启动成功标记路径：
@@ -1441,13 +1444,17 @@ app.MapGet("/api/admin/system", async (HttpContext ctx, IdentityCoordinator iden
         message = UpdateService.CurrentApplyMode == UpdateApplyMode.ManagedByPlatform ? UpdateService.FnosManagedMessage : "",
     });
 });
-app.MapPost("/api/admin/updates/check", async (UpdateCheckBody body, HttpContext ctx, IdentityCoordinator identities, UpdateService updates, CancellationToken ct) =>
+app.MapPost("/api/admin/updates/check", async (UpdateCheckBody body, HttpContext ctx, IdentityCoordinator identities, UpdateSettings settings, UpdateAutomation automation, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
     if (principal.User.Role != UserRole.Admin) return Forbidden();
-    var channel = string.Equals(body.Channel, "beta", StringComparison.OrdinalIgnoreCase) ? UpdateChannel.Beta : UpdateChannel.Stable;
-    var release = await updates.FetchLatestReleaseAsync(channel, ct);
+    // 未指定渠道时使用系统设置中保存的更新渠道。
+    var saved = await settings.GetAsync(ct);
+    var channel = string.IsNullOrWhiteSpace(body.Channel)
+        ? saved.Channel
+        : string.Equals(body.Channel, "beta", StringComparison.OrdinalIgnoreCase) ? UpdateChannel.Beta : UpdateChannel.Stable;
+    var release = await automation.CheckAsync(channel, download: false, ct);
     return Results.Ok(new { tag = release?.Tag, name = release?.Name });
 });
 // 调试用：请求体为当前平台的服务端发布包 zip，安装后服务端自动重启；不限制版本高低。
@@ -1630,7 +1637,7 @@ public sealed record SchedulePullIntervalBody(int IntervalMinutes);
 public sealed record ExtensionPolicyBody(bool? Enabled, bool? AllowNonAdmin, bool? ShowOnWatch);
 public sealed record ExtensionSettingsBody(Dictionary<string, string?>? Values);
 public sealed record ExtensionGroupAccessBody(bool AllowClassAdmin);
-public sealed record UpdateCheckBody(string Channel, bool Force = false);
+public sealed record UpdateCheckBody(string? Channel = null, bool Force = false);
 public sealed record PairingCodeBody(Guid? ClassId, bool Unified = false, bool Persistent = false, string? RequestedCode = null);
 public sealed record VisitorAutoEnterBody(bool AutoEnter);
 

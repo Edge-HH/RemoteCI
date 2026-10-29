@@ -193,7 +193,7 @@
         <div class="form-error error" data-create-user-error role="alert" hidden></div>
         <label>ID<input asp-for="Create.Username" autocomplete="off" /></label>
         <label>账号名<input asp-for="Create.DisplayName" autocomplete="off" /><small class="muted teacher-username-note" data-teacher-username-note hidden>用户名需与课表中的任课教师名一致才能获取个人日程；一科多位老师可在课表中写成“张三/李四”。</small></label>
-        <label>初始密码<input asp-for="Create.Password" type="password" autocomplete="new-password" placeholder="留空则首次登录时设置" /></label>
+        <label>初始密码<input asp-for="Create.Password" type="password" autocomplete="new-password" placeholder="留空则首次登录时设置" pattern="[A-Za-z0-9]*" title="只能输入英文字母和数字" data-alnum-password /></label>
         <label>
             角色
             <select asp-for="Create.RoleId" data-role-select>
@@ -422,11 +422,11 @@
                         <input type="hidden" name="id" value="@user.Id" />
                         <label>
                             新密码
-                            <input name="password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required data-new-password />
+                            <input name="password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required data-new-password pattern="[A-Za-z0-9]*" title="只能输入英文字母和数字" data-alnum-password />
                         </label>
                         <label>
                             确认新密码
-                            <input name="confirmPassword" type="password" minlength="8" maxlength="128" autocomplete="new-password" required data-confirm-password />
+                            <input name="confirmPassword" type="password" minlength="8" maxlength="128" autocomplete="new-password" required data-confirm-password pattern="[A-Za-z0-9]*" title="只能输入英文字母和数字" data-alnum-password />
                         </label>
                         <button class="ghost" type="submit">重置密码</button>
                     </form>

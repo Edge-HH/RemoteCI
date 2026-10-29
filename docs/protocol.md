@@ -519,7 +519,7 @@ WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebU
 - `GET/POST/PUT/DELETE /api/roles`、`GET/PUT /api/visitor`
 - `GET/PUT /api/settings/notifications`（读取需登录，修改仅系统管理员）、`GET/PUT /api/settings/schedule-pull`、`GET/PUT /api/settings/semester`（见“学期”）
 - `GET/PUT /api/extensions`
-- `GET /api/admin/system`、`POST /api/admin/updates/check`、`POST /api/admin/updates/upload`（请求体为服务端发布包 zip，调试用，安装后自动重启）、`GET/POST/DELETE /api/admin/backups`
+- `GET /api/admin/system`、`POST /api/admin/updates/check`（请求体 `{"channel":"stable|beta"}`，省略渠道时使用系统设置中保存的更新渠道）、`POST /api/admin/updates/upload`（请求体为服务端发布包 zip，调试用，安装后自动重启）、`GET/POST/DELETE /api/admin/backups`
 - `GET /api/audit`、`GET /api/audit/export`、`GET /api/devices/health`（见“集控运维”）
 - `GET/PUT /api/settings/app-guard`、`GET/PUT/DELETE /api/devices/{credentialId}/app-guard`、`GET /api/app-guard/events`（见“应用守护”）
 - `GET/POST /api/automation/rules`、`GET/PUT/DELETE /api/automation/rules/{id}`、`POST /api/automation/rules/{id}/run`、`GET /api/automation/runs`

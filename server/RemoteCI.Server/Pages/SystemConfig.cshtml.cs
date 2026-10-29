@@ -25,6 +25,8 @@ public sealed class SystemConfigModel(
     PeerRegistry peers,
     IdentityCoordinator identities,
     OperationsSettings operations,
+    UpdateSettings updateSettings,
+    UpdateAutomation updateAutomation,
     AppGuardService appGuard) : WebPageModel(users)
 {
     [BindProperty] public OperationsInput OperationsOptions { get; set; } = new();
@@ -51,12 +53,24 @@ public sealed class SystemConfigModel(
     public bool UsesPersistentOverlay => UpdateService.CurrentApplyMode == UpdateApplyMode.PersistentOverlay;
     public bool IsDevelopment => environment.IsDevelopment();
     public string CurrentPlatform => UpdateService.CurrentPlatform;
-    public UpdateChannel SelectedUpdateChannel =>
-        UpdateOptions.Channel == UpdateChannel.Beta ? UpdateChannel.Beta : UpdateChannel.Stable;
+    [BindProperty] public UpdateSettingsInput UpdateSettingsOptions { get; set; } = new();
+    /// <summary>后台检查与自动下载的最新状态，页面据此显示上次检查时间和已下载的更新包。</summary>
+    public UpdateStatusSnapshot UpdateStatus => updateAutomation.Status;
+    public UpdateChannel SelectedUpdateChannel => UpdateSettingsOptions.Channel;
 
     public async Task<IActionResult> OnGetAsync()
     {
         if (await RequireAdminAsync() is { } denied) return denied;
+        await LoadPageAsync();
+        return Page();
+    }
+
+    /// <summary>
+    /// 载入整页各区块的当前设置；检查/执行更新直接返回页面而不重定向，
+    /// 也要载入，否则其他区块的表单会显示成默认值。
+    /// </summary>
+    private async Task LoadPageAsync()
+    {
         await LoadBackupAsync();
         ForceSenderInTitle = await identities.GetForceSenderInTitleAsync();
         var metadata = await db.SystemMetadata.AsNoTracking().Where(x => x.Id == 1)
@@ -64,7 +78,18 @@ public sealed class SystemConfigModel(
         OrganizationName = metadata.OrganizationName;
         ScreenshotNotifyClassroom = metadata.ScreenshotNotifyClassroom;
         OperationsOptions = OperationsInput.From(await operations.GetAsync());
-        return Page();
+        await LoadUpdateSettingsAsync();
+    }
+
+    public async Task<IActionResult> OnPostSaveUpdateSettingsAsync(CancellationToken ct)
+    {
+        if (await RequireAdminAsync() is { } denied) return denied;
+        await updateSettings.SetAsync(UpdateSettingsOptions.ToValues(), ct);
+        if (UpdateSettingsOptions.AutoCheck) updateAutomation.RequestCheck();
+        TempData["Message"] = UpdateSettingsOptions.AutoCheck
+            ? UpdateSettingsOptions.AutoDownload ? "更新设置已保存，将自动检查并下载新版本" : "更新设置已保存，将自动检查新版本"
+            : "更新设置已保存";
+        return RedirectToPage(null, null, "update");
     }
 
     public async Task<IActionResult> OnPostSaveOperationsSettingsAsync(CancellationToken ct)
@@ -118,7 +143,7 @@ public sealed class SystemConfigModel(
     public async Task<IActionResult> OnPostCheckUpdateAsync(CancellationToken ct)
     {
         if (await RequireAdminAsync() is { } denied) return denied;
-        await LoadBackupAsync();
+        await LoadPageAsync();
         if (!UpdateService.CanSelfUpdateNow(IsDevelopment))
         {
             CheckMessage = IsPlatformManaged
@@ -128,7 +153,9 @@ public sealed class SystemConfigModel(
         }
         try
         {
-            LatestRelease = await updates.FetchLatestReleaseAsync(SelectedUpdateChannel, ct);
+            LatestRelease = await updateAutomation.CheckAsync(SelectedUpdateChannel, download: false, ct);
+            // 下载可能耗时数分钟，交给后台检查完成，不阻塞页面。
+            if (UpdateSettingsOptions.AutoDownload) updateAutomation.RequestCheck();
             if (LatestRelease is null)
             {
                 CheckMessage = "仓库暂无 release。";
@@ -155,7 +182,7 @@ public sealed class SystemConfigModel(
     public async Task<IActionResult> OnPostUpdateAsync(CancellationToken ct)
     {
         if (await RequireAdminAsync() is { } denied) return denied;
-        await LoadBackupAsync();
+        await LoadPageAsync();
         if (!UpdateService.CanSelfUpdateNow(IsDevelopment))
         {
             CheckMessage = IsPlatformManaged
@@ -176,8 +203,10 @@ public sealed class SystemConfigModel(
 
             ServerAsset = updates.SelectServerAsset(LatestRelease)
                 ?? throw new InvalidOperationException("未找到当前平台的更新包，请到 GitHub 手动下载。");
-            var prepared = await updates.PrepareUpdateAsync(
-                LatestRelease, ServerAsset, ResolveDatabasePath(), environment.ContentRootPath, ct);
+            // 自动下载好的同版本更新包已经校验过，直接安装，不再重复下载。
+            var prepared = updateAutomation.TakeDownloaded(latestVersion)
+                ?? await updates.PrepareUpdateAsync(
+                    LatestRelease, ServerAsset, ResolveDatabasePath(), environment.ContentRootPath, ct);
             await ApplyAndRestartAsync(prepared, latestVersion, ct);
         }
         catch (Exception ex)
@@ -191,7 +220,7 @@ public sealed class SystemConfigModel(
     public async Task<IActionResult> OnPostUploadUpdateAsync(CancellationToken ct)
     {
         if (await RequireAdminAsync() is { } denied) return denied;
-        await LoadBackupAsync();
+        await LoadPageAsync();
         if (!UpdateService.CanSelfUpdateNow(IsDevelopment))
         {
             CheckMessage = IsPlatformManaged
@@ -326,6 +355,9 @@ public sealed class SystemConfigModel(
         UnreadableTwoFactorUsers = await archives.FindUnreadableTwoFactorUsersAsync(HttpContext.RequestAborted);
     }
 
+    private async Task LoadUpdateSettingsAsync() =>
+        UpdateSettingsOptions = UpdateSettingsInput.From(await updateSettings.GetAsync(HttpContext.RequestAborted));
+
     private void ScheduleRestart() => ApplicationRestartCoordinator.ScheduleRestart(lifetime, environment);
 
     private async Task<IActionResult?> RequireAdminAsync()
@@ -376,7 +408,23 @@ public sealed class SystemConfigModel(
 
     public sealed class UpdateInput
     {
-        public UpdateChannel Channel { get; set; } = UpdateChannel.Stable;
         public bool Force { get; set; }
+    }
+
+    public sealed class UpdateSettingsInput
+    {
+        public UpdateChannel Channel { get; set; } = UpdateChannel.Stable;
+        public bool AutoCheck { get; set; } = true;
+        public bool AutoDownload { get; set; }
+
+        public static UpdateSettingsInput From(UpdateSettingsValues values) => new()
+        {
+            Channel = values.Channel,
+            AutoCheck = values.AutoCheck,
+            AutoDownload = values.AutoDownload,
+        };
+
+        public UpdateSettingsValues ToValues() => new(
+            Enum.IsDefined(Channel) ? Channel : UpdateChannel.Stable, AutoCheck, AutoCheck && AutoDownload);
     }
 }

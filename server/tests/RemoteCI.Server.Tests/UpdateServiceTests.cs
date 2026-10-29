@@ -617,4 +617,28 @@ public sealed class UpdateServiceTests
             Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public void ShouldDownload_OnlyNewerReleaseWithAssetNotYetDownloaded()
+    {
+        var asset = new ReleaseAsset("RemoteCI.Server-3.9.0.0-win-x64.zip", "https://example.invalid/a.zip", 1);
+        var newer = new ReleaseInfo("3.9.0.0", "newer", "", [asset]);
+        var staging = Directory.CreateTempSubdirectory("remoteci-update-test");
+        try
+        {
+            Assert.True(UpdateAutomation.ShouldDownload(newer, asset, "3.1.0.0", null));
+            Assert.False(UpdateAutomation.ShouldDownload(newer, null, "3.1.0.0", null));
+            Assert.False(UpdateAutomation.ShouldDownload(newer, asset, "3.9.0.0", null));
+            var downloaded = new DownloadedUpdate("3.9.0.0", UpdateChannel.Stable,
+                new PreparedUpdate(staging.FullName, staging.FullName));
+            Assert.False(UpdateAutomation.ShouldDownload(newer, asset, "3.1.0.0", downloaded));
+            // 预下载的文件被清理后需要重新下载。
+            var missing = downloaded with { Update = new PreparedUpdate(staging.FullName, Path.Combine(staging.FullName, "gone")) };
+            Assert.True(UpdateAutomation.ShouldDownload(newer, asset, "3.1.0.0", missing));
+        }
+        finally
+        {
+            staging.Delete(recursive: true);
+        }
+    }
 }

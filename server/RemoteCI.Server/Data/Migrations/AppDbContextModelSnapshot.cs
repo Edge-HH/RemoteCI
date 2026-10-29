@@ -1808,6 +1808,15 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Property<bool>("SemesterSyncToClassrooms")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("UpdateAutoCheck")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("UpdateAutoDownload")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("UpdateChannel")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("VapidPrivateKey")
                         .HasColumnType("TEXT");
 

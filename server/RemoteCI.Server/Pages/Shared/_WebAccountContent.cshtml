@@ -56,8 +56,8 @@
         <form method="post" asp-page-handler="Password" class="stack" data-password-confirmation>
             <div asp-validation-summary="All" class="validation"></div>
             <label>当前密码<input asp-for="Password.CurrentPassword" type="password" minlength="8" maxlength="128" autocomplete="current-password" required /></label>
-            <label>新密码<input asp-for="Password.NewPassword" type="password" minlength="8" maxlength="128" autocomplete="new-password" required data-new-password /></label>
-            <label>确认新密码<input asp-for="Password.ConfirmNewPassword" type="password" minlength="8" maxlength="128" autocomplete="new-password" required data-confirm-password /></label>
+            <label>新密码<input asp-for="Password.NewPassword" type="password" minlength="8" maxlength="128" autocomplete="new-password" required data-new-password pattern="[A-Za-z0-9]*" title="只能输入英文字母和数字" data-alnum-password /></label>
+            <label>确认新密码<input asp-for="Password.ConfirmNewPassword" type="password" minlength="8" maxlength="128" autocomplete="new-password" required data-confirm-password pattern="[A-Za-z0-9]*" title="只能输入英文字母和数字" data-alnum-password /></label>
             <button type="submit">修改并撤销设备登录</button>
         </form>
     </section>

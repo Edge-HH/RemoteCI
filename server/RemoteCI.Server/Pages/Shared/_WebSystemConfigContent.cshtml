@@ -72,13 +72,34 @@
         {
             <p class="muted">更新会安装到应用数据目录，容器重建后仍然有效@(Model.IsFnos ? "；fnOS 应用中心显示的版本号不会随之变化" : "")。之后安装新的@(Model.IsFnos ? " FPK" : "镜像")会改用其中的版本；新版本首次启动失败时自动退回原版本。</p>
         }
-        <form method="post" asp-page-handler="CheckUpdate" class="stack system-config-form">
+        <form method="post" asp-page-handler="SaveUpdateSettings" class="stack system-config-form" data-update-settings-form>
             <label>更新渠道
-                <select asp-for="UpdateOptions.Channel">
+                <select asp-for="UpdateSettingsOptions.Channel">
                     <option value="Stable">正式版</option>
                     <option value="Beta">Beta版（包含正式版）</option>
                 </select>
             </label>
+            <label class="check"><input asp-for="UpdateSettingsOptions.AutoCheck" data-update-auto-check /> 自动检查更新（每 6 小时检查一次所选渠道）</label>
+            <label class="check"><input asp-for="UpdateSettingsOptions.AutoDownload" data-update-auto-download /> 发现新版本后自动下载（下载并校验后等待确认安装，不会自动重启）</label>
+            <button type="submit">保存更新设置</button>
+        </form>
+        var updateStatus = Model.UpdateStatus;
+        @if (updateStatus.CheckedAt is { } checkedAt)
+        {
+            <p class="muted">上次检查 @checkedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")（@(updateStatus.Channel == UpdateChannel.Beta ? "Beta版" : "正式版")）@(updateStatus.Latest is { } checkedRelease ? $"：最新版本 {UpdateService.NormalizeVersion(checkedRelease.Tag)}" : "")@(updateStatus.Error is { } checkError ? $"；{checkError}" : "")</p>
+        }
+        @if (updateStatus.Downloading)
+        {
+            <p class="notice">正在下载新版本更新包…</p>
+        }
+        else if (updateStatus.Downloaded is { } downloaded && Model.LatestRelease is null)
+        {
+            <p class="notice ok">已下载并校验 @(downloaded.Version)，可直接安装。</p>
+            <form method="post" asp-page-handler="Update" class="stack system-config-form" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='处理中…'">
+                <button type="submit">安装 @(downloaded.Version) 并重启</button>
+            </form>
+        }
+        <form method="post" asp-page-handler="CheckUpdate" class="stack system-config-form">
             <label class="check"><input asp-for="UpdateOptions.Force" /> 强制更新（同版本重新下载并覆盖安装）</label>
             <button type="submit">检查更新</button>
         </form>
@@ -99,9 +120,8 @@
             @if (canInstall && Model.ServerAsset is not null)
             {
                 <form method="post" asp-page-handler="Update" class="stack system-config-form" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='处理中…'">
-                    <input type="hidden" asp-for="UpdateOptions.Channel" />
                     <input type="hidden" asp-for="UpdateOptions.Force" />
-                    <button type="submit">@(hasNewer ? $"下载并更新到 {latestVersion}" : $"重新下载并覆盖安装 {latestVersion}")</button>
+                    <button type="submit">@(hasNewer ? updateStatus.Downloaded?.Version == latestVersion ? $"安装 {latestVersion} 并重启" : $"下载并更新到 {latestVersion}" : $"重新下载并覆盖安装 {latestVersion}")</button>
                 </form>
             }
             else if (hasNewer)

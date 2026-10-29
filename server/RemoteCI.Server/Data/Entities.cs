@@ -188,6 +188,17 @@ public sealed class SystemMetadata
     /// <summary>远程截图后是否在教室端弹出“已远程获取本机屏幕截图”的轻提示；默认静默。</summary>
     public bool ScreenshotNotifyClassroom { get; set; }
 
+    // ---------- 服务端更新（部署相关，不随配置包迁移） ----------
+
+    /// <summary>服务端更新渠道：手动检查与自动检查都按此渠道选版本。</summary>
+    public RemoteCI.Server.Services.UpdateChannel UpdateChannel { get; set; } = RemoteCI.Server.Services.UpdateChannel.Stable;
+
+    /// <summary>后台定期检查 GitHub Release 是否有新版本；默认开启。</summary>
+    public bool UpdateAutoCheck { get; set; } = true;
+
+    /// <summary>自动检查发现新版本后预先下载并校验更新包，管理员确认后直接安装；默认关闭。</summary>
+    public bool UpdateAutoDownload { get; set; }
+
     // ---------- 应用守护（全局默认策略，单设备可在 AppGuardOverride 中覆盖） ----------
 
     public bool AppGuardEnabled { get; set; }
