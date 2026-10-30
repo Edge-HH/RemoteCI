@@ -56,12 +56,12 @@ public sealed class LoginModel(
         VisitorAccessEnabled = await visitorAccess.AnyVisitorClassEnabledAsync(ct);
         if (!ModelState.IsValid) return Page();
         var password = Input.Password ?? string.Empty;
-        var user = await users.FindByNameAsync(Input.Username.Trim());
+        var user = await identities.FindLoginUserAsync(Input.Username, ct);
         if (user is null || !user.Enabled)
         {
             // 恒定时间：与 REST 登录端点同一逻辑，避免响应时间泄露用户名是否存在。
             await identities.EqualizeLoginTimingAsync(password);
-            ModelState.AddModelError(string.Empty, "ID 或密码错误");
+            ModelState.AddModelError(string.Empty, "ID/用户名或密码错误");
             return Page();
         }
         if (user.PasswordPending && password.Length == 0)
@@ -162,7 +162,8 @@ public sealed class LoginModel(
 
     public sealed class LoginInput
     {
-        [Required, StringLength(32, MinimumLength = 3)]
+        // 登录 ID（3-32 位）或用户名（1-40 个字符）均可。
+        [Required, StringLength(40)]
         public string Username { get; set; } = string.Empty;
 
         // 密码可留空：未设置密码的待激活账号首次登录时以此为入口设置密码。

@@ -196,12 +196,12 @@ public sealed partial class IdentityCoordinator(
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken ct = default)
     {
-        var user = await users.FindByNameAsync(request.Username.Trim());
+        var user = await FindLoginUserAsync(request.Username, ct);
         if (user is null || !user.Enabled)
         {
             // 恒定时间：对不存在的账号也执行一次同等成本的 PBKDF2 校验，避免响应时间泄露用户名是否存在。
             await users.CheckPasswordAsync(TimingUser(), request.Password);
-            throw new IdentityOperationException(ApiErrorCodes.Unauthorized, "ID 或密码错误");
+            throw new IdentityOperationException(ApiErrorCodes.Unauthorized, "ID/用户名或密码错误");
         }
         // 批量导入且未设密码的账号：首次登录（空密码）下发一次性设置令牌，设置密码后重新登录。
         if (user.PasswordPending && string.IsNullOrEmpty(request.Password))
@@ -220,14 +220,14 @@ public sealed partial class IdentityCoordinator(
     public async Task CheckLoginPasswordAsync(AppUser user, string password)
     {
         if (!user.Enabled || user.PasswordPending)
-            throw new IdentityOperationException(ApiErrorCodes.Unauthorized, "ID 或密码错误");
+            throw new IdentityOperationException(ApiErrorCodes.Unauthorized, "ID/用户名或密码错误");
         if (await users.IsLockedOutAsync(user))
             throw new IdentityOperationException(ApiErrorCodes.Unauthorized, "失败次数过多，账号已临时锁定，请稍后再试");
         if (!await users.CheckPasswordAsync(user, password))
         {
             // 接入 Identity 锁定：连续失败 8 次锁定 10 分钟（与 WebUI 登录行为一致）。
             await users.AccessFailedAsync(user);
-            throw new IdentityOperationException(ApiErrorCodes.Unauthorized, "ID 或密码错误");
+            throw new IdentityOperationException(ApiErrorCodes.Unauthorized, "ID/用户名或密码错误");
         }
     }
 
@@ -245,7 +245,7 @@ public sealed partial class IdentityCoordinator(
     /// <summary>首登设置密码：校验一次性令牌与有效期，补设密码后账号立即恢复正常登录。</summary>
     public async Task SetupPasswordAsync(SetupPasswordRequest request, CancellationToken ct = default)
     {
-        var user = await users.FindByNameAsync(request.Username.Trim());
+        var user = await FindLoginUserAsync(request.Username, ct);
         var now = DateTimeOffset.UtcNow;
         var invalid = user is null
             || !user.PasswordPending
@@ -736,6 +736,8 @@ public sealed partial class IdentityCoordinator(
         var protocolRole = role.Kind == AccountRoleKind.Administrator ? UserRole.Admin : UserRole.User;
         if (request.ClassId is { } requestedClass && !await db.Classrooms.AnyAsync(x => x.Id == requestedClass, ct))
             throw new IdentityOperationException(ApiErrorCodes.NotFound, "班级不存在");
+        await EnsureLoginNameAvailableAsync(ApiErrorCodes.UsernameExists, "ID", request.Username.Trim(), null, ct);
+        await EnsureLoginNameAvailableAsync(ApiErrorCodes.DisplayNameExists, "用户名", request.DisplayName.Trim(), null, ct);
         // 密码留空 = 批量导入待激活账号：首次登录时强制设置密码。
         var hasPassword = !string.IsNullOrWhiteSpace(request.Password);
         var user = new AppUser
@@ -779,6 +781,7 @@ public sealed partial class IdentityCoordinator(
                 await GuardLastAdminAsync(user.Id, ct);
 
             var mustRevoke = user.Enabled && !request.Enabled;
+            await EnsureDisplayNameChangeAllowedAsync(user, request.DisplayName.Trim(), ct);
             user.DisplayName = request.DisplayName.Trim();
             user.Role = targetProtocolRole;
             user.RoleDefinitionId = targetRole.Id;
@@ -845,6 +848,7 @@ public sealed partial class IdentityCoordinator(
         var user = await RequireUserAsync(id);
         if (user.Role != UserRole.Admin)
             throw new IdentityOperationException(ApiErrorCodes.Forbidden, "仅系统管理员可以修改用户名。");
+        await EnsureDisplayNameChangeAllowedAsync(user, request.DisplayName.Trim(), ct);
         user.DisplayName = request.DisplayName.Trim();
         user.UpdatedAt = DateTimeOffset.UtcNow;
         user.Version = await NextVersionAsync(ct);
@@ -1204,6 +1208,41 @@ public sealed partial class IdentityCoordinator(
     /// WebUI 登录页与 REST 登录端点共用同一逻辑。
     /// </summary>
     public Task EqualizeLoginTimingAsync(string password) => users.CheckPasswordAsync(TimingUser(), password);
+
+    /// <summary>
+    /// 按登录 ID 或用户名查找账号：ID 优先；否则按用户名匹配，且只有恰好一个账号使用该用户名时才算命中
+    /// （升级前遗留的同名账号只能用 ID 登录）。比较与 ID 一样忽略大小写。
+    /// </summary>
+    public async Task<AppUser?> FindLoginUserAsync(string login, CancellationToken ct = default)
+    {
+        var value = login.Trim();
+        if (value.Length == 0) return null;
+        if (await users.FindByNameAsync(value) is { } byId) return byId;
+        var normalized = users.NormalizeName(value);
+        var byDisplayName = await users.Users
+            .Where(x => x.DisplayName == value || x.DisplayName.ToUpper() == normalized)
+            .Take(2).ToListAsync(ct);
+        return byDisplayName.Count == 1 ? byDisplayName[0] : null;
+    }
+
+    /// <summary>
+    /// 登录 ID 与用户名共用一个命名空间：都可用于登录，因此不能与其他账号的 ID 或用户名相同（忽略大小写），
+    /// 避免登录时认错账号。
+    /// </summary>
+    private async Task EnsureLoginNameAvailableAsync(string code, string label, string value, Guid? exceptUserId, CancellationToken ct)
+    {
+        var normalized = users.NormalizeName(value);
+        var taken = await users.Users.AnyAsync(x => x.Id != exceptUserId && (x.NormalizedUserName == normalized
+            || x.DisplayName == value || x.DisplayName.ToUpper() == normalized), ct);
+        if (taken)
+            throw new IdentityOperationException(code, $"{label}“{value}”已被其他账号用作 ID 或用户名");
+    }
+
+    /// <summary>只校验真正改动的用户名，升级前遗留的同名账号仍可编辑其他字段。</summary>
+    private Task EnsureDisplayNameChangeAllowedAsync(AppUser user, string displayName, CancellationToken ct) =>
+        string.Equals(user.DisplayName, displayName, StringComparison.Ordinal)
+            ? Task.CompletedTask
+            : EnsureLoginNameAvailableAsync(ApiErrorCodes.DisplayNameExists, "用户名", displayName, user.Id, ct);
 
     private static void ValidateUserInput(string username, string displayName, string password, UserRole role)
     {

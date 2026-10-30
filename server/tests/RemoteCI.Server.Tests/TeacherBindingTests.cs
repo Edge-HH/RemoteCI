@@ -71,8 +71,8 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
     [Fact]
     public async Task Teacher_SeatsBoundClassInListScheduleAndCommandPermissions()
     {
-        var (classId, subjectId) = await SeedTaughtClassAsync("绑定班");
-        await CreateUserAsync("wang.teacher", "Teacher-Password-2026", AccountRole.TeacherId, displayName: "王老师");
+        var (classId, subjectId) = await SeedTaughtClassAsync("绑定班", "王绑定");
+        await CreateUserAsync("wang.teacher", "Teacher-Password-2026", AccountRole.TeacherId, displayName: "王绑定");
         var teacher = await _factory.LoginAsync("wang.teacher", "Teacher-Password-2026");
         using var client = _factory.CreateClient();
 
@@ -97,7 +97,7 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
         Assert.Equal("绑定班", item.ClassName);
         var course = Assert.Single(item.Courses);
         Assert.Equal(subjectId, course.SubjectId);
-        Assert.Equal("王老师", course.Teacher);
+        Assert.Equal("王绑定", course.Teacher);
 
         // 任教班级可以发通知：鉴权通过、命令进入下发路径，插件离线时返回 503 + PluginOffline 而不是 403。
         var taught = await SendNotificationAsync(client, teacher.AccessToken, classId);
@@ -127,8 +127,8 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
         Assert.Equal("班主任", roles.Single(x => x.Id == AccountRole.ClassAdministratorId).Name);
 
         // 班主任与老师一样按显示名获得“我的日程”。
-        var (classId, _) = await SeedTaughtClassAsync("班主任任教班");
-        await CreateUserAsync("head.teacher", "Head-Teacher-Password-2026", AccountRole.ClassAdministratorId, displayName: "王老师");
+        var (classId, _) = await SeedTaughtClassAsync("班主任任教班", "王班主任");
+        await CreateUserAsync("head.teacher", "Head-Teacher-Password-2026", AccountRole.ClassAdministratorId, displayName: "王班主任");
         var headTeacherLogin = await _factory.LoginAsync("head.teacher", "Head-Teacher-Password-2026");
         var scheduleResponse = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, "/api/me/schedule", headTeacherLogin.AccessToken));
         scheduleResponse.EnsureSuccessStatusCode();
@@ -139,8 +139,8 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
     [Fact]
     public async Task StudentRole_IsNotBoundByDisplayNameEvenWithSameName()
     {
-        await SeedTaughtClassAsync("学生同名班");
-        await CreateUserAsync("same.name.student", "Student-Password-2026", AccountRole.StudentId, displayName: "王老师");
+        await SeedTaughtClassAsync("学生同名班", "王同名生");
+        await CreateUserAsync("same.name.student", "Student-Password-2026", AccountRole.StudentId, displayName: "王同名生");
         var student = await _factory.LoginAsync("same.name.student", "Student-Password-2026");
         using var client = _factory.CreateClient();
 
@@ -165,7 +165,7 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
     [Fact]
     public async Task DisplayNameEndpoint_IsAdminOnlyAndBindingFollowsAdminRename()
     {
-        var (classId, _) = await SeedTaughtClassAsync("改名班");
+        var (classId, _) = await SeedTaughtClassAsync("改名班", "王改名");
         var teacherId = await CreateUserAsync("rename.teacher", "Teacher-Password-2026", AccountRole.TeacherId, displayName: "占位名");
         var teacher = await _factory.LoginAsync("rename.teacher", "Teacher-Password-2026");
         using var client = _factory.CreateClient();
@@ -173,14 +173,14 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
         // 显示名决定老师能看到哪些班级，老师不能自助修改。
         Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(TestWebApplicationFactory.Bearer(
             HttpMethod.Post, "/api/me/display-name", teacher.AccessToken,
-            new ChangeDisplayNameRequest { DisplayName = "王老师" }))).StatusCode);
+            new ChangeDisplayNameRequest { DisplayName = "王改名" }))).StatusCode);
         Assert.Empty((await GetMyScheduleAsync(client, teacher.AccessToken)).Days);
 
         // 管理员在人员管理中改名后，绑定随之生效。
         var admin = await _factory.LoginAsync();
         var renamed = await client.SendAsync(TestWebApplicationFactory.Bearer(
             HttpMethod.Put, $"/api/users/{teacherId}", admin.AccessToken,
-            new UpdateUserRequest { DisplayName = "王老师", Role = UserRole.User, RoleId = AccountRole.TeacherId, Enabled = true }));
+            new UpdateUserRequest { DisplayName = "王改名", Role = UserRole.User, RoleId = AccountRole.TeacherId, Enabled = true }));
         renamed.EnsureSuccessStatusCode();
         teacher = await _factory.LoginAsync("rename.teacher", "Teacher-Password-2026");
         var schedule = await GetMyScheduleAsync(client, teacher.AccessToken);
@@ -204,8 +204,8 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
     [Fact]
     public async Task MySchedule_IsEmptyForNonTeacherEvenWithSameName()
     {
-        await SeedTaughtClassAsync("日程同名班");
-        await CreateUserAsync("same.name.schedule", "Student-Password-2026", AccountRole.StudentId, displayName: "王老师");
+        await SeedTaughtClassAsync("日程同名班", "王同名日程");
+        await CreateUserAsync("same.name.schedule", "Student-Password-2026", AccountRole.StudentId, displayName: "王同名日程");
         var student = await _factory.LoginAsync("same.name.schedule", "Student-Password-2026");
         using var client = _factory.CreateClient();
 
@@ -277,8 +277,8 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
     [Fact]
     public async Task CreateSyncAsync_IncludesTaughtTeachersWithTeacherPermissions()
     {
-        var (classId, _) = await SeedTaughtClassAsync("镜像班");
-        await CreateUserAsync("mirror.teacher", "Teacher-Password-2026", AccountRole.TeacherId, displayName: "王老师");
+        var (classId, _) = await SeedTaughtClassAsync("镜像班", "王镜像");
+        await CreateUserAsync("mirror.teacher", "Teacher-Password-2026", AccountRole.TeacherId, displayName: "王镜像");
 
         using var scope = _factory.Services.CreateScope();
         var identities = scope.ServiceProvider.GetRequiredService<IdentityCoordinator>();
@@ -296,8 +296,8 @@ public sealed class TeacherBindingTests : IClassFixture<TestWebApplicationFactor
     {
         // 老师同时以“学生”成员身份加入任教班级：云端取“成员角色 ∪ 老师角色默认权限”，
         // LAN 授权镜像必须得到相同结果，否则局域网直连时通知、语音和扩展会被插件拒绝。
-        var (classId, _) = await SeedTaughtClassAsync("成员老师班", teacherName: "赵老师");
-        var teacherId = await CreateUserAsync("member.teacher", "Teacher-Password-2026", AccountRole.TeacherId, displayName: "赵老师");
+        var (classId, _) = await SeedTaughtClassAsync("成员老师班", teacherName: "赵成员");
+        var teacherId = await CreateUserAsync("member.teacher", "Teacher-Password-2026", AccountRole.TeacherId, displayName: "赵成员");
 
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

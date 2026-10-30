@@ -76,9 +76,12 @@ public sealed class UsersModel(
         }
         catch (IdentityOperationException ex)
         {
-            var invalidFields = ex.Code == ApiErrorCodes.UsernameExists
-                ? new[] { $"{nameof(Create)}.{nameof(UserInput.Username)}" }
-                : Array.Empty<string>();
+            var invalidFields = ex.Code switch
+            {
+                ApiErrorCodes.UsernameExists => new[] { $"{nameof(Create)}.{nameof(UserInput.Username)}" },
+                ApiErrorCodes.DisplayNameExists => new[] { $"{nameof(Create)}.{nameof(UserInput.DisplayName)}" },
+                _ => Array.Empty<string>(),
+            };
             return await CreateFailureAsync(ex.Message, invalidFields, ct);
         }
     }

@@ -268,7 +268,7 @@ fun LoginScreen(
                         OutlinedTextField(
                             username,
                             { username = it },
-                            label = { Text("ID") },
+                            label = { Text("ID / 用户名") },
                             leadingIcon = { Icon(Icons.Rounded.Person, contentDescription = null) },
                             singleLine = true,
                             shape = RoundedCornerShape(16.dp),

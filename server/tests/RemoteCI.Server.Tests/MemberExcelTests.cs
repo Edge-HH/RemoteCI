@@ -174,6 +174,57 @@ public sealed class MemberExcelTests
             .Select(x => x.RoleDefinitionId)
             .SingleAsync());
     }
+
+    [Fact]
+    public async Task ImportAndOverwrite_RejectIdOrDisplayNameUsedByAnotherAccount()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        await factory.LoginAsync();
+
+        using var scope = factory.Services.CreateAsyncScope();
+        var service = scope.ServiceProvider.GetRequiredService<MemberExcelService>();
+        var classrooms = scope.ServiceProvider.GetRequiredService<ClassroomService>();
+        var identities = scope.ServiceProvider.GetRequiredService<IdentityCoordinator>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var classroom = await classrooms.CreateAsync("Excel 重名班");
+        var existing = await identities.CreateUserAsync(new CreateUserRequest
+        {
+            ClassId = TestWebApplicationFactory.DefaultClassId,
+            Username = "excel.owner",
+            DisplayName = "已占用的名字",
+            Password = "Excel-Owner-Password-2026",
+            RoleId = AccountRole.StudentId,
+        });
+        await classrooms.AddMemberAsync(classroom.Id, existing.Id, AccountRole.StudentId);
+
+        using (var workbook = CreateWorkbook(
+                   ["excel.dup.name", "已占用的名字", "Excel 重名班", "学生", ""],
+                   ["excel.id.as.name", "EXCEL.OWNER", "Excel 重名班", "学生", ""],
+                   ["已占用的名字", "用户名当 ID", "Excel 重名班", "学生", ""]))
+        using (var stream = Save(workbook))
+        {
+            var imported = await service.ImportAsync(stream);
+            Assert.Equal(0, imported.CreatedUsers);
+            Assert.Equal(3, imported.Failures.Count);
+        }
+
+        var export = await service.ExportAsync(null);
+        using var overwrite = new XLWorkbook(new MemoryStream(export.Content));
+        var sheet = overwrite.Worksheet("成员");
+        var newRow = sheet.RowsUsed().Max(x => x.RowNumber()) + 1;
+        sheet.Cell(newRow, 1).Value = "excel.overwrite.new";
+        sheet.Cell(newRow, 2).Value = "已占用的名字";
+        sheet.Cell(newRow, 3).Value = "Excel 重名班";
+        sheet.Cell(newRow, 4).Value = "学生";
+        using var overwriteStream = Save(overwrite);
+
+        var result = await service.OverwriteAsync(overwriteStream);
+
+        Assert.True(result.HasFailures);
+        Assert.Contains(result.Failures, x => x.Username == "excel.overwrite.new" && x.Message.Contains("用户名已被其他账号用作 ID 或用户名"));
+        Assert.False(await db.Users.AnyAsync(x => x.UserName == "excel.overwrite.new"));
+    }
+
     [Fact]
     public async Task WebUi_DownloadsTemplateAndExportWorkbook()
     {

@@ -1628,7 +1628,7 @@ static IResult OperationError(IdentityOperationException ex) => Results.Json(
         ApiErrorCodes.Forbidden => StatusCodes.Status403Forbidden,
         ApiErrorCodes.NotFound => StatusCodes.Status404NotFound,
         ApiErrorCodes.PairCodeInvalid => StatusCodes.Status409Conflict,
-        ApiErrorCodes.UsernameExists or ApiErrorCodes.LastAdmin => StatusCodes.Status409Conflict,
+        ApiErrorCodes.UsernameExists or ApiErrorCodes.DisplayNameExists or ApiErrorCodes.LastAdmin => StatusCodes.Status409Conflict,
         _ => StatusCodes.Status400BadRequest,
     });
 static ApiError Error(string code, string message) => new() { Code = code, Message = message };

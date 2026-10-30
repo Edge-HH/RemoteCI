@@ -231,9 +231,15 @@ public sealed partial class MemberExcelService(
             .Where(x => !string.IsNullOrWhiteSpace(x.UserName))
             .GroupBy(x => x.UserName!, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
+        // 登录 ID 与用户名都可用于登录，共用一个命名空间（忽略大小写）。
+        var loginNameOwners = allUsers
+            .SelectMany(x => new[] { x.UserName, x.DisplayName }.Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => (Name: name!.Trim(), x.Id)))
+            .GroupBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(x => x.Key, x => x.Select(owner => owner.Id).ToHashSet(), StringComparer.OrdinalIgnoreCase);
 
         var plans = BuildOverwritePlans(
-            rows, scopeIds, classByName, roleByKey, allRoles, userById, userByName, result);
+            rows, scopeIds, classByName, roleByKey, allRoles, userById, userByName, loginNameOwners, result);
 
         if (result.Failures.Count > 0)
             return result;
@@ -266,14 +272,16 @@ public sealed partial class MemberExcelService(
         IReadOnlyList<AccountRole> allRoles,
         IReadOnlyDictionary<Guid, AppUser> userById,
         IReadOnlyDictionary<string, AppUser> userByName,
+        IReadOnlyDictionary<string, HashSet<Guid>> loginNameOwners,
         MemberExcelImportResult result)
     {
         var plans = new List<OverwritePlan>();
         var seenUserIds = new HashSet<Guid>();
         var seenLoginIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenNewLoginNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var group in rows.GroupBy(x => string.IsNullOrWhiteSpace(x.SystemId) ? $"name:{x.UserId}" : $"id:{x.SystemId}", StringComparer.OrdinalIgnoreCase))
         {
-            var plan = BuildOverwritePlan(group, scopeIds, classByName, roleByKey, allRoles, userById, userByName, seenUserIds, seenLoginIds, result);
+            var plan = BuildOverwritePlan(group, scopeIds, classByName, roleByKey, allRoles, userById, userByName, loginNameOwners, seenUserIds, seenLoginIds, seenNewLoginNames, result);
             if (plan is not null)
                 plans.Add(plan);
         }
@@ -288,8 +296,10 @@ public sealed partial class MemberExcelService(
         IReadOnlyList<AccountRole> allRoles,
         IReadOnlyDictionary<Guid, AppUser> userById,
         IReadOnlyDictionary<string, AppUser> userByName,
+        IReadOnlyDictionary<string, HashSet<Guid>> loginNameOwners,
         ISet<Guid> seenUserIds,
         ISet<string> seenLoginIds,
+        IDictionary<string, string> seenNewLoginNames,
         MemberExcelImportResult result)
     {
         var first = group.First();
@@ -297,6 +307,7 @@ public sealed partial class MemberExcelService(
         ValidateOverwriteIdentity(group, first, failures);
         var existingUser = FindExistingUser(first, userById, userByName, failures);
         ValidateOverwriteConflicts(first, existingUser, userByName, seenUserIds, seenLoginIds, failures);
+        ValidateOverwriteLoginNames(first, existingUser, loginNameOwners, seenNewLoginNames, failures);
         var memberships = BuildMemberships(group, scopeIds, classByName, roleByKey, failures);
         if (failures.Count > 0)
         {
@@ -335,6 +346,33 @@ public sealed partial class MemberExcelService(
         if (!seenLoginIds.Add(login)) failures.Add("文件内存在重复的用户 ID。");
         if (userByName.TryGetValue(login, out var loginOwner) && loginOwner.Id != existingUser?.Id)
             failures.Add("用户 ID 已被其他账号使用。");
+    }
+
+    /// <summary>
+    /// 新的或改动的 ID/用户名不能与其他账号（含文件内其他行）的 ID 或用户名相同；
+    /// 未改动的值不校验，升级前遗留的同名账号仍可覆盖导入。
+    /// </summary>
+    private static void ValidateOverwriteLoginNames(
+        ParsedMemberRow first,
+        AppUser? existingUser,
+        IReadOnlyDictionary<string, HashSet<Guid>> loginNameOwners,
+        IDictionary<string, string> seenNewLoginNames,
+        ICollection<string> failures)
+    {
+        var login = first.UserId.Trim();
+        foreach (var (label, value, current) in new[]
+                 {
+                     ("用户 ID", login, existingUser?.UserName),
+                     ("用户名", first.DisplayName.Trim(), existingUser?.DisplayName),
+                 })
+        {
+            if (string.Equals(value, current?.Trim(), StringComparison.OrdinalIgnoreCase)) continue;
+            if (loginNameOwners.TryGetValue(value, out var owners) && owners.Any(id => id != existingUser?.Id))
+                failures.Add($"{label}已被其他账号用作 ID 或用户名。");
+            if (seenNewLoginNames.TryGetValue(value, out var otherLogin) && !string.Equals(otherLogin, login, StringComparison.OrdinalIgnoreCase))
+                failures.Add("文件内存在重复的用户 ID 或用户名。");
+            seenNewLoginNames.TryAdd(value, login);
+        }
     }
 
     private static AccountRole GetGlobalRole(

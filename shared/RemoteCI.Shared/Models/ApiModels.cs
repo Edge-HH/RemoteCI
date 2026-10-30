@@ -89,6 +89,8 @@ public static class ApiErrorCodes
     public const string InternalError = "INTERNAL_ERROR";
     /// <summary>用户名已存在（409）。</summary>
     public const string UsernameExists = "USERNAME_EXISTS";
+    /// <summary>用户名已被其他账号用作 ID 或用户名（409）。</summary>
+    public const string DisplayNameExists = "DISPLAY_NAME_EXISTS";
     /// <summary>不能移除最后一个管理员（409）。</summary>
     public const string LastAdmin = "LAST_ADMIN";
     /// <summary>WS 协议版本不受支持，连接被拒绝。</summary>

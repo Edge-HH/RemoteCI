@@ -124,7 +124,7 @@ curl -fsS -X POST "$REMOTECI_BASE_URL/api/auth/login" -H "Content-Type: applicat
 | `401` | 凭据无效或过期：令牌先续期；API Key 可能已吊销，或账号失去了 API 权限 |
 | `403` | 当前账号在该班没有对应权限，或该操作只允许系统管理员 |
 | `404` | 对象不存在，或插件尚未同步数据 |
-| `409` | 冲突：用户名已存在、最后一个管理员，或换课时课表已被别人修改（`SCHEDULE_STALE`）；换课申请的课位已变化（`SWAP_SLOT_CHANGED`）、申请已被处理（`SWAP_STATE_CONFLICT`）、当天这节课的强制换课已被撤回（`SWAP_FORCE_LOCKED`），或存在需要用户确认的冲突（`SWAP_CONFLICTS`，把 `conflicts[].message` 告诉用户，同意后带 `acknowledgeConflicts: true` 重试） |
+| `409` | 冲突：ID 或用户名已被其他账号用作 ID/用户名（`USERNAME_EXISTS` / `DISPLAY_NAME_EXISTS`；二者都能登录，必须全局唯一）、最后一个管理员，或换课时课表已被别人修改（`SCHEDULE_STALE`）；换课申请的课位已变化（`SWAP_SLOT_CHANGED`）、申请已被处理（`SWAP_STATE_CONFLICT`）、当天这节课的强制换课已被撤回（`SWAP_FORCE_LOCKED`），或存在需要用户确认的冲突（`SWAP_CONFLICTS`，把 `conflicts[].message` 告诉用户，同意后带 `acknowledgeConflicts: true` 重试） |
 | `400` | 请求无效；换课申请两节课都不是自己的（`SWAP_NOT_OWN`），或目标班级没有该学科（`SWAP_SUBJECT_MISSING`） |
 | `503` / `504` | 教室端插件离线，或执行超时 |
 

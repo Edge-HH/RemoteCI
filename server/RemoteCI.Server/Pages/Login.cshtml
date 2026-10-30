@@ -12,7 +12,7 @@
     <div id="login-panel-password" role="tabpanel" aria-labelledby="login-tab-password" data-login-panel="password">
         <form method="post" class="stack">
             <div asp-validation-summary="ModelOnly" class="validation"></div>
-            <label>ID<input asp-for="Input.Username" autocomplete="username" /></label>
+            <label>ID / 用户名<input asp-for="Input.Username" autocomplete="username" /></label>
             <label>密码<input asp-for="Input.Password" type="password" autocomplete="current-password" pattern="[A-Za-z0-9]*" title="只能输入英文字母和数字" data-alnum-password /><small class="muted">尚未设置密码的账号可留空，登录后设置新密码。</small></label>
             <label class="check remember-me">
                 <input asp-for="Input.RememberMe" />

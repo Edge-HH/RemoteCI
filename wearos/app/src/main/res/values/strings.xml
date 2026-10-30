@@ -4,7 +4,7 @@
 
     <!-- 登录页 -->
     <string name="login_title">登录 RemoteCI</string>
-    <string name="input_label_username">ID</string>
+    <string name="input_label_username">ID / 用户名</string>
     <string name="input_label_password">密码</string>
     <string name="input_label_cloud_url">云端地址</string>
     <string name="cloud_http_warning">云端地址使用明文 HTTP，账号密码可能被同一局域网窃听，建议改用 HTTPS</string>

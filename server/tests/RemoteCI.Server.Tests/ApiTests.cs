@@ -138,7 +138,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
     }
 
     [Fact]
-    public async Task Login_OnlyAcceptsId()
+    public async Task Login_AcceptsIdOrDisplayName()
     {
         var admin = await _factory.LoginAsync();
         var first = await _client.SendAsync(TestWebApplicationFactory.Bearer(
@@ -154,18 +154,106 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             }));
         first.EnsureSuccessStatusCode();
 
-        Assert.Equal(HttpStatusCode.OK, (await _client.PostAsJsonAsync("/api/auth/login", new LoginRequest
+        foreach (var login in new[] { "login.id", "LOGIN.ID", "登录用户名", " 登录用户名 " })
         {
-            Username = "login.id",
-            Password = "Login-Password-2026",
-            DeviceName = "ID login",
-        })).StatusCode);
+            var response = await _client.PostAsJsonAsync("/api/auth/login", new LoginRequest
+            {
+                Username = login,
+                Password = "Login-Password-2026",
+                DeviceName = "Login",
+            });
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("login.id", (await response.Content.ReadFromJsonAsync<AuthResponse>())!.User.Username);
+        }
         Assert.Equal(HttpStatusCode.Unauthorized, (await _client.PostAsJsonAsync("/api/auth/login", new LoginRequest
         {
             Username = "登录用户名",
-            Password = "Login-Password-2026",
-            DeviceName = "Username login",
+            Password = "Wrong-Password-2026",
+            DeviceName = "Login",
         })).StatusCode);
+
+        var browser = _factory.CreateClient(new() { AllowAutoRedirect = false, HandleCookies = true });
+        await LoginWebUiAsync(browser, "登录用户名", "Login-Password-2026");
+    }
+
+    [Fact]
+    public async Task Login_DisplayNameSharedByLegacyAccountsOnlyAcceptsId()
+    {
+        var admin = await _factory.LoginAsync();
+        foreach (var username in new[] { "legacy.one", "legacy.two" })
+        {
+            (await _client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post, "/api/users", admin.AccessToken, new CreateUserRequest
+            {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
+                Username = username,
+                DisplayName = username,
+                Password = "Legacy-Password-2026",
+            }))).EnsureSuccessStatusCode();
+        }
+        // 升级前遗留的同名账号：直接写库模拟。
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await database.Users.Where(x => x.UserName == "legacy.one" || x.UserName == "legacy.two")
+                .ExecuteUpdateAsync(x => x.SetProperty(user => user.DisplayName, "同名老师"));
+        }
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await _client.PostAsJsonAsync("/api/auth/login", new LoginRequest
+        {
+            Username = "同名老师",
+            Password = "Legacy-Password-2026",
+            DeviceName = "Ambiguous",
+        })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await _client.PostAsJsonAsync("/api/auth/login", new LoginRequest
+        {
+            Username = "legacy.two",
+            Password = "Legacy-Password-2026",
+            DeviceName = "ID",
+        })).StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateUser_RejectsIdOrDisplayNameUsedByAnotherAccount()
+    {
+        var admin = await _factory.LoginAsync();
+        async Task<HttpResponseMessage> CreateAsync(string username, string displayName) =>
+            await _client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post, "/api/users", admin.AccessToken, new CreateUserRequest
+            {
+                ClassId = TestWebApplicationFactory.DefaultClassId,
+                Username = username,
+                DisplayName = displayName,
+                Password = "Unique-Password-2026",
+            }));
+
+        (await CreateAsync("unique.owner", "唯一老师")).EnsureSuccessStatusCode();
+        (await CreateAsync("self.same", "self.same")).EnsureSuccessStatusCode();
+
+        foreach (var (username, displayName, code) in new[]
+                 {
+                     ("UNIQUE.OWNER", "另一位老师", ApiErrorCodes.UsernameExists),
+                     ("other.one", "唯一老师", ApiErrorCodes.DisplayNameExists),
+                     ("other.two", "Unique.Owner", ApiErrorCodes.DisplayNameExists),
+                     ("teacher.alias", "self.same", ApiErrorCodes.DisplayNameExists),
+                 })
+        {
+            var response = await CreateAsync(username, displayName);
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            Assert.Contains(code, await response.Content.ReadAsStringAsync());
+        }
+
+        // 用户名改名同样不能占用其他账号的 ID 或用户名；不改用户名的编辑不受影响。
+        var users = (await (await _client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Get, "/api/users", admin.AccessToken)))
+            .Content.ReadFromJsonAsync<List<UserListItem>>())!;
+        var target = users.Single(x => x.Username == "self.same");
+        var rename = await _client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Put, $"/api/users/{target.Id}", admin.AccessToken, new UpdateUserRequest
+        {
+            DisplayName = "unique.owner",
+            Role = target.Role,
+            RoleId = target.RoleId,
+            Enabled = true,
+            GrantedPermissions = target.GrantedPermissions,
+        }));
+        Assert.Equal(HttpStatusCode.Conflict, rename.StatusCode);
     }
 
     [Fact]
@@ -2099,7 +2187,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             new CreateUserRequest
             {
                 ClassId = TestWebApplicationFactory.DefaultClassId,
-                Username = username, DisplayName = "语音权限测试", Password = "Voice-Password-2026",
+                Username = username, DisplayName = $"语音权限测试 {username}", Password = "Voice-Password-2026",
                 GrantedPermissions = UserPermissions.AccessWebUi |
                     (voiceGranted ? UserPermissions.SendVoiceMessages : UserPermissions.SendNotifications),
             }));

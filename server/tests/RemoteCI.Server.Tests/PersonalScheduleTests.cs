@@ -84,8 +84,12 @@ public sealed class PersonalScheduleTests
         var owner = await factory.LoginAsync();
         using var client = factory.CreateClient();
         var createUser = await client.SendAsync(TestWebApplicationFactory.Bearer(HttpMethod.Post, "/api/users", owner.AccessToken,
-            new CreateUserRequest { Username = "personal-other", DisplayName = owner.User.DisplayName, Password = "Test-Password-123", RoleId = AccountRole.TeacherId }));
+            new CreateUserRequest { Username = "personal-other", DisplayName = "personal-other", Password = "Test-Password-123", RoleId = AccountRole.TeacherId }));
         createUser.EnsureSuccessStatusCode();
+        // 新账号不能与他人同名；直接写库模拟升级前遗留的同名账号，确认私人课程按账号而不是用户名隔离。
+        using (var scope = factory.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<AppDbContext>().Users.Where(x => x.UserName == "personal-other")
+                .ExecuteUpdateAsync(x => x.SetProperty(user => user.DisplayName, owner.User.DisplayName));
         var other = await factory.LoginAsync("personal-other", "Test-Password-123");
         var body = Weekly("私人研讨", DayOfWeek.Thursday, "19:30", "20:30", reminder: 25, notify: true);
         body.Location = "自习室";

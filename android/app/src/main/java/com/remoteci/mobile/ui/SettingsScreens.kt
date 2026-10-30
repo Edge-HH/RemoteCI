@@ -352,7 +352,7 @@ fun ConnectionScreen(
                     Icon(Icons.Rounded.QrCodeScanner, contentDescription = "扫描")
                 }
             })
-            OutlinedTextField(username, { username = it }, label = { Text("ID") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(username, { username = it }, label = { Text("ID / 用户名") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(
                 value = password,
                 onValueChange = { password = it },
