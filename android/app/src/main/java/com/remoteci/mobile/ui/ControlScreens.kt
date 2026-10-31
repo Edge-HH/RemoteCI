@@ -82,7 +82,9 @@ fun ControlListScreen(embedded: Boolean, snackbar: androidx.compose.material3.Sn
     val snapshot by ConnectionManager.snapshot.collectAsState()
     val caps by ConnectionManager.availableCapabilities.collectAsState()
     val classPermissions = effectiveClassPermissions(classes, currentClassId, user?.permissions ?: 0)
-    fun can(permission: Int): Boolean = classPermissions and permission == permission
+    // 旧服务端没有细化后的独立权限位（音量、清除通知等），按原来合并在一起的旧权限判断。
+    val refined = user?.usesRefinedPermissions == true || Protocol.hasRefinedBits(classPermissions)
+    fun can(permission: Int): Boolean = Protocol.hasPermission(classPermissions, permission, refined)
     // 控制项按“消息 / 大屏 / 扩展”分组显示。
     data class Row(
         val group: String,
@@ -99,7 +101,7 @@ fun ControlListScreen(embedded: Boolean, snackbar: androidx.compose.material3.Sn
         Row("消息", "发送语音", "最长 60 秒的语音消息", Icons.Rounded.Mic,
             can(Protocol.PERMISSION_SEND_VOICE_MESSAGES) && Protocol.CAP_VOICE_MESSAGE_SEND in caps, Screen.Voice),
         Row("消息", "清除提醒", "清除 ClassIsland 当前提醒与手表提示", Icons.Rounded.NotificationsOff,
-            can(Protocol.PERMISSION_SEND_NOTIFICATIONS) && Protocol.CAP_NOTIFICATION_CLEAR in caps, null,
+            can(Protocol.PERMISSION_CLEAR_NOTIFICATIONS) && Protocol.CAP_NOTIFICATION_CLEAR in caps, null,
             { ConnectionManager.clearNotifications() }),
         Row("大屏", "主界面", if (snapshot?.isMainMenuVisible == true) "当前显示中，点击可隐藏" else "当前已隐藏，点击可显示",
             Icons.Rounded.Visibility,
@@ -107,7 +109,7 @@ fun ControlListScreen(embedded: Boolean, snackbar: androidx.compose.material3.Sn
         Row("大屏", "屏幕截图", "查看教室电脑当前屏幕", Icons.Rounded.DesktopWindows,
             can(Protocol.PERMISSION_CAPTURE_SCREEN) && Protocol.CAP_SCREEN_CAPTURE in caps, Screen.Screenshot),
         Row("大屏", "音量", "音量调节和切换静音", Icons.Rounded.VolumeUp,
-            can(Protocol.PERMISSION_POWER_CONTROL) && Protocol.CAP_VOLUME_CONTROL in caps, Screen.Volume),
+            can(Protocol.PERMISSION_VOLUME_CONTROL) && Protocol.CAP_VOLUME_CONTROL in caps, Screen.Volume),
         Row("大屏", "电源控制", "关机、睡眠或休眠", Icons.Rounded.PowerSettingsNew,
             can(Protocol.PERMISSION_POWER_CONTROL) && Protocol.CAP_POWER_CONTROL in caps, Screen.Power),
         Row("扩展", "扩展功能", "运行已注册扩展", Icons.Rounded.Extension,

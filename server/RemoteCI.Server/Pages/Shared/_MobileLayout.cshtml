@@ -6,11 +6,11 @@
 @{
     var current = User.Identity?.IsAuthenticated == true ? await Users.GetUserAsync(User) : null;
     var path = Context.Request.Path.Value ?? "";
-    var classes = current is null ? [] : await Access.GetAccessibleClassesAsync(current.Id, current.Role, current.GrantedPermissions, Context.RequestAborted);
+    var classes = current is null ? [] : await Access.GetAccessibleClassesAsync(current.Id, current.Role, Context.RequestAborted);
     var selected = Guid.TryParse(Context.Request.Cookies[WebPageModel.CurrentClassCookie], out var classId) ? classId : Guid.Empty;
     var classroom = classes.FirstOrDefault(x => x.Id == selected) ?? classes.FirstOrDefault();
     var defaults = current is null ? UserPermissions.None : await Db.AccountRoles.Where(x => x.Id == current.RoleDefinitionId).Select(x => x.DefaultPermissions).FirstOrDefaultAsync();
-    var permissions = current is null ? UserPermissions.None : RolePermissions.Effective(current.Role, current.GrantedPermissions, defaults);
+    var permissions = current is null ? UserPermissions.None : PermissionAdjustment.Of(current).Apply(current.Role, defaults);
     // 底栏四个主页面：今天、课表（含我的日程与换课申请）、控制、我的。
     var primary = path is "/Mobile/Today" or "/Mobile/Schedule" or "/Mobile/MySchedule" or "/Mobile/SwapRequests" or "/Mobile/Control" or "/Mobile/Account";
     var title = ViewData["Title"]?.ToString() ?? "RemoteCI";

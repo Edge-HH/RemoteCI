@@ -660,16 +660,13 @@ public static class WebSocketHub
             return;
         }
         command.ClassId = classId;
-        // 远程升级、插件管理、集控、终端与文件分发属于宿主级维护，即使普通角色被授予 ManageUsers 也仅允许系统管理员执行。
-        if ((command.Command is CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
-            CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
-            CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
-            CommandKind.JoinManagement or CommandKind.RestartClassIsland or CommandKind.LaunchClassIsland or
-            CommandKind.ExecuteTerminalCommand or CommandKind.SendFile) && session.Principal.User!.Role != UserRole.Admin)
+        // 远程升级、插件管理、集控与终端按各自独立的班级权限鉴权（见下方 GetCommandValidationError）；
+        // 手机/手表通道只能内联传文件，直接分发文件仍仅允许系统管理员，经服务端中转请走文件分发接口。
+        if (command.Command is CommandKind.SendFile && session.Principal.User!.Role != UserRole.Admin)
         {
             await SendFailureAsync(
                 envelope, session.ConnectionId, session.Registry,
-                CommandResultCodes.Forbidden, "仅系统管理员可以执行远程维护操作", session.CancellationToken);
+                CommandResultCodes.Forbidden, "仅系统管理员可以直接分发文件", session.CancellationToken);
             return;
         }
         if (command.Notification is not null)
@@ -679,8 +676,7 @@ public static class WebSocketHub
         }
 
         var classPermissions = await session.ClassAccess.GetEffectivePermissionsAsync(
-            session.Principal.User!.Id, session.Principal.User!.Role, classId.Value,
-            session.Principal.User!.GrantedPermissions, session.CancellationToken);
+            session.Principal.User!.Id, session.Principal.User!.Role, classId.Value, session.CancellationToken);
         if (GetCommandValidationError(
                 command, classPermissions, session.Principal.User!.AllowedExtensionIds,
                 session.Store, classId.Value) is { } error)
@@ -823,7 +819,9 @@ public static class WebSocketHub
         UserPermissions classPermissions)
     {
         // 插件会再次鉴权，因此必须携带刚刚验证的班内权限，且不修改连接的全局身份。
-        command.RequestedBy = session.Principal.User!.WithPermissions(classPermissions);
+        // 发往插件的权限按新权限鉴权后，再补上旧插件认的权限位（只影响这一条命令）。
+        command.RequestedBy = session.Principal.User!.WithPermissions(
+            CommandPermissions.ForDispatch(command.Command, classPermissions));
         envelope.Payload = command;
         session.Registry.RegisterWatchCommand(envelope.MessageId, session.ConnectionId, command, classId);
         var sent = command.Command == CommandKind.LaunchClassIsland

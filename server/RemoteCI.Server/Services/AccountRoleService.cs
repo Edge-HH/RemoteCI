@@ -18,11 +18,20 @@ public sealed class AccountRoleService(AppDbContext db)
                 Name = x.Name,
                 Kind = x.Kind.ToString(),
                 DefaultPermissions = x.Kind == AccountRoleKind.Administrator ? UserPermissions.All : x.DefaultPermissions,
+                DefaultManagementPermissions = x.Kind == AccountRoleKind.Administrator
+                    ? ManagementPermissions.All
+                    : x.DefaultManagementPermissions,
                 UserCount = x.Users.Count,
             }).ToListAsync(ct);
 
-    public async Task<AccountRoleInfo> CreateAsync(string name, UserPermissions permissions, CancellationToken ct = default)
+    /// <param name="delegation">操作者的授权边界；省略表示不限制（系统管理员或服务端内部调用）。</param>
+    public async Task<AccountRoleInfo> CreateAsync(
+        string name, UserPermissions permissions, CancellationToken ct = default,
+        ManagementPermissions management = ManagementPermissions.None, PermissionDelegation? delegation = null)
     {
+        var limits = delegation ?? PermissionDelegation.Unrestricted;
+        permissions = limits.ClampDefaults(permissions, UserPermissions.None);
+        management = limits.ClampDefaults(management, ManagementPermissions.None);
         var normalized = NormalizeName(name);
         if (await db.AccountRoles.AnyAsync(x => x.NormalizedName == normalized, ct))
             throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "Role name already exists");
@@ -31,14 +40,23 @@ public sealed class AccountRoleService(AppDbContext db)
         {
             Id = Guid.NewGuid(), Name = name.Trim(), NormalizedName = normalized,
             Kind = AccountRoleKind.Custom, DefaultPermissions = permissions & RolePermissions.Assignable,
+            DefaultManagementPermissions = management & ManagementPermissions.All,
             CreatedAt = now, UpdatedAt = now,
         };
         db.AccountRoles.Add(role);
         await db.SaveChangesAsync(ct);
-        return new AccountRoleInfo { Id = role.Id, Name = role.Name, Kind = role.Kind.ToString(), DefaultPermissions = role.DefaultPermissions };
+        return new AccountRoleInfo
+        {
+            Id = role.Id, Name = role.Name, Kind = role.Kind.ToString(),
+            DefaultPermissions = role.DefaultPermissions, DefaultManagementPermissions = role.DefaultManagementPermissions,
+        };
     }
 
-    public async Task UpdateAsync(Guid id, string name, UserPermissions permissions, CancellationToken ct = default)
+    /// <param name="management">默认系统管理权限；null 表示保持原值（旧客户端不下发该字段）。</param>
+    /// <param name="delegation">操作者的授权边界；省略表示不限制（系统管理员或服务端内部调用）。</param>
+    public async Task UpdateAsync(
+        Guid id, string name, UserPermissions permissions, CancellationToken ct = default,
+        ManagementPermissions? management = null, PermissionDelegation? delegation = null)
     {
         var role = await db.AccountRoles.SingleOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new IdentityOperationException(ApiErrorCodes.NotFound, "Role not found");
@@ -50,7 +68,10 @@ public sealed class AccountRoleService(AppDbContext db)
         if (role.Kind == AccountRoleKind.Custom && await db.AccountRoles.AnyAsync(x => x.Id != id && x.NormalizedName == normalized, ct))
             throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "Role name already exists");
         if (role.Kind == AccountRoleKind.Custom) { role.Name = name.Trim(); role.NormalizedName = normalized; }
-        role.DefaultPermissions = permissions & RolePermissions.Assignable;
+        var limits = delegation ?? PermissionDelegation.Unrestricted;
+        role.DefaultPermissions = limits.ClampDefaults(permissions, role.DefaultPermissions) & RolePermissions.Assignable;
+        role.DefaultManagementPermissions = limits.ClampDefaults(
+            management ?? role.DefaultManagementPermissions, role.DefaultManagementPermissions) & ManagementPermissions.All;
         role.UpdatedAt = DateTimeOffset.UtcNow;
         var metadata = await db.SystemMetadata.SingleAsync(x => x.Id == 1, ct);
         metadata.AccountVersion++;

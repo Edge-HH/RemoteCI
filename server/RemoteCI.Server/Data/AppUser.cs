@@ -9,7 +9,14 @@ public sealed class AppUser : IdentityUser<Guid>, UserProfileLike
     public UserRole Role { get; set; } = UserRole.User;
     public Guid RoleDefinitionId { get; set; } = AccountRole.StudentId;
     public AccountRole RoleDefinition { get; set; } = null!;
+    /// <summary>相对角色默认权限新增的班级权限；在每个班级都叠加到该班的班内角色上。</summary>
     public UserPermissions GrantedPermissions { get; set; }
+    /// <summary>相对角色默认权限收回的班级权限；在每个班级都从该班的班内角色中扣除。</summary>
+    public UserPermissions RevokedPermissions { get; set; }
+    /// <summary>相对全局角色新增的系统管理权限。</summary>
+    public ManagementPermissions GrantedManagementPermissions { get; set; }
+    /// <summary>相对全局角色收回的系统管理权限。</summary>
+    public ManagementPermissions RevokedManagementPermissions { get; set; }
     public bool Enabled { get; set; } = true;
     public long Version { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;

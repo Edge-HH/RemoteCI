@@ -46,12 +46,17 @@ public sealed partial class IdentityCoordinator(
     /// <summary>API Key 的固定前缀，便于与设备访问令牌区分且不改变现有 Bearer 鉴权格式。</summary>
     public const string ApiKeyPrefix = "rci_";
 
-    /// <summary>内置“班主任”角色的默认权限：班内日常管理（含屏幕截图），不含用户管理、电源/主菜单控制等系统级权限。</summary>
+    /// <summary>
+    /// 内置“班主任”角色的默认权限：班内日常管理（含屏幕截图、本班档案与插件设置、班级信息、电子班牌、
+    /// 操作记录与课时统计），不含用户管理、电源/主菜单控制与远程维护等高风险权限。
+    /// </summary>
     public const UserPermissions ClassAdministratorDefaultPermissions =
         UserPermissions.ViewCurrentCourse | UserPermissions.AccessWebUi | UserPermissions.ManageSchedule |
-        UserPermissions.SendNotifications | UserPermissions.SendVoiceMessages | UserPermissions.TeacherComing |
-        UserPermissions.RunExtensions | UserPermissions.ApiAccess | UserPermissions.RequestScheduleSwap |
-        UserPermissions.CaptureScreen;
+        UserPermissions.SendNotifications | UserPermissions.ClearNotifications | UserPermissions.SendVoiceMessages |
+        UserPermissions.TeacherComing | UserPermissions.RunExtensions | UserPermissions.ConfigureExtensions |
+        UserPermissions.ApiAccess | UserPermissions.RequestScheduleSwap | UserPermissions.CaptureScreen |
+        UserPermissions.ManageClassProfile | UserPermissions.PullSchedule | UserPermissions.ManageClassInfo |
+        UserPermissions.ManageClassBoards | UserPermissions.ViewAuditLog | UserPermissions.ViewLessonStats;
 
     /// <summary>
     /// 内置“老师”角色的默认权限：查看当前课程、发送通知与语音消息、发起换课申请，以及用 API Key 读取自己的日程。
@@ -59,7 +64,7 @@ public sealed partial class IdentityCoordinator(
     /// 显示名由系统管理员维护。
     /// </summary>
     public const UserPermissions TeacherDefaultPermissions =
-        UserPermissions.ViewCurrentCourse | UserPermissions.SendNotifications |
+        UserPermissions.ViewCurrentCourse | UserPermissions.SendNotifications | UserPermissions.ClearNotifications |
         UserPermissions.SendVoiceMessages | UserPermissions.ApiAccess | UserPermissions.RequestScheduleSwap;
 
     /// <summary>
@@ -130,7 +135,8 @@ public sealed partial class IdentityCoordinator(
         await db.AccountRoles.Where(x => x.Id == AccountRole.AdministratorId).ExecuteUpdateAsync(setters => setters
             .SetProperty(x => x.Name, "管理员")
             .SetProperty(x => x.NormalizedName, "管理员")
-            .SetProperty(x => x.DefaultPermissions, UserPermissions.All), ct);
+            .SetProperty(x => x.DefaultPermissions, UserPermissions.All)
+            .SetProperty(x => x.DefaultManagementPermissions, ManagementPermissions.All), ct);
         await db.AccountRoles.Where(x => x.Id == AccountRole.ClassAdministratorId).ExecuteUpdateAsync(setters => setters
             .SetProperty(x => x.Name, "班主任")
             .SetProperty(x => x.NormalizedName, "班主任")
@@ -704,6 +710,16 @@ public sealed partial class IdentityCoordinator(
     /// 读取目标账号角色（不区分启用状态）。管理守卫必须用它而非 GetProfileAsync：
     /// 后者对禁用账号返回 null，会让普通用户绕过“仅管理员可管理管理员”检查接管被禁用的管理员。
     /// </summary>
+    /// <summary>账号按全局角色计算的有效权限（角色默认 + 个人新增 − 个人收回），供登录后选择落地页等不加载角色的场景。</summary>
+    public async Task<UserPermissions> GetGlobalPermissionsAsync(AppUser user, CancellationToken ct = default)
+    {
+        var defaults = await db.AccountRoles.AsNoTracking()
+            .Where(x => x.Id == user.RoleDefinitionId)
+            .Select(x => x.DefaultPermissions)
+            .SingleOrDefaultAsync(ct);
+        return PermissionAdjustment.Of(user).Apply(user.Role, defaults);
+    }
+
     public async Task<UserRole?> GetRoleAsync(Guid id, CancellationToken ct = default)
     {
         var user = await users.FindByIdAsync(id.ToString());
@@ -711,25 +727,15 @@ public sealed partial class IdentityCoordinator(
     }
 
     public async Task<IReadOnlyList<UserListItem>> ListUsersAsync(CancellationToken ct = default) =>
-        await users.Users.Include(x => x.RoleDefinition).OrderByDescending(x => x.Role).ThenBy(x => x.UserName)
-            .Select(x => new UserListItem
-            {
-                Id = x.Id,
-                Username = x.UserName!,
-                DisplayName = x.DisplayName,
-                Role = x.Role,
-                RoleId = x.RoleDefinitionId,
-                RoleName = x.RoleDefinition.Name,
-                GrantedPermissions = x.GrantedPermissions,
-                EffectivePermissions = x.Role == UserRole.Admin
-                    ? UserPermissions.All
-                    : UserPermissions.ViewCurrentCourse | x.RoleDefinition.DefaultPermissions | x.GrantedPermissions,
-                Enabled = x.Enabled,
-                UpdatedAt = x.UpdatedAt,
-                IsSystemOwner = x.IsSystemOwner,
-            }).ToListAsync(ct);
+        (await users.Users.AsNoTracking().Include(x => x.RoleDefinition)
+            .OrderByDescending(x => x.Role).ThenBy(x => x.UserName)
+            .ToListAsync(ct))
+            .Select(x => ToListItem(x, x.RoleDefinition))
+            .ToList();
 
-    public async Task<UserListItem> CreateUserAsync(CreateUserRequest request, CancellationToken ct = default)
+    /// <param name="delegation">操作者的授权边界；省略表示不限制（系统管理员或服务端内部调用）。</param>
+    public async Task<UserListItem> CreateUserAsync(
+        CreateUserRequest request, CancellationToken ct = default, PermissionDelegation? delegation = null)
     {
         ValidateUserInput(request.Username, request.DisplayName, request.Password, request.Role);
         var role = await ResolveRoleAsync(request.RoleId, request.Role, ct);
@@ -738,6 +744,14 @@ public sealed partial class IdentityCoordinator(
             throw new IdentityOperationException(ApiErrorCodes.NotFound, "班级不存在");
         await EnsureLoginNameAvailableAsync(ApiErrorCodes.UsernameExists, "ID", request.Username.Trim(), null, ct);
         await EnsureLoginNameAvailableAsync(ApiErrorCodes.DisplayNameExists, "用户名", request.DisplayName.Trim(), null, ct);
+        var limits = delegation ?? PermissionDelegation.Unrestricted;
+        var (granted, revoked) = limits.ClampAdjustment(
+            request.GrantedPermissions, request.RevokedPermissions ?? UserPermissions.None,
+            UserPermissions.None, UserPermissions.None);
+        var (grantedManagement, revokedManagement) = limits.ClampAdjustment(
+            request.GrantedManagementPermissions ?? ManagementPermissions.None,
+            request.RevokedManagementPermissions ?? ManagementPermissions.None,
+            ManagementPermissions.None, ManagementPermissions.None);
         // 密码留空 = 批量导入待激活账号：首次登录时强制设置密码。
         var hasPassword = !string.IsNullOrWhiteSpace(request.Password);
         var user = new AppUser
@@ -747,7 +761,10 @@ public sealed partial class IdentityCoordinator(
             DisplayName = request.DisplayName.Trim(),
             Role = protocolRole,
             RoleDefinitionId = role.Id,
-            GrantedPermissions = NormalizeGrants(protocolRole, request.GrantedPermissions),
+            GrantedPermissions = NormalizeGrants(protocolRole, granted),
+            RevokedPermissions = NormalizeGrants(protocolRole, revoked),
+            GrantedManagementPermissions = NormalizeManagement(protocolRole, grantedManagement),
+            RevokedManagementPermissions = NormalizeManagement(protocolRole, revokedManagement),
             Enabled = true,
             PasswordPending = !hasPassword,
             UpdatedAt = DateTimeOffset.UtcNow,
@@ -765,7 +782,9 @@ public sealed partial class IdentityCoordinator(
         return await ToListItemAsync(user, ct);
     }
 
-    public async Task<UserListItem> UpdateUserAsync(Guid id, UpdateUserRequest request, CancellationToken ct = default)
+    /// <param name="delegation">操作者的授权边界；省略表示不限制（系统管理员或服务端内部调用）。</param>
+    public async Task<UserListItem> UpdateUserAsync(
+        Guid id, UpdateUserRequest request, CancellationToken ct = default, PermissionDelegation? delegation = null)
     {
         ValidateDisplayName(request.DisplayName);
         ValidateRole(request.Role);
@@ -785,7 +804,19 @@ public sealed partial class IdentityCoordinator(
             user.DisplayName = request.DisplayName.Trim();
             user.Role = targetProtocolRole;
             user.RoleDefinitionId = targetRole.Id;
-            user.GrantedPermissions = NormalizeGrants(targetProtocolRole, request.GrantedPermissions);
+            // 旧客户端不认识收回与系统管理权限字段：省略时保持原值，避免一次编辑把它们清空。
+            var limits = delegation ?? PermissionDelegation.Unrestricted;
+            var (granted, revoked) = limits.ClampAdjustment(
+                request.GrantedPermissions, request.RevokedPermissions ?? user.RevokedPermissions,
+                user.GrantedPermissions, user.RevokedPermissions);
+            var (grantedManagement, revokedManagement) = limits.ClampAdjustment(
+                request.GrantedManagementPermissions ?? user.GrantedManagementPermissions,
+                request.RevokedManagementPermissions ?? user.RevokedManagementPermissions,
+                user.GrantedManagementPermissions, user.RevokedManagementPermissions);
+            user.GrantedPermissions = NormalizeGrants(targetProtocolRole, granted);
+            user.RevokedPermissions = NormalizeGrants(targetProtocolRole, revoked);
+            user.GrantedManagementPermissions = NormalizeManagement(targetProtocolRole, grantedManagement);
+            user.RevokedManagementPermissions = NormalizeManagement(targetProtocolRole, revokedManagement);
             user.Enabled = request.Enabled;
             user.UpdatedAt = DateTimeOffset.UtcNow;
             user.Version = await NextVersionAsync(ct);
@@ -928,10 +959,11 @@ public sealed partial class IdentityCoordinator(
                 : (user.RoleDefinitionId, user.RoleDefinition?.DefaultPermissions ?? UserPermissions.None);
             // 与云端 ClassAccessService.GetEffectivePermissionsAsync 保持同一公式：班内角色权限，
             // 再并上任教老师的全局老师角色默认权限，避免“老师且为班级成员”的账号在 LAN 上权限更少。
-            var effective = ClassAccessService.EffectiveForMembership(user.Role, memberDefaults, user.GrantedPermissions);
+            var adjustment = PermissionAdjustment.Of(user);
+            var effective = ClassAccessService.EffectiveForMembership(user.Role, memberDefaults, adjustment);
             if (!isAdmin && memberRoles.ContainsKey(user.Id) && taughtTeacherIds.Contains(user.Id))
                 effective |= ClassAccessService.EffectiveForMembership(
-                    user.Role, user.RoleDefinition?.DefaultPermissions ?? UserPermissions.None, user.GrantedPermissions);
+                    user.Role, user.RoleDefinition?.DefaultPermissions ?? UserPermissions.None, adjustment);
             var account = new SyncedAccount
             {
                 Id = user.Id,
@@ -1142,32 +1174,40 @@ public sealed partial class IdentityCoordinator(
             RoleName = role.Name,
             RoleKind = (int)role.Kind,
             GrantedPermissions = user.GrantedPermissions,
-            Permissions = user.Role == UserRole.Admin ? UserPermissions.All : UserPermissions.ViewCurrentCourse | role.DefaultPermissions | user.GrantedPermissions,
-            Classes = [.. await classAccess.GetAccessibleClassesAsync(user.Id, user.Role, user.GrantedPermissions, ct)],
+            Permissions = PermissionAdjustment.Of(user).Apply(user.Role, role.DefaultPermissions),
+            ManagementPermissions = EffectiveManagement(user, role),
+            Classes = [.. await classAccess.GetAccessibleClassesAsync(user.Id, user.Role, ct)],
             Version = user.Version,
         };
         await extensionPolicies.ApplyAccessAsync(profile, ct);
         return profile;
     }
 
-    private async Task<UserListItem> ToListItemAsync(AppUser user, CancellationToken ct)
+    private async Task<UserListItem> ToListItemAsync(AppUser user, CancellationToken ct) =>
+        ToListItem(user, await db.AccountRoles.AsNoTracking().SingleAsync(x => x.Id == user.RoleDefinitionId, ct));
+
+    private static UserListItem ToListItem(AppUser user, AccountRole role) => new()
     {
-        var role = await db.AccountRoles.AsNoTracking().SingleAsync(x => x.Id == user.RoleDefinitionId, ct);
-        return new UserListItem
-        {
-            Id = user.Id,
-            Username = user.UserName!,
-            DisplayName = user.DisplayName,
-            Role = user.Role,
-            RoleId = role.Id,
-            RoleName = role.Name,
-            GrantedPermissions = user.GrantedPermissions,
-            EffectivePermissions = user.Role == UserRole.Admin ? UserPermissions.All : UserPermissions.ViewCurrentCourse | role.DefaultPermissions | user.GrantedPermissions,
-            Enabled = user.Enabled,
-            UpdatedAt = user.UpdatedAt,
-            IsSystemOwner = user.IsSystemOwner,
-        };
-    }
+        Id = user.Id,
+        Username = user.UserName!,
+        DisplayName = user.DisplayName,
+        Role = user.Role,
+        RoleId = role.Id,
+        RoleName = role.Name,
+        GrantedPermissions = user.GrantedPermissions,
+        RevokedPermissions = user.RevokedPermissions,
+        EffectivePermissions = PermissionAdjustment.Of(user).Apply(user.Role, role.DefaultPermissions),
+        GrantedManagementPermissions = user.GrantedManagementPermissions,
+        RevokedManagementPermissions = user.RevokedManagementPermissions,
+        EffectiveManagementPermissions = EffectiveManagement(user, role),
+        Enabled = user.Enabled,
+        UpdatedAt = user.UpdatedAt,
+        IsSystemOwner = user.IsSystemOwner,
+    };
+
+    private static ManagementPermissions EffectiveManagement(AppUser user, AccountRole role) =>
+        RolePermissions.EffectiveManagement(user.Role, role.DefaultManagementPermissions,
+            user.GrantedManagementPermissions, user.RevokedManagementPermissions);
 
     private async Task<AccountRole> ResolveRoleAsync(Guid? roleId, UserRole legacyRole, CancellationToken ct)
     {
@@ -1178,7 +1218,11 @@ public sealed partial class IdentityCoordinator(
 
     private static UserPermissions NormalizeGrants(UserRole role, UserPermissions grants) => role == UserRole.Admin
         ? UserPermissions.None
-        : grants & (RolePermissions.Assignable & ~UserPermissions.ChangeDisplayName);
+        : grants & RolePermissions.Assignable;
+
+    private static ManagementPermissions NormalizeManagement(UserRole role, ManagementPermissions grants) => role == UserRole.Admin
+        ? ManagementPermissions.None
+        : grants & ManagementPermissions.All;
 
     private static string NormalizeDeviceName(string value) => string.IsNullOrWhiteSpace(value)
         ? "Wear OS"

@@ -20,6 +20,12 @@ public sealed class ConfigurationArchiveService(
 {
     private static readonly byte[] Magic = "RCICFG01"u8.ToArray();
     private const int Iterations = 600_000;
+
+    /// <summary>
+    /// 备份格式版本。8：权限细化——角色带默认系统管理权限，账号带收回权限与系统管理权限；
+    /// 导入更早的备份时按 <see cref="PermissionUpgrade"/> 补齐拆出的新权限。
+    /// </summary>
+    private const int CurrentSnapshotVersion = 8;
     private const int MaxImportBytes = 64 * 1024 * 1024;
     private readonly string _backupDirectory = Path.Combine(
         Path.GetDirectoryName(Path.IsPathRooted(options.Value.DatabasePath)
@@ -28,11 +34,12 @@ public sealed class ConfigurationArchiveService(
 
     public async Task<ConfigurationSnapshot> CaptureAsync(CancellationToken ct = default)
     {
-        var roles = await db.AccountRoles.AsNoTracking().Select(x => new RoleSnapshot(x.Id, x.Name, x.Kind, x.DefaultPermissions, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
+        var roles = await db.AccountRoles.AsNoTracking().Select(x => new RoleSnapshot(x.Id, x.Name, x.Kind, x.DefaultPermissions, x.CreatedAt, x.UpdatedAt, x.DefaultManagementPermissions)).ToListAsync(ct);
         var users = await db.Users.AsNoTracking().Select(x => new UserSnapshot(
             x.Id, x.UserName!, x.NormalizedUserName!, x.DisplayName, x.PasswordHash!, x.SecurityStamp!, x.ConcurrencyStamp!,
             x.Role, x.RoleDefinitionId, x.GrantedPermissions, x.Enabled, x.Version, x.UpdatedAt, x.IsSystemOwner,
-            x.TwoFactorEnabled, x.ProtectedTotpKey, x.LastTotpTimeStep, x.TwoFactorRecoveryHashes, null)).ToListAsync(ct);
+            x.TwoFactorEnabled, x.ProtectedTotpKey, x.LastTotpTimeStep, x.TwoFactorRecoveryHashes, null,
+            x.RevokedPermissions, x.GrantedManagementPermissions, x.RevokedManagementPermissions)).ToListAsync(ct);
         var groups = await db.ClassGroups.AsNoTracking().Select(x => new GroupSnapshot(x.Id, x.Name, x.ParentId, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
         var classrooms = await db.Classrooms.AsNoTracking().Select(x => new ClassroomSnapshot(x.Id, x.Name, x.VisitorAccessEnabled, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
         var memberships = await db.ClassMemberships.AsNoTracking().Select(x => new MembershipSnapshot(x.UserId, x.ClassroomId, x.RoleDefinitionId)).ToListAsync(ct);
@@ -61,7 +68,7 @@ public sealed class ConfigurationArchiveService(
         var automationRules = await db.AutomationRules.AsNoTracking().Select(x => new AutomationRuleSnapshot(
             x.Id, x.Name, x.Enabled, x.TriggerJson, x.ActionsJson, x.TargetJson, x.ValidFrom, x.ValidTo,
             x.CreatedByUserId, x.CreatedByName, x.CreatedAtUnixMs, x.UpdatedAtUnixMs)).ToListAsync(ct);
-        return new ConfigurationSnapshot(7, DateTimeOffset.UtcNow, roles, users, plugins,
+        return new ConfigurationSnapshot(CurrentSnapshotVersion, DateTimeOffset.UtcNow, roles, users, plugins,
             new MetadataSnapshot(
                 metadata.AccountVersion,
                 metadata.ForceSenderInTitle,
@@ -195,9 +202,10 @@ public sealed class ConfigurationArchiveService(
         await db.Classrooms.ExecuteDeleteAsync(ct);
         await db.ClassGroups.ExecuteDeleteAsync(ct);
         db.ChangeTracker.Clear();
-        db.AccountRoles.AddRange(snapshot.Roles.Select(x => new AccountRole { Id=x.Id, Name=x.Name, NormalizedName=x.Name.Trim().ToUpperInvariant(), Kind=x.Kind, DefaultPermissions=UpgradeImportedPermissions(snapshot.Version, x.DefaultPermissions), CreatedAt=x.CreatedAt, UpdatedAt=x.UpdatedAt }));
+        var importedSelfService = snapshot.Metadata.ClassSelfService ?? ClassSelfServicePolicy.Default;
+        db.AccountRoles.AddRange(snapshot.Roles.Select(x => new AccountRole { Id=x.Id, Name=x.Name, NormalizedName=x.Name.Trim().ToUpperInvariant(), Kind=x.Kind, DefaultPermissions=UpgradeImportedRolePermissions(snapshot.Version, x, importedSelfService), DefaultManagementPermissions=x.DefaultManagementPermissions ?? UpgradeImportedManagement(snapshot.Version, x.DefaultPermissions), CreatedAt=x.CreatedAt, UpdatedAt=x.UpdatedAt }));
         await db.SaveChangesAsync(ct);
-        db.Users.AddRange(snapshot.Users.Select(x => new AppUser { Id=x.Id, UserName=x.Username, NormalizedUserName=x.NormalizedUsername, DisplayName=x.DisplayName, PasswordHash=x.PasswordHash, SecurityStamp=Guid.NewGuid().ToString(), ConcurrencyStamp=Guid.NewGuid().ToString(), Role=x.Role, RoleDefinitionId=x.RoleId, GrantedPermissions=UpgradeImportedPermissions(snapshot.Version, x.GrantedPermissions), Enabled=x.Enabled, Version=x.Version, UpdatedAt=x.UpdatedAt, EmailConfirmed=false, PhoneNumberConfirmed=false, TwoFactorEnabled=x.TwoFactorEnabled, ProtectedTotpKey=x.TotpSecret is { } secret ? twoFactor.ProtectKey(x.Id, secret) : x.ProtectedTotpKey, LastTotpTimeStep=x.LastTotpTimeStep, TwoFactorRecoveryHashes=x.TwoFactorRecoveryHashes, LockoutEnabled=true, IsSystemOwner=x.IsSystemOwner == true }));
+        db.Users.AddRange(snapshot.Users.Select(x => new AppUser { Id=x.Id, UserName=x.Username, NormalizedUserName=x.NormalizedUsername, DisplayName=x.DisplayName, PasswordHash=x.PasswordHash, SecurityStamp=Guid.NewGuid().ToString(), ConcurrencyStamp=Guid.NewGuid().ToString(), Role=x.Role, RoleDefinitionId=x.RoleId, GrantedPermissions=UpgradeImportedPermissions(snapshot.Version, x.GrantedPermissions), RevokedPermissions=x.RevokedPermissions ?? UserPermissions.None, GrantedManagementPermissions=x.GrantedManagementPermissions ?? UpgradeImportedManagement(snapshot.Version, x.GrantedPermissions), RevokedManagementPermissions=x.RevokedManagementPermissions ?? ManagementPermissions.None, Enabled=x.Enabled, Version=x.Version, UpdatedAt=x.UpdatedAt, EmailConfirmed=false, PhoneNumberConfirmed=false, TwoFactorEnabled=x.TwoFactorEnabled, ProtectedTotpKey=x.TotpSecret is { } secret ? twoFactor.ProtectKey(x.Id, secret) : x.ProtectedTotpKey, LastTotpTimeStep=x.LastTotpTimeStep, TwoFactorRecoveryHashes=x.TwoFactorRecoveryHashes, LockoutEnabled=true, IsSystemOwner=x.IsSystemOwner == true }));
         db.UserApiKeys.AddRange((snapshot.ApiKeys ?? []).Select(x => new UserApiKey { Id=x.Id, UserId=x.UserId, Name=x.Name, KeyHash=x.KeyHash, Prefix=x.Prefix, CreatedAt=x.CreatedAt, LastUsedAt=x.LastUsedAt, ExpiresAt=x.ExpiresAt, RevokedAt=x.RevokedAt }));
         // v1/v2 旧包没有班级数据：建一个承载旧数据的班级（沿用旧版默认班级 Id），访客开关沿用包内全局设置。
         var legacyPackage = snapshot.Classrooms is null;
@@ -371,13 +379,28 @@ public sealed class ConfigurationArchiveService(
     private static ConfigurationSnapshot Decompress(byte[] bytes) { using var input=new MemoryStream(bytes); using var gzip=new GZipStream(input,CompressionMode.Decompress); return JsonSerializer.Deserialize<ConfigurationSnapshot>(gzip,JsonDefaults.Options) ?? throw new InvalidDataException("Invalid backup"); }
     private static BackupFileInfo ToInfo(FileInfo file) => new(file.Name,file.CreationTimeUtc,file.Length,file.Name.Contains("preimport",StringComparison.OrdinalIgnoreCase)?"Import":"Backup");
     private static void ValidatePassword(string value) { if (value.Length < 8) throw new InvalidDataException("Export password must contain at least 8 characters"); }
-    private static UserPermissions UpgradeImportedPermissions(int snapshotVersion, UserPermissions permissions) =>
-        snapshotVersion == 1 && permissions.HasFlag(UserPermissions.PowerControl)
-            ? permissions | UserPermissions.MainMenuControl
+    private static UserPermissions UpgradeImportedPermissions(int snapshotVersion, UserPermissions permissions)
+    {
+        if (snapshotVersion == 1 && permissions.HasFlag(UserPermissions.PowerControl))
+            permissions |= UserPermissions.MainMenuControl;
+        return snapshotVersion < 8 ? PermissionUpgrade.Split(permissions) : permissions;
+    }
+
+    /// <summary>旧备份的角色：班主任另按当时的班级自治策略换算，其余角色只补齐拆出的权限。</summary>
+    private static UserPermissions UpgradeImportedRolePermissions(
+        int snapshotVersion, RoleSnapshot role, ClassSelfServicePolicy selfService)
+    {
+        var permissions = UpgradeImportedPermissions(snapshotVersion, role.DefaultPermissions);
+        return snapshotVersion < 8 && role.Kind == AccountRoleKind.ClassAdministrator
+            ? PermissionUpgrade.ClassAdministrator(permissions, selfService)
             : permissions;
+    }
+
+    private static ManagementPermissions UpgradeImportedManagement(int snapshotVersion, UserPermissions legacy) =>
+        snapshotVersion < 8 ? PermissionUpgrade.Management(legacy) : ManagementPermissions.None;
     private static void Validate(ConfigurationSnapshot value)
     {
-        if(value.Version is not (1 or 2 or 3 or 4 or 5 or 6 or 7) || value.Roles.Count==0 || value.Users.Count==0) throw new InvalidDataException("Invalid backup schema");
+        if(value.Version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8) || value.Roles.Count==0 || value.Users.Count==0) throw new InvalidDataException("Invalid backup schema");
         if (value.Users.Any(x => x.TwoFactorEnabled && x.ProtectedTotpKey is null && x.TotpSecret is null))
             throw new InvalidDataException("Two-factor key missing from backup");
         var roleIds=value.Roles.Select(x=>x.Id).ToHashSet();
@@ -438,9 +461,11 @@ public sealed record AutomationRuleSnapshot(Guid Id, string Name, bool Enabled, 
 public sealed record HolidaySettingsSnapshot(bool Enabled, string? SourceUrlTemplate, List<HolidayOverrideSnapshot> Overrides);
 public sealed record HolidayOverrideSnapshot(DateOnly Date, int? FollowWeekday);
 public sealed record StoredProfileSnapshot(Guid Id, string Name, string ProfileJson, long Revision, Guid? ClassId, Guid? SourceTemplateId, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
-public sealed record RoleSnapshot(Guid Id,string Name,AccountRoleKind Kind,UserPermissions DefaultPermissions,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);
+public sealed record RoleSnapshot(Guid Id,string Name,AccountRoleKind Kind,UserPermissions DefaultPermissions,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt,
+    ManagementPermissions? DefaultManagementPermissions = null);
 public sealed record UserSnapshot(Guid Id,string Username,string NormalizedUsername,string DisplayName,string PasswordHash,string SecurityStamp,string ConcurrencyStamp,UserRole Role,Guid RoleId,UserPermissions GrantedPermissions,bool Enabled,long Version,DateTimeOffset UpdatedAt,bool? IsSystemOwner = null,
-    bool TwoFactorEnabled = false, string? ProtectedTotpKey = null, long? LastTotpTimeStep = null, string? TwoFactorRecoveryHashes = null, string? TotpSecret = null);
+    bool TwoFactorEnabled = false, string? ProtectedTotpKey = null, long? LastTotpTimeStep = null, string? TwoFactorRecoveryHashes = null, string? TotpSecret = null,
+    UserPermissions? RevokedPermissions = null, ManagementPermissions? GrantedManagementPermissions = null, ManagementPermissions? RevokedManagementPermissions = null);
 public sealed record ClassroomSnapshot(Guid Id,string Name,bool VisitorAccessEnabled,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);
 public sealed record GroupSnapshot(Guid Id,string Name,Guid? ParentId,DateTimeOffset CreatedAt,DateTimeOffset UpdatedAt);
 public sealed record MembershipSnapshot(Guid UserId,Guid ClassroomId,Guid RoleDefinitionId);

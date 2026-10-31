@@ -55,7 +55,7 @@ public sealed class ClassBroadcastService(
         try
         {
             var classPermissions = await access.GetEffectivePermissionsAsync(
-                user.Id, user.Role, classId, user.GrantedPermissions, ct);
+                user.Id, user.Role, classId, ct);
             if (!classPermissions.HasFlag(required))
                 return Fail(classId, "没有该班级的操作权限");
 

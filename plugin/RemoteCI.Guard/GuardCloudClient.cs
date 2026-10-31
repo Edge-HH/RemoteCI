@@ -157,8 +157,12 @@ internal sealed class GuardCloudClient : IDisposable
         GuardCommandResult result;
         if (command.Command is not (GuardCommands.LaunchClassIsland or GuardCommands.StopAppGuard or GuardCommands.UninstallAppGuard))
             result = GuardCommandResult.Failure("FORBIDDEN", "守护通道仅支持远程打开、关闭或卸载守护");
-        else if (command.RequestedBy is not { Role: 2 } || (command.RequestedBy.Permissions & 4) == 0)
-            result = GuardCommandResult.Failure("FORBIDDEN", "仅系统管理员可以管理应用守护");
+        else if (command.RequestedBy is not { } requester ||
+                 (requester.Role != GuardCommands.AdminRole &&
+                  (requester.Permissions & GuardCommands.RequiredPermission(command.Command)) == 0))
+            result = GuardCommandResult.Failure("FORBIDDEN", command.Command == GuardCommands.LaunchClassIsland
+                ? "没有启动 ClassIsland 的权限"
+                : "没有管理应用守护的权限");
         else if (CommandHandler is null)
             result = GuardCommandResult.Failure("INTERNAL_ERROR", "守护管理功能尚未就绪");
         else

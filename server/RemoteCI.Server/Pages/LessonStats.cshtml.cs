@@ -24,7 +24,8 @@ public sealed class LessonStatsModel(
 
     public LessonStatsReport Report { get; private set; } = null!;
     public IReadOnlyList<(Guid Id, string Name)> ClassOptions { get; private set; } = [];
-    public bool IsAdmin => CurrentUser.Role == UserRole.Admin;
+    /// <summary>是否查看全部班级（系统管理员或“查看全部课时统计”）。</summary>
+    public bool IsAdmin => _scope is null;
     public string? Error { get; private set; }
 
     /// <summary>可见班级：null 表示全部（系统管理员）。</summary>
@@ -66,7 +67,8 @@ public sealed class LessonStatsModel(
     private async Task<IActionResult?> RequireScopeAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        _scope = await access.GetClassHeadScopeAsync(CurrentUser.Id, CurrentUser.Role, ct);
+        _scope = await access.GetPermissionScopeAsync(
+            CurrentUser.Id, CurrentUser.Role, UserPermissions.ViewLessonStats, ManagementPermissions.ViewAllLessonStats, ct);
         if (_scope is { Count: 0 }) return RedirectToPage("/Denied");
         var query = db.Classrooms.AsNoTracking();
         if (_scope is not null)

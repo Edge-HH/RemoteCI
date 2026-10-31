@@ -96,12 +96,71 @@ object Protocol {
     const val PERMISSION_MAIN_MENU_CONTROL = 256
     const val PERMISSION_SEND_VOICE_MESSAGES = 512
     const val PERMISSION_CHANGE_DISPLAY_NAME = 1024
+    const val PERMISSION_API_ACCESS = 2048
     /** 老师主动发起换课申请（由对方老师审批）。 */
     const val PERMISSION_REQUEST_SWAP = 4096
     /** 不经审批的强制换课；对方老师可撤回。 */
     const val PERMISSION_FORCE_SWAP = 8192
+    /** 经服务端中转把文件发到有权班级的设备。 */
+    const val PERMISSION_SEND_FILES = 16384
     /** 获取有权班级教室电脑的当前屏幕截图；班主任角色默认拥有。 */
     const val PERMISSION_CAPTURE_SCREEN = 32768
+
+    /** 以下为权限细化后拆出的独立权限（第 16 位起）；旧服务端不会下发，判断时见 [hasPermission]。 */
+    const val PERMISSION_MANAGE_CLASS_PROFILE = 1 shl 16
+    const val PERMISSION_PULL_SCHEDULE = 1 shl 17
+    const val PERMISSION_CLEAR_NOTIFICATIONS = 1 shl 18
+    const val PERMISSION_VOLUME_CONTROL = 1 shl 19
+    const val PERMISSION_MAIN_WINDOW_LAYOUT = 1 shl 20
+    const val PERMISSION_REMOTE_TERMINAL = 1 shl 21
+    const val PERMISSION_CONTROL_CLASSISLAND = 1 shl 22
+    const val PERMISSION_CONFIGURE_EXTENSIONS = 1 shl 23
+    const val PERMISSION_MANAGE_PLUGINS = 1 shl 24
+    const val PERMISSION_UPGRADE_SOFTWARE = 1 shl 25
+    const val PERMISSION_MANAGE_DEVICE_GUARD = 1 shl 26
+    const val PERMISSION_MANAGE_CLASS_INFO = 1 shl 27
+    const val PERMISSION_MANAGE_CLASS_BOARDS = 1 shl 28
+    const val PERMISSION_VIEW_AUDIT_LOG = 1 shl 29
+    const val PERMISSION_VIEW_LESSON_STATS = 1 shl 30
+    /** 第 16–30 位：只有权限细化后的服务端才会下发。 */
+    const val REFINED_PERMISSIONS = 0x7FFF0000
+    /** 管理员拥有的全部班级权限位。 */
+    const val PERMISSION_ALL = Int.MAX_VALUE
+    /** 可授予普通账号与角色的班级权限：除基础权限与兼容保留的“修改用户名”外的全部。 */
+    const val PERMISSION_ASSIGNABLE = PERMISSION_ALL and PERMISSION_VIEW_CURRENT.inv() and PERMISSION_CHANGE_DISPLAY_NAME.inv()
+
+    /** 系统管理权限（managementPermissions），只按全局角色计算。 */
+    const val MANAGEMENT_MANAGE_ROLES = 1
+    const val MANAGEMENT_IMPORT_USERS = 2
+    const val MANAGEMENT_MANAGE_CLASSES = 4
+    const val MANAGEMENT_MANAGE_PROFILE_LIBRARY = 8
+    const val MANAGEMENT_MANAGE_HOLIDAYS = 16
+    const val MANAGEMENT_VIEW_DEVICES = 32
+    const val MANAGEMENT_BATCH_CONTROL = 64
+    const val MANAGEMENT_MANAGE_AUTOMATION = 128
+    const val MANAGEMENT_MANAGE_APP_GUARD = 256
+    const val MANAGEMENT_MANAGE_EXTENSION_SETTINGS = 512
+    const val MANAGEMENT_MANAGE_LOGIN_PAGE = 1024
+    const val MANAGEMENT_MANAGE_PLUGIN_ACCESS = 2048
+    const val MANAGEMENT_VIEW_ALL_AUDIT_LOGS = 4096
+    const val MANAGEMENT_VIEW_ALL_LESSON_STATS = 8192
+    const val MANAGEMENT_ALL = 16383
+
+    /** 权限细化前合并在一起的旧权限位；旧服务端不认识新位时按它判断。 */
+    fun legacyPermission(permission: Int): Int = when (permission) {
+        PERMISSION_CLEAR_NOTIFICATIONS -> PERMISSION_SEND_NOTIFICATIONS
+        PERMISSION_VOLUME_CONTROL -> PERMISSION_POWER_CONTROL
+        PERMISSION_MAIN_WINDOW_LAYOUT -> PERMISSION_MAIN_MENU_CONTROL
+        else -> permission
+    }
+
+    /** 权限是否满足：服务端已细化权限时按新位判断，旧服务端按原来合并在一起的旧位判断。 */
+    fun hasPermission(effective: Int, permission: Int, refined: Boolean): Boolean {
+        val required = if (refined) permission else legacyPermission(permission)
+        return effective and required == required
+    }
+
+    fun hasRefinedBits(permissions: Int): Boolean = permissions and REFINED_PERMISSIONS != 0
 
     const val SCHEDULE_SOURCE_PLUGIN = 1
     const val SCHEDULE_SOURCE_WEB_UI = 2
@@ -482,6 +541,8 @@ data class UserProfile(
     @SerialName("roleKind") val roleKind: Int? = null,
     @SerialName("grantedPermissions") val grantedPermissions: Int = 0,
     val permissions: Int = Protocol.PERMISSION_VIEW_CURRENT,
+    /** 系统管理权限；只有权限细化后的服务端会下发（可能为 0），旧服务端与局域网镜像为 null。 */
+    @SerialName("managementPermissions") val managementPermissions: Int? = null,
     @SerialName("allowedExtensionIds") val allowedExtensionIds: List<String>? = null,
     @SerialName("visibleExtensionIds") val visibleExtensionIds: List<String>? = null,
     val classes: List<ClassSummary>? = null,
@@ -494,9 +555,28 @@ data class UserProfile(
     /** 拥有个人“我的日程”的内置角色：老师与班主任（均按显示名匹配课表教师名）。 */
     val hasPersonalSchedule: Boolean
         get() = roleKind == Protocol.ROLE_KIND_TEACHER || roleKind == Protocol.ROLE_KIND_CLASS_ADMINISTRATOR
-    /** 是否可管理指定班级的课表拉取：系统管理员，或该班级的班主任（与服务端按班级校验一致）。 */
-    fun canPullScheduleFor(classId: String?): Boolean =
-        isAdmin || classes?.firstOrNull { it.id == classId }?.isClassAdministrator == true
+    /**
+     * 服务端是否已细化权限：会下发 managementPermissions，或权限中带第 16 位起的拆分权限。
+     * 旧服务端两者都没有，此时按原来合并在一起的旧权限判断。
+     */
+    val usesRefinedPermissions: Boolean
+        get() = managementPermissions != null || Protocol.hasRefinedBits(permissions) ||
+            classes?.any { Protocol.hasRefinedBits(it.effectivePermissions) } == true
+
+    /** 按细化后的权限判断全局权限；旧服务端不下发新权限位时退回旧权限。 */
+    fun can(permission: Int): Boolean = Protocol.hasPermission(permissions, permission, usesRefinedPermissions)
+
+    /**
+     * 是否可拉取指定班级的课表（与服务端按班级校验一致）：系统管理员；该班有“从教室刷新课表”权限；
+     * 旧服务端没有这一权限位时，退回原来的“本班班主任”判断。
+     */
+    fun canPullScheduleFor(classId: String?): Boolean {
+        if (isAdmin) return true
+        val classContext = classes?.firstOrNull { it.id == classId } ?: return false
+        return if (usesRefinedPermissions)
+            Protocol.hasPermission(classContext.effectivePermissions, Protocol.PERMISSION_PULL_SCHEDULE, refined = true)
+        else classContext.isClassAdministrator
+    }
     val roleLabel: String
         get() = when {
             isAdmin -> "管理员"
@@ -504,6 +584,11 @@ data class UserProfile(
             else -> roleName ?: "用户"
         }
     fun has(permission: Int): Boolean = permissions and permission == permission
+
+    /** 是否拥有某项系统管理权限；系统管理员始终拥有。旧服务端不下发时为 false，调用方按旧规则判断。 */
+    fun hasManagement(permission: Int): Boolean =
+        isAdmin || (managementPermissions ?: 0) and permission == permission
+
     fun canInvoke(extension: ExtensionDefinition): Boolean =
         has(Protocol.PERMISSION_RUN_EXTENSIONS) &&
             (allowedExtensionIds == null || extension.id in allowedExtensionIds)

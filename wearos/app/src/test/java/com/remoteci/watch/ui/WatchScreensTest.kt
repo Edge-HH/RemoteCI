@@ -1,6 +1,7 @@
 package com.remoteci.watch.ui
 
 import com.remoteci.watch.data.ClassStateSnapshot
+import com.remoteci.watch.data.ClassSummary
 import com.remoteci.watch.data.ConnectionManager
 import com.remoteci.watch.data.CourseEntry
 import com.remoteci.watch.data.ExtensionDefinition
@@ -531,5 +532,52 @@ class WatchScreensTest {
         assertEquals("soft", nextSelectValue(parameter.options, "standard"))
         assertEquals("custom", parameter.optionLabel("custom"))
         assertEquals("soft", parameter.copy(optionLabels = listOf("只有一个")).optionLabel("soft"))
+    }
+
+    @Test
+    fun `volume and clear use independent permissions on refined servers`() {
+        val caps = setOf(Protocol.CAP_SCHEDULE_READ, Protocol.CAP_VOLUME_CONTROL, Protocol.CAP_NOTIFICATION_CLEAR)
+        val volumeOnly = UserProfile(permissions = Protocol.PERMISSION_VIEW_CURRENT or Protocol.PERMISSION_VOLUME_CONTROL, managementPermissions = 0)
+        assertTrue(volumeOnly.can(Protocol.PERMISSION_VOLUME_CONTROL))
+        assertFalse(volumeOnly.can(Protocol.PERMISSION_CLEAR_NOTIFICATIONS))
+        assertEquals(listOf("课表", "控制", "设置"), homeActionLabels(volumeOnly, caps))
+
+        val clearOnly = UserProfile(permissions = Protocol.PERMISSION_VIEW_CURRENT or Protocol.PERMISSION_CLEAR_NOTIFICATIONS)
+        assertTrue(clearOnly.can(Protocol.PERMISSION_CLEAR_NOTIFICATIONS))
+        assertEquals(listOf("课表", "控制", "设置"), homeActionLabels(clearOnly, caps))
+
+        // 新服务端上，电源与发送通知不再连带音量与清除通知。
+        val powerAndSend = UserProfile(
+            permissions = Protocol.PERMISSION_VIEW_CURRENT or Protocol.PERMISSION_POWER_CONTROL or Protocol.PERMISSION_SEND_NOTIFICATIONS,
+            managementPermissions = 0,
+        )
+        assertFalse(powerAndSend.can(Protocol.PERMISSION_VOLUME_CONTROL))
+        assertFalse(powerAndSend.can(Protocol.PERMISSION_CLEAR_NOTIFICATIONS))
+        assertEquals(listOf("课表", "设置"), homeActionLabels(powerAndSend.copy(permissions = Protocol.PERMISSION_VIEW_CURRENT), caps))
+    }
+
+    @Test
+    fun `old servers grant volume and clear through the merged bits`() {
+        val caps = setOf(Protocol.CAP_SCHEDULE_READ, Protocol.CAP_VOLUME_CONTROL, Protocol.CAP_NOTIFICATION_CLEAR)
+        val legacy = UserProfile(permissions = Protocol.PERMISSION_VIEW_CURRENT or Protocol.PERMISSION_POWER_CONTROL or Protocol.PERMISSION_SEND_NOTIFICATIONS)
+        assertFalse(legacy.usesRefinedPermissions)
+        assertTrue(legacy.can(Protocol.PERMISSION_VOLUME_CONTROL))
+        assertTrue(legacy.can(Protocol.PERMISSION_CLEAR_NOTIFICATIONS))
+        assertEquals(listOf("课表", "控制", "设置"), homeActionLabels(legacy, caps))
+        assertFalse(UserProfile(permissions = Protocol.PERMISSION_VIEW_CURRENT).can(Protocol.PERMISSION_VOLUME_CONTROL))
+    }
+
+    @Test
+    fun `watch pull schedule follows class permission with class head fallback`() {
+        val refined = UserProfile(
+            managementPermissions = 0,
+            classes = listOf(ClassSummary(id = "a", roleKind = Protocol.ROLE_KIND_CLASS_ADMINISTRATOR, permissions = Protocol.PERMISSION_VIEW_CURRENT)),
+        )
+        assertFalse(refined.canPullScheduleFor("a"))
+        assertTrue(
+            refined.copy(classes = listOf(ClassSummary(id = "a", permissions = Protocol.PERMISSION_PULL_SCHEDULE))).canPullScheduleFor("a"),
+        )
+        val legacyHead = UserProfile(classes = listOf(ClassSummary(id = "a", roleKind = Protocol.ROLE_KIND_CLASS_ADMINISTRATOR, permissions = 1)))
+        assertTrue(legacyHead.canPullScheduleFor("a"))
     }
 }

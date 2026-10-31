@@ -136,7 +136,7 @@ public sealed class ExtensionSettingsReplayService(
         }
 
         var permissions = await access.GetEffectivePermissionsAsync(
-            profile.Id, profile.Role, row.ClassroomId, profile.GrantedPermissions);
+            profile.Id, profile.Role, row.ClassroomId);
         var result = await peers.SendCommandAndWaitToConnectionAsync(
             ExtensionGroupService.CreateCommand(
                 profile.WithPermissions(permissions), row.GroupId, PendingExtensionSettingsService.Parse(row.ValuesJson), row.ClassroomId),

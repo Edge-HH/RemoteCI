@@ -29,7 +29,7 @@ public sealed class LoginModel(
             return RedirectToPage("/Setup");
         if (User.Identity?.IsAuthenticated == true && await users.GetUserAsync(User) is { } user)
         {
-            var permissions = RolePermissions.Effective(user.Role, user.GrantedPermissions);
+            var permissions = await identities.GetGlobalPermissionsAsync(user, ct);
             return RedirectToPage(MobileUi.IsMobile(HttpContext) ? "/Mobile/Today" : permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account");
         }
 
@@ -99,9 +99,9 @@ public sealed class LoginModel(
     /// <summary>多班级账号登录后先选择进入的班级；单班级账号进入总览（没有“概览”权限时进入个人账号）。</summary>
     private async Task<string> LandingPageAsync(AppUser user, CancellationToken ct)
     {
-        var permissions = RolePermissions.Effective(user.Role, user.GrantedPermissions);
+        var permissions = await identities.GetGlobalPermissionsAsync(user, ct);
         var access = HttpContext.RequestServices.GetRequiredService<ClassAccessService>();
-        var accessibleClasses = await access.GetAccessibleClassesAsync(user.Id, user.Role, user.GrantedPermissions, ct);
+        var accessibleClasses = await access.GetAccessibleClassesAsync(user.Id, user.Role, ct);
         if (accessibleClasses.Count > 1) return "/ClassSelect";
         return MobileUi.IsMobile(HttpContext) ? "/Mobile/Today" : permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account";
     }

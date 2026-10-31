@@ -16,12 +16,12 @@ public sealed class PairingModel(UserManager<AppUser> users, IdentityCoordinator
     [BindProperty] public string? RequestedCode { get; set; }
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
+        if (await RequireManagementAsync(ManagementPermissions.ManagePluginAccess) is { } denied) return denied;
         Credentials = await identities.ListPluginCredentialsAsync(ct); return Page();
     }
     public async Task<IActionResult> OnPostCreateAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
+        if (await RequireManagementAsync(ManagementPermissions.ManagePluginAccess) is { } denied) return denied;
         if (Mode != "shared" && CurrentClass is null) { TempData["Error"] = "请先选择班级"; return RedirectToPage(); }
         try
         {
@@ -37,7 +37,7 @@ public sealed class PairingModel(UserManager<AppUser> users, IdentityCoordinator
     }
     public async Task<IActionResult> OnPostRevokeAsync(Guid id, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
+        if (await RequireManagementAsync(ManagementPermissions.ManagePluginAccess) is { } denied) return denied;
         try { await identities.RevokePluginCredentialAsync(id, ct); await peers.DisconnectPluginCredentialAsync(id, ct); TempData["Message"] = "凭据已吊销，插件需重新配对"; }
         catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
         return RedirectToPage();

@@ -157,8 +157,9 @@ public sealed class ProfileLibraryTests
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => library.SaveAsync(classAdmin,
             [ProfileTestData.New("其他班档案", second.Id)], first.Id));
 
+        // 本班档案是独立权限：从班主任角色收回“本班档案”即失去管理权，与是否能直接换课无关。
         var role = await db.AccountRoles.SingleAsync(x => x.Id == AccountRole.ClassAdministratorId);
-        role.DefaultPermissions &= ~UserPermissions.ManageSchedule;
+        role.DefaultPermissions &= ~UserPermissions.ManageClassProfile;
         await db.SaveChangesAsync();
         Assert.False(await library.CanManageClassAsync(classAdmin, first.Id));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => library.GetAsync(classAdmin, own.Id, first.Id));
@@ -293,7 +294,7 @@ public sealed class ProfileLibraryTests
             var own = (await library.SaveAsync(actor, [ProfileTestData.New("备份班级", TestWebApplicationFactory.DefaultClassId, template.Id)]))[0];
             expected = [template, own];
             snapshot = await source.ServiceProvider.GetRequiredService<ConfigurationArchiveService>().CaptureAsync();
-            Assert.Equal(7, snapshot.Version);
+            Assert.Equal(8, snapshot.Version);
             var serialized = JsonSerializer.SerializeToNode(snapshot, JsonDefaults.Options)!;
             Assert.Equal(2, serialized["profiles"]!.AsArray().Count);
         }

@@ -283,18 +283,18 @@ public sealed class AppGuardServiceTests : IDisposable
     }
 
     [Fact]
-    public void GuardManagementCommands_AreServerOnlyAdminOperations()
+    public void GuardManagementCommands_AreServerOnlyDeviceGuardOperations()
     {
         foreach (var command in new[] { CommandKind.StopAppGuard, CommandKind.UninstallAppGuard })
         {
             Assert.True(CommandPermissions.IsServerOnly(command));
-            Assert.Equal(UserPermissions.ManageUsers, CommandPermissions.Required(command));
+            Assert.Equal(UserPermissions.ManageDeviceGuard, CommandPermissions.Required(command));
             Assert.Equal(RemoteCiCapabilities.AppGuardManage, RemoteCiCapabilities.Required(command));
         }
         Assert.DoesNotContain(RemoteCiCapabilities.AppGuardManage, RemoteCiCapabilities.Baseline);
         Assert.Contains(RemoteCiCapabilities.AppGuardManage, RemoteCiCapabilities.Current);
         Assert.True(CommandPermissions.IsServerOnly(CommandKind.UpdateAppGuard));
-        Assert.Equal(UserPermissions.ManageUsers, CommandPermissions.Required(CommandKind.UpdateAppGuard));
+        Assert.Equal(UserPermissions.ManageDeviceGuard, CommandPermissions.Required(CommandKind.UpdateAppGuard));
         Assert.Equal(RemoteCiCapabilities.AppGuardUpdate, RemoteCiCapabilities.Required(CommandKind.UpdateAppGuard));
         Assert.DoesNotContain(RemoteCiCapabilities.AppGuardUpdate, RemoteCiCapabilities.Baseline);
         Assert.Contains(RemoteCiCapabilities.AppGuardUpdate, RemoteCiCapabilities.Current);

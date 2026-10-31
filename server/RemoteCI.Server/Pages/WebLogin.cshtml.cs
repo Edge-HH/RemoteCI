@@ -28,7 +28,7 @@ public sealed class WebLoginModel(
         var user = await identities.RedeemWebLoginTicketAsync(t, ct);
         if (user is null) return RedirectToPage("/Login", new { from = "visitor" });
 
-        var classes = await access.GetAccessibleClassesAsync(user.Id, user.Role, user.GrantedPermissions, ct);
+        var classes = await access.GetAccessibleClassesAsync(user.Id, user.Role, ct);
         // 沿用客户端当前选中的班级，让 WebUI 打开后与手机上看到的是同一个班。
         if (classId is { } selected && classes.Any(x => x.Id == selected))
         {
@@ -40,7 +40,7 @@ public sealed class WebLoginModel(
                 MaxAge = TimeSpan.FromDays(30),
             });
         }
-        var permissions = RolePermissions.Effective(user.Role, user.GrantedPermissions);
+        var permissions = await identities.GetGlobalPermissionsAsync(user, ct);
         Target = !string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl) ? returnUrl
             : classes.Count > 1 && classId is null ? Url.Page("/ClassSelect")!
             : Url.Page(permissions.HasFlag(UserPermissions.AccessWebUi) ? "/Index" : "/Account")!;

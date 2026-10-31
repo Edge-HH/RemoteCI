@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
 using RemoteCI.Server.Data;
+using RemoteCI.Server.Services;
 using RemoteCI.Shared;
 
 namespace RemoteCI.Server.Pages;
@@ -50,7 +51,7 @@ public sealed class StatusCodeModel(UserManager<AppUser> users) : PageModel
             ? await users.Users.AsNoTracking().Include(x => x.RoleDefinition).SingleOrDefaultAsync(x => x.Id == userId)
             : null;
         if (user is null || !user.Enabled) return;
-        var permissions = RolePermissions.Effective(user.Role, user.GrantedPermissions, user.RoleDefinition.DefaultPermissions);
+        var permissions = PermissionAdjustment.Of(user).Apply(user.Role, user.RoleDefinition.DefaultPermissions);
         (HomeUrl, HomeLabel) = permissions.HasFlag(UserPermissions.AccessWebUi)
             ? (Url.Page("/Index") ?? "/", "返回主页")
             : (Url.Page("/Account") ?? "/Account", "返回个人账号");

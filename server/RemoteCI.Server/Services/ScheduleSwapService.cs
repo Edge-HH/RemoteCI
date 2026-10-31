@@ -657,7 +657,7 @@ public sealed class ScheduleSwapService(
         var user = await db.Users.Include(x => x.RoleDefinition).SingleOrDefaultAsync(x => x.Id == userId, ct);
         if (user is null || !user.Enabled)
             throw new SwapOperationException(ApiErrorCodes.Unauthorized, "账号不可用", StatusCodes.Status401Unauthorized);
-        return new Actor(user, RolePermissions.Effective(user.Role, user.GrantedPermissions, user.RoleDefinition.DefaultPermissions));
+        return new Actor(user, PermissionAdjustment.Of(user).Apply(user.Role, user.RoleDefinition.DefaultPermissions));
     }
 
     private static void RequirePermission(Actor actor, UserPermissions permission)

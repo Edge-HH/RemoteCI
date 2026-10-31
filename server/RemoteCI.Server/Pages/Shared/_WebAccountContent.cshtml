@@ -5,6 +5,9 @@
 {
     // 手机网页版的“我的”页：当前班级、个人偏好、管理（有权限才显示），账号安全在下方，退出登录放最后。
     var canManageUsers = Model.Permissions.HasFlag(UserPermissions.ManageUsers);
+    var canManageRoles = Model.HasManagement(ManagementPermissions.ManageRoles);
+    var canManageLogin = Model.HasManagement(ManagementPermissions.ManageLoginPage);
+    var canManagePlugins = Model.HasManagement(ManagementPermissions.ManagePluginAccess);
     var isAdmin = Model.CurrentUser.Role == UserRole.Admin;
     <div class="mobile-connected-list">
         <a class="mobile-row" href="/ClassSelect"><i class="icon icon-apartment"></i><span><strong>当前班级</strong><small>@(Model.CurrentClass?.Name ?? "未选择") · 点击切换</small></span><i class="icon icon-chevron-right"></i></a>
@@ -15,20 +18,29 @@
         <a class="mobile-row" href="/Mobile/Calendar"><i class="icon icon-calendar-month"></i><span><strong>系统日历</strong><small>订阅我的日程和班级课表</small></span><i class="icon icon-chevron-right"></i></a>
     </div>
     <section class="panel"><h2>外观</h2><label>显示模式<select data-mobile-appearance><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label><label>主题配色<select data-mobile-palette><option value="green">绿色（默认）</option><option value="lavender">淡紫</option><option value="purple">经典紫</option><option value="blue">蓝色</option><option value="orange">橙色</option><option value="pink">粉色</option></select></label></section>
-    @if (canManageUsers || isAdmin)
+    @if (canManageUsers || canManageRoles || canManageLogin || canManagePlugins || isAdmin)
     {
         <p class="mobile-section-label" id="manage">管理</p>
         <div class="mobile-connected-list">
             @if (canManageUsers)
             {
                 <a class="mobile-row" href="/Mobile/Users"><i class="icon icon-group"></i><span><strong>账号管理</strong><small>新建、编辑、启停账号</small></span><i class="icon icon-chevron-right"></i></a>
+            }
+            @if (canManageRoles)
+            {
                 <a class="mobile-row" href="/Mobile/Users?section=roles"><i class="icon icon-verified-user"></i><span><strong>角色配置</strong><small>角色及默认权限</small></span><i class="icon icon-chevron-right"></i></a>
+            }
+            @if (canManageLogin)
+            {
                 <a class="mobile-row" href="/Mobile/VisitorAccess"><i class="icon icon-badge"></i><span><strong>访客访问</strong><small>访客课表与自动进入设置</small></span><i class="icon icon-chevron-right"></i></a>
+            }
+            @if (canManagePlugins)
+            {
                 <a class="mobile-row" href="/Mobile/Pairing"><i class="icon icon-link"></i><span><strong>插件配对码</strong><small>配对 ClassIsland、撤销插件凭据</small></span><i class="icon icon-chevron-right"></i></a>
+                <a class="mobile-row" href="/Mobile/PluginAccess#schedule-pull"><i class="icon icon-sync"></i><span><strong>自动拉取课表</strong><small>在线插件刷新课表的周期，对全部班级生效</small></span><i class="icon icon-chevron-right"></i></a>
             }
             @if (isAdmin)
             {
-                <a class="mobile-row" href="/Mobile/PluginAccess#schedule-pull"><i class="icon icon-sync"></i><span><strong>自动拉取课表</strong><small>在线插件刷新课表的周期，对全部班级生效</small></span><i class="icon icon-chevron-right"></i></a>
                 <a class="mobile-row" href="/Mobile/SystemConfig"><i class="icon icon-settings"></i><span><strong>系统设置</strong><small>服务端更新、备份与集控运维</small></span><i class="icon icon-chevron-right"></i></a>
             }
         </div>

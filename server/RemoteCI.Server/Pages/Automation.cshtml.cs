@@ -81,7 +81,6 @@ public sealed class AutomationModel(
 
     private async Task<IActionResult?> RequireAdminAsync()
     {
-        if (await RequireAsync() is { } denied) return denied;
-        return CurrentUser.Role == UserRole.Admin ? null : RedirectToPage("/Denied");
+        return await RequireManagementAsync(ManagementPermissions.ManageAutomation);
     }
 }

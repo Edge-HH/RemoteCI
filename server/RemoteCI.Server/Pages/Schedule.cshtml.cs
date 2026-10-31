@@ -27,7 +27,7 @@ public sealed class ScheduleModel(
     /// <summary>能否进入本班“档案”页（管理员，或具有本班换课权限的班主任）；不能时不显示档案入口。</summary>
     public bool CanEditClassProfile { get; private set; }
     public bool PluginOnline => peers.HasPluginFor(CurrentClassId);
-    // 拉取课表会覆盖服务端缓存，只允许系统管理员或获准的本班班主任使用；其他账号不显示入口。
+    // 拉取课表会覆盖服务端缓存，需要本班“从教室刷新课表”权限；其他账号不显示入口。
     public bool CanPullSchedule => ClassSelfService.CanPullSchedule &&
         (!PluginOnline || peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.SchedulePull));
     public bool CanManageSchedule => ClassPermissions.HasFlag(UserPermissions.ManageSchedule) &&

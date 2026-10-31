@@ -155,7 +155,7 @@ public sealed class AutomationTests
         await settings.SetAsync((await settings.GetAsync()) with { DeviceAlertThresholdMinutes = 25, AuditRetentionDays = 30 });
         var archive = scope.ServiceProvider.GetRequiredService<ConfigurationArchiveService>();
         var snapshot = await archive.CaptureAsync();
-        Assert.Equal(7, snapshot.Version);
+        Assert.Equal(8, snapshot.Version);
 
         await settings.SetAsync((await settings.GetAsync()) with { DeviceAlertThresholdMinutes = 60 });
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

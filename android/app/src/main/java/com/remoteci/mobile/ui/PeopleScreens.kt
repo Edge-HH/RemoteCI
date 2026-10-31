@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -37,7 +38,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -45,7 +45,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -53,11 +52,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.remoteci.mobile.data.AccountRoleInfo
 import com.remoteci.mobile.data.AccountRoleMutation
 import com.remoteci.mobile.data.AdminApi
 import com.remoteci.mobile.data.CreateUserRequest
 import com.remoteci.mobile.data.Protocol
 import com.remoteci.mobile.data.UpdateUserRequest
+import com.remoteci.mobile.data.UserListItem
 import com.remoteci.mobile.data.VisitorAccessState
 import kotlinx.coroutines.launch
 
@@ -136,56 +137,134 @@ fun VisitorAccessScreen(onBack: () -> Unit, snackbar: androidx.compose.material3
 @Composable
 fun RolesScreen(onBack: () -> Unit, snackbar: androidx.compose.material3.SnackbarHostState) {
     val scope = rememberCoroutineScope()
-    var roles by remember { mutableStateOf(listOf<com.remoteci.mobile.data.AccountRoleInfo>()) }
+    var roles by remember { mutableStateOf(listOf<AccountRoleInfo>()) }
+    // null 为新建模式；否则编辑该角色。
+    var editingRole by remember { mutableStateOf<AccountRoleInfo?>(null) }
     var name by remember { mutableStateOf("") }
-    var grants by remember { mutableIntStateOf(0) }
+    var selection by remember { mutableStateOf(PermissionSelection()) }
+    var saving by remember { mutableStateOf(false) }
+
+    fun startCreate() {
+        editingRole = null
+        name = ""
+        selection = PermissionSelection()
+    }
+
+    fun startEdit(role: AccountRoleInfo) {
+        editingRole = role
+        name = role.name
+        selection = role.defaults()
+    }
+
     LaunchedEffect(Unit) { roles = runCatching { AdminApi.roles() }.getOrDefault(emptyList()) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        TopAppBar(title = { Text("角色配置") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
+        TopAppBar(
+            title = { Text("角色配置") },
+            navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } },
+            actions = {
+                TextButton(onClick = ::startCreate, enabled = editingRole != null) {
+                    Icon(Icons.Rounded.Add, contentDescription = null)
+                    Text("新建角色")
+                }
+            },
+        )
         if (roles.isEmpty()) EmptyState("没有角色", "管理员可以创建自定义角色。")
         ConnectedListCard(Modifier.padding(16.dp)) {
             roles.forEachIndexed { index, role ->
                 AppListItem(
-                    title = role.name,
-                    supporting = "${role.kind} · ${role.userCount} 个账号",
+                    title = role.name + if (role.id == editingRole?.id) " · 编辑中" else "",
+                    supporting = "${roleKindLabel(role)} · ${role.userCount} 个账号",
                     leading = Icons.Rounded.AdminPanelSettings,
                     index = index,
                     count = roles.size,
-                    onClick = {
-                        name = role.name
-                        grants = role.defaultPermissions
-                    },
+                    onClick = { startEdit(role) },
                 )
             }
         }
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(name, { name = it }, label = { Text("角色名称") }, modifier = Modifier.fillMaxWidth())
-            PermissionEditor(grants) { grants = it }
+        val role = editingRole
+        val locked = role?.isAdministrator == true
+        val builtIn = role != null && !role.isCustom
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(if (role == null) "新建角色" else "编辑「${role.name}」", style = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(
+                name,
+                { name = it },
+                label = { Text("角色名称") },
+                readOnly = builtIn,
+                supportingText = if (builtIn) {
+                    { Text("内置角色不能改名") }
+                } else null,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            PermissionChecklist(
+                selection = selection,
+                onChange = { selection = it },
+                title = "默认权限",
+                description = if (locked) "管理员角色拥有全部权限，不能修改。"
+                else "使用此角色的账号默认拥有勾选的权限；账号上的单独调整不受影响。",
+                locked = locked,
+            )
             Button(onClick = {
+                if (saving) return@Button
                 scope.launch {
-                    runCatching { AdminApi.createRole(AccountRoleMutation(name, grants)) }
-                        .onSuccess { roles = AdminApi.roles(); snackbar.showSnackbar("角色已保存") }
-                        .onFailure { snackbar.showSnackbar(it.message ?: "保存失败") }
+                    saving = true
+                    runCatching {
+                        val chosen = selection.permissions and Protocol.PERMISSION_ASSIGNABLE
+                        if (role == null) {
+                            AdminApi.createRole(AccountRoleMutation(name.trim(), chosen, selection.management))
+                        } else {
+                            // “老师来了”不在清单中，保持角色原值。
+                            val permissions = (chosen and PermissionCatalog.HIDDEN.inv()) or (role.defaultPermissions and PermissionCatalog.HIDDEN)
+                            AdminApi.updateRole(role.id, AccountRoleMutation(name.trim(), permissions, selection.management))
+                        }
+                    }.onSuccess {
+                        roles = runCatching { AdminApi.roles() }.getOrDefault(roles)
+                        val updated = role?.let { saved -> roles.firstOrNull { it.id == saved.id } }
+                        if (updated == null) startCreate() else startEdit(updated)
+                        snackbar.showSnackbar("角色已保存")
+                    }.onFailure { snackbar.showSnackbar(it.message ?: "保存失败") }
+                    saving = false
                 }
-            }, modifier = Modifier.fillMaxWidth().height(56.dp), enabled = name.isNotBlank()) { Text("新建角色") }
+            }, modifier = Modifier.fillMaxWidth().height(56.dp), enabled = !locked && !saving && name.isNotBlank()) {
+                Text(if (role == null) "新建角色" else "保存角色")
+            }
         }
     }
 }
+
+private fun roleKindLabel(role: AccountRoleInfo): String = when {
+    role.isAdministrator -> "内置 · 全部权限"
+    role.isCustom -> "自定义"
+    else -> "内置"
+}
+
+/** 角色的默认勾选；管理员角色视为全部权限。 */
+private fun AccountRoleInfo.defaults(): PermissionSelection =
+    if (isAdministrator) PermissionSelection(Protocol.PERMISSION_ALL, Protocol.MANAGEMENT_ALL)
+    else PermissionSelection.ofRole(defaultPermissions, defaultManagementPermissions)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UsersScreen(onBack: () -> Unit, snackbar: androidx.compose.material3.SnackbarHostState) {
     val scope = rememberCoroutineScope()
     val currentUser by ConnectionManagerUser()
-    var users by remember { mutableStateOf(listOf<com.remoteci.mobile.data.UserListItem>()) }
-    var roles by remember { mutableStateOf(listOf<com.remoteci.mobile.data.AccountRoleInfo>()) }
+    var users by remember { mutableStateOf(listOf<UserListItem>()) }
+    var roles by remember { mutableStateOf(listOf<AccountRoleInfo>()) }
     var username by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var grants by remember { mutableIntStateOf(0) }
+    var selection by remember { mutableStateOf(PermissionSelection()) }
     var selectedRoleId by remember { mutableStateOf<String?>(null) }
     var roleMenuExpanded by remember { mutableStateOf(false) }
-    var editing by remember { mutableStateOf<com.remoteci.mobile.data.UserListItem?>(null) }
+    var editing by remember { mutableStateOf<UserListItem?>(null) }
+    var editName by remember { mutableStateOf("") }
+    var editSelection by remember { mutableStateOf(PermissionSelection()) }
+
+    fun selectRole(role: AccountRoleInfo?) {
+        selectedRoleId = role?.id
+        selection = role?.defaults() ?: PermissionSelection()
+    }
+
     LaunchedEffect(Unit) {
         runCatching { AdminApi.users() }
             .onSuccess { users = it }
@@ -193,8 +272,7 @@ fun UsersScreen(onBack: () -> Unit, snackbar: androidx.compose.material3.Snackba
         runCatching { AdminApi.roles() }
             .onSuccess { roles = it }
             .onFailure { snackbar.showSnackbar(it.message ?: "读取角色失败") }
-        selectedRoleId = roles.firstOrNull { it.kind == "Student" }?.id
-            ?: roles.firstOrNull { it.kind != "Administrator" }?.id
+        selectRole(roles.firstOrNull { it.kind == "Student" } ?: roles.firstOrNull { !it.isAdministrator })
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         TopAppBar(title = { Text("账号管理") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })
@@ -207,7 +285,11 @@ fun UsersScreen(onBack: () -> Unit, snackbar: androidx.compose.material3.Snackba
                     leading = Icons.Rounded.Group,
                     index = index,
                     count = users.size,
-                    onClick = { editing = item; displayName = item.displayName; grants = item.grantedPermissions },
+                    onClick = {
+                        editing = item
+                        editName = item.displayName
+                        editSelection = userSelection(item, roles.firstOrNull { it.id == item.roleId }?.defaults())
+                    },
                 )
             }
         }
@@ -222,17 +304,15 @@ fun UsersScreen(onBack: () -> Unit, snackbar: androidx.compose.material3.Snackba
                 modifier = Modifier.fillMaxWidth(),
             )
             Text("角色", style = MaterialTheme.typography.titleSmall)
-            val selectableRoles = roles.filter { currentUser?.isAdmin == true || it.kind != "Administrator" }
+            val selectableRoles = roles.filter { currentUser?.isAdmin == true || !it.isAdministrator }
+            val selectedRole = selectableRoles.firstOrNull { it.id == selectedRoleId }
             Box {
                 OutlinedButton(
                     onClick = { roleMenuExpanded = true },
                     modifier = Modifier.fillMaxWidth().height(56.dp),
                     enabled = selectableRoles.isNotEmpty(),
                 ) {
-                    Text(
-                        selectableRoles.firstOrNull { it.id == selectedRoleId }?.name ?: "选择账号角色",
-                        modifier = Modifier.weight(1f),
-                    )
+                    Text(selectedRole?.name ?: "选择账号角色", modifier = Modifier.weight(1f))
                     Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
                 }
                 DropdownMenu(
@@ -244,7 +324,7 @@ fun UsersScreen(onBack: () -> Unit, snackbar: androidx.compose.material3.Snackba
                         DropdownMenuItem(
                             text = { Text(role.name) },
                             onClick = {
-                                selectedRoleId = role.id
+                                selectRole(role)
                                 roleMenuExpanded = false
                             },
                         )
@@ -252,20 +332,32 @@ fun UsersScreen(onBack: () -> Unit, snackbar: androidx.compose.material3.Snackba
                 }
             }
             if (selectableRoles.isEmpty()) Text("没有可用角色，请先检查连接或在角色配置中创建角色。", color = MaterialTheme.colorScheme.error)
-            PermissionEditor(grants) { grants = it }
+            val createLocked = selectedRole?.isAdministrator == true
+            PermissionChecklist(
+                selection = selection,
+                onChange = { selection = it },
+                description = if (createLocked) "管理员拥有全部权限。" else "默认为所选角色的权限，可单独新增或收回。",
+                modifier = Modifier.padding(top = 8.dp),
+                baseline = selectedRole?.defaults(),
+                locked = createLocked,
+            )
             Button(onClick = {
                 scope.launch {
                     runCatching {
-                        val selectedRole = roles.firstOrNull { it.id == selectedRoleId }
-                            ?: error("请选择账号角色")
+                        val role = roles.firstOrNull { it.id == selectedRoleId } ?: error("请选择账号角色")
+                        val adjustment = if (role.isAdministrator) PermissionAdjustment(0, 0, 0, 0)
+                        else PermissionAdjustment.between(role.defaults(), selection)
                         AdminApi.createUser(
                             CreateUserRequest(
                                 username.trim(),
                                 displayName.trim(),
                                 password,
-                                if (selectedRole.kind == "Administrator") Protocol.ROLE_ADMIN else Protocol.ROLE_USER,
-                                selectedRole.id,
-                                grants,
+                                if (role.isAdministrator) Protocol.ROLE_ADMIN else Protocol.ROLE_USER,
+                                role.id,
+                                adjustment.granted,
+                                adjustment.revoked,
+                                adjustment.grantedManagement,
+                                adjustment.revokedManagement,
                             ),
                         )
                     }.onSuccess {
@@ -273,7 +365,7 @@ fun UsersScreen(onBack: () -> Unit, snackbar: androidx.compose.material3.Snackba
                         username = ""
                         displayName = ""
                         password = ""
-                        grants = 0
+                        selectRole(roles.firstOrNull { it.id == selectedRoleId })
                         snackbar.showSnackbar("账号已创建")
                     }
                         .onFailure { snackbar.showSnackbar(it.message ?: "创建失败") }
@@ -282,20 +374,41 @@ fun UsersScreen(onBack: () -> Unit, snackbar: androidx.compose.material3.Snackba
         }
     }
     editing?.let { item ->
+        val role = roles.firstOrNull { it.id == item.roleId }
+        val locked = item.role == Protocol.ROLE_ADMIN || role?.isAdministrator == true
         AlertDialog(
             onDismissRequest = { editing = null },
             title = { Text("编辑 ${item.displayName}") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(displayName, { displayName = it }, label = { Text("显示名") })
-                    PermissionEditor(grants) { grants = it }
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(editName, { editName = it }, label = { Text("显示名") }, modifier = Modifier.fillMaxWidth())
+                    PermissionChecklist(
+                        selection = editSelection,
+                        onChange = { editSelection = it },
+                        description = if (locked) "管理员拥有全部权限。"
+                        else "角色「${role?.name ?: item.roleName ?: "未知"}」的默认权限，可单独新增或收回。",
+                        baseline = role?.defaults(),
+                        locked = locked || role == null,
+                    )
                 }
             },
             confirmButton = {
                 TextButton({
                     scope.launch {
                         runCatching {
-                            AdminApi.updateUser(item.id, UpdateUserRequest(displayName, item.role, item.roleId, grants, item.enabled))
+                            val request = if (locked || role == null) {
+                                // 管理员或角色未知时只改显示名，权限调整保持原值。
+                                UpdateUserRequest(editName, item.role, item.roleId, item.grantedPermissions, item.enabled)
+                            } else {
+                                val adjustment = PermissionAdjustment.between(
+                                    role.defaults(), editSelection, item.grantedPermissions, item.revokedPermissions,
+                                )
+                                UpdateUserRequest(
+                                    editName, item.role, item.roleId, adjustment.granted, item.enabled,
+                                    adjustment.revoked, adjustment.grantedManagement, adjustment.revokedManagement,
+                                )
+                            }
+                            AdminApi.updateUser(item.id, request)
                         }.onSuccess { users = AdminApi.users(); editing = null }
                             .onFailure { snackbar.showSnackbar(it.message ?: "更新失败") }
                     }
@@ -305,6 +418,13 @@ fun UsersScreen(onBack: () -> Unit, snackbar: androidx.compose.material3.Snackba
         )
     }
 }
+
+/** 编辑账号时的初始勾选：服务端下发的有效权限，旧服务端缺少时退回角色默认。 */
+internal fun userSelection(item: UserListItem, roleDefaults: PermissionSelection?): PermissionSelection = PermissionSelection(
+    if (item.effectivePermissions != 0) item.effectivePermissions or Protocol.PERMISSION_VIEW_CURRENT
+    else roleDefaults?.permissions ?: Protocol.PERMISSION_VIEW_CURRENT,
+    item.effectiveManagementPermissions ?: roleDefaults?.management ?: 0,
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -413,30 +533,6 @@ fun PairingScreen(onBack: () -> Unit, snackbar: androidx.compose.material3.Snack
                         }
                     },
                 )
-            }
-        }
-    }
-}
-
-@Composable
-fun PermissionEditor(value: Int, onChange: (Int) -> Unit) {
-    val flags = listOf(
-        Protocol.PERMISSION_ACCESS_WEB_UI to "概览",
-        Protocol.PERMISSION_MANAGE_USERS to "人员管理",
-        Protocol.PERMISSION_SEND_NOTIFICATIONS to "通知",
-        Protocol.PERMISSION_SEND_VOICE_MESSAGES to "语音",
-        Protocol.PERMISSION_MANAGE_SCHEDULE to "换课",
-        Protocol.PERMISSION_RUN_EXTENSIONS to "扩展",
-        Protocol.PERMISSION_MAIN_MENU_CONTROL to "主界面",
-        Protocol.PERMISSION_POWER_CONTROL to "电源",
-    )
-    Column {
-        flags.forEach { (flag, label) ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(label)
-                Switch(checked = value and flag == flag, onCheckedChange = { on ->
-                    onChange(if (on) value or flag else value and flag.inv())
-                })
             }
         }
     }

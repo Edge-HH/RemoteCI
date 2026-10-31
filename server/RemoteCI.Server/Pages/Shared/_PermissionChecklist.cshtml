@@ -1,0 +1,44 @@
+@model PermissionChecklistView
+@* 分组权限清单：勾选状态就是账号或角色最终拥有的权限；JS 负责计数、“已新增/已收回”标记、切换角色时自动勾选与恢复默认。 *@
+<div class="permission-checklist@(Model.Locked ? " is-locked" : null)" data-permission-checklist
+     data-baseline="@((int)Model.Baseline)" data-baseline-management="@((int)Model.BaselineManagement)"
+     data-show-baseline="@(Model.ShowBaseline ? "true" : "false")">
+    <div class="permission-checklist-head">
+        <div>
+            <strong>@Model.Title</strong>
+            <small data-permission-description>@Model.Description</small>
+        </div>
+        @if (Model.ShowBaseline)
+        {
+            <button type="button" class="ghost permission-reset" data-permission-reset disabled="@Model.Locked">恢复为角色默认</button>
+        }
+    </div>
+    @foreach (var group in PermissionCatalog.Groups)
+    {
+        var titleId = $"{Model.Prefix}-{group.Id}-{Guid.NewGuid():N}";
+        <section class="permission-group" data-permission-group aria-labelledby="@titleId">
+            <header class="permission-group-head">
+                <span class="permission-group-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">@Html.Raw(group.IconSvg)</g></svg></span>
+                <span class="permission-group-title"><strong id="@titleId">@group.Title</strong><small>@group.Scope</small></span>
+                <span class="permission-group-count" data-permission-count>@group.Items.Count(Model.IsChecked)/@group.Items.Count</span>
+                <button type="button" class="ghost permission-group-all" data-permission-group-all disabled="@Model.Locked">全选</button>
+            </header>
+            <ul class="permission-list">
+                @foreach (var item in group.Items)
+                {
+                    var adjustment = Model.AdjustmentLabel(item);
+                    <li class="permission-item@(adjustment is null ? null : " is-adjusted")" data-permission-item>
+                        <label>
+                            <input type="checkbox" name="@(Model.Prefix).@(item.IsManagement ? "Management" : "Permission")" value="@item.Value"
+                                   data-kind="@(item.IsManagement ? "management" : "class")" data-base="@(item.IsBase ? "true" : null)"
+                                   checked="@Model.IsChecked(item)" disabled="@(Model.Locked || item.IsBase)" />
+                            <span class="permission-item-copy"><strong>@item.Label</strong><small>@item.Hint</small></span>
+                            <span class="permission-item-flag" data-permission-flag>@adjustment</span>
+                        </label>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+    <p class="permission-admin-note">@PermissionCatalog.AdminOnlyNote</p>
+</div>

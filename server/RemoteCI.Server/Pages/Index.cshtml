@@ -8,7 +8,7 @@
     </div>
     <div class="dashboard-actions">
         <form method="post" asp-page-handler="RetryConnection"><button class="primary-action" type="submit"><i class="icon icon-sync" aria-hidden="true"></i>重新检测连接</button></form>
-        @if (Model.Permissions.HasFlag(UserPermissions.ManageUsers))
+        @if (Model.HasManagement(ManagementPermissions.ManagePluginAccess))
         {
             <form method="post" asp-page-handler="PairCode"><button class="secondary-action" type="submit"><i class="icon icon-link" aria-hidden="true"></i>生成配对码</button></form>
         }

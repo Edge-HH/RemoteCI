@@ -55,6 +55,12 @@ public sealed class UsersModel(
 
         try
         {
+            // 清单里勾选的是账号最终拥有的权限；保存为相对所选角色默认权限的新增与收回。
+            var role = (await roleService.ListAsync(ct)).FirstOrDefault(x => x.Id == Create.RoleId);
+            var (granted, revoked) = RolePermissions.Adjust(
+                role?.DefaultPermissions ?? UserPermissions.None, Create.SelectedPermissions);
+            var (grantedManagement, revokedManagement) = RolePermissions.Adjust(
+                role?.DefaultManagementPermissions ?? ManagementPermissions.None, Create.SelectedManagement);
             var created = await identities.CreateUserAsync(new CreateUserRequest
             {
                 Username = Create.Username,
@@ -62,8 +68,11 @@ public sealed class UsersModel(
                 Password = Create.Password,
                 Role = Create.Role,
                 RoleId = Create.RoleId,
-                GrantedPermissions = Create.Grants,
-            }, ct);
+                GrantedPermissions = granted & ~PermissionCatalog.Hidden,
+                RevokedPermissions = revoked & ~PermissionCatalog.Hidden,
+                GrantedManagementPermissions = grantedManagement,
+                RevokedManagementPermissions = revokedManagement,
+            }, ct, Delegation);
             // 账号不会自动加入任何班级：只为显式选择的班级建立成员关系（老师按课表姓名绑定，不分配班级）。
             if (Create.Role != UserRole.Admin &&
                 Create.RoleId != AccountRole.TeacherId &&
@@ -135,16 +144,26 @@ public sealed class UsersModel(
         try
         {
             await identities.EnsureCanManageAsync(CurrentUser.Id, Edit.Id, ct);
-            // 隐藏功能的旧权限位不随可见权限表单被意外清除，恢复入口时仍可兼容原有账号。
             var existing = (await identities.ListUsersAsync(ct)).FirstOrDefault(item => item.Id == Edit.Id);
+            var role = (await roleService.ListAsync(ct)).FirstOrDefault(x => x.Id == Edit.RoleId);
+            // 清单里勾选的是账号最终拥有的权限；保存为相对所选角色默认权限的新增与收回。
+            var (granted, revoked) = RolePermissions.Adjust(
+                role?.DefaultPermissions ?? UserPermissions.None, Edit.SelectedPermissions);
+            var (grantedManagement, revokedManagement) = RolePermissions.Adjust(
+                role?.DefaultManagementPermissions ?? ManagementPermissions.None, Edit.SelectedManagement);
+            // 编辑器不展示的隐藏权限位（“老师来了”）保持账号原有的调整，避免一次保存把它清掉。
+            var hidden = PermissionCatalog.Hidden;
             await identities.UpdateUserAsync(Edit.Id, new UpdateUserRequest
             {
                 DisplayName = Edit.DisplayName,
                 Role = Edit.Role,
                 RoleId = Edit.RoleId,
                 Enabled = Edit.Enabled,
-                GrantedPermissions = Edit.Grants | ((existing?.GrantedPermissions ?? UserPermissions.None) & UserPermissions.TeacherComing),
-            }, ct);
+                GrantedPermissions = (granted & ~hidden) | ((existing?.GrantedPermissions ?? UserPermissions.None) & hidden),
+                RevokedPermissions = (revoked & ~hidden) | ((existing?.RevokedPermissions ?? UserPermissions.None) & hidden),
+                GrantedManagementPermissions = grantedManagement,
+                RevokedManagementPermissions = revokedManagement,
+            }, ct, Delegation);
             await authorizationSync.SyncAsync(ct);
             TempData["Message"] = "账号与权限已更新。";
         }
@@ -205,8 +224,7 @@ public sealed class UsersModel(
 
     public async Task<IActionResult> OnPostBatchImportAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ImportUsers) is { } denied) return denied;
         try
         {
             var result = await importService.ImportAsync(ImportText, ImportClassId, ImportRoleId, ct);
@@ -224,16 +242,14 @@ public sealed class UsersModel(
 
     public async Task<IActionResult> OnGetTemplateAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ImportUsers) is { } denied) return denied;
         var content = await memberExcel.CreateTemplateAsync(ct);
         return File(content, MemberExcelService.ExcelContentType, MemberExcelService.TemplateFileName);
     }
 
     public async Task<IActionResult> OnGetExportAsync(Guid? groupId, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ImportUsers) is { } denied) return denied;
         try
         {
             var export = await memberExcel.ExportAsync(groupId, ct);
@@ -248,8 +264,7 @@ public sealed class UsersModel(
 
     public async Task<IActionResult> OnPostImportExcelAsync(IFormFile? excelFile, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ImportUsers) is { } denied) return denied;
         var bytes = await ReadExcelFileAsync(excelFile, ct);
         if (bytes is null) return RedirectToPage();
         try
@@ -268,8 +283,7 @@ public sealed class UsersModel(
 
     public async Task<IActionResult> OnPostOverwriteExcelAsync(IFormFile? excelFile, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ImportUsers) is { } denied) return denied;
         var bytes = await ReadExcelFileAsync(excelFile, ct);
         if (bytes is null) return RedirectToPage();
         try
@@ -322,25 +336,28 @@ public sealed class UsersModel(
 
     public async Task<IActionResult> OnPostCreateRoleAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
-        try { await roleService.CreateAsync(RoleEdit.Name, RoleEdit.Grants, ct); TempData["Message"] = "Role created."; }
+        if (await RequireManagementAsync(ManagementPermissions.ManageRoles) is { } denied) return denied;
+        try
+        {
+            await roleService.CreateAsync(RoleEdit.Name, RoleEdit.SelectedPermissions, ct, RoleEdit.SelectedManagement, Delegation);
+            TempData["Message"] = "角色已创建。";
+        }
         catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
         return RedirectToPage();
     }
 
     public async Task<IActionResult> OnPostUpdateRoleAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageRoles) is { } denied) return denied;
         try
         {
-            // 同上：角色编辑页不再渲染该权限，但保留已有角色的协议兼容位。
+            // 编辑器不展示的隐藏权限位（“老师来了”）保留角色原值。
             var existing = (await roleService.ListAsync(ct)).FirstOrDefault(role => role.Id == RoleEdit.Id);
-            var grants = RoleEdit.Grants | ((existing?.DefaultPermissions ?? UserPermissions.None) & UserPermissions.TeacherComing);
-            await roleService.UpdateAsync(RoleEdit.Id, RoleEdit.Name, grants, ct);
+            var grants = RoleEdit.SelectedPermissions |
+                ((existing?.DefaultPermissions ?? UserPermissions.None) & PermissionCatalog.Hidden);
+            await roleService.UpdateAsync(RoleEdit.Id, RoleEdit.Name, grants, ct, RoleEdit.SelectedManagement, Delegation);
             await authorizationSync.SyncAsync(ct);
-            TempData["Message"] = "Role updated.";
+            TempData["Message"] = "角色已更新，使用该角色且未单独调整的权限随之生效。";
         }
         catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
         return RedirectToPage();
@@ -348,17 +365,70 @@ public sealed class UsersModel(
 
     public async Task<IActionResult> OnPostDeleteRoleAsync(Guid id, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
-        try { await roleService.DeleteAsync(id, ct); TempData["Message"] = "Role deleted."; }
+        if (await RequireManagementAsync(ManagementPermissions.ManageRoles) is { } denied) return denied;
+        try { await roleService.DeleteAsync(id, ct); TempData["Message"] = "角色已删除。"; }
         catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
         return RedirectToPage();
     }
 
+    /// <summary>人员与角色页：人员管理、角色配置或批量导入任一权限即可进入，各区块再按各自权限显示。</summary>
+    public bool CanManageUsers => Permissions.HasFlag(UserPermissions.ManageUsers);
+    public bool CanManageRoles => HasManagement(ManagementPermissions.ManageRoles);
+    public bool CanImportUsers => HasManagement(ManagementPermissions.ImportUsers);
+
+    /// <summary>按角色 Id 查角色定义；人员编辑器据此计算“角色默认”基准。</summary>
+    public AccountRoleInfo? FindRole(Guid? roleId) => RoleDefinitions.FirstOrDefault(x => x.Id == roleId);
+
+    /// <summary>人员编辑器的分组权限清单：勾选状态为账号按全局角色计算的有效权限，基准为角色默认。</summary>
+    public PermissionChecklistView UserChecklist(string prefix, UserListItem? user, Guid? roleId)
+    {
+        var role = FindRole(user?.RoleId ?? roleId);
+        var isAdmin = user?.Role == UserRole.Admin || role?.Kind == nameof(AccountRoleKind.Administrator);
+        var baseline = role?.DefaultPermissions ?? UserPermissions.None;
+        var baselineManagement = role?.DefaultManagementPermissions ?? ManagementPermissions.None;
+        return new PermissionChecklistView(
+            prefix,
+            user?.EffectivePermissions ?? baseline,
+            user?.EffectiveManagementPermissions ?? baselineManagement,
+            "权限",
+            isAdmin
+                ? "管理员固定拥有全部权限。"
+                : "已按角色自动勾选；勾选或取消即为该账号单独调整，在各班级中以班内角色为基础套用同样的调整。",
+            baseline,
+            baselineManagement,
+            ShowBaseline: true,
+            Locked: isAdmin);
+    }
+
+    /// <summary>新建账号的清单：表单校验失败重绘时保留已勾选的调整，否则按所选角色默认勾选。</summary>
+    public PermissionChecklistView CreateChecklist()
+    {
+        var view = UserChecklist("Create", null, Create.RoleId);
+        return Create.Permission.Count == 0 && Create.Management.Count == 0 || view.Locked
+            ? view
+            : view with
+            {
+                Selected = Create.SelectedPermissions | UserPermissions.ViewCurrentCourse,
+                SelectedManagement = Create.SelectedManagement,
+            };
+    }
+
+    /// <summary>角色编辑器的分组权限清单：勾选状态即该角色的默认权限。</summary>
+    public static PermissionChecklistView RoleChecklist(string prefix, AccountRoleInfo? role) => new(
+        prefix,
+        role?.DefaultPermissions ?? UserPermissions.RequestScheduleSwap,
+        role?.DefaultManagementPermissions ?? ManagementPermissions.None,
+        "默认权限",
+        role?.Kind == nameof(AccountRoleKind.Administrator)
+            ? "管理员固定拥有全部权限，不可修改。"
+            : "勾选该角色拥有的权限；使用该角色且没有单独调整的账号随之生效。",
+        Locked: role?.Kind == nameof(AccountRoleKind.Administrator));
+
     private async Task<IActionResult> LoadAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
-        Accounts = await identities.ListUsersAsync(ct);
+        if (await RequireAsync() is { } denied) return denied;
+        if (!CanManageUsers && !CanManageRoles && !CanImportUsers) return RedirectToPage("/Denied");
+        Accounts = CanManageUsers ? await identities.ListUsersAsync(ct) : [];
         RoleDefinitions = await roleService.ListAsync(ct);
         Classes = await classrooms.ListAsync(ct);
         ImportGroups = await classrooms.ListGroupsAsync(ct);
@@ -442,6 +512,8 @@ public sealed class UsersModel(
         TempData["Error"] = message;
         Accounts = await identities.ListUsersAsync(ct);
         RoleDefinitions = await roleService.ListAsync(ct);
+        Classes = await classrooms.ListAsync(ct);
+        ImportGroups = await classrooms.ListGroupsAsync(ct);
         await LoadApiKeyStateAsync(ct);
         return Page();
     }
@@ -476,37 +548,13 @@ public sealed class UsersModel(
             ModelState.Remove(key);
     }
 
+    /// <summary>分组权限清单提交的勾选值：班级权限与系统管理权限各一组复选框。</summary>
     public abstract class PermissionInput
     {
-        public bool AccessWebUi { get; set; }
-        public bool ManageUsers { get; set; }
-        public bool SendNotifications { get; set; }
-        public bool SendVoiceMessages { get; set; }
-        public bool TeacherComing { get; set; }
-        public bool ManageSchedule { get; set; }
-        public bool RunExtensions { get; set; }
-        public bool MainMenuControl { get; set; }
-        public bool PowerControl { get; set; }
-        public bool ChangeDisplayName { get; set; }
-        public bool ApiAccess { get; set; }
-        public bool RequestScheduleSwap { get; set; }
-        public bool ForceScheduleSwap { get; set; }
-        public bool SendFiles { get; set; }
-        public bool CaptureScreen { get; set; }
-        public UserPermissions Grants => (AccessWebUi ? UserPermissions.AccessWebUi : 0) |
-            (ManageUsers ? UserPermissions.ManageUsers : 0) |
-            (SendNotifications ? UserPermissions.SendNotifications : 0) |
-            (SendVoiceMessages ? UserPermissions.SendVoiceMessages : 0) |
-            (TeacherComing ? UserPermissions.TeacherComing : 0) |
-            (ManageSchedule ? UserPermissions.ManageSchedule : 0) |
-            (RunExtensions ? UserPermissions.RunExtensions : 0) |
-            (MainMenuControl ? UserPermissions.MainMenuControl : 0) |
-            (PowerControl ? UserPermissions.PowerControl : 0) |
-            (ApiAccess ? UserPermissions.ApiAccess : 0) |
-            (RequestScheduleSwap ? UserPermissions.RequestScheduleSwap : 0) |
-            (ForceScheduleSwap ? UserPermissions.ForceScheduleSwap : 0) |
-            (SendFiles ? UserPermissions.SendFiles : 0) |
-            (CaptureScreen ? UserPermissions.CaptureScreen : 0);
+        public List<int> Permission { get; set; } = [];
+        public List<int> Management { get; set; } = [];
+        public UserPermissions SelectedPermissions => PermissionCatalog.ToPermissions(Permission);
+        public ManagementPermissions SelectedManagement => PermissionCatalog.ToManagement(Management);
     }
 
     public sealed class RoleInput : PermissionInput

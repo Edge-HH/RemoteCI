@@ -86,6 +86,21 @@ public sealed class GuardWireContractTests
         Assert.Equal("实验中学", guardPolicy.OrganizationName);
     }
 
+    [Fact]
+    public void GuardPermissionBits_MatchSharedProtocol()
+    {
+        // 守护不引用共享程序集，权限位与角色值按常量复刻，必须与协议保持一致。
+        Assert.Equal((int)UserPermissions.ControlClassIsland, GuardCommands.ControlClassIslandPermission);
+        Assert.Equal((int)UserPermissions.ManageDeviceGuard, GuardCommands.ManageDeviceGuardPermission);
+        Assert.Equal((int)UserRole.Admin, GuardCommands.AdminRole);
+        Assert.Equal(CommandPermissions.Required(CommandKind.LaunchClassIsland),
+            (UserPermissions)GuardCommands.RequiredPermission(GuardCommands.LaunchClassIsland));
+        Assert.Equal(CommandPermissions.Required(CommandKind.StopAppGuard),
+            (UserPermissions)GuardCommands.RequiredPermission(GuardCommands.StopAppGuard));
+        Assert.Equal(CommandPermissions.Required(CommandKind.UninstallAppGuard),
+            (UserPermissions)GuardCommands.RequiredPermission(GuardCommands.UninstallAppGuard));
+    }
+
     private static T? ConvertPayload<T>(object? payload) =>
         payload is JsonElement element ? element.Deserialize<T>(JsonDefaults.Options) : default;
 }

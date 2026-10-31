@@ -10,27 +10,35 @@ namespace RemoteCI.Server.Services;
 /// <summary>档案库唯一读写入口；页面提供的 ID、班级和修订号均在此重新核对。</summary>
 public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService access, ScheduleViewService scheduleViews)
 {
+    /// <summary>
+    /// 是否可以管理某个班级的档案：拥有“档案库”系统权限（全部班级），或在该班拥有“本班档案”权限。
+    /// actor 须已加载角色（WebUI 页面、档案 REST 与自动化都会加载）。
+    /// </summary>
     public async Task<bool> CanManageClassAsync(AppUser actor, Guid classId, CancellationToken ct = default) =>
-        await access.CanAccessAsync(actor.Id, actor.Role, classId, ct) &&
-        (actor.Role == UserRole.Admin ||
-         await access.IsClassAdminAsync(actor.Id, actor.Role, classId, ct) &&
-         (await access.GetEffectivePermissionsAsync(actor.Id, actor.Role, classId, actor.GrantedPermissions, ct))
-             .HasFlag(UserPermissions.ManageSchedule));
+        IsLibraryManager(actor)
+            ? await db.Classrooms.AnyAsync(x => x.Id == classId, ct)
+            : await access.CanAccessAsync(actor.Id, actor.Role, classId, ct) &&
+              (await access.GetEffectivePermissionsAsync(actor.Id, actor.Role, classId, ct))
+                  .HasFlag(UserPermissions.ManageClassProfile);
+
+    /// <summary>档案库管理者：系统管理员或拥有“档案库”系统权限，可管理模板与全部班级档案。</summary>
+    public static bool IsLibraryManager(AppUser actor) =>
+        AccountPermissions.HasManagement(actor, ManagementPermissions.ManageProfileLibrary);
 
     public async Task<IReadOnlyList<StoredProfileDto>> ListAsync(AppUser actor, Guid? onlyClass = null, CancellationToken ct = default)
     {
         if (onlyClass is { } classId) await RequireClassAsync(actor, classId, ct);
-        else if (actor.Role != UserRole.Admin) throw Denied();
+        else if (!IsLibraryManager(actor)) throw Denied();
         var query = db.StoredProfiles.AsNoTracking();
         if (onlyClass is not null) query = query.Where(x => x.ClassId == onlyClass);
         var rows = await query.ToListAsync(ct);
         return rows.OrderBy(x => x.Name).Select(ToDto).ToList();
     }
 
-    /// <summary>不指定班级时的列表：管理员得到全部档案，班主任得到自己可管理班级的档案。</summary>
+    /// <summary>不指定班级时的列表：档案库管理者得到全部档案，其他账号得到自己有“本班档案”权限的班级档案。</summary>
     public async Task<IReadOnlyList<StoredProfileDto>> ListManageableAsync(AppUser actor, CancellationToken ct = default)
     {
-        if (actor.Role == UserRole.Admin) return await ListAsync(actor, ct: ct);
+        if (IsLibraryManager(actor)) return await ListAsync(actor, ct: ct);
         var rows = await db.StoredProfiles.AsNoTracking().Where(x => x.ClassId != null).ToListAsync(ct);
         var allowed = new HashSet<Guid>();
         foreach (var classId in rows.Select(x => x.ClassId!.Value).Distinct())
@@ -85,7 +93,7 @@ public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService ac
                 var item = items[index];
                 if (onlyClass is not null && item.ClassId != onlyClass) throw Denied();
                 if (item.ClassId is { } classId) await RequireClassAsync(actor, classId, ct);
-                else if (actor.Role != UserRole.Admin) throw Denied();
+                else if (!IsLibraryManager(actor)) throw Denied();
 
                 StoredProfile row;
                 if (item.Id is { } id)
@@ -107,7 +115,7 @@ public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService ac
                 if (item.SourceTemplateId != row.SourceTemplateId)
                 {
                     // 班主任可保留来源，但不能借模板 ID 获取其他档案或更改来源关系。
-                    if (actor.Role != UserRole.Admin) throw Denied();
+                    if (!IsLibraryManager(actor)) throw Denied();
                     if (item.SourceTemplateId is { } templateId &&
                         !await db.StoredProfiles.AnyAsync(x => x.Id == templateId && x.ClassId == null, ct))
                         throw new ArgumentException("来源模板不存在。");
@@ -153,7 +161,7 @@ public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService ac
 
     public async Task<StoredProfileDto> CopyAsync(AppUser actor, ProfileIdRequest input, CancellationToken ct = default)
     {
-        if (actor.Role != UserRole.Admin) throw Denied();
+        if (!IsLibraryManager(actor)) throw Denied();
         var original = await GetAsync(actor, input.Id, ct: ct);
         if (original.ClassId is not null) throw new ArgumentException("请从全局模板创建模板副本。");
         if (original.Revision != input.Revision) throw Conflict();
@@ -288,7 +296,7 @@ public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService ac
         var row = await db.StoredProfiles.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new KeyNotFoundException("档案不存在。");
         if (onlyClass is not null && row.ClassId != onlyClass) throw Denied();
         if (row.ClassId is { } classId) await RequireClassAsync(actor, classId, ct);
-        else if (actor.Role != UserRole.Admin) throw Denied();
+        else if (!IsLibraryManager(actor)) throw Denied();
         return row;
     }
 

@@ -9,14 +9,20 @@
 @{
     var current = User.Identity?.IsAuthenticated == true ? await UserManager.GetUserAsync(User) : null;
     var roleDefaults = current is null
-        ? UserPermissions.None
+        ? null
         : await Db.AccountRoles.AsNoTracking()
             .Where(role => role.Id == current.RoleDefinitionId)
-            .Select(role => role.DefaultPermissions)
+            .Select(role => new { role.DefaultPermissions, role.DefaultManagementPermissions })
             .SingleOrDefaultAsync();
     var permissions = current is null
         ? UserPermissions.None
-        : RolePermissions.Effective(current.Role, current.GrantedPermissions, roleDefaults);
+        : RemoteCI.Server.Services.PermissionAdjustment.Of(current).Apply(current.Role, roleDefaults?.DefaultPermissions ?? UserPermissions.None);
+    // 系统管理权限只按全局角色与个人调整计算；侧边栏的系统级入口逐项按它显示。
+    var management = current is null
+        ? ManagementPermissions.None
+        : RolePermissions.EffectiveManagement(current.Role, roleDefaults?.DefaultManagementPermissions ?? ManagementPermissions.None,
+            current.GrantedManagementPermissions, current.RevokedManagementPermissions);
+    bool HasManagement(ManagementPermissions permission) => management.HasFlag(permission);
     var currentPage = ViewContext.RouteData.Values["page"]?.ToString();
     var hasPersonalSchedule = current is not null;
     var canRequestSwap = current is not null && permissions.HasFlag(UserPermissions.RequestScheduleSwap);
@@ -29,11 +35,13 @@
     var controlMenuActive = currentPage is "/Control" or "/Notifications";
     // “系统设置”是一组带 tab 的页面：常规与维护、登录与访问、插件与课表同步共用一个侧边栏入口。
     var systemSettingsActive = currentPage is "/SystemConfig" or "/LoginSettings" or "/PluginAccess";
-    var showControlMenu = permissions.HasFlag(UserPermissions.SendNotifications) ||
-        permissions.HasFlag(UserPermissions.SendVoiceMessages) ||
-        permissions.HasFlag(UserPermissions.PowerControl) ||
-        permissions.HasFlag(UserPermissions.MainMenuControl) ||
-        permissions.HasFlag(UserPermissions.RunExtensions);
+    // 控制页上任一控制项的权限（全局或当前班级）即显示“控制”入口；页面内再逐项按当前班级权限显示。
+    const UserPermissions controlPermissions = UserPermissions.SendNotifications | UserPermissions.ClearNotifications |
+        UserPermissions.SendVoiceMessages | UserPermissions.PowerControl | UserPermissions.VolumeControl |
+        UserPermissions.MainMenuControl | UserPermissions.MainWindowLayout | UserPermissions.RunExtensions |
+        UserPermissions.CaptureScreen | UserPermissions.SendFiles | UserPermissions.RemoteTerminal |
+        UserPermissions.ControlClassIsland | UserPermissions.ManagePlugins | UserPermissions.UpgradeSoftware |
+        UserPermissions.ManageDeviceGuard | UserPermissions.ManageClassInfo;
     // 班级切换器：可访问班级与 Cookie 选中的当前班级；没有可访问班级时不渲染。
     IReadOnlyList<RemoteCI.Shared.Models.ClassSummary> accessibleClasses = Array.Empty<RemoteCI.Shared.Models.ClassSummary>();
     Guid currentClassId = Guid.Empty;
@@ -41,30 +49,42 @@
     {
         // 与页面/API 共用班级访问服务，教师按课表姓名绑定的任教班级也必须进入上下文。
         accessibleClasses = await classAccess.GetAccessibleClassesAsync(
-            current.Id, current.Role, current.GrantedPermissions, Context.RequestAborted);
+            current.Id, current.Role, Context.RequestAborted);
         currentClassId = Guid.TryParse(Context.Request.Cookies[RemoteCI.Server.Pages.WebPageModel.CurrentClassCookie], out var cookieClass)
             && accessibleClasses.Any(x => x.Id == cookieClass)
             ? cookieClass
             : accessibleClasses.FirstOrDefault()?.Id ?? Guid.Empty;
     }
     var currentClassName = accessibleClasses.FirstOrDefault(x => x.Id == currentClassId)?.Name ?? "暂无班级";
-    // 本班档案属于班级自治：仅管理员或本班班主任，并且具有本班课表管理权限。
-    var showClassProfiles = current is not null && accessibleClasses.Any(x => x.Id == currentClassId)
-        && await classAccess.IsClassAdminAsync(current.Id, current.Role, currentClassId, Context.RequestAborted)
-        && (accessibleClasses.First(x => x.Id == currentClassId).Permissions ?? UserPermissions.None).HasFlag(UserPermissions.ManageSchedule);
-    // 班级区的“扩展插件”入口只管理当前班级：系统管理员始终可见；班主任需系统管理员至少开放一个插件且本班有扩展功能权限。
+    var currentClassPermissions = accessibleClasses.FirstOrDefault(x => x.Id == currentClassId)?.Permissions ?? UserPermissions.None;
+    var showControlMenu = ((permissions | currentClassPermissions) & controlPermissions) != 0;
+    // 本班档案：当前班级有“本班档案”权限。
+    var showClassProfiles = current is not null && currentClassPermissions.HasFlag(UserPermissions.ManageClassProfile);
+    // 班级区的“扩展插件”入口只管理当前班级：系统管理员始终可见；其他账号需本班有“修改本班插件设置”权限且至少开放了一个插件。
     // 跨班级、按设备统一下发在“设备与控制”分组的“插件批量下发”中进行。
     var showClassExtensionSettings = current is not null
         && accessibleClasses.Any(x => x.Id == currentClassId)
         && (current.Role == UserRole.Admin || (await extensionGroups.ListClassAdminEditableAsync(
-            current.Id, current.Role, current.GrantedPermissions, currentClassId, Context.RequestAborted))?.Count > 0);
-    // 操作记录与课时统计：所有角色都在“记录与统计”分组；系统管理员看全部，班主任看自己担任班主任的班级。
-    var showClassAuditLog = current is not null && current.Role != UserRole.Admin
-        && accessibleClasses.Any(x => x.Id == currentClassId)
-        && await classAccess.IsClassAdminAsync(current.Id, current.Role, currentClassId, Context.RequestAborted);
-    // 电子班牌：系统管理员或本班班主任为当前班级生成班牌链接。
-    var showClassBoards = current is not null && accessibleClasses.Any(x => x.Id == currentClassId)
-        && await classAccess.IsClassAdminAsync(current.Id, current.Role, currentClassId, Context.RequestAborted);
+            current.Id, current.Role, currentClassId, Context.RequestAborted))?.Count > 0);
+    // 操作记录与课时统计：拥有“查看全部”系统权限看全部，否则看自己有对应班级权限的班级。
+    var showAuditLog = current is not null && (HasManagement(ManagementPermissions.ViewAllAuditLogs)
+        || accessibleClasses.Any(x => (x.Permissions ?? UserPermissions.None).HasFlag(UserPermissions.ViewAuditLog)));
+    var showLessonStats = current is not null && (HasManagement(ManagementPermissions.ViewAllLessonStats)
+        || accessibleClasses.Any(x => (x.Permissions ?? UserPermissions.None).HasFlag(UserPermissions.ViewLessonStats)));
+    // 电子班牌：当前班级有“电子班牌”权限。
+    var showClassBoards = current is not null && currentClassPermissions.HasFlag(UserPermissions.ManageClassBoards);
+    var showAcademic = HasManagement(ManagementPermissions.ManageProfileLibrary) || HasManagement(ManagementPermissions.ManageHolidays);
+    var showDevices = HasManagement(ManagementPermissions.ViewDevices) || HasManagement(ManagementPermissions.BatchControl) ||
+        HasManagement(ManagementPermissions.ManageAutomation) || HasManagement(ManagementPermissions.ManageAppGuard) ||
+        HasManagement(ManagementPermissions.ManageExtensionSettings);
+    var showPeople = permissions.HasFlag(UserPermissions.ManageUsers) || HasManagement(ManagementPermissions.ManageRoles) ||
+        HasManagement(ManagementPermissions.ImportUsers);
+    var showOrg = HasManagement(ManagementPermissions.ManageClasses) || showPeople;
+    // 系统设置：系统管理员进入常规与维护；其他账号进入自己有权限的第一个 tab。
+    var systemSettingsUrl = current?.Role == UserRole.Admin ? Url.Page("/SystemConfig")
+        : HasManagement(ManagementPermissions.ManageLoginPage) ? Url.Page("/LoginSettings")
+        : HasManagement(ManagementPermissions.ManagePluginAccess) ? Url.Page("/PluginAccess")
+        : null;
     // 侧边栏左上角展示当前班级：已上传头像显示头像，未上传显示班级图标；还没有任何可访问班级时显示 RemoteCI logo。
     var hasCurrentClass = current is not null && accessibleClasses.Any(x => x.Id == currentClassId);
     var currentClassHasAvatar = hasCurrentClass
@@ -188,52 +208,79 @@
                     }
                     </div>
                 }
-                @if (current.Role == UserRole.Admin || showClassAuditLog)
+                @if (showAuditLog || showLessonStats)
                 {
                     <div class="nav-group" data-nav-group="records">
                     <button class="nav-section-label" type="button" data-nav-group-toggle aria-expanded="true">记录与统计</button>
+                    @if (showAuditLog)
+                    {
                         <a class="@NavClass("/AuditLog")" aria-current="@CurrentPage("/AuditLog")" asp-page="/AuditLog" data-search-label="操作记录 审计 日志 谁关机 命令记录"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9a9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5m4-1v5l4 2"/></g></svg><span>操作记录</span></a>
+                    }
+                    @if (showLessonStats)
+                    {
                         <a class="@NavClass("/LessonStats")" aria-current="@CurrentPage("/LessonStats")" asp-page="/LessonStats" data-search-label="课时统计 代课 课时 工作量"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9m-5 8V5M8 17v-3"/></g></svg><span>课时统计</span></a>
+                    }
                     </div>
                 }
-                @if (current.Role == UserRole.Admin)
+                @if (showAcademic)
                 {
                     <div class="nav-group" data-nav-group="academic">
                     <button class="nav-section-label" type="button" data-nav-group-toggle aria-expanded="true">教务</button>
+                    @if (HasManagement(ManagementPermissions.ManageProfileLibrary))
+                    {
                         <a class="@NavClass("/Profiles")" aria-current="@CurrentPage("/Profiles")" asp-page="/Profiles" data-search-label="档案库 档案管理 批量时间表 批量课程表 上传解析"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12M13 13h4m-4 4h4"/></g></svg><span>档案库</span></a>
+                    }
+                    @if (HasManagement(ManagementPermissions.ManageHolidays))
+                    {
                         <a class="@NavClass("/Holidays")" aria-current="@CurrentPage("/Holidays")" asp-page="/Holidays" data-search-label="学期 开学 单双周 教学周 调休 节假日 放假 补课 国庆 春节"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M9 16l2 2l4-4"/></g></svg><span>学期与调休</span></a>
+                    }
                     </div>
                 }
-                @if (current.Role == UserRole.Admin)
+                @if (showDevices)
                 {
                     <div class="nav-group" data-nav-group="devices">
                     <button class="nav-section-label" type="button" data-nav-group-toggle aria-expanded="true">设备与控制</button>
+                    @if (HasManagement(ManagementPermissions.ViewDevices))
+                    {
                         <a class="@NavClass("/Devices")" aria-current="@CurrentPage("/Devices")" asp-page="/Devices" data-search-label="设备状态 在线 离线 告警 版本 大屏"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8m-4-4v4"/></g></svg><span>设备状态</span></a>
+                    }
+                    @if (HasManagement(ManagementPermissions.BatchControl))
+                    {
                         <a class="@NavClass("/BatchControl")" aria-current="@CurrentPage("/BatchControl")" asp-page="/BatchControl" data-search-label="批量控制 广播 通知 开关机 电源 语音"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M4.9 16.1C1 12.2 1 5.8 4.9 1.9m2.9 2.8a6.14 6.14 0 0 0-.8 7.5"/><circle cx="12" cy="9" r="2"/><path d="M16.2 4.8c2 2 2.26 5.11.8 7.47M19.1 1.9a9.96 9.96 0 0 1 0 14.1m-9.6 2h5M8 22l4-11l4 11"/></g></svg><span>批量控制</span></a>
+                    }
+                    @if (HasManagement(ManagementPermissions.ManageAutomation))
+                    {
                         <a class="@(currentPage is "/Automation" or "/AutomationEdit" ? "nav-link active" : "nav-link")" aria-current="@(currentPage is "/Automation" or "/AutomationEdit" ? "page" : null)" asp-page="/Automation" data-search-label="自动化 定时 关机 放学 规则 计划任务"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M10 2h4m-2 12l3-3"/><circle cx="12" cy="14" r="8"/></g></svg><span>自动化</span></a>
+                    }
+                    @if (HasManagement(ManagementPermissions.ManageAppGuard))
+                    {
                         <a class="@NavClass("/AppGuard")" aria-current="@CurrentPage("/AppGuard")" asp-page="/AppGuard" data-search-label="应用守护 退出自启 崩溃重启 禁止删除 防删除 备份 恢复 守护进程"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12l2 2l4-4"/></g></svg><span>应用守护</span></a>
+                    }
+                    @if (HasManagement(ManagementPermissions.ManageExtensionSettings))
+                    {
                         <a class="@NavClass("/ExtensionSettings")" aria-current="@CurrentPage("/ExtensionSettings")" asp-page="/ExtensionSettings" data-search-label="插件批量下发 插件批量设置 扩展插件 插件设置 批量下发 按设备"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.39 4.39a1 1 0 0 0 1.68-.474a2.5 2.5 0 1 1 3.014 3.015a1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474a2.5 2.5 0 1 0-3.014 3.015a1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474a2.5 2.5 0 1 1-3.014-3.015a1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474a2.5 2.5 0 1 0 3.014-3.015a1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/></svg><span>插件批量下发</span></a>
+                    }
                     </div>
                 }
-                @if (current.Role == UserRole.Admin || permissions.HasFlag(UserPermissions.ManageUsers))
+                @if (showOrg)
                 {
                     <div class="nav-group" data-nav-group="org">
                     <button class="nav-section-label" type="button" data-nav-group-toggle aria-expanded="true">组织与权限</button>
-                    @if (current.Role == UserRole.Admin)
+                    @if (HasManagement(ManagementPermissions.ManageClasses))
                     {
                         <a class="@NavClass("/Classes")" aria-current="@CurrentPage("/Classes")" asp-page="/Classes" data-search-label="班级管理 班级 分组 成员 访客 连接码 设备分配"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m6.08 9.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/><path d="m6.08 14.5l-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/></g></svg><span>班级管理</span></a>
                     }
-                    @if (permissions.HasFlag(UserPermissions.ManageUsers))
+                    @if (showPeople)
                     {
                         <a class="@NavClass("/Users")" aria-current="@CurrentPage("/Users")" asp-page="/Users" data-search-label="人员与角色 人员权限 用户 账号管理 角色 批量导入"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3.128a4 4 0 0 1 0 7.744M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></g></svg><span>人员与角色</span></a>
                     }
                     </div>
                 }
-                @if (current.Role == UserRole.Admin || permissions.HasFlag(UserPermissions.ManageUsers))
+                @if (systemSettingsUrl is not null)
                 {
                     <div class="nav-group" data-nav-group="system">
                     <button class="nav-section-label" type="button" data-nav-group-toggle aria-expanded="true">系统</button>
-                        <a class="@(systemSettingsActive ? "nav-link active" : "nav-link")" aria-current="@(systemSettingsActive ? "page" : null)" href="@(current.Role == UserRole.Admin ? Url.Page("/SystemConfig") : Url.Page("/LoginSettings"))" data-search-label="系统设置 系统配置 系统更新 备份 服务端维护 登录页设置 登录页 背景 访客访问 扫码登录 插件凭据 配对码 自动拉取课表"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M14 17H5M19 7h-9"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></g></svg><span>系统设置</span></a>
+                        <a class="@(systemSettingsActive ? "nav-link active" : "nav-link")" aria-current="@(systemSettingsActive ? "page" : null)" href="@systemSettingsUrl" data-search-label="系统设置 系统配置 系统更新 备份 服务端维护 登录页设置 登录页 背景 访客访问 扫码登录 插件凭据 配对码 自动拉取课表"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M14 17H5M19 7h-9"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></g></svg><span>系统设置</span></a>
                     </div>
                 }
             </nav>

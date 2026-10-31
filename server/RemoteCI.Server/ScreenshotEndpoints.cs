@@ -23,9 +23,10 @@ public static class ScreenshotEndpoints
             if (await PermissionsAsync(user, classId, access, ct) is not { } permissions ||
                 !permissions.HasFlag(UserPermissions.CaptureScreen))
                 return ApiAuth.Forbidden("没有该班级的屏幕截图权限");
-            // 按设备截图只开放给系统管理员（设备状态页可看到同班的多台电脑）。
-            if (body?.CredentialId is not null && user.Role != UserRole.Admin)
-                return ApiAuth.Forbidden("仅系统管理员可以指定设备截图");
+            // 按设备截图与设备状态页一致：还需要“设备状态”系统权限（可看到同班的多台电脑）。
+            if (body?.CredentialId is not null && user.Role != UserRole.Admin &&
+                !user.ManagementPermissions.HasFlag(ManagementPermissions.ViewDevices))
+                return ApiAuth.Forbidden("没有按设备截图的权限");
             var outcome = await dispatcher.CaptureAsync(classId, body?.CredentialId, user.WithPermissions(permissions), ct);
             return outcome.Record is { } record
                 ? Results.Json(ScreenshotService.ToView(record), statusCode: StatusCodes.Status201Created)
@@ -92,7 +93,7 @@ public static class ScreenshotEndpoints
         UserProfile user, Guid classId, ClassAccessService access, CancellationToken ct)
     {
         if (user.Role == UserRole.Admin) return UserPermissions.All;
-        var classes = await access.GetAccessibleClassesAsync(user.Id, user.Role, user.GrantedPermissions, ct);
+        var classes = await access.GetAccessibleClassesAsync(user.Id, user.Role, ct);
         return classes.FirstOrDefault(x => x.Id == classId)?.Permissions;
     }
 

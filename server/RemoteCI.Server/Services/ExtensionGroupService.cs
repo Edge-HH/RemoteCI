@@ -95,36 +95,31 @@ public sealed class ExtensionGroupService(
             x => string.Equals(x.Id, groupId, StringComparison.Ordinal));
 
     /// <summary>
-    /// 是否可以修改指定班级中指定插件的设置：系统管理员；或该插件已开放班级自治、
-    /// 且在该班拥有扩展功能权限的班主任。插件端只校验扩展权限位，班主任身份与开关只能在服务端复核。
+    /// 是否可以修改指定班级中指定插件的设置：系统管理员；或该插件已开放给班级、
+    /// 且在该班拥有“修改本班插件设置”权限的账号。插件端只校验权限位，开放开关只能在服务端复核。
     /// </summary>
     public async Task<bool> CanEditSettingsAsync(
         UserProfile user, Guid classId, string groupId, CancellationToken ct = default)
     {
         if (user.Role == UserRole.Admin) return true;
         return await policies.IsClassAdminAllowedAsync(groupId, ct) &&
-            await IsExtensionClassAdminAsync(user.Id, user.Role, user.GrantedPermissions, classId, ct);
+            await CanConfigureInClassAsync(user.Id, user.Role, classId, ct);
     }
 
     /// <summary>
-    /// 班主任可以自行管理的插件分组 Id：不是本班班主任或没有本班扩展功能权限时为空；系统管理员返回 null 表示不受限。
+    /// 账号可以在本班自行修改设置的插件分组 Id：在该班没有“修改本班插件设置”权限时为空；系统管理员返回 null 表示不受限。
     /// </summary>
     public async Task<IReadOnlySet<string>?> ListClassAdminEditableAsync(
-        Guid userId, UserRole role, UserPermissions grantedPermissions, Guid classId, CancellationToken ct = default)
+        Guid userId, UserRole role, Guid classId, CancellationToken ct = default)
     {
         if (role == UserRole.Admin) return null;
-        return await IsExtensionClassAdminAsync(userId, role, grantedPermissions, classId, ct)
+        return await CanConfigureInClassAsync(userId, role, classId, ct)
             ? await policies.ListClassAdminAllowedAsync(ct)
             : new HashSet<string>(StringComparer.Ordinal);
     }
 
-    private async Task<bool> IsExtensionClassAdminAsync(
-        Guid userId, UserRole role, UserPermissions grantedPermissions, Guid classId, CancellationToken ct)
-    {
-        if (!await access.IsClassAdminAsync(userId, role, classId, ct)) return false;
-        var permissions = await access.GetEffectivePermissionsAsync(userId, role, classId, grantedPermissions, ct);
-        return permissions.HasFlag(UserPermissions.RunExtensions);
-    }
+    private async Task<bool> CanConfigureInClassAsync(Guid userId, UserRole role, Guid classId, CancellationToken ct) =>
+        (await access.GetEffectivePermissionsAsync(userId, role, classId, ct)).HasFlag(UserPermissions.ConfigureExtensions);
 
     /// <summary>修改单个班级的扩展设置；调用方须先通过 <see cref="CanEditSettingsAsync(UserProfile, Guid, string, CancellationToken)"/>。</summary>
     public async Task<CommandResult> ApplyToClassAsync(
@@ -143,7 +138,7 @@ public sealed class ExtensionGroupService(
         if (error is not null)
             return CommandResult.Failure(CommandResultCodes.InvalidRequest, error);
 
-        var permissions = await access.GetEffectivePermissionsAsync(user.Id, user.Role, classId, user.GrantedPermissions, ct);
+        var permissions = await access.GetEffectivePermissionsAsync(user.Id, user.Role, classId, ct);
         var result = await peers.SendCommandAndWaitAsync(
             CreateCommand(user.WithPermissions(permissions), groupId, normalized, classId),
             classId,

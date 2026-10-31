@@ -80,6 +80,7 @@ public sealed class AppGuardModel(
     public async Task<IActionResult> OnPostUpdateGuardAsync(Guid credentialId, CancellationToken ct)
     {
         if (await RequireAdminAsync() is { } denied) return denied;
+        if (RequireDeviceGuardPermission() is { } missing) return missing;
         var requestedBy = (await identities.GetProfileAsync(CurrentUser.Id, ct))?.WithPermissions(Permissions);
         if (requestedBy is null) return RedirectToPage("/Login");
         var result = await peers.ManageAppGuardAsync(credentialId, CommandKind.UpdateAppGuard, requestedBy, GuardCommandTimeout, ct);
@@ -90,6 +91,7 @@ public sealed class AppGuardModel(
     private async Task<IActionResult> ManageGuardAsync(Guid credentialId, bool uninstall, CancellationToken ct)
     {
         if (await RequireAdminAsync() is { } denied) return denied;
+        if (RequireDeviceGuardPermission() is { } missing) return missing;
         var device = await appGuard.GetDeviceAsync(credentialId, ct);
         var requestedBy = (await identities.GetProfileAsync(CurrentUser.Id, ct))?.WithPermissions(Permissions);
         if (requestedBy is null) return RedirectToPage("/Login");
@@ -154,10 +156,17 @@ public sealed class AppGuardModel(
         Events = await appGuard.GetRecentEventsAsync(null, 50, ct);
     }
 
+    /// <summary>直接关闭、卸载或更新设备上的守护还需要“设备应用守护”权限（命令会以该账号的权限下发）。</summary>
+    private IActionResult? RequireDeviceGuardPermission()
+    {
+        if (Permissions.HasFlag(UserPermissions.ManageDeviceGuard)) return null;
+        TempData["Error"] = "没有停用、卸载或更新设备守护的权限。";
+        return RedirectToPage();
+    }
+
     private async Task<IActionResult?> RequireAdminAsync()
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
-        return CurrentUser.Role == UserRole.Admin ? null : RedirectToPage("/Denied");
+        return await RequireManagementAsync(ManagementPermissions.ManageAppGuard);
     }
 
     /// <param name="Supported">课表插件在线时是否声明了应用守护能力；离线时为 null。</param>

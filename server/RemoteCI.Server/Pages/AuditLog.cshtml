@@ -14,7 +14,7 @@
 </div>
 <p class="muted ops-intro">
     记录经服务端下发到教室电脑的每一条命令：谁、从哪个入口、对哪台设备、做了什么、结果如何。
-    语音、文件内容和档案 JSON 不会保存。@(Model.IsAdmin ? "" : "你只能看到自己担任班主任的班级。")
+    语音、文件内容和档案 JSON 不会保存。@(Model.IsAdmin ? "" : "你只能看到自己有操作记录权限的班级。")
 </p>
 <form method="get" class="panel ops-filters">
     <label>开始日期<input type="date" name="from" value="@Model.From?.ToString("yyyy-MM-dd")" /></label>

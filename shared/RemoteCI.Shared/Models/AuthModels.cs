@@ -134,6 +134,10 @@ public sealed class UserProfile : UserProfileLike
     [JsonPropertyName("permissions")]
     public UserPermissions Permissions { get; set; }
 
+    /// <summary>系统管理权限（全局，不随班级变化）；旧版服务端不下发时为 None，客户端按角色判断。</summary>
+    [JsonPropertyName("managementPermissions")]
+    public ManagementPermissions ManagementPermissions { get; set; }
+
     /// <summary>
     /// 服务端允许该账号调用的扩展 Id。null 表示旧版服务端未下发策略，
     /// 空列表表示当前没有可调用扩展。
@@ -170,6 +174,7 @@ public sealed class UserProfile : UserProfileLike
         RoleKind = RoleKind,
         GrantedPermissions = GrantedPermissions,
         Permissions = permissions,
+        ManagementPermissions = ManagementPermissions,
         AllowedExtensionIds = AllowedExtensionIds,
         VisibleExtensionIds = VisibleExtensionIds,
         Classes = Classes,
@@ -379,6 +384,21 @@ public sealed class CreateUserRequest
     [JsonPropertyName("grantedPermissions")]
     public UserPermissions GrantedPermissions { get; set; }
 
+    /// <summary>相对角色默认权限收回的班级权限；省略表示不收回。</summary>
+    [JsonPropertyName("revokedPermissions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UserPermissions? RevokedPermissions { get; set; }
+
+    /// <summary>相对角色新增的系统管理权限；省略表示不新增。</summary>
+    [JsonPropertyName("grantedManagementPermissions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ManagementPermissions? GrantedManagementPermissions { get; set; }
+
+    /// <summary>相对角色收回的系统管理权限；省略表示不收回。</summary>
+    [JsonPropertyName("revokedManagementPermissions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ManagementPermissions? RevokedManagementPermissions { get; set; }
+
     /// <summary>
     /// 新账号加入的班级（班内角色与账号角色相同）；省略时不加入任何班级。
     /// 服务端不再有默认班级，老师按课表姓名绑定任教班级，管理员可访问全部班级。
@@ -404,8 +424,24 @@ public sealed class UpdateUserRequest
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RoleName { get; set; }
 
+    /// <summary>相对角色默认权限新增的班级权限。</summary>
     [JsonPropertyName("grantedPermissions")]
     public UserPermissions GrantedPermissions { get; set; }
+
+    /// <summary>相对角色默认权限收回的班级权限；省略（旧客户端）时保持账号原有的收回设置。</summary>
+    [JsonPropertyName("revokedPermissions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UserPermissions? RevokedPermissions { get; set; }
+
+    /// <summary>相对角色新增的系统管理权限；省略时保持原值。</summary>
+    [JsonPropertyName("grantedManagementPermissions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ManagementPermissions? GrantedManagementPermissions { get; set; }
+
+    /// <summary>相对角色收回的系统管理权限；省略时保持原值。</summary>
+    [JsonPropertyName("revokedManagementPermissions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ManagementPermissions? RevokedManagementPermissions { get; set; }
 
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; }
@@ -455,11 +491,26 @@ public sealed class UserListItem
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RoleName { get; set; }
 
+    /// <summary>相对角色默认权限新增的班级权限。</summary>
     [JsonPropertyName("grantedPermissions")]
     public UserPermissions GrantedPermissions { get; set; }
 
+    /// <summary>相对角色默认权限收回的班级权限。</summary>
+    [JsonPropertyName("revokedPermissions")]
+    public UserPermissions RevokedPermissions { get; set; }
+
+    /// <summary>按全局角色计算的有效班级权限；在各班级中以班内角色为基础再套用同一套个人调整。</summary>
     [JsonPropertyName("effectivePermissions")]
     public UserPermissions EffectivePermissions { get; set; }
+
+    [JsonPropertyName("grantedManagementPermissions")]
+    public ManagementPermissions GrantedManagementPermissions { get; set; }
+
+    [JsonPropertyName("revokedManagementPermissions")]
+    public ManagementPermissions RevokedManagementPermissions { get; set; }
+
+    [JsonPropertyName("effectiveManagementPermissions")]
+    public ManagementPermissions EffectiveManagementPermissions { get; set; }
 
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; }
@@ -539,6 +590,8 @@ public sealed class AccountRoleInfo
     public string Kind { get; set; } = string.Empty;
     [JsonPropertyName("defaultPermissions")]
     public UserPermissions DefaultPermissions { get; set; }
+    [JsonPropertyName("defaultManagementPermissions")]
+    public ManagementPermissions DefaultManagementPermissions { get; set; }
     [JsonPropertyName("userCount")]
     public int UserCount { get; set; }
 }
@@ -549,6 +602,10 @@ public sealed class CreateAccountRoleRequest
     public string Name { get; set; } = string.Empty;
     [JsonPropertyName("defaultPermissions")]
     public UserPermissions DefaultPermissions { get; set; }
+    /// <summary>角色默认的系统管理权限；省略（旧客户端）时为空。</summary>
+    [JsonPropertyName("defaultManagementPermissions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ManagementPermissions? DefaultManagementPermissions { get; set; }
 }
 
 public sealed class UpdateAccountRoleRequest
@@ -557,6 +614,10 @@ public sealed class UpdateAccountRoleRequest
     public string Name { get; set; } = string.Empty;
     [JsonPropertyName("defaultPermissions")]
     public UserPermissions DefaultPermissions { get; set; }
+    /// <summary>角色默认的系统管理权限；省略（旧客户端）时保持原值。</summary>
+    [JsonPropertyName("defaultManagementPermissions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ManagementPermissions? DefaultManagementPermissions { get; set; }
 }
 
 /// <summary>

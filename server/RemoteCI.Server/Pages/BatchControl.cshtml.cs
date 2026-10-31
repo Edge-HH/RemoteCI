@@ -158,12 +158,12 @@ public class BatchControlModel(
     protected IdentityCoordinator Identities { get; } = identities;
     public virtual bool IsSingleControl => false;
 
-    /// <summary>系统管理员：批量页整体只对管理员开放，单班页用它决定高风险操作是否可见。</summary>
+    /// <summary>系统管理员。</summary>
     public bool IsAdmin => CurrentUser.Role == UserRole.Admin;
 
     /// <summary>
-    /// 卡片是否对该用户可见。批量控制页本身已限定管理员，因此全部显示；
-    /// 单班控制页按协议权限表判断，避免出现看得见却执行不了（或被拒绝）的操作。
+    /// 卡片是否对该用户可见，与执行时的复核口径一致：批量控制页（“批量控制”系统权限）按账号全局角色的权限判断，
+    /// 单班控制页按当前班级的权限判断，避免出现看得见却执行不了（或被拒绝）的操作。
     /// </summary>
     public bool CanUseOperation(BatchOperationKind operation)
     {
@@ -171,10 +171,10 @@ public class BatchControlModel(
         if (MobileUi.IsMobile(HttpContext) && this is ControlModel control)
             return operation switch { BatchOperationKind.Notify => control.CanSendNotifications, BatchOperationKind.ClearNotifications => control.CanClearNotifications,
                 BatchOperationKind.Power => control.CanControlPower, BatchOperationKind.VoiceMessage => control.CanSendVoiceMessages, _ => false };
-        if (!IsSingleControl) return true;
         if (CommandForOperation(operation) is not { } command) return false;
         var required = CommandPermissions.Required(command);
-        return required != UserPermissions.None && ClassPermissions.HasFlag(required);
+        return required != UserPermissions.None &&
+            (IsSingleControl ? ClassPermissions : Permissions).HasFlag(required);
     }
 
     /// <summary>是否存在任一可见操作：无权限时连目标选择弹窗也不渲染，避免把设备清单泄露到页面。</summary>
@@ -203,19 +203,14 @@ public class BatchControlModel(
         CanUseOperation(BatchOperationKind.UpgradeClassIsland) ||
         CanUseOperation(BatchOperationKind.RestartClassIsland);
 
-    /// <summary>远程维护组：终端与文件分发只会影响设备文件系统，单班页还要求系统管理员。</summary>
+    /// <summary>远程维护组：终端与文件分发，分别需要“远程终端”与“文件分发”权限。</summary>
     public bool HasMaintenanceOperations =>
         CanUseMaintenanceOperation(BatchOperationKind.ExecuteTerminalCommand) ||
         CanUseMaintenanceOperation(BatchOperationKind.SendFile);
 
-    /// <summary>终端与文件分发的可见性：批量页整体已限定管理员；单班页要求系统管理员加班级维护权限。</summary>
+    /// <summary>终端与文件分发的可见性：手机网页版不提供；其余与普通操作同一口径。</summary>
     public bool CanUseMaintenanceOperation(BatchOperationKind operation) =>
-        !MobileUi.IsMobile(HttpContext) && (IsSingleControl
-            ? IsAdmin && CommandForOperation(operation) is { } command &&
-              CommandPermissions.Required(command) is var required &&
-              required != UserPermissions.None &&
-              ClassPermissions.HasFlag(required)
-            : CanUseOperation(operation));
+        !MobileUi.IsMobile(HttpContext) && CanUseOperation(operation);
 
     /// <summary>批量操作对应的协议命令，用于复用 CommandPermissions 的权限口径。</summary>
     private static CommandKind? CommandForOperation(BatchOperationKind operation) => operation switch
@@ -230,6 +225,7 @@ public class BatchControlModel(
         BatchOperationKind.UninstallPlugins => CommandKind.UninstallPlugins,
         BatchOperationKind.InstallPluginPackages => CommandKind.InstallPluginPackages,
         BatchOperationKind.SetPluginEnabled => CommandKind.SetPluginEnabled,
+        BatchOperationKind.SetPluginManagementPolicy => CommandKind.SetPluginManagementPolicy,
         BatchOperationKind.RefreshSoftwareInventory => CommandKind.RefreshSoftwareInventory,
         BatchOperationKind.UpgradePlugins => CommandKind.UpgradePlugins,
         BatchOperationKind.UpgradeClassIsland => CommandKind.UpgradeClassIsland,
@@ -253,6 +249,7 @@ public class BatchControlModel(
     {
         if (await RequireAdminAsync() is { } denied) return denied;
         await LoadBatchAsync(ct);
+        if (!CanUseOperation(Operation)) return Back("没有执行该操作的权限。");
         if (!TargetsSelected()) return Back("请先选择要控制的班级、分组或设备。");
         if (RequiresRiskConfirmation(Operation) && !ConfirmHighRisk)
             return Back("该操作会影响教室端设备，请先勾选确认后执行。");
@@ -334,6 +331,8 @@ public class BatchControlModel(
     public async Task<IActionResult> OnPostBroadcastVoiceAsync(CancellationToken ct)
     {
         if (await RequireAdminAsync() is { } denied) return denied;
+        if (!CanUseOperation(BatchOperationKind.VoiceMessage))
+            return new JsonResult(CommandResult.Failure(CommandResultCodes.Forbidden, "没有语音消息权限"));
         if (Request.ContentType != "application/octet-stream" || Request.ContentLength is > VoiceMessageRequest.MaxBytes)
             return new JsonResult(CommandResult.Failure(CommandResultCodes.InvalidRequest, "语音格式无效或超过 60 秒"));
         using var audio = new MemoryStream();
@@ -409,15 +408,16 @@ public class BatchControlModel(
     public async Task<IActionResult> OnPostExecuteTerminalAsync(CancellationToken ct)
     {
         if (await RequireAdminAsync() is { } denied) return denied;
+        if (!CanUseMaintenanceOperation(BatchOperationKind.ExecuteTerminalCommand)) return RemoteOpDenied();
         return await ExecuteTerminalCoreAsync(
             ParseGuidQuery("classIds"), ParseGuidQuery("groupIds"), ParseGuidQuery("connectionIds"), ct);
     }
 
-    /// <summary>单班终端执行：目标固定为当前班级，且要求系统管理员加班级维护权限。</summary>
+    /// <summary>单班终端执行：目标固定为当前班级，需要本班“远程终端”权限。</summary>
     public async Task<IActionResult> OnPostSingleTerminalAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (!IsSingleControl || !CanRunMaintenanceInCurrentClass()) return RemoteOpDenied();
+        if (!IsSingleControl || !CanUseMaintenanceOperation(BatchOperationKind.ExecuteTerminalCommand)) return RemoteOpDenied();
         return await ExecuteTerminalCoreAsync([CurrentClassId], [], [], ct);
     }
 
@@ -425,21 +425,18 @@ public class BatchControlModel(
     public async Task<IActionResult> OnPostDistributeFileAsync(CancellationToken ct)
     {
         if (await RequireAdminAsync() is { } denied) return denied;
+        if (!CanUseMaintenanceOperation(BatchOperationKind.SendFile)) return RemoteOpDenied();
         return await DistributeFileCoreAsync(
             ParseGuidQuery("classIds"), ParseGuidQuery("groupIds"), ParseGuidQuery("connectionIds"), ct);
     }
 
-    /// <summary>单班文件分发：目标固定为当前班级，且要求系统管理员加班级维护权限。</summary>
+    /// <summary>单班文件分发：目标固定为当前班级，需要本班“文件分发”权限。</summary>
     public async Task<IActionResult> OnPostSingleDistributeFileAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (!IsSingleControl || !CanRunMaintenanceInCurrentClass()) return RemoteOpDenied();
+        if (!IsSingleControl || !CanUseMaintenanceOperation(BatchOperationKind.SendFile)) return RemoteOpDenied();
         return await DistributeFileCoreAsync([CurrentClassId], [], [], ct);
     }
-
-    /// <summary>单班页执行远程维护的前置复核，与卡片可见性使用同一口径。</summary>
-    private bool CanRunMaintenanceInCurrentClass() =>
-        IsAdmin && ClassPermissions.HasFlag(UserPermissions.ManageUsers);
 
     private IActionResult RemoteOpDenied() => new JsonResult(CommandResult.Failure(
         CommandResultCodes.Forbidden, "没有远程维护权限"));
@@ -917,12 +914,11 @@ public class BatchControlModel(
         }
     }
 
-    /// <summary>批量页要求系统管理员；单班页要求当前班级可以使用对应的插件操作。</summary>
+    /// <summary>批量页要求“批量控制”系统权限；两种页面都要求可以使用对应的插件操作。</summary>
     private async Task<IActionResult?> RequirePluginManagerAsync(
         BatchOperationKind operation = BatchOperationKind.InstallPlugins)
     {
-        if (!IsSingleControl) return await RequireAdminAsync();
-        if (await RequireAsync() is { } denied) return denied;
+        if (await (IsSingleControl ? RequireAsync() : RequireAdminAsync()) is { } denied) return denied;
         return CanUseOperation(operation)
             ? null
             : new JsonResult(new { success = false, message = "没有插件管理权限" });
@@ -1164,11 +1160,8 @@ public class BatchControlModel(
         Classes.FirstOrDefault(x => x.Id == result.ClassId)?.Name
         ?? (CurrentClass?.Id == result.ClassId ? CurrentClass.Name : "未知班级");
 
-    private async Task<IActionResult?> RequireAdminAsync()
-    {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        return CurrentUser.Role == UserRole.Admin ? null : RedirectToPage("/Denied");
-    }
+    /// <summary>批量控制页整体需要“批量控制”系统权限；每项操作另按账号的全局权限复核。</summary>
+    private Task<IActionResult?> RequireAdminAsync() => RequireManagementAsync(ManagementPermissions.BatchControl);
 
     public sealed record KnownPlugin(
         string Id,
