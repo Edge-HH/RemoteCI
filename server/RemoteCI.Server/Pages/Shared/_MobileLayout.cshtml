@@ -30,6 +30,7 @@
     <title>@title · RemoteCI</title>
     <script>try {const a=localStorage.getItem('remoteci-mobile-appearance')||'system';document.documentElement.dataset.theme=a==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):a;document.documentElement.dataset.palette=localStorage.getItem('remoteci-mobile-palette')||'green';} catch {}</script>
     <link rel="stylesheet" href="~/vendor/material-symbols/material-symbols.css" asp-append-version="true" />
+    <link rel="expect" href="#page-state-ready" blocking="render" />
     <link rel="stylesheet" href="~/app.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/premium.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/mobile.css" asp-append-version="true" />
@@ -73,7 +74,9 @@
         }
     </div>
     <div class="toast-stack" data-toast-stack aria-live="polite"></div>
-    <script src="~/page-state.js" asp-append-version="true" defer></script>
+    @* 同步执行：在首次绘制前恢复 tab、滚动位置和未保存的选择；head 中的 rel=expect 让浏览器等到下面的标记解析完再绘制。 *@
+    <script src="~/page-state.js" asp-append-version="true"></script>
+    <span id="page-state-ready" hidden></span>
     <script src="~/app.js" asp-append-version="true" defer></script>
     <script src="~/mobile.js" asp-append-version="true" defer></script>
     <script src="~/voice-message.js" asp-append-version="true" defer></script>

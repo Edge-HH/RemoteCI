@@ -186,7 +186,6 @@ else {
     const savedTheme = localStorage.getItem("remoteci-theme");
     if (savedTheme === "dark") document.documentElement.dataset.theme = "dark";
 }
-if (localStorage.getItem("remoteci-sidebar-collapsed") === "1" && !window.matchMedia("(max-width: 820px)").matches) document.body.classList.add("sidebar-collapsed");
 
 const searchInput = document.querySelector("[data-app-search]");
 const searchFeedback = document.querySelector("[data-search-feedback]");
@@ -581,42 +580,4 @@ function syncRollingHint(scope) {
             try { localStorage.setItem(key, JSON.stringify(collapsed)); } catch { }
         });
     });
-})();
-
-// 页面内 tab：[data-page-tabs] 中带 data-tab-link 的链接切换同页 [data-tab] 区块，其他链接是跨页 tab。
-// 打开顺序：地址栏锚点（tab 名或区块内元素 id）> 本页上次停留的 tab > 第一个 tab；表单提交后重定向回来仍停在原 tab。
-(() => {
-    const nav = document.querySelector("[data-page-tabs]");
-    if (!nav) return;
-    const links = [...nav.querySelectorAll("[data-tab-link]")];
-    if (links.length === 0) return;
-    const storeKey = `remoteci-tab:${location.pathname.toLowerCase()}`;
-    const names = links.map(link => link.dataset.tabLink);
-    const show = (name, remember) => {
-        links.forEach(link => {
-            const active = link.dataset.tabLink === name;
-            link.classList.toggle("active", active);
-            if (active) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
-        });
-        document.querySelectorAll("[data-tab]").forEach(section => { section.hidden = section.dataset.tab !== name; });
-        if (remember) { try { sessionStorage.setItem(storeKey, name); } catch { } }
-    };
-    const fromHash = () => {
-        const hash = decodeURIComponent(location.hash.slice(1));
-        if (!hash) return null;
-        if (names.includes(hash)) return hash;
-        const owner = document.getElementById(hash)?.closest("[data-tab]");
-        return owner && names.includes(owner.dataset.tab) ? owner.dataset.tab : null;
-    };
-    let stored = null;
-    try { stored = sessionStorage.getItem(storeKey); } catch { }
-    const initial = fromHash() ?? (names.includes(stored) ? stored : names[0]);
-    show(initial, true);
-    if (location.hash && !names.includes(decodeURIComponent(location.hash.slice(1)))) document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView();
-    links.forEach(link => link.addEventListener("click", event => {
-        event.preventDefault();
-        show(link.dataset.tabLink, true);
-        history.replaceState(null, "", `#${link.dataset.tabLink}`);
-    }));
-    window.addEventListener("hashchange", () => { const name = fromHash(); if (name) show(name, true); });
 })();
