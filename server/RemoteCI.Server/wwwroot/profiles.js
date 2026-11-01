@@ -234,11 +234,26 @@
         });
         return errors;
     };
-    globalThis.RemoteCIProfileTransforms = { clone, read, write, blankProfile, pointTimeField, pointTime, timeText, timeSeconds, editedTime, insertSlot, removeSlot, changeSlotType, moveSlot, affectedCourses, validateProfile,
+    // 科目地点存在科目附加数据中：AttachedObjects[RemoteCI 固定 GUID] = { Location }，与服务端 SubjectLocations 一致。
+    const subjectLocation = (subject, key) => {
+        const attached = read(subject, "AttachedObjects", null);
+        const id = attached && typeof attached === "object" ? Object.keys(attached).find(item => sameId(item, key)) : null;
+        return id ? String(read(attached[id], "Location", "") ?? "") : "";
+    };
+    const setSubjectLocation = (subject, key, value) => {
+        const text = String(value ?? "").trim();
+        let attached = read(subject, "AttachedObjects", null);
+        if (attached && typeof attached === "object") Object.keys(attached).filter(item => sameId(item, key)).forEach(item => delete attached[item]);
+        if (!text) return;
+        if (!attached || typeof attached !== "object") { attached = {}; write(subject, "AttachedObjects", attached); }
+        attached[key] = { Location: text };
+    };
+    globalThis.RemoteCIProfileTransforms = { clone, read, write, blankProfile, subjectLocation, setSubjectLocation, pointTimeField, pointTime, timeText, timeSeconds, editedTime, insertSlot, removeSlot, changeSlotType, moveSlot, affectedCourses, validateProfile,
         isOverlay, regularEntries, tempLayers, todayText, createTempLayer, separateTempTime, moveTempLayer, deleteTempLayer, cleanExpiredTempLayers, deletePlan, markChanged };
     if (typeof document === "undefined") return;
     const app = document.querySelector("[data-profile-app]");
     if (!app) return;
+    const locationKey = app.dataset.subjectLocationKey;
     const $ = selector => app.querySelector(selector);
     const $$ = selector => [...app.querySelectorAll(selector)];
     const initial = JSON.parse($("[data-profile-initial]").textContent);
@@ -350,7 +365,7 @@
         const container = $("[data-profile-section-content]");
         if (state.section === "Subjects") {
             const list = entries(doc, "Subjects");
-            container.innerHTML = `<div class="profile-section-heading"><h3>科目</h3><button type="button" class="ghost" data-profile-add-object>添加科目</button></div>${list.length ? `<div class="profile-table-scroll"><table class="profile-table"><thead><tr><th>名称</th><th>简称</th><th>教师</th><th>操作</th></tr></thead><tbody>${list.map(([id, subject]) => `<tr data-profile-subject="${escape(id)}"><td><input data-profile-subject-field="Name" aria-label="科目名称" value="${escape(read(subject, "Name", ""))}" /></td><td><input data-profile-subject-field="Initial" aria-label="科目简称" value="${escape(read(subject, "Initial", ""))}" /></td><td><input data-profile-subject-field="TeacherName" aria-label="任课教师" value="${escape(read(subject, "TeacherName", ""))}" /></td><td><button type="button" class="ghost danger" data-profile-delete-subject="${escape(id)}" aria-label="删除${escape(read(subject, "Name", "科目"))}">删除</button></td></tr>`).join("")}</tbody></table></div>` : '<p class="muted profile-section-empty">尚无科目。添加后可在时间表和课表中选用。</p>'}`;
+            container.innerHTML = `<div class="profile-section-heading"><h3>科目</h3><button type="button" class="ghost" data-profile-add-object>添加科目</button></div>${list.length ? `<div class="profile-table-scroll"><table class="profile-table"><thead><tr><th>名称</th><th>简称</th><th>教师</th><th>地点</th><th>操作</th></tr></thead><tbody>${list.map(([id, subject]) => `<tr data-profile-subject="${escape(id)}"><td><input data-profile-subject-field="Name" aria-label="科目名称" value="${escape(read(subject, "Name", ""))}" /></td><td><input data-profile-subject-field="Initial" aria-label="科目简称" value="${escape(read(subject, "Initial", ""))}" /></td><td><input data-profile-subject-field="TeacherName" aria-label="任课教师" value="${escape(read(subject, "TeacherName", ""))}" /></td><td><input data-profile-subject-location maxlength="100" aria-label="科目地点" placeholder="本班教室" value="${escape(subjectLocation(subject, locationKey))}" /></td><td><button type="button" class="ghost danger" data-profile-delete-subject="${escape(id)}" aria-label="删除${escape(read(subject, "Name", "科目"))}">删除</button></td></tr>`).join("")}</tbody></table></div>` : '<p class="muted profile-section-empty">尚无科目。添加后可在时间表和课表中选用。</p>'}`;
             return;
         }
         if (state.section === "TempLayers") { renderTempLayers(doc, container); return; }
@@ -779,6 +794,7 @@
         const draft = activeDraft();
         if (!draft) return;
         if (node.hasAttribute("data-profile-name")) { draft.name = node.value; write(draft.doc, "Name", node.value); markDirty(); return; }
+        if (node.hasAttribute("data-profile-subject-location")) { setSubjectLocation(dictionary(draft.doc, "Subjects")[node.closest("[data-profile-subject]").dataset.profileSubject], locationKey, node.value); markDirty(); return; }
         if (node.dataset.profileSubjectField) { write(dictionary(draft.doc, "Subjects")[node.closest("[data-profile-subject]").dataset.profileSubject], node.dataset.profileSubjectField, node.value); markDirty(); return; }
         if (node.dataset.profileObjectField === "Name") { write(dictionary(draft.doc, sectionKey())[state.objectId], "Name", node.value); markDirty(); return; }
         if (["StartTime", "EndTime", "StartSecond", "EndSecond"].includes(node.dataset.profileSlotField)) { const point = slots(dictionary(draft.doc, "TimeLayouts")[slotLayoutId()])[Number(node.closest("[data-profile-slot]").dataset.profileSlot)]; write(point, node.dataset.profileSlotField, editedTime(read(point, node.dataset.profileSlotField), node.value)); markDirty(); return; }

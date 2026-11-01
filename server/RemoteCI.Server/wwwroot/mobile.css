@@ -160,7 +160,7 @@ html[data-theme=dark] .mobile-bottom-nav { border:1px solid var(--m-line); box-s
 .mobile-app .login-logo { width:72px; height:72px; }
 .mobile-app .login-card h1 { font-size:26px; }
 .mobile-app .visitor-switcher, .mobile-app .visitor-group-filter, .mobile-app .class-select-grid { display:flex; flex-wrap:wrap; gap:12px; }
-.mobile-app .schedule-table-wrap { overflow:auto; }
+.mobile-app .sg-scroll { overflow:auto; }
 
 html[data-mobile-ui] { min-width:0; }
 .mobile-app[data-mobile-page="/Mobile/Control"] .page-head,

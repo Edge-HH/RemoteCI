@@ -65,8 +65,9 @@ public sealed class ScheduleAdjustmentOverlay
                 }
                 else if (course.SubjectId == entry.FromSubjectId)
                 {
-                    var teacher = entry.TeacherName ?? bundle.Subjects.FirstOrDefault(x => x.Id == entry.ToSubjectId)?.Teacher;
-                    replaced = Copy(course, entry.ToSubjectId, entry.ToSubject, teacher, entry, pending: true);
+                    var target = bundle.Subjects.FirstOrDefault(x => x.Id == entry.ToSubjectId);
+                    replaced = Copy(course, entry.ToSubjectId, entry.ToSubject, entry.TeacherName ?? target?.Teacher, entry, pending: true);
+                    replaced.Location = target?.Location;
                 }
                 if (replaced is null) continue;
                 courses ??= [.. day.Courses];
@@ -87,6 +88,7 @@ public sealed class ScheduleAdjustmentOverlay
                 Courses = courses,
                 DayKind = day.DayKind,
                 HolidayName = day.HolidayName,
+                DividerAfterIndexes = day.DividerAfterIndexes,
             });
         }
         if (!changed) return bundle;
@@ -111,6 +113,7 @@ public sealed class ScheduleAdjustmentOverlay
         StartTime = course.StartTime,
         EndTime = course.EndTime,
         Teacher = teacher,
+        Location = course.Location,
         Enabled = course.Enabled,
         BaseSubjectId = course.BaseSubjectId ?? (subjectId == entry.FromSubjectId ? null : entry.FromSubjectId),
         AdjustmentId = course.AdjustmentId ?? entry.Id,

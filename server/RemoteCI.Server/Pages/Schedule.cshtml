@@ -1,7 +1,8 @@
 @page
 @model ScheduleModel
 @{ ViewData["Title"] = "课表"; }
-<div class="page-head"><div><h1>未来七日课表</h1></div><div class="schedule-head-actions">@if (Model.CanRequestSwap) { <a class="button ghost" asp-page="/SwapRequests">申请换课</a> }<span class="status @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "已连接" : "插件离线")</span></div></div>
+<partial name="_ScheduleDisplayPrefs" />
+<div class="page-head"><div><h1>@Model.WeekTitle</h1><p class="muted">@Model.WeekRange</p></div><div class="schedule-head-actions">@if (Model.CanRequestSwap) { <a class="button ghost" asp-page="/SwapRequests">申请换课</a> }<button type="button" class="ghost" data-user-edit-open="schedule-display-dialog" aria-controls="schedule-display-dialog">显示设置</button><span class="status @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "已连接" : "插件离线")</span></div></div>
 @if (Model.CanPullSchedule)
 {
 <section class="panel schedule-pull-panel">
@@ -27,7 +28,7 @@ else
 {
     @if (Model.FromProfile)
     {
-        <div class="notice">插件从未同步过课表，以下按本班当前档案“@(Model.CurrentView!.ProfileName)”推算。插件连接并同步后将显示教室端的实际课表；科目教师与换课需在插件同步后操作@if (Model.CanEditClassProfile) { <text>，或直接</text><a asp-page="/ClassProfiles">编辑班级档案</a> }。</div>
+        <div class="notice">插件从未同步过课表，以下按本班当前档案“@(Model.CurrentView!.ProfileName)”推算。插件连接并同步后将显示教室端的实际课表；科目教师、科目地点与换课需在插件同步后操作@if (Model.CanEditClassProfile) { <text>，或直接</text><a asp-page="/ClassProfiles">编辑班级档案</a> }。</div>
         @if (Model.CurrentView!.UsesWeekRotation)
         {
             <div class="notice warning">档案包含多周轮换课表。管理员尚未设置学期开始日期，服务端按“本周为第 1 周”推算，可能与教室端不同@if (Model.CurrentUser.Role == RemoteCI.Shared.UserRole.Admin) { <text>；请在</text><a asp-page="/Holidays">学期与调休</a><text>中设置</text> }。</div>
@@ -37,15 +38,24 @@ else
     {
         <div class="notice">插件离线，显示的是 @Model.Bundle.GeneratedAt.ToLocalTime().ToString("M月d日 HH:mm") 最后一次同步的课表；日程、提醒与换课申请仍按此课表工作，插件重新连接后会自动同步最新课表。</div>
     }
-    <partial name="_ScheduleTable" model="Model.Bundle" />
+    <nav class="schedule-week-nav" aria-label="切换周">
+        <a class="button ghost" asp-page="/Schedule" asp-route-week="@Model.PreviousWeek" aria-disabled="@(Model.PreviousWeek is null ? "true" : null)">上一周</a>
+        @if (!Model.IsCurrentWeek) { <a class="button ghost" asp-page="/Schedule">回到本周</a> }
+        <a class="button ghost" asp-page="/Schedule" asp-route-week="@Model.NextWeek" aria-disabled="@(Model.NextWeek is null ? "true" : null)">下一周</a>
+    </nav>
+    <partial name="_ScheduleGrid" model="Model.Grid" />
     @if (Model.CanManageSchedule && !Model.FromProfile)
     {
     <section class="panel" aria-labelledby="schedule-settings-title">
-        <div class="panel-heading"><div><h2 id="schedule-settings-title">课表设置</h2><p class="muted">科目教师与换课都在弹窗里填写，提交后由教室端生效。</p></div></div>
+        <div class="panel-heading"><div><h2 id="schedule-settings-title">课表设置</h2><p class="muted">科目教师、科目地点与换课都在弹窗里填写，提交后由教室端生效。</p></div></div>
         <div class="batch-action-grid schedule-setting-actions">
             <button type="button" class="batch-action-card" data-user-edit-open="subject-teacher-dialog" aria-controls="subject-teacher-dialog">
                 <span class="batch-action-icon"><i class="icon icon-manage-accounts" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>科目教师</strong><small>为各科设置授课老师；教师名与老师账号的用户名一致时，课程会出现在该老师的“我的日程”中。</small></span>
+            </button>
+            <button type="button" class="batch-action-card" data-user-edit-open="subject-location-dialog" aria-controls="subject-location-dialog">
+                <span class="batch-action-icon"><i class="icon icon-apartment" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>科目地点</strong><small>为在机房、实验室、操场等地上的科目填写地点；留空表示在本班教室上课，课表中不显示。</small></span>
             </button>
             <button type="button" class="batch-action-card" data-user-edit-open="schedule-change-dialog" aria-controls="schedule-change-dialog">
                 <span class="batch-action-icon"><i class="icon icon-swap-horiz" aria-hidden="true"></i></span>
@@ -75,6 +85,37 @@ else
                                 <input type="hidden" name="SubjectTeacher.SubjectId" value="@subject.Id" />
                                 <label>@subject.Name
                                     <input type="text" name="SubjectTeacher.TeacherName" value="@subject.Teacher" maxlength="@RemoteCI.Shared.Models.SubjectTeacherRequest.MaxTeacherNameLength" placeholder="授课教师名，多位老师用 / 分隔（留空清除）" />
+                                </label>
+                                <button type="submit">保存</button>
+                            </form>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </dialog>
+
+    <dialog id="subject-location-dialog" class="user-edit-dialog" data-user-edit-dialog aria-labelledby="subject-location-dialog-title">
+        <div class="user-edit-dialog-shell">
+            <header class="user-edit-dialog-header"><div><p class="eyebrow">课表设置</p><h2 id="subject-location-dialog-title">科目地点</h2><p class="muted">地点写入教室端档案，随课表显示在网页、手机与日历订阅中。</p></div><button type="button" class="ghost dialog-close-button" data-user-edit-close aria-label="关闭科目地点"><i class="icon icon-close" aria-hidden="true"></i></button></header>
+            <div class="user-edit-form">
+                @if (!Model.PluginOnline)
+                {
+                    <div class="notice warning">插件离线，暂时无法设置科目地点；插件重新连接后即可编辑。</div>
+                }
+                else if (!Model.CanSetSubjectLocation)
+                {
+                    <div class="notice warning">当前班级的插件不支持设置科目地点，请升级教室端插件后重试。</div>
+                }
+                else
+                {
+                    <div class="form-grid subject-teacher-grid">
+                        @foreach (var subject in Model.Subjects)
+                        {
+                            <form method="post" asp-page-handler="SubjectLocation" class="subject-teacher-row">
+                                <input type="hidden" name="SubjectLocation.SubjectId" value="@subject.Id" />
+                                <label>@subject.Name
+                                    <input type="text" name="SubjectLocation.Location" value="@subject.Location" maxlength="@RemoteCI.Shared.Models.SubjectLocations.MaxLength" placeholder="例如：机房、实验楼 C301（留空清除）" />
                                 </label>
                                 <button type="submit">保存</button>
                             </form>
@@ -125,3 +166,4 @@ else
     </dialog>
     }
 }
+<partial name="_ScheduleDisplaySettings" model="Model.ColorSettings" />

@@ -119,9 +119,11 @@ public sealed class RoleAndBackupTests : IClassFixture<TestWebApplicationFactory
                 GrantedPermissions = UserPermissions.ApiAccess,
             });
             rawKey = (await identities.CreateApiKeyAsync(user.Id, "备份测试")).Key;
+            await scope.ServiceProvider.GetRequiredService<SubjectColorService>().SetAsync(user.Id, "物理", SubjectColors.Palette[3]);
             var archive = scope.ServiceProvider.GetRequiredService<ConfigurationArchiveService>();
             var snapshot = await archive.CaptureAsync();
             Assert.Contains(snapshot.ApiKeys!, x => x.UserId == user.Id);
+            Assert.Contains(snapshot.SubjectColors!, x => x.UserId == user.Id && x.SubjectName == "物理");
             await archive.ApplyAsync(snapshot);
         }
 
@@ -130,6 +132,8 @@ public sealed class RoleAndBackupTests : IClassFixture<TestWebApplicationFactory
             .ValidateApiKeyAsync(rawKey);
         Assert.NotNull(principal);
         Assert.Equal("backup.api.key", principal.User!.Username);
+        var colors = await verificationScope.ServiceProvider.GetRequiredService<SubjectColorService>().OverridesAsync(principal.User.Id);
+        Assert.Equal(SubjectColors.Palette[3], colors["物理"]);
     }
 
     [Fact]

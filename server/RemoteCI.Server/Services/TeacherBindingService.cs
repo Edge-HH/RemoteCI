@@ -110,6 +110,29 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state, Sc
     /// 插件从未同步过课表的班级按当前班级档案推算，Source 标记为 profile。
     /// <paramref name="fallbackOffset"/> 是没有任何班级快照时使用的时区（客户端上报的本机时区），见 <see cref="ClassClock"/>。
     /// </summary>
+    /// <summary>
+    /// 按周浏览“我的日程”时的班级来源：与 <see cref="GetScheduledClassesAsync"/> 相同，但看整份课表（插件上报的 30 天、档案推算同样天数），
+    /// 几周后才有课的班级也列出。只用于显示本人的课，不授予班级访问。
+    /// </summary>
+    public async Task<IReadOnlyList<(TaughtClass Class, string? Source)>> GetDisplayClassesAsync(
+        string? boundName, TimeSpan? fallbackOffset, CancellationToken ct = default)
+    {
+        var name = boundName?.Trim();
+        if (string.IsNullOrEmpty(name)) return [];
+        var classrooms = (await db.Classrooms.AsNoTracking().ToListAsync(ct)).OrderBy(x => x.CreatedAt).ToList();
+        var estimated = await scheduleViews.BuildFromProfilesAsync(classrooms.Select(x => x.Id).ToList(), fallbackOffset, ct, ScheduleBundle.HorizonDays);
+        var result = new List<(TaughtClass, string?)>();
+        foreach (var classroom in classrooms)
+        {
+            var (bundle, source) = state.GetLatestSchedule(classroom.Id) is { } latest
+                ? (latest, (string?)null)
+                : (estimated.GetValueOrDefault(classroom.Id)?.Bundle, ScheduleBundleSources.Profile);
+            if (bundle is not null && bundle.Days.SelectMany(x => x.Courses).Any(x => x.Enabled && Matches(name, x.Teacher)))
+                result.Add((new TaughtClass(classroom.Id, classroom.Name, classroom.VisitorAccessEnabled, classroom.Avatar != null, bundle), source));
+        }
+        return result;
+    }
+
     private async Task<IReadOnlyList<(TaughtClass Class, string? Source)>> GetScheduledClassesAsync(
         string? boundName, TimeSpan? fallbackOffset, CancellationToken ct)
     {
@@ -147,11 +170,12 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state, Sc
         foreach (var date in dates)
         {
             var items = new List<MyScheduleItem>();
+            ScheduleDay? marked = null;
             foreach (var (taughtClass, source) in taught)
             {
-                var courses = taughtClass.Bundle.Days
-                    .Where(x => x.Date == date)
-                    .SelectMany(x => x.Courses)
+                var day = taughtClass.Bundle.Days.FirstOrDefault(x => x.Date == date);
+                if (day?.DayKind is not null) marked ??= day;
+                var courses = (day?.Courses ?? [])
                     .Where(x => x.Enabled && Matches(boundName, x.Teacher))
                     .OrderBy(x => x.Index)
                     .ToList();
@@ -160,9 +184,11 @@ public sealed class TeacherBindingService(AppDbContext db, IStateStore state, Sc
                     {
                         ClassId = taughtClass.ClassId, ClassName = taughtClass.ClassName, Courses = courses, Source = source,
                         TimeZoneOffsetMinutes = (int)ClassClock.Offset(state, taughtClass.ClassId, response.GeneratedAt, fallbackOffset).TotalMinutes,
+                        DividerAfterIndexes = day!.DividerAfterIndexes,
                     });
             }
-            if (items.Count > 0) response.Days.Add(new MyScheduleDay { Date = date, Items = items });
+            if (items.Count > 0)
+                response.Days.Add(new MyScheduleDay { Date = date, Items = items, DayKind = marked?.DayKind, HolidayName = marked?.HolidayName });
         }
         return response;
     }

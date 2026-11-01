@@ -16,7 +16,9 @@ public sealed class ScheduleModel(
     PeerRegistry peers,
     ScheduleSyncService scheduleSync,
     ScheduleViewService scheduleViews,
-    ProfileLibraryService profiles) : WebPageModel(users)
+    ProfileLibraryService profiles,
+    ScheduleWeekService weeks,
+    SubjectColorService colors) : WebPageModel(users)
 {
     [BindProperty]
     public ScheduleInput Input { get; set; } = new();
@@ -35,6 +37,24 @@ public sealed class ScheduleModel(
     public ScheduleSyncStatus? CurrentTask => scheduleSync.Current(CurrentClassId);
     [BindProperty]
     public SubjectTeacherInput SubjectTeacher { get; set; } = new();
+    [BindProperty]
+    public SubjectLocationInput SubjectLocation { get; set; } = new();
+
+    /// <summary>按周浏览的课表：已过去的日子来自课时台账，今天起来自插件课表或档案推算。</summary>
+    public ScheduleWeekResponse? Week { get; private set; }
+    public ScheduleGridView? Grid { get; private set; }
+    public SubjectColorsResponse ColorSettings { get; private set; } = new();
+    /// <summary>上一周、下一周的周一（yyyy-MM-dd）；超出可浏览范围时为 null。</summary>
+    public string? PreviousWeek { get; private set; }
+    public string? NextWeek { get; private set; }
+    public bool IsCurrentWeek { get; private set; } = true;
+    public string WeekTitle => Week?.TeachingWeek is { } week ? $"第 {week} 周" : "课表";
+    public string WeekRange => Week is null ? string.Empty
+        : $"{SemesterWeeks.Parse(Week.From):M月d日} – {SemesterWeeks.Parse(Week.To):M月d日}";
+
+    /// <summary>当前班级是否支持设置科目地点（写入 ClassIsland 档案科目的附加数据）。</summary>
+    public bool CanSetSubjectLocation => PluginOnline &&
+        peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.ScheduleSubjectLocation);
 
     /// <summary>当前班级是否支持设置科目教师（写入 ClassIsland 档案的 Subject.TeacherName）。</summary>
     public bool CanSetSubjectTeacher => PluginOnline &&
@@ -59,7 +79,7 @@ public sealed class ScheduleModel(
         return new JsonResult(new { revision = MobileRevision });
     }
 
-    public async Task<IActionResult> OnGetAsync()
+    public async Task<IActionResult> OnGetAsync(string? week)
     {
         if (await RequireAsync() is { } denied) return denied;
         if (MobileUi.IsMobile(HttpContext) && CurrentUser.RoleDefinitionId == AccountRole.TeacherId && !Request.Query.ContainsKey("class"))
@@ -70,7 +90,27 @@ public sealed class ScheduleModel(
         var today = ClassClock.Today(state, CurrentClassId);
         ViewData["ScheduleToday"] = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         if (Bundle is not null && !FromProfile) BuildSwapDays(Bundle, today);
+        await BuildWeekAsync(ScheduleDisplayHandler.WeekStart(week), today, HttpContext.RequestAborted);
         return Page();
+    }
+
+    private async Task BuildWeekAsync(DateOnly? start, DateOnly today, CancellationToken ct)
+    {
+        var monday = start ?? SemesterWeeks.Monday(today);
+        Week = await weeks.BuildClassAsync(CurrentClassId, monday, monday.AddDays(6), ct);
+        Grid = ScheduleGridView.ForClass(Week, await colors.OverridesAsync(CurrentUser.Id, ct));
+        ColorSettings = await colors.ListAsync(ToProfile(), AccountRole.HasPersonalSchedule(CurrentUser.RoleDefinitionId) ? CurrentUser.DisplayName : null, ct);
+        var min = SemesterWeeks.Parse(Week.MinDate) ?? monday;
+        var max = SemesterWeeks.Parse(Week.MaxDate) ?? monday;
+        IsCurrentWeek = monday == SemesterWeeks.Monday(today);
+        PreviousWeek = monday.AddDays(-1) >= min ? SemesterWeeks.Format(monday.AddDays(-7)) : null;
+        NextWeek = monday.AddDays(7) <= max ? SemesterWeeks.Format(monday.AddDays(7)) : null;
+    }
+
+    public async Task<IActionResult> OnPostSubjectColorAsync(string? name, string? color, bool reset, CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        return await ScheduleDisplayHandler.SaveColorAsync(this, colors, CurrentUser.Id, name, color, reset, ct);
     }
 
     private void BuildSwapDays(ScheduleBundle bundle, DateOnly today)
@@ -211,6 +251,54 @@ public sealed class ScheduleModel(
         return RedirectToPage();
     }
 
+    /// <summary>为班级科目设置上课地点：下发 SetSubjectLocation 写入教室端档案科目的附加数据，随后课表自动重推。</summary>
+    public async Task<IActionResult> OnPostSubjectLocationAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (RequireClass(UserPermissions.ManageSchedule) is { } classDenied) return classDenied;
+        Bundle = state.GetLatestSchedule(CurrentClassId);
+        if (!CanSetSubjectLocation)
+        {
+            TempData["Error"] = $"{CommandResultCodes.CapabilityUnsupported}：当前班级的插件不支持设置科目地点，请升级教室端插件。";
+            return RedirectToPage();
+        }
+        if (Subjects.All(x => x.Id != SubjectLocation.SubjectId))
+        {
+            TempData["Error"] = "请选择当前课表中的科目。";
+            return RedirectToPage();
+        }
+        if (SubjectLocation.Location?.Trim().Length > SubjectLocations.MaxLength)
+        {
+            TempData["Error"] = $"科目地点不能超过 {SubjectLocations.MaxLength} 个字符。";
+            return RedirectToPage();
+        }
+        var result = await peers.SendCommandAndWaitAsync(new CommandMessage
+        {
+            Command = CommandKind.SetSubjectLocation,
+            ClassId = CurrentClassId,
+            RequestedBy = ToProfile(),
+            SubjectLocation = new SubjectLocationRequest
+            {
+                SubjectId = SubjectLocation.SubjectId,
+                Location = SubjectLocation.Location?.Trim(),
+            },
+        }, CurrentClassId, TimeSpan.FromSeconds(15), ct);
+        TempData[result.Success ? "Message" : "Error"] = result.Message;
+        return RedirectToPage();
+    }
+
+    /// <summary>以当前账号与其本班权限发起命令时的请求者。</summary>
+    private UserProfile ToProfile() => new()
+    {
+        Id = CurrentUser.Id,
+        Username = CurrentUser.UserName!,
+        DisplayName = CurrentUser.DisplayName,
+        Role = CurrentUser.Role,
+        GrantedPermissions = CurrentUser.GrantedPermissions,
+        Permissions = ClassPermissions,
+        Version = CurrentUser.Version,
+    };
+
     public sealed class ScheduleInput
     {
         public string Date { get; set; } = string.Empty;
@@ -226,5 +314,11 @@ public sealed class ScheduleModel(
     {
         public Guid SubjectId { get; set; }
         public string? TeacherName { get; set; }
+    }
+
+    public sealed class SubjectLocationInput
+    {
+        public Guid SubjectId { get; set; }
+        public string? Location { get; set; }
     }
 }

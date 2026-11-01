@@ -28,10 +28,11 @@ public sealed class ScheduleViewService(
 {
     public const int Days = 7;
 
-    public async Task<ScheduleView?> GetAsync(Guid classId, CancellationToken ct = default)
+    /// <param name="days">按档案推算时推算的天数；按周浏览时传 <see cref="ScheduleBundle.HorizonDays"/>，与插件上报的范围一致。</param>
+    public async Task<ScheduleView?> GetAsync(Guid classId, CancellationToken ct = default, int days = Days)
     {
         if (state.GetLatestSchedule(classId) is { } cached) return new ScheduleView(cached, ScheduleViewSource.Plugin);
-        return (await BuildFromProfilesAsync([classId], ct: ct)).GetValueOrDefault(classId);
+        return (await BuildFromProfilesAsync([classId], ct: ct, days: days)).GetValueOrDefault(classId);
     }
 
     /// <summary>
@@ -50,7 +51,7 @@ public sealed class ScheduleViewService(
     /// 推算“今天”所用的时区（例如手机上报的本机时区），见 <see cref="ClassClock"/>。
     /// </summary>
     public async Task<IReadOnlyDictionary<Guid, ScheduleView>> BuildFromProfilesAsync(
-        IReadOnlyCollection<Guid> classIds, TimeSpan? fallbackOffset = null, CancellationToken ct = default)
+        IReadOnlyCollection<Guid> classIds, TimeSpan? fallbackOffset = null, CancellationToken ct = default, int days = Days)
     {
         var missing = classIds.Where(id => state.GetLatestSchedule(id) is null).Distinct().ToList();
         var result = new Dictionary<Guid, ScheduleView>();
@@ -70,7 +71,7 @@ public sealed class ScheduleViewService(
         {
             try
             {
-                var built = ProfileDocument.BuildSchedule(profile.ProfileJson, ClassClock.Today(state, profile.ClassId, fallback: fallbackOffset), Days,
+                var built = ProfileDocument.BuildSchedule(profile.ProfileJson, ClassClock.Today(state, profile.ClassId, fallback: fallbackOffset), days,
                     date => holidayDays.GetValueOrDefault(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)), semesterStart);
                 built.Bundle.ClassId = profile.ClassId;
                 result[profile.ClassId] = new ScheduleView(built.Bundle, ScheduleViewSource.Profile, profile.Name, built.UsesWeekRotation);

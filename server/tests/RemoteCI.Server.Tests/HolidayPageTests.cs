@@ -43,14 +43,16 @@ public sealed class HolidayPageTests
     {
         await using var factory = new TestWebApplicationFactory();
         _ = await factory.LoginAsync();
+        var monday = SemesterWeeks.Monday(ClassClock.Today(factory.Services.GetRequiredService<IStateStore>(), TestWebApplicationFactory.DefaultClassId));
         using (var scope = factory.Services.CreateScope())
             scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(TestWebApplicationFactory.DefaultClassId, new ScheduleBundle
             {
-                FromDate = "2026-10-01",
+                FromDate = SemesterWeeks.Format(monday),
                 Days =
                 [
-                    new ScheduleDay { Date = "2026-10-01", DayKind = ScheduleDayKinds.Holiday, HolidayName = "国庆节" },
-                    new ScheduleDay { Date = "2026-10-10", Enabled = true, DayKind = ScheduleDayKinds.Makeup, HolidayName = "国庆节" },
+                    new ScheduleDay { Date = SemesterWeeks.Format(monday), DayKind = ScheduleDayKinds.Holiday, HolidayName = "国庆节" },
+                    new ScheduleDay { Date = SemesterWeeks.Format(monday.AddDays(1)), Enabled = true, DayKind = ScheduleDayKinds.Makeup, HolidayName = "国庆节" },
+                    new ScheduleDay { Date = SemesterWeeks.Format(monday.AddDays(6)), Enabled = true },
                 ],
             });
         using var browser = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = true });
@@ -59,7 +61,7 @@ public sealed class HolidayPageTests
         var html = WebUtility.HtmlDecode(await browser.GetStringAsync("/Schedule"));
 
         Assert.Contains("放假 · 国庆节", html);
-        Assert.Contains("调休 · 国庆节", html);
+        Assert.Contains("<em class=\"sg-day-tag makeup\">调休</em>", html);
     }
 
     [Fact]
@@ -81,9 +83,9 @@ public sealed class HolidayPageTests
 
         var html = WebUtility.HtmlDecode(await browser.GetStringAsync("/Schedule"));
 
-        var headings = Regex.Matches(html, "<th scope=\"col\"[^>]*><strong>(周.)").Select(x => x.Groups[1].Value).ToList();
+        var headings = Regex.Matches(html, "class=\"sg-day-head[^\"]*\"[^>]*>\\s*<strong>(周.)</strong>").Select(x => x.Groups[1].Value).ToList();
         Assert.Equal(["周一", "周二", "周三", "周四", "周五", "周六", "周日"], headings);
-        Assert.Matches($"<th scope=\"col\" class=\"schedule-today\"[^>]*><strong>周.（今天）</strong><small>{today:yyyy-MM-dd}</small>", html);
+        Assert.Matches($"class=\"sg-day-head sg-today[^\"]*\" aria-current=\"date\">\\s*<strong>周.</strong>\\s*<small>{today:MM/dd}</small>", html);
     }
 
     private static async Task LoginAsync(HttpClient browser)

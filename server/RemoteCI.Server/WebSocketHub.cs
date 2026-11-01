@@ -770,6 +770,13 @@ public static class WebSocketHub
             if (command.SubjectTeacher.TeacherName is { Length: > SubjectTeacherRequest.MaxTeacherNameLength })
                 return new CommandError(CommandResultCodes.InvalidRequest, "教师名过长");
         }
+        if (command.Command == CommandKind.SetSubjectLocation)
+        {
+            if (command.SubjectLocation is null || command.SubjectLocation.SubjectId == Guid.Empty)
+                return new CommandError(CommandResultCodes.InvalidRequest, "缺少科目地点参数");
+            if (command.SubjectLocation.Location is { Length: > SubjectLocations.MaxLength })
+                return new CommandError(CommandResultCodes.InvalidRequest, "科目地点过长");
+        }
         if (command.Command == CommandKind.ExecuteTerminalCommand)
         {
             var terminal = command.TerminalCommand;

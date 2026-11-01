@@ -404,6 +404,19 @@ public sealed class UserExtensionPreference
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
+/// <summary>账号改过的学科颜色（按去首尾空白的学科名）；没有记录的学科用默认颜色，见 <see cref="RemoteCI.Shared.Models.SubjectColors"/>。</summary>
+public sealed class UserSubjectColor
+{
+    public const int MaxSubjectNameLength = 100;
+
+    public Guid UserId { get; set; }
+    public AppUser User { get; set; } = null!;
+    public string SubjectName { get; set; } = string.Empty;
+    /// <summary>色板中的颜色（#RRGGBB）。</summary>
+    public string Color { get; set; } = string.Empty;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public enum BackupCadence
 {
     Hourly = 1,

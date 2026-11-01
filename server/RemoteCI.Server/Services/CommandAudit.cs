@@ -274,6 +274,7 @@ public static class CommandAuditSummary
         CommandKind.JoinManagement => "加入集控",
         CommandKind.RestartClassIsland => "重启 ClassIsland",
         CommandKind.SetSubjectTeacher => "设置科目教师",
+        CommandKind.SetSubjectLocation => "设置科目地点",
         CommandKind.ExecuteTerminalCommand => "远程终端",
         CommandKind.SendFile => "分发文件",
         CommandKind.ApplyExtensionSettings => "扩展设置",
@@ -337,6 +338,8 @@ public static class CommandAuditSummary
                 $"{Clip(layout.Name, 40)}，{layout.Points.Count} 个时间点",
             CommandKind.SetSubjectTeacher when command.SubjectTeacher is { } teacher =>
                 string.IsNullOrWhiteSpace(teacher.TeacherName) ? "清除教师" : $"教师 {Clip(teacher.TeacherName, 40)}",
+            CommandKind.SetSubjectLocation when command.SubjectLocation is { } location =>
+                string.IsNullOrWhiteSpace(location.Location) ? "清除地点" : $"地点 {Clip(location.Location, 40)}",
             CommandKind.ExecuteTerminalCommand when command.TerminalCommand is { } terminal =>
                 Clip(terminal.Command.Trim(), 200) +
                 (string.IsNullOrWhiteSpace(terminal.WorkingDirectory) ? string.Empty : $"（目录 {Clip(terminal.WorkingDirectory, 80)}）"),

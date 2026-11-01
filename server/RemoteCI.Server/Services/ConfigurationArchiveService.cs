@@ -56,6 +56,8 @@ public sealed class ConfigurationArchiveService(
             .Select(x => new ExtensionGroupPolicySnapshot(x.GroupId, x.AllowClassAdmin, x.UpdatedAt)).ToListAsync(ct);
         var extensionPreferences = await db.UserExtensionPreferences.AsNoTracking()
             .Select(x => new ExtensionPreferenceSnapshot(x.UserId, x.ExtensionId, x.ShowOnWatch, x.UpdatedAt)).ToListAsync(ct);
+        var subjectColors = await db.UserSubjectColors.AsNoTracking()
+            .Select(x => new SubjectColorSnapshot(x.UserId, x.SubjectName, x.Color, x.UpdatedAt)).ToListAsync(ct);
         var metadata = await db.SystemMetadata.AsNoTracking().SingleAsync(x => x.Id == 1, ct);
         var backup = await db.BackupConfigurations.AsNoTracking().SingleAsync(x => x.Id == 1, ct);
         var profiles = await db.StoredProfiles.AsNoTracking().Select(x => new StoredProfileSnapshot(
@@ -101,7 +103,8 @@ public sealed class ConfigurationArchiveService(
                 metadata.AppGuardRestartDelayMinutes, metadata.AppGuardRestartOnCrash, metadata.AppGuardPreventDeletion,
                 metadata.AppGuardBackupIntervalHours, appGuardOverrides, metadata.AppGuardEnhancedMode,
                 metadata.AppGuardBackupPathsJson, metadata.AppGuardRandomBackupPath, metadata.AppGuardProcessName, metadata.AppGuardBackupDirectoryName,
-                metadata.AppGuardLaunchOnStartup));
+                metadata.AppGuardLaunchOnStartup),
+            subjectColors);
     }
 
     public async Task<BackupFileInfo> CreateLocalBackupAsync(string source, CancellationToken ct = default)
@@ -192,6 +195,7 @@ public sealed class ConfigurationArchiveService(
         await db.UserApiKeys.ExecuteDeleteAsync(ct);
         await db.PluginPairingCodes.ExecuteDeleteAsync(ct);
         await db.UserExtensionPreferences.ExecuteDeleteAsync(ct);
+        await db.UserSubjectColors.ExecuteDeleteAsync(ct);
         await db.ExtensionPolicies.ExecuteDeleteAsync(ct);
         await db.ExtensionGroupPolicies.ExecuteDeleteAsync(ct);
         await db.Users.ExecuteDeleteAsync(ct);
@@ -256,6 +260,11 @@ public sealed class ConfigurationArchiveService(
             .DistinctBy(x => x.GroupId, StringComparer.Ordinal)
             .Select(x => new ExtensionGroupPolicy { GroupId = x.GroupId, AllowClassAdmin = x.AllowClassAdmin, UpdatedAt = x.UpdatedAt }));
         db.UserExtensionPreferences.AddRange((snapshot.ExtensionPreferences ?? []).Select(x => new UserExtensionPreference { UserId=x.UserId, ExtensionId=x.ExtensionId, ShowOnWatch=x.ShowOnWatch, UpdatedAt=x.UpdatedAt }));
+        // 旧配置包没有学科颜色，恢复后各账号回到默认配色；色板外的颜色（例如色板调整前的配置包）同样丢弃。
+        db.UserSubjectColors.AddRange((snapshot.SubjectColors ?? [])
+            .Where(x => SubjectColors.NormalizePaletteColor(x.Color) is not null && SubjectColors.Key(x.SubjectName) is { Length: > 0 and <= UserSubjectColor.MaxSubjectNameLength })
+            .DistinctBy(x => (x.UserId, SubjectColors.Key(x.SubjectName)))
+            .Select(x => new UserSubjectColor { UserId = x.UserId, SubjectName = SubjectColors.Key(x.SubjectName), Color = SubjectColors.NormalizePaletteColor(x.Color)!, UpdatedAt = x.UpdatedAt }));
         var metadata = await db.SystemMetadata.SingleAsync(x => x.Id == 1, ct);
         metadata.AccountVersion = snapshot.Metadata.AccountVersion + 1;
         metadata.ForceSenderInTitle = snapshot.Metadata.ForceSenderInTitle;
@@ -412,6 +421,7 @@ public sealed class ConfigurationArchiveService(
         if(value.Users.Select(x=>x.Username.ToUpperInvariant()).Distinct().Count()!=value.Users.Count) throw new InvalidDataException("Duplicate account ID");
         var userIds=value.Users.Select(x=>x.Id).ToHashSet();
         if((value.ExtensionPreferences??[]).Any(x=>!userIds.Contains(x.UserId))) throw new InvalidDataException("Unknown extension preference user");
+        if((value.SubjectColors??[]).Any(x=>!userIds.Contains(x.UserId))) throw new InvalidDataException("Unknown subject color user");
         if((value.Memberships??[]).Any(x=>!userIds.Contains(x.UserId))) throw new InvalidDataException("Unknown membership user");
         if((value.ApiKeys??[]).Any(x=>!userIds.Contains(x.UserId))) throw new InvalidDataException("Unknown API key user");
         var classroomIds=(value.Classrooms??[]).Select(x=>x.Id).ToHashSet();
@@ -456,7 +466,7 @@ public sealed class ConfigurationArchiveService(
 }
 
 public sealed record BackupFileInfo(string Name, DateTimeOffset CreatedAt, long Size, string Source);
-public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null, List<ClassroomSnapshot>? Classrooms = null, List<MembershipSnapshot>? Memberships = null, List<GroupSnapshot>? ClassGroups = null, List<ApiKeySnapshot>? ApiKeys = null, List<StoredProfileSnapshot>? Profiles = null, HolidaySettingsSnapshot? Holidays = null, List<ExtensionGroupPolicySnapshot>? ExtensionGroupPolicies = null, OperationsSettingsSnapshot? Operations = null, List<AutomationRuleSnapshot>? AutomationRules = null, AppGuardSettingsSnapshot? AppGuard = null);
+public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null, List<ClassroomSnapshot>? Classrooms = null, List<MembershipSnapshot>? Memberships = null, List<GroupSnapshot>? ClassGroups = null, List<ApiKeySnapshot>? ApiKeys = null, List<StoredProfileSnapshot>? Profiles = null, HolidaySettingsSnapshot? Holidays = null, List<ExtensionGroupPolicySnapshot>? ExtensionGroupPolicies = null, OperationsSettingsSnapshot? Operations = null, List<AutomationRuleSnapshot>? AutomationRules = null, AppGuardSettingsSnapshot? AppGuard = null, List<SubjectColorSnapshot>? SubjectColors = null);
 public sealed record AppGuardSettingsSnapshot(string? OrganizationName, bool Enabled, bool RestartAfterExit, int RestartDelayMinutes, bool RestartOnCrash, bool PreventDeletion, int BackupIntervalHours, List<AppGuardOverrideSnapshot>? Overrides, bool EnhancedMode = false, string? BackupPathsJson = null, bool RandomBackupPath = false, string? ProcessName = null, string? BackupDirectoryName = null, bool? LaunchOnStartup = null);
 public sealed record AppGuardOverrideSnapshot(Guid CredentialId, bool Enabled, bool RestartAfterExit, int RestartDelayMinutes, bool RestartOnCrash, bool PreventDeletion, int BackupIntervalHours, DateTimeOffset UpdatedAt, bool EnhancedMode = false, string? BackupPathsJson = null, bool RandomBackupPath = false, string? ProcessName = null, string? BackupDirectoryName = null, bool? LaunchOnStartup = null);
 public sealed record OperationsSettingsSnapshot(int AuditRetentionDays, bool DeviceAlertsEnabled, int DeviceAlertThresholdMinutes, bool DeviceAlertNotifyAdmins, bool DeviceAlertNotifyClassHeads, bool DeviceAlertSchoolHoursOnly, bool ProfileDriftCheckEnabled = true, string? ProfileDriftCheckTime = null);
@@ -479,6 +489,7 @@ public sealed record ApiKeySnapshot(Guid Id,Guid UserId,string Name,string KeyHa
 public sealed record ExtensionPolicySnapshot(string ExtensionId,bool Enabled,bool AllowNonAdmin,DateTimeOffset UpdatedAt);
 public sealed record ExtensionGroupPolicySnapshot(string GroupId, bool AllowClassAdmin, DateTimeOffset UpdatedAt);
 public sealed record ExtensionPreferenceSnapshot(Guid UserId,string ExtensionId,bool ShowOnWatch,DateTimeOffset UpdatedAt);
+public sealed record SubjectColorSnapshot(Guid UserId, string SubjectName, string Color, DateTimeOffset UpdatedAt);
 public sealed record MetadataSnapshot(
     long AccountVersion,
     bool ForceSenderInTitle,
