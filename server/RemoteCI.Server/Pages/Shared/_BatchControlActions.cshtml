@@ -157,7 +157,7 @@
 </section>
 }
 
-@* 扩展插件：各班安装同一个支持 RemoteCI 的插件后自动出现；单班控制页在下方“扩展功能”中按插件分组展示。 *@
+@* 扩展插件：各班安装同一个支持 RemoteCI 的插件后自动出现；单班控制页在下方“扩展功能”中以同样的列表展示。 *@
 @if (!Model.IsSingleControl && Model.BatchExtensionGroups.Count > 0)
 {
 <section class="panel batch-section" id="batch-extension-plugins">
@@ -168,26 +168,34 @@
         </div>
     </div>
     @{ var batchExtensionIndex = 0; }
+    @* 与单班控制页“扩展功能”一致：按插件分组、每个扩展功能一行，执行后进入选择设备步骤。 *@
     @foreach (var group in Model.BatchExtensionGroups)
     {
-        <div class="batch-extension-group" data-extension-group="@group.Id">
-            <h3>@group.DisplayName</h3>
-            @if (!string.IsNullOrWhiteSpace(group.Description)) { <p class="muted">@group.Description</p> }
-            <div class="batch-action-grid">
-                @foreach (var extension in group.Extensions)
-                {
-                    <button type="button" class="batch-action-card" data-batch-open="RunExtension" data-batch-dialog="batch-settings-extension-@batchExtensionIndex" data-batch-title="@extension.DisplayName" data-batch-risk="false">
-                        <span class="batch-action-icon"><i class="icon icon-extension" aria-hidden="true"></i></span>
-                        <span class="batch-action-copy"><strong>@extension.DisplayName</strong><small>@(string.IsNullOrWhiteSpace(extension.Description) ? (extension.Parameters?.Count > 0 ? "填写参数后批量执行。" : "批量执行该扩展功能。") : extension.Description)</small></span>
-                    </button>
-                    batchExtensionIndex++;
-                }
+        <div class="extension-group" data-extension-group="@group.Id">
+            <div class="extension-group-head">
+                <div class="extension-identity">
+                    <strong>@group.DisplayName</strong>
+                    @if (!string.IsNullOrWhiteSpace(group.Description)) { <small>@group.Description</small> }
+                </div>
                 @if (group.HasSettings)
                 {
-                    <a class="batch-action-card" asp-page="@(Model.IsSingleControl ? "/ClassExtensions" : "/ExtensionSettings")" asp-route-groupId="@group.Id">
-                        <span class="batch-action-icon"><i class="icon icon-tune" aria-hidden="true"></i></span>
-                        <span class="batch-action-copy"><strong>插件设置</strong><small>@(Model.IsSingleControl ? $"修改本班的 {group.Settings.Count} 项设置。" : $"按范围统一修改 {group.Settings.Count} 项设置。")</small></span>
-                    </a>
+                    <a class="button ghost" asp-page="/ExtensionSettings" asp-route-groupId="@group.Id" title="按范围统一修改 @group.Settings.Count 项设置"><i class="icon icon-tune" aria-hidden="true"></i> 插件设置</a>
+                }
+            </div>
+            <div class="extension-list">
+                @if (group.Extensions.Count == 0)
+                {
+                    <p class="muted">该插件没有可执行的扩展功能，可在插件设置中统一调整。</p>
+                }
+                @foreach (var extension in group.Extensions)
+                {
+                    <article class="extension-control-row">
+                        <div class="extension-identity"><strong>@extension.DisplayName</strong>@if (!string.IsNullOrWhiteSpace(extension.Description)) { <small>@extension.Description</small> }<small>ID：@extension.Id</small></div>
+                        <div class="extension-row-actions">
+                            <button type="button" data-batch-open="RunExtension" data-batch-dialog="batch-settings-extension-@batchExtensionIndex" data-batch-title="@extension.DisplayName" data-batch-risk="false">执行</button>
+                        </div>
+                    </article>
+                    batchExtensionIndex++;
                 }
             </div>
         </div>
