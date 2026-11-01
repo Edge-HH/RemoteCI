@@ -19,6 +19,7 @@ curl -fsS -X POST "$REMOTECI_BASE_URL/api/commands?classId=$CLASS_ID" \
 | 9 | 语音消息 | `voiceMessage`：`{"format":"pcm_s16le_16000_mono","audioBase64":"…"}`，16 kHz 单声道 16 位 PCM，最长 60 秒 | 512 |
 | 1 | 换课 | `scheduleChange`，见下 | 16 |
 | 21 | 设置科目教师 | `subjectTeacher`：`{"subjectId":"…","teacherName":"王明"}`，`teacherName` 为空表示清除 | 16 |
+| 35 | 设置科目地点 | `subjectLocation`：`{"subjectId":"…","location":"机房"}`，`location` 为空表示清除（在本班教室上课）；需要插件能力 `schedule.subject-location` | 16 |
 | 4 | 显示 / 隐藏主界面 | `mainMenuVisible`：`true` 或 `false` | 256 |
 | 29 | 上传主界面文件 | `mainWindowLayout`，见下 | 256 |
 | 30 | 获取当前主界面文件 | 无；`data` 为 `{"name","layoutJson","layouts","isManagementMode"}` 的 JSON 字符串 | 256 |
