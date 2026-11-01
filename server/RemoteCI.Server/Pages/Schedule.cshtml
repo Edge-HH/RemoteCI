@@ -40,66 +40,88 @@ else
     <partial name="_ScheduleTable" model="Model.Bundle" />
     @if (Model.CanManageSchedule && !Model.FromProfile)
     {
-    <section class="panel">
-        <h2>科目教师</h2>
-        <p class="muted">教师名与老师账号的用户名一致时，课程会出现在该老师的“我的日程”中。</p>
-        @if (!Model.CanSetSubjectTeacher)
-        {
-            <div class="notice warning">当前班级的插件不支持设置科目教师，请升级教室端插件后重试。</div>
-        }
-        else
-        {
-            <div class="form-grid subject-teacher-grid">
-                @foreach (var subject in Model.Subjects)
+    <section class="panel" aria-labelledby="schedule-settings-title">
+        <div class="panel-heading"><div><h2 id="schedule-settings-title">课表设置</h2><p class="muted">科目教师与换课都在弹窗里填写，提交后由教室端生效。</p></div></div>
+        <div class="batch-action-grid schedule-setting-actions">
+            <button type="button" class="batch-action-card" data-user-edit-open="subject-teacher-dialog" aria-controls="subject-teacher-dialog">
+                <span class="batch-action-icon"><i class="icon icon-manage-accounts" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>科目教师</strong><small>为各科设置授课老师；教师名与老师账号的用户名一致时，课程会出现在该老师的“我的日程”中。</small></span>
+            </button>
+            <button type="button" class="batch-action-card" data-user-edit-open="schedule-change-dialog" aria-controls="schedule-change-dialog">
+                <span class="batch-action-icon"><i class="icon icon-swap-horiz" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>换课</strong><small>交换两节课或替换科目，可选今天起 30 天内的日期；可只改当天，也可永久写入源课表。</small></span>
+            </button>
+        </div>
+    </section>
+
+    <dialog id="subject-teacher-dialog" class="user-edit-dialog" data-user-edit-dialog aria-labelledby="subject-teacher-dialog-title">
+        <div class="user-edit-dialog-shell">
+            <header class="user-edit-dialog-header"><div><p class="eyebrow">课表设置</p><h2 id="subject-teacher-dialog-title">科目教师</h2><p class="muted">教师名与老师账号的用户名一致时，课程会出现在该老师的“我的日程”中。</p></div><button type="button" class="ghost dialog-close-button" data-user-edit-close aria-label="关闭科目教师"><i class="icon icon-close" aria-hidden="true"></i></button></header>
+            <div class="user-edit-form">
+                @if (!Model.PluginOnline)
                 {
-                    <form method="post" asp-page-handler="SubjectTeacher" class="subject-teacher-row">
-                        <input type="hidden" name="SubjectTeacher.SubjectId" value="@subject.Id" />
-                        <label>@subject.Name
-                            <input type="text" name="SubjectTeacher.TeacherName" value="@subject.Teacher" maxlength="@RemoteCI.Shared.Models.SubjectTeacherRequest.MaxTeacherNameLength" placeholder="授课教师名，多位老师用 / 分隔（留空清除）" />
-                        </label>
-                        <button type="submit">保存</button>
-                    </form>
+                    <div class="notice warning">插件离线，暂时无法设置科目教师；插件重新连接后即可编辑。</div>
+                }
+                else if (!Model.CanSetSubjectTeacher)
+                {
+                    <div class="notice warning">当前班级的插件不支持设置科目教师，请升级教室端插件后重试。</div>
+                }
+                else
+                {
+                    <div class="form-grid subject-teacher-grid">
+                        @foreach (var subject in Model.Subjects)
+                        {
+                            <form method="post" asp-page-handler="SubjectTeacher" class="subject-teacher-row">
+                                <input type="hidden" name="SubjectTeacher.SubjectId" value="@subject.Id" />
+                                <label>@subject.Name
+                                    <input type="text" name="SubjectTeacher.TeacherName" value="@subject.Teacher" maxlength="@RemoteCI.Shared.Models.SubjectTeacherRequest.MaxTeacherNameLength" placeholder="授课教师名，多位老师用 / 分隔（留空清除）" />
+                                </label>
+                                <button type="submit">保存</button>
+                            </form>
+                        }
+                    </div>
                 }
             </div>
-        }
-    </section>
-    }
-    @if (Model.CanManageSchedule && !Model.FromProfile)
-    {
-    <section class="panel">
-        <h2>换课</h2>
-        <p class="muted">可选今天起 30 天内的任意一天（以教室端已同步的课表为准）。</p>
-        <form method="post" class="form-grid schedule-change-form" data-schedule-change-form>
-            <script type="application/json" data-schedule-days>@Html.Raw(Model.SwapDaysJson)</script>
-            <label>日期
-                <input asp-for="Input.Date" type="date" min="@Model.SwapMinDate" max="@Model.SwapMaxDate" required data-schedule-date />
-                <small class="muted" data-schedule-date-hint aria-live="polite" hidden></small>
-            </label>
-            <input asp-for="Input.ExpectedRevision" type="hidden" data-schedule-revision />
-            <label>原节次
-                <select asp-for="Input.SourceIndex" data-schedule-source required></select>
-            </label>
-            <label>模式
-                <select asp-for="Input.Mode" data-schedule-mode>
-                    <option value="Exchange">交换</option>
-                    <option value="Replace">替换</option>
-                </select>
-            </label>
-            <label data-exchange-field>目标节次（同一天）
-                <select asp-for="Input.TargetIndex" data-schedule-target required></select>
-            </label>
-            <label data-replace-field hidden>替换科目
-                <select asp-for="Input.ReplacementSubjectId" disabled>
-                    <option value="">不选择</option>
-                    @foreach (var subject in Model.Bundle.Subjects)
-                    {
-                        <option value="@subject.Id">@subject.Name</option>
-                    }
-                </select>
-            </label>
-            <label class="schedule-permanent-option"><input asp-for="Input.Permanent" /> 永久换课（写入源课表，之后每周继续生效）</label>
-            <button type="submit" class="schedule-submit-button" disabled="@(!Model.PluginOnline)">提交换课</button>
-        </form>
-    </section>
+        </div>
+    </dialog>
+
+    <dialog id="schedule-change-dialog" class="user-edit-dialog schedule-change-dialog" data-user-edit-dialog aria-labelledby="schedule-change-dialog-title">
+        <div class="user-edit-dialog-shell">
+            <header class="user-edit-dialog-header"><div><p class="eyebrow">课表设置</p><h2 id="schedule-change-dialog-title">换课</h2><p class="muted">可选今天起 30 天内的任意一天（以教室端已同步的课表为准）。</p></div><button type="button" class="ghost dialog-close-button" data-user-edit-close aria-label="关闭换课"><i class="icon icon-close" aria-hidden="true"></i></button></header>
+            <div class="user-edit-form">
+                <form method="post" class="form-grid schedule-change-form" data-schedule-change-form>
+                    <script type="application/json" data-schedule-days>@Html.Raw(Model.SwapDaysJson)</script>
+                    <label>日期
+                        <input asp-for="Input.Date" type="date" min="@Model.SwapMinDate" max="@Model.SwapMaxDate" required data-schedule-date />
+                        <small class="muted" data-schedule-date-hint aria-live="polite" hidden></small>
+                    </label>
+                    <input asp-for="Input.ExpectedRevision" type="hidden" data-schedule-revision />
+                    <label>原节次
+                        <select asp-for="Input.SourceIndex" data-schedule-source required></select>
+                    </label>
+                    <label>模式
+                        <select asp-for="Input.Mode" data-schedule-mode>
+                            <option value="Exchange">交换</option>
+                            <option value="Replace">替换</option>
+                        </select>
+                    </label>
+                    <label data-exchange-field>目标节次（同一天）
+                        <select asp-for="Input.TargetIndex" data-schedule-target required></select>
+                    </label>
+                    <label data-replace-field hidden>替换科目
+                        <select asp-for="Input.ReplacementSubjectId" disabled>
+                            <option value="">不选择</option>
+                            @foreach (var subject in Model.Bundle.Subjects)
+                            {
+                                <option value="@subject.Id">@subject.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label class="schedule-permanent-option"><input asp-for="Input.Permanent" /> 永久换课（写入源课表，之后每周继续生效）</label>
+                    <button type="submit" class="schedule-submit-button" disabled="@(!Model.PluginOnline)">提交换课</button>
+                </form>
+            </div>
+        </div>
+    </dialog>
     }
 }

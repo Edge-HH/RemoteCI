@@ -502,14 +502,20 @@ textarea { resize: vertical; }
     .my-schedule-course-index { grid-column: 1 / -1; }
 }
 
-.subject-teacher-grid { gap: 10px 18px; }
+/* 科目教师在弹窗里编辑：一屏两列，窄视口交给 .form-grid 的断点收成一列。 */
+.subject-teacher-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px 18px; }
 .subject-teacher-row { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 10px; margin: 0; }
+/* 科目教师与换课收进同一个板块：两个操作各占一行按钮，点击后打开对应的弹窗。
+   .batch-action-grid 在 premium.css 里定义得更靠后，这里用双类选择器确保单列生效。 */
+.batch-action-grid.schedule-setting-actions { grid-template-columns: 1fr; }
 .schedule-pull-layout { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 14px 24px; }
 .schedule-pull-copy h2, .schedule-pull-copy p { margin: 0; }
 .schedule-pull-copy p { margin-top: 8px; }
 .schedule-pull-button { width: auto; min-width: 240px; justify-self: end; }
 .schedule-pull-layout .schedule-pull-progress { grid-column: 1/-1; }
 .schedule-change-form .schedule-submit-button { grid-column: 3; width: 100%; }
+/* 换课表单在弹窗里按三列排布，比通用弹窗宽一些，“永久换课”说明才不至于挤成三行。 */
+.user-edit-dialog.schedule-change-dialog { width: min(920px,calc(100vw - 32px)); }
 @media (max-width: 820px) {
     .schedule-pull-layout { grid-template-columns: 1fr; }
     .schedule-pull-button { width: 100%; min-width: 0; justify-self: stretch; }

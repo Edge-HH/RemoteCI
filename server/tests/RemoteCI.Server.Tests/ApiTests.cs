@@ -745,6 +745,12 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Contains("data-schedule-change-form", scheduleHtml);
         Assert.Contains("data-schedule-source", scheduleHtml);
         Assert.Contains("data-schedule-target", scheduleHtml);
+        // 科目教师与换课收进同一个板块：两个操作各占一行按钮，点击后打开各自的弹窗。
+        Assert.Contains("""class="batch-action-grid schedule-setting-actions""", scheduleHtml);
+        Assert.Contains("data-user-edit-open=\"subject-teacher-dialog\"", scheduleHtml);
+        Assert.Contains("data-user-edit-open=\"schedule-change-dialog\"", scheduleHtml);
+        Assert.Contains("""<dialog id="subject-teacher-dialog" class="user-edit-dialog" data-user-edit-dialog""", scheduleHtml);
+        Assert.Contains("""<dialog id="schedule-change-dialog" class="user-edit-dialog schedule-change-dialog" data-user-edit-dialog""", scheduleHtml);
         // 日期用日期选择器（今天起 30 天内），节次由 app.js 按所选日期从内嵌数据填充。
         Assert.Contains("目标节次（同一天）", scheduleHtml);
         Assert.Contains("data-schedule-days", scheduleHtml);
@@ -820,6 +826,9 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Contains(".schedule-pull-layout { display: grid; grid-template-columns: minmax(0,1fr) auto", css);
         Assert.Contains(".schedule-pull-button { width: auto; min-width: 240px; justify-self: end; }", css);
         Assert.Contains(".schedule-change-form .schedule-submit-button { grid-column: 3; width: 100%; }", css);
+        // 课表设置板块的两个操作各占一行；换课弹窗比通用弹窗宽，三列表单才不挤。
+        Assert.Contains(".batch-action-grid.schedule-setting-actions { grid-template-columns: 1fr; }", css);
+        Assert.Contains(".user-edit-dialog.schedule-change-dialog { width: min(920px,calc(100vw - 32px)); }", css);
         Assert.Contains(".backup-list .row-actions { flex: 0 0 auto; align-items: center; flex-direction: row", css);
         var script = await browser.GetStringAsync("/app.js");
         Assert.Contains("[data-backup-settings-form]", script);
