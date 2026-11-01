@@ -35,6 +35,13 @@ data class WatchSettings(
     val receiveAutomationNotifications: Boolean = true,
     val receivePluginNotifications: Boolean = true,
     val appearanceMode: String = "system",
+    /**
+     * 控制页“常用”控制项（控制项 id），按磁贴顺序；null 表示未自定义，使用默认常用项，
+     * 空列表表示用户取消了全部常用项。“今天”页的快捷控制读取同一份设置。
+     */
+    val controlFavorites: List<String>? = null,
+    /** 控制页控制项的排列顺序（控制项 id）；为空表示默认顺序。 */
+    val controlOrder: List<String> = emptyList(),
 )
 
 class SettingsStore(context: Context) {
@@ -46,8 +53,7 @@ class SettingsStore(context: Context) {
         cloudServerUrl = prefs.getString(KEY_CLOUD_URL, "http://10.0.2.2:8080") ?: "http://10.0.2.2:8080",
         lanConnectionEnabled = prefs.getBoolean(KEY_LAN_CONNECTION_ENABLED, true),
         lanHost = prefs.getString(KEY_LAN_HOST, "") ?: "",
-        lanHostCandidates = prefs.getString(KEY_LAN_HOST_CANDIDATES, "")
-            ?.lineSequence()?.filter(String::isNotBlank)?.distinct()?.toList().orEmpty(),
+        lanHostCandidates = prefs.getString(KEY_LAN_HOST_CANDIDATES, "")?.parseIdLines().orEmpty(),
         lanPort = prefs.getInt(KEY_LAN_PORT, 8765),
         lanClassId = prefs.getString(KEY_LAN_CLASS_ID, "") ?: "",
         selectedClassId = prefs.getString(KEY_SELECTED_CLASS_ID, "") ?: "",
@@ -68,10 +74,15 @@ class SettingsStore(context: Context) {
         receiveAutomationNotifications = prefs.getBoolean(KEY_AUTOMATION_NOTIFICATIONS, true),
         receivePluginNotifications = prefs.getBoolean(KEY_PLUGIN_NOTIFICATIONS, true),
         appearanceMode = prefs.getString(KEY_APPEARANCE, "system") ?: "system",
+        // 键不存在表示从未自定义；写入空串表示用户主动取消了全部常用项。
+        controlFavorites = if (prefs.contains(KEY_CONTROL_FAVORITES)) {
+            prefs.getString(KEY_CONTROL_FAVORITES, "")?.parseIdLines().orEmpty()
+        } else null,
+        controlOrder = prefs.getString(KEY_CONTROL_ORDER, "")?.parseIdLines().orEmpty(),
     )
 
     fun save(settings: WatchSettings) {
-        prefs.edit()
+        val editor = prefs.edit()
             .putString(KEY_USERNAME, settings.username)
             .putBoolean(KEY_CLOUD_CONNECTION_ENABLED, settings.cloudConnectionEnabled)
             .putString(KEY_CLOUD_URL, settings.cloudServerUrl)
@@ -96,7 +107,12 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_AUTOMATION_NOTIFICATIONS, settings.receiveAutomationNotifications)
             .putBoolean(KEY_PLUGIN_NOTIFICATIONS, settings.receivePluginNotifications)
             .putString(KEY_APPEARANCE, settings.appearanceMode)
-            .apply()
+            .putString(KEY_CONTROL_ORDER, settings.controlOrder.joinToString("\n"))
+        // null 表示未自定义：删除键回到默认常用项，不能用空串代替。
+        val favorites = settings.controlFavorites
+        if (favorites != null) editor.putString(KEY_CONTROL_FAVORITES, favorites.joinToString("\n"))
+        else editor.remove(KEY_CONTROL_FAVORITES)
+        editor.apply()
     }
 
     /**
@@ -110,6 +126,10 @@ class SettingsStore(context: Context) {
         prefs.edit().putString(KEY_THEME_ID, themeId).putBoolean(KEY_THEME_FRESH_MIGRATED, true).apply()
         return themeId
     }
+
+    /** 一行一项的 id 列表（候选地址、控制项顺序与常用项）；空行忽略，重复项只保留第一次出现。 */
+    private fun String.parseIdLines(): List<String> =
+        lineSequence().map(String::trim).filter(String::isNotEmpty).distinct().toList()
 
     private companion object {
         const val KEY_USERNAME = "username"
@@ -137,6 +157,8 @@ class SettingsStore(context: Context) {
         const val KEY_AUTOMATION_NOTIFICATIONS = "receiveAutomationNotifications"
         const val KEY_PLUGIN_NOTIFICATIONS = "receivePluginNotifications"
         const val KEY_APPEARANCE = "appearanceMode"
+        const val KEY_CONTROL_FAVORITES = "controlFavorites"
+        const val KEY_CONTROL_ORDER = "controlOrder"
     }
 }
 

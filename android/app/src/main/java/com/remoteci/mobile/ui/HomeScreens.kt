@@ -558,13 +558,13 @@ fun HomeShell(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (tab) {
-                HomeTab.Today -> TodayScreen(snackbar, onOpen, onTab, onSwapRequests = { onHome(Screen.Home(HomeTab.Schedule, openSwapRequests = true)) })
+                HomeTab.Today -> TodayScreen(settings, snackbar, onOpen, onTab, onSwapRequests = { onHome(Screen.Home(HomeTab.Schedule, openSwapRequests = true)) })
                 HomeTab.Schedule -> ScheduleScreen(
                     snackbar = snackbar,
                     onOpen = onOpen,
                     openSwapRequests = home.openSwapRequests,
                 )
-                HomeTab.Control -> ControlListScreen(snackbar = snackbar, onOpen = onOpen)
+                HomeTab.Control -> ControlListScreen(settings, snackbar = snackbar, onOpen = onOpen)
                 HomeTab.Me -> AccountScreen(settings, snackbar, onOpen, onPersist, onLoggedOut)
             }
         }
@@ -573,7 +573,7 @@ fun HomeShell(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (HomeTab) -> Unit, onSwapRequests: () -> Unit) {
+fun TodayScreen(settings: WatchSettings, snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (HomeTab) -> Unit, onSwapRequests: () -> Unit) {
     val snapshot by ConnectionManager.snapshot.collectAsState()
     val schedule by ConnectionManager.schedule.collectAsState()
     val user by ConnectionManager.currentUser.collectAsState()
@@ -607,7 +607,8 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
         Protocol.STATE_AFTER_SCHOOL -> "放学"
         else -> "待机"
     }
-    val controls = rememberVisibleControlItems().filter { it.todayShortcut }
+    // 快捷控制与控制页共用同一份“常用”设置和顺序，在控制页里自定义后这里同步变化。
+    val controls = rememberControlLayout(settings).favorites
     val pendingSwaps by ConnectionManager.pendingSwapCount.collectAsState()
     Column(Modifier.fillMaxSize()) {
     // 连接状态改为标题右侧的云朵图标，点开看课表同步与手表状态。

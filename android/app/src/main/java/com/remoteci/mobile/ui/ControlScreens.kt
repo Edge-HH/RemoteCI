@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.AlertDialog
@@ -71,19 +72,42 @@ import com.remoteci.mobile.data.effectiveClassPermissions
 import com.remoteci.mobile.data.Protocol
 import com.remoteci.mobile.data.UserProfile
 import com.remoteci.mobile.data.VoiceRecorder
+import com.remoteci.mobile.data.WatchSettings
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.launch
 
-/** 当前班级可用的控制项；权限按当前班级计算，插件能力随插件上下线变化。 */
+/** 当前班级的权限与插件能力；控制页和扩展列表共用同一份判断。 */
+private data class ControlAccess(val classPermissions: Int, val refined: Boolean, val capabilities: Set<String>)
+
 @Composable
-internal fun rememberVisibleControlItems(): List<ControlItem> {
+private fun rememberControlAccess(): ControlAccess {
     val user by ConnectionManager.currentUser.collectAsState()
     val classes by ConnectionManager.classes.collectAsState()
     val currentClassId by ConnectionManager.currentClassId.collectAsState()
     val caps by ConnectionManager.availableCapabilities.collectAsState()
     val classPermissions = effectiveClassPermissions(classes, currentClassId, user?.permissions ?: 0)
     val refined = user?.usesRefinedPermissions == true || Protocol.hasRefinedBits(classPermissions)
-    return visibleControlItems(classPermissions, refined, caps)
+    return ControlAccess(classPermissions, refined, caps)
+}
+
+/** 当前班级可用的控制项，加上账号可见的扩展功能；权限按当前班级计算，插件能力随插件上下线变化。 */
+@Composable
+internal fun rememberVisibleControlEntries(): List<ControlEntry> {
+    val access = rememberControlAccess()
+    val user by ConnectionManager.currentUser.collectAsState()
+    val extensions by ConnectionManager.extensions.collectAsState()
+    val items = visibleControlItems(access.classPermissions, access.refined, access.capabilities)
+    val visibleExtensions = extensions.filter { extensionVisibleForClass(user, access.classPermissions, it) }
+    return remember(items, visibleExtensions) { controlEntries(items, visibleExtensions) }
+}
+
+/** 控制页与“今天”页共用的布局：按本机保存的自定义顺序排好，常用项作为磁贴。 */
+@Composable
+internal fun rememberControlLayout(settings: WatchSettings): ControlLayout {
+    val entries = rememberVisibleControlEntries()
+    return remember(entries, settings.controlOrder, settings.controlFavorites) {
+        controlLayout(entries, settings.controlOrder, settings.controlFavorites)
+    }
 }
 
 internal val ControlItem.icon: ImageVector
@@ -96,6 +120,26 @@ internal val ControlItem.icon: ImageVector
         ControlItem.Volume -> Icons.Rounded.VolumeUp
         ControlItem.Power -> Icons.Rounded.PowerSettingsNew
         ControlItem.Extensions -> Icons.Rounded.Extension
+    }
+
+internal val ControlEntry.icon: ImageVector
+    get() = when (this) {
+        is ControlEntry.Builtin -> item.icon
+        // 具体扩展功能沿用扩展页的通用图标。
+        is ControlEntry.Extension -> Icons.Rounded.Extension
+    }
+
+/** 磁贴上的一行状态：主界面显示当前显隐状态，扩展显示注册 id，其余用简短说明。 */
+internal fun ControlEntry.tileSupporting(mainMenuVisible: Boolean): String = when (this) {
+    is ControlEntry.Builtin -> item.tileSupporting(mainMenuVisible)
+    is ControlEntry.Extension -> id
+}
+
+/** 列表行的一行说明：内置项用默认说明，扩展功能显示注册 id。 */
+internal val ControlEntry.supportingText: String
+    get() = when (this) {
+        is ControlEntry.Builtin -> item.supporting
+        is ControlEntry.Extension -> id
     }
 
 /** 磁贴上的一行状态：主界面显示当前显隐状态，其余用简短说明。 */
@@ -118,29 +162,56 @@ internal fun runControl(item: ControlItem, mainMenuVisible: Boolean, onOpen: (Sc
         ControlItem.Screenshot -> onOpen(Screen.Screenshot)
         ControlItem.Volume -> onOpen(Screen.Volume)
         ControlItem.Power -> onOpen(Screen.Power)
-        ControlItem.Extensions -> onOpen(Screen.Extensions)
+        ControlItem.Extensions -> onOpen(Screen.Extensions())
     }
 }
 
-/** 底栏“控制”：顶部磁贴放一键与高频操作，下方按“大屏 / 扩展”分组列出需要进入二级页的控制。 */
+/**
+ * 执行控制页的一项。扩展功能的参数默认值可用时直接运行（常用磁贴就是一键操作），
+ * 需要填写参数时进入扩展页的对应表单。
+ */
+internal fun runControl(entry: ControlEntry, mainMenuVisible: Boolean, onOpen: (Screen) -> Unit) {
+    when (entry) {
+        is ControlEntry.Builtin -> runControl(entry.item, mainMenuVisible, onOpen)
+        is ControlEntry.Extension -> {
+            val definition = entry.definition
+            val args = initialExtensionArgs(definition.parameters)
+            if (validateExtensionArgs(definition.parameters, args) == null) {
+                ConnectionManager.runExtension(definition, args)
+            } else {
+                onOpen(Screen.Extensions(definition.id))
+            }
+        }
+    }
+}
+
+/** 底栏“控制”：顶部是自定义的常用磁贴，下方按分组列出其余控制项。 */
 @Composable
-fun ControlListScreen(snackbar: androidx.compose.material3.SnackbarHostState, onOpen: (Screen) -> Unit) {
+fun ControlListScreen(settings: WatchSettings, snackbar: androidx.compose.material3.SnackbarHostState, onOpen: (Screen) -> Unit) {
     val snapshot by ConnectionManager.snapshot.collectAsState()
     val mainMenuVisible = snapshot?.isMainMenuVisible == true
-    val items = rememberVisibleControlItems()
-    val quick = items.filter { it.quick }
-    val rest = items.filterNot { it.quick }
+    val layout = rememberControlLayout(settings)
     Column(Modifier.fillMaxSize()) {
-        HomeTopBar("课堂控制", snackbar, onOpen)
-        if (items.isEmpty()) {
+        HomeTopBar(
+            "课堂控制", snackbar, onOpen,
+            actions = {
+                // 顺序与常用项都可自定义，入口放在顶栏，不占用控制项本身的位置。
+                if (!layout.isEmpty) {
+                    IconButton({ onOpen(Screen.ControlLayout) }) {
+                        Icon(Icons.Rounded.SwapVert, contentDescription = "自定义控制页")
+                    }
+                }
+            },
+        )
+        if (layout.isEmpty) {
             EmptyState("没有可用的控制项", "这取决于账号权限，以及当前插件是否在线。")
             Spacer(Modifier.weight(1f))
         } else {
             // 控制项多于一屏（小屏或长说明换行）时必须可滚动，否则底部的“扩展功能”等入口无法触达。
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
-                if (quick.isNotEmpty()) {
+                if (layout.favorites.isNotEmpty()) {
                     ListSectionLabel("常用")
-                    QuickActionGrid(quick, Modifier.padding(horizontal = 16.dp)) { item, modifier ->
+                    QuickActionGrid(layout.favorites, Modifier.padding(horizontal = 16.dp)) { item, modifier ->
                         QuickActionTile(
                             title = item.title,
                             icon = item.icon,
@@ -150,18 +221,18 @@ fun ControlListScreen(snackbar: androidx.compose.material3.SnackbarHostState, on
                         )
                     }
                 }
-                rest.groupBy { it.group }.forEach { (group, groupItems) ->
-                    ListSectionLabel(group)
+                layout.groups.forEach { group ->
+                    ListSectionLabel(group.name)
                     ConnectedListCard(Modifier.padding(horizontal = 16.dp)) {
-                        groupItems.forEachIndexed { index, item ->
+                        group.items.forEachIndexed { index, entry ->
                             AppListItem(
-                                title = item.title,
-                                supporting = item.supporting,
-                                leading = item.icon,
+                                title = entry.title,
+                                supporting = entry.supportingText,
+                                leading = entry.icon,
                                 trailing = Icons.Rounded.ChevronRight,
                                 index = index,
-                                count = groupItems.size,
-                                onClick = { runControl(item, mainMenuVisible, onOpen) },
+                                count = group.items.size,
+                                onClick = { runControl(entry, mainMenuVisible, onOpen) },
                             )
                         }
                     }
@@ -393,26 +464,25 @@ fun MainMenuScreen(onBack: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ExtensionsScreen(onBack: () -> Unit) {
+fun ExtensionsScreen(openId: String?, onBack: () -> Unit) {
     val user by ConnectionManager.currentUser.collectAsState()
-    val classes by ConnectionManager.classes.collectAsState()
-    val currentClassId by ConnectionManager.currentClassId.collectAsState()
     val extensions by ConnectionManager.extensions.collectAsState()
-    val classPermissions = effectiveClassPermissions(classes, currentClassId, user?.permissions ?: 0)
-    val canRunExtensions = (classPermissions and Protocol.PERMISSION_RUN_EXTENSIONS) == Protocol.PERMISSION_RUN_EXTENSIONS
-    val allowedExtensionIds = user?.allowedExtensionIds
-    val visibleExtensionIds = user?.visibleExtensionIds
-    val visibleExtensions = extensions.filter { extension ->
-        canRunExtensions &&
-            (allowedExtensionIds == null || extension.id in allowedExtensionIds) &&
-            (visibleExtensionIds == null || extension.id in visibleExtensionIds)
-    }
+    val access = rememberControlAccess()
+    val visibleExtensions = extensions.filter { extensionVisibleForClass(user, access.classPermissions, it) }
     val scope = rememberCoroutineScope()
     var policies by remember { mutableStateOf<List<com.remoteci.mobile.data.ExtensionPolicyItem>>(emptyList()) }
     var selected by remember { mutableStateOf<ExtensionDefinition?>(null) }
     var args by remember { mutableStateOf<Map<String, String?>>(emptyMap()) }
     androidx.compose.runtime.LaunchedEffect(user) {
         policies = runCatching { AdminApi.extensions(ConnectionManager.currentClassId.value) }.getOrDefault(emptyList())
+    }
+    // 从控制页的扩展磁贴进入时，直接打开该扩展的参数表单。
+    androidx.compose.runtime.LaunchedEffect(openId, visibleExtensions) {
+        if (selected != null) return@LaunchedEffect
+        visibleExtensions.firstOrNull { it.id == openId }?.let {
+            selected = it
+            args = initialExtensionArgs(it.parameters)
+        }
     }
     Column(Modifier.fillMaxSize()) {
         TopAppBar(title = { Text("扩展功能") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } })

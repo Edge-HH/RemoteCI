@@ -57,7 +57,10 @@ sealed interface Screen {
     data object Screenshot : Screen
     data object Power : Screen
     data object MainMenu : Screen
-    data object Extensions : Screen
+    /** openId：从控制页的扩展磁贴进入时直接打开该扩展的参数表单。 */
+    data class Extensions(val openId: String? = null) : Screen
+    /** 控制页的自定义排序与常用项设置。 */
+    data object ControlLayout : Screen
     data object VisitorAccess : Screen
     data object Roles : Screen
     data object Users : Screen
