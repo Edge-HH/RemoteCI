@@ -223,11 +223,15 @@ object ConnectionManager {
             else accessible.firstOrNull()?.id
     }
 
-    /** 班级内的有效权限；服务端未下发班级信息（旧服务端）时回退到全局权限。 */
+    /**
+     * 班级内的有效权限；服务端未下发班级信息（旧服务端）时回退到全局权限。
+     * 旧服务端没有细化后的独立权限位（例如音量、清除通知），按原来合并在一起的旧权限判断。
+     */
     fun hasClassPermission(permission: Int): Boolean {
         val classContext = classes.value.firstOrNull { it.id == currentClassId.value }
         val effective = classContext?.effectivePermissions ?: currentUser.value?.permissions ?: 0
-        return effective and permission == permission
+        val refined = currentUser.value?.usesRefinedPermissions == true || Protocol.hasRefinedBits(effective)
+        return Protocol.hasPermission(effective, permission, refined)
     }
 
     /**
@@ -549,7 +553,7 @@ object ConnectionManager {
     fun clearNotifications() {
         sendCommand(
             CommandMessage(command = Protocol.CMD_CLEAR_NOTIFICATIONS),
-            Protocol.PERMISSION_SEND_NOTIFICATIONS,
+            Protocol.PERMISSION_CLEAR_NOTIFICATIONS,
         )
     }
 
@@ -577,7 +581,7 @@ object ConnectionManager {
                     command = Protocol.CMD_VOLUME,
                     volume = VolumeControlRequest(level = level.coerceIn(0, 100)),
                 ),
-                Protocol.PERMISSION_POWER_CONTROL,
+                Protocol.PERMISSION_VOLUME_CONTROL,
             )
         }
     }
@@ -585,7 +589,7 @@ object ConnectionManager {
     fun setMuted(muted: Boolean) {
         sendCommand(
             CommandMessage(command = Protocol.CMD_VOLUME, volume = VolumeControlRequest(muted = muted)),
-            Protocol.PERMISSION_POWER_CONTROL,
+            Protocol.PERMISSION_VOLUME_CONTROL,
         )
     }
 

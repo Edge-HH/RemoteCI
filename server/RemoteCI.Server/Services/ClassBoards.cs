@@ -41,8 +41,9 @@ public sealed class ClassBoardService(
     public const int MaxBoardsPerClass = 10;
     private static readonly string[] WeekdayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
+    /// <summary>需要该班的“电子班牌”权限（系统管理员始终拥有）。</summary>
     public async Task<bool> CanManageAsync(AppUser actor, Guid classId, CancellationToken ct = default) =>
-        await access.IsClassAdminAsync(actor.Id, actor.Role, classId, ct) &&
+        (await access.GetEffectivePermissionsAsync(actor.Id, actor.Role, classId, ct)).HasFlag(UserPermissions.ManageClassBoards) &&
         await db.Classrooms.AnyAsync(x => x.Id == classId, ct);
 
     public async Task<IReadOnlyList<ClassBoardView>> ListAsync(AppUser actor, Guid classId, CancellationToken ct = default)

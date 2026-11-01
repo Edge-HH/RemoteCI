@@ -1103,9 +1103,12 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var html = await browser.GetStringAsync("/Users");
         Assert.DoesNotContain("TeacherComing", html);
         Assert.DoesNotContain("老师来了", html);
-        Assert.DoesNotContain("Create.ChangeDisplayName", html);
-        Assert.DoesNotContain("\"Edit.ChangeDisplayName\"", html);
-        Assert.Equal(UserPermissions.None, new RemoteCI.Server.Pages.UsersModel.UserInput { ChangeDisplayName = true }.Grants);
+        Assert.DoesNotContain($"name=\"Create.Permission\" value=\"{(int)UserPermissions.ChangeDisplayName}\"", html);
+        Assert.DoesNotContain($"name=\"Edit.Permission\" value=\"{(int)UserPermissions.ChangeDisplayName}\"", html);
+        Assert.Equal(UserPermissions.None, new RemoteCI.Server.Pages.UsersModel.UserInput
+        {
+            Permission = [(int)UserPermissions.ChangeDisplayName],
+        }.SelectedPermissions);
     }
 
     [Fact]
@@ -1205,10 +1208,12 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         using var browser = CreateBrowserClient();
         await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
         var html = await browser.GetStringAsync("/Users");
-        Assert.Contains("Create.ApiAccess", html);
-        Assert.Contains("Edit.ApiAccess", html);
-        Assert.Contains("RoleEdit.ApiAccess", html);
-        Assert.Equal(UserPermissions.ApiAccess, new RemoteCI.Server.Pages.UsersModel.UserInput { ApiAccess = true }.Grants);
+        foreach (var prefix in new[] { "Create", "Edit", "RoleEdit" })
+            Assert.Contains($"name=\"{prefix}.Permission\" value=\"{(int)UserPermissions.ApiAccess}\"", html);
+        Assert.Equal(UserPermissions.ApiAccess, new RemoteCI.Server.Pages.UsersModel.UserInput
+        {
+            Permission = [(int)UserPermissions.ApiAccess],
+        }.SelectedPermissions);
     }
 
     [Fact]
@@ -1418,9 +1423,14 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var adminDialogEnd = html.IndexOf("</dialog>", adminIdIndex, StringComparison.Ordinal);
         Assert.True(adminDialogStart >= 0 && adminDialogEnd > adminDialogStart);
         var adminDialog = html[adminDialogStart..(adminDialogEnd + "</dialog>".Length)];
-        Assert.Contains("管理员默认拥有全部权限，附加权限不可修改。", adminDialog);
-        Assert.Matches("data-role-permissions[^>]*\\shidden(?:=|\\s|>)", adminDialog);
-        Assert.Matches("name=\\\"Edit.AccessWebUi\\\"[^>]*\\sdisabled(?:=|\\s|/|>)", adminDialog);
+        // 管理员：清单全部勾选并锁定，不能单独调整。
+        Assert.Contains("管理员固定拥有全部权限。", WebUtility.HtmlDecode(adminDialog));
+        Assert.Contains("permission-checklist is-locked", adminDialog);
+        var adminPermission = Regex.Match(adminDialog,
+            $"<input[^>]*name=\\\"Edit.Permission\\\" value=\\\"{(int)UserPermissions.AccessWebUi}\\\"[^>]*>");
+        Assert.True(adminPermission.Success);
+        Assert.Contains("disabled", adminPermission.Value, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("checked", adminPermission.Value, StringComparison.OrdinalIgnoreCase);
 
         var studentIdIndex = html.LastIndexOf("ID：dialog.student", StringComparison.Ordinal);
         var studentDialogStart = html.LastIndexOf("<dialog", studentIdIndex, StringComparison.Ordinal);
@@ -1431,7 +1441,8 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.DoesNotContain("handler=Delete", studentDialog);
         Assert.Contains("data-password-confirmation", studentDialog);
         Assert.Contains("name=\"confirmPassword\"", studentDialog);
-        var studentPermission = Regex.Match(studentDialog, "<input[^>]*name=\\\"Edit.AccessWebUi\\\"[^>]*>");
+        var studentPermission = Regex.Match(studentDialog,
+            $"<input[^>]*name=\\\"Edit.Permission\\\" value=\\\"{(int)UserPermissions.AccessWebUi}\\\"[^>]*>");
         Assert.True(studentPermission.Success);
         Assert.DoesNotContain("disabled", studentPermission.Value, StringComparison.OrdinalIgnoreCase);
     }
@@ -2225,10 +2236,12 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         using var browser = CreateBrowserClient();
         await LoginWebUiAsync(browser, TestWebApplicationFactory.AdminUsername, TestWebApplicationFactory.AdminPassword);
         var html = await browser.GetStringAsync("/Users");
-        Assert.Contains("Create.SendVoiceMessages", html);
-        Assert.Contains("Edit.SendVoiceMessages", html);
-        Assert.Contains("RoleEdit.SendVoiceMessages", html);
-        Assert.Equal(UserPermissions.SendVoiceMessages, new RemoteCI.Server.Pages.UsersModel.UserInput { SendVoiceMessages = true }.Grants);
+        foreach (var prefix in new[] { "Create", "Edit", "RoleEdit" })
+            Assert.Contains($"name=\"{prefix}.Permission\" value=\"{(int)UserPermissions.SendVoiceMessages}\"", html);
+        Assert.Equal(UserPermissions.SendVoiceMessages, new RemoteCI.Server.Pages.UsersModel.UserInput
+        {
+            Permission = [(int)UserPermissions.SendVoiceMessages],
+        }.SelectedPermissions);
     }
 
     private HttpClient CreateBrowserClient() => _factory.CreateClient(new WebApplicationFactoryClientOptions

@@ -52,7 +52,8 @@ public sealed class IndexModel(
 
     public async Task<IActionResult> OnPostPairCodeAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi | UserPermissions.ManageUsers) is { } denied) return denied;
+        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
+        if (!HasManagement(ManagementPermissions.ManagePluginAccess)) return RedirectToPage("/Denied");
         // 配对码绑定当前班级；插件配对后归属该班，只能收发该班的命令与数据。
         if (CurrentClass is null)
         {

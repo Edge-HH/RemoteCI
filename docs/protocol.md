@@ -6,28 +6,72 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 ## 身份与权限
 
-有效权限是位掩码：
+有效权限是位掩码。权限分两类：**班级权限**（`permissions`，下表）按账号在各班级的角色计算，随命令的 `requestedBy.permissions` 下发给插件；**系统管理权限**（`managementPermissions`，见下一节）只按账号的全局角色计算，只在服务端使用。
 
 | 值 | 权限 |
 | ---: | --- |
-| 1 | `ViewCurrentCourse` |
-| 2 | `AccessWebUi` |
-| 4 | `ManageUsers` |
-| 8 | `SendNotifications` |
-| 16 | `ManageSchedule` |
-| 32 | `PowerControl`（旧名称 `SystemControl` 保留为别名） |
+| 1 | `ViewCurrentCourse`（基础权限，普通用户固定拥有） |
+| 2 | `AccessWebUi`（概览页） |
+| 4 | `ManageUsers`（人员管理：账号、密码与 API Key） |
+| 8 | `SendNotifications`（发送通知） |
+| 16 | `ManageSchedule`（直接换课与编辑课表、科目任课老师） |
+| 32 | `PowerControl`（关机、重启与睡眠；旧名称 `SystemControl` 保留为别名） |
 | 64 | `TeacherComing`（旧协议保留，当前 UI 暂时隐藏） |
-| 128 | `RunExtensions` |
-| 256 | `MainMenuControl` |
-| 512 | `SendVoiceMessages`（发送语音） |
-| 1024 | `ChangeDisplayName`（修改用户名） |
+| 128 | `RunExtensions`（使用扩展功能） |
+| 256 | `MainMenuControl`（显示或隐藏主界面） |
+| 512 | `SendVoiceMessages`（语音消息） |
+| 1024 | `ChangeDisplayName`（仅兼容旧数据，不可授予） |
 | 2048 | `ApiAccess`（REST API Key；插件协议仅透传该位） |
-| 4096 | `RequestScheduleSwap`（老师主动换课：发起与审批换课申请） |
+| 4096 | `RequestScheduleSwap`（发起换课申请） |
 | 8192 | `ForceScheduleSwap`（强制换课：不经审批立即生效，对方可撤回） |
-| 16384 | `SendFiles`（文件分发：经服务端中转把文件发到有权班级设备的桌面、下载或文档文件夹） |
-| 32768 | `CaptureScreen`（屏幕截图：获取有权班级教室电脑的当前屏幕） |
+| 16384 | `SendFiles`（文件分发：经服务端中转把文件发到设备的桌面、下载或文档文件夹） |
+| 32768 | `CaptureScreen`（屏幕截图） |
+| 65536 | `ManageClassProfile`（本班档案：查看、编辑、下发与收集档案和时间表） |
+| 131072 | `PullSchedule`（从教室刷新课表） |
+| 262144 | `ClearNotifications`（清除通知） |
+| 524288 | `VolumeControl`（音量与静音） |
+| 1048576 | `MainWindowLayout`（上传与获取主界面文件） |
+| 2097152 | `RemoteTerminal`（远程终端） |
+| 4194304 | `ControlClassIsland`（启动、重启 ClassIsland 与加入集控） |
+| 8388608 | `ConfigureExtensions`（修改本班已开放的扩展插件设置） |
+| 16777216 | `ManagePlugins`（安装、卸载、启停插件，插件包与插件管理策略） |
+| 33554432 | `UpgradeSoftware`（升级 ClassIsland 与插件、刷新版本清单） |
+| 67108864 | `ManageDeviceGuard`（停用、卸载与更新设备上的应用守护） |
+| 134217728 | `ManageClassInfo`（班级名称与头像） |
+| 268435456 | `ManageClassBoards`（电子班牌） |
+| 536870912 | `ViewAuditLog`（本班操作记录与设备状态） |
+| 1073741824 | `ViewLessonStats`（本班课时统计） |
 
-管理员的有效权限固定为 65535（全部位）。`SendFiles` 默认不授予任何内置角色，由系统管理员按需开启；`CaptureScreen` 默认授予内置班主任角色（升级迁移会为已有的班主任角色补上一次），老师需由系统管理员在账号或角色中开启。`RequestScheduleSwap` 与 `ForceScheduleSwap` 是全局权限，由系统管理员在“角色配置”中开关：内置老师和班主任默认开启前者（升级迁移会为已有的两个内置角色补上一次），后者默认关闭。普通用户固定包含值 1，其余权限来自服务端授权。权限设置界面将值 2 显示为“概览”；七日课表查看只要求账号已登录，手动拉取课表允许系统管理员，以及班级自治策略允许时的本班班主任；定时自动拉取间隔是全局设置，只有系统管理员可以修改，值 16 保护换课。`TeacherComing` 权限位和命令仅为旧客户端兼容保留，当前不在 WebUI、各端 App 或权限设置中显示；`SendNotifications` 只保护自定义通知与清除提醒，`SendVoiceMessages` 独立保护语音消息，`RunExtensions` 是所有插件扩展的独立权限，`MainMenuControl` 保护主界面显隐，`PowerControl` 保护音量和 Windows 电源操作，`ChangeDisplayName` 仅保留为兼容旧权限数据，实际只有系统管理员可以修改用户可见用户名（DisplayName，登录 ID 不变）；用户名会影响老师获取的日程信息。`ApiAccess` 允许账号创建 API Key 并调用 REST API；管理员、班主任与老师默认拥有 API 访问。
+管理员的有效权限固定为 2147483647（全部位）。值 65536 起是从原有权限中拆出的独立权限（权限细化）：升级时已拥有原权限的角色与账号自动补齐，行为不变——`SendNotifications` 补 `ClearNotifications`，`PowerControl` 补 `VolumeControl`，`MainMenuControl` 补 `MainWindowLayout`，`ManageUsers` 补本班档案、远程终端、ClassIsland 程序控制、管理插件、升级软件与设备应用守护；内置“班主任”角色另补 `ManageClassProfile`（原本有 `ManageSchedule` 时）、`ConfigureExtensions`（原本有 `RunExtensions` 时）、`ManageClassBoards`、`ViewAuditLog`、`ViewLessonStats`，并把原“班级自治策略”的改班名/头像与拉取课表开关换算为 `ManageClassInfo` 与 `PullSchedule`。远程维护命令（升级、插件管理、集控、ClassIsland 重启/启动、终端、守护管理）不再要求系统管理员身份，按各自的权限位放行；直接内联分发文件仍仅限系统管理员。
+
+**角色与个人权限。** 每个角色有一组默认权限（`AccountRoleInfo.defaultPermissions` 与 `defaultManagementPermissions`）。账号的个人权限记录为相对角色的调整：`grantedPermissions`（新增）与 `revokedPermissions`（收回），有效权限 = 角色默认 + 新增 − 收回，`ViewCurrentCourse` 不能收回。在班级中以该班的班内角色（任教班级为全局“老师”角色）为基础套用同一套调整。WebUI 的角色与人员编辑器按分组列出全部权限并自动勾选当前拥有的项；人员编辑器保存时把勾选结果换算成相对所选角色的新增与收回。`PUT /api/users/{id}` 的 `revokedPermissions`、`grantedManagementPermissions`、`revokedManagementPermissions` 都是可选字段：省略（旧客户端）时保持原值。非管理员通过“人员管理”或“角色配置”修改权限时只能授予自己拥有的权限，收回不受限制；超出范围的新增会被忽略。
+
+`SendFiles` 默认不授予任何内置角色；`CaptureScreen` 默认授予内置班主任角色，老师需由管理员在账号或角色中开启。`RequestScheduleSwap` 与 `ForceScheduleSwap` 按全局角色计算：内置老师和班主任默认开启前者，后者默认关闭。七日课表查看只要求账号已登录；定时自动拉取间隔是全局设置，需要系统管理权限 `ManagePluginAccess`。`TeacherComing` 权限位和命令仅为旧客户端兼容保留，当前不在 WebUI、各端 App 或权限设置中显示；`ChangeDisplayName` 仅保留为兼容旧权限数据，实际只有系统管理员可以修改用户可见用户名（DisplayName，登录 ID 不变）；用户名会影响老师获取的日程信息。`ApiAccess` 允许账号创建 API Key 并调用 REST API；管理员、班主任与老师默认拥有 API 访问。
+
+**旧插件兼容。** 插件端按 `CommandPermissions.Required` 复核 `requestedBy.permissions`。服务端发往插件的每条命令会在发起人已具备新权限时补上权限细化前旧插件认的位（例如音量命令补 `PowerControl`、终端命令补 `ManageUsers`），只影响这一条命令；旧插件对远程维护命令另有“仅系统管理员”的检查，非管理员需升级插件后才能使用这些委派权限。
+
+### 系统管理权限
+
+`UserProfile.managementPermissions` 与 `UserListItem.effectiveManagementPermissions` 为以下位掩码；系统管理员固定拥有全部（16383）。旧版服务端不下发该字段时客户端按角色判断。
+
+| 值 | 权限 |
+| ---: | --- |
+| 1 | `ManageRoles`（角色配置） |
+| 2 | `ImportUsers`（批量导入导出人员） |
+| 4 | `ManageClasses`（班级管理：建班、分组、成员、连接码、设备分配、访客开关；不能授予班内“管理员”角色） |
+| 8 | `ManageProfileLibrary`（档案库：模板与全部班级档案） |
+| 16 | `ManageHolidays`（学期与调休） |
+| 32 | `ViewDevices`（全部设备状态） |
+| 64 | `BatchControl`（批量控制；每项操作仍需对应的班级权限位，按全局角色计算） |
+| 128 | `ManageAutomation`（自动化规则；规则以最后修改人的权限执行） |
+| 256 | `ManageAppGuard`（应用守护全局与单设备策略；直接关闭/卸载/更新守护另需 `ManageDeviceGuard`） |
+| 512 | `ManageExtensionSettings`（插件批量下发、扩展调用策略与插件的班级开放） |
+| 1024 | `ManageLoginPage`（登录页外观、扫码登录地址与访客） |
+| 2048 | `ManagePluginAccess`（插件凭据、配对码与课表自动拉取间隔） |
+| 4096 | `ViewAllAuditLogs`（全部班级的操作记录） |
+| 8192 | `ViewAllLessonStats`（全部班级的课时统计） |
+
+升级时原先拥有 `ManageUsers` 的角色与账号补齐 `ManageLoginPage` 与 `ManagePluginAccess`（这两个系统设置页原本对人员管理开放）。系统配置、服务端更新与备份，以及管理员账号本身，仍只有系统管理员可以操作。
 
 账号密码只用于 `POST /api/auth/login` 登录请求，不在设备上持久化。登录请求的 `username` 字段可以填登录 ID 或用户名（`displayName`），均不区分大小写：先按 ID 匹配，否则按用户名匹配；升级前遗留的多个同名账号只能用 ID 登录。因此 ID 与用户名共用一个命名空间，创建账号或修改用户名时不能与其他账号的 ID 或用户名相同，冲突返回 409 `USERNAME_EXISTS`（ID）或 `DISPLAY_NAME_EXISTS`（用户名）。启用二步验证时，首次请求返回 `twoFactorRequired: true`，不签发会话；客户端提示验证码后，在同一端点重发账号、密码和 `twoFactorCode`，使用恢复码时再传 `useRecoveryCode: true`。`/api/auth/mobile-login` 同样支持这两个可选字段，提示验证时原票据保持有效，完成后一次性消费。验证码错误返回 401，并计入账号锁定。旧客户端需升级才能登录已启用二步验证的账号，详见 [二步验证](two-factor.md)。生产环境必须使用 HTTPS；Android 手机端为兼容尚未配置 TLS 的现有部署，允许用户在持续显示风险提示的情况下明确连接 HTTP 云服务器。成功响应包含 1 小时 `accessToken`、30 天 `deviceSessionId/deviceSecret` 和用户有效权限。`POST /api/auth/refresh` 会同时轮换访问令牌和设备密钥；旧值立即失效。
 
@@ -192,9 +236,9 @@ WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手
 
 越界数值由服务端与插件各自截断。插件把策略缓存为 `AppGuardPolicy.json`，并把守护进程部署到 `%LOCALAPPDATA%\RemoteCI\Guard\<processName>.exe`，从不直接运行 ClassIsland 安装目录内的守护副本。
 
-守护使用相同设备令牌连接 `/ws?token=...&client=guard`，声明 `host.app-guard`、`host.app-guard-launch` 与 `host.app-guard-manage`。插件与守护按凭据合并为同一设备，完整插件优先参与普通路由；守护只接收 `app_guard_policy` 与命令 28 `LaunchClassIsland`、32 `StopAppGuard`、33 `UninstallAppGuard`，不接收账号或课表数据。三条命令仅限具有 `ManageUsers` 的系统管理员，执行端复核 `requestedBy.role=Admin` 和权限位；课表已运行时命令 28 幂等成功。命令 32 停用策略并退出守护进程，保留安装文件；命令 33 先请求 UAC 移除增强服务与登录任务，再停用策略、退出守护并延迟删除默认目录和额外备份。守护先发送 `command_result`，成功后才断开连接；`app_guard_event` 与 `command_result` 是守护允许上报的其他消息。WebUI 只在守护在线且声明 `host.app-guard-manage` 时提供关闭/卸载入口，命令成功后把该设备保存为停用的单设备覆盖。同一凭据有多条守护连接时（旧守护被替换后连接尚未超时断开），服务端按最新接入的守护判断能力并发送守护命令。
+守护使用相同设备令牌连接 `/ws?token=...&client=guard`，声明 `host.app-guard`、`host.app-guard-launch` 与 `host.app-guard-manage`。插件与守护按凭据合并为同一设备，完整插件优先参与普通路由；守护只接收 `app_guard_policy` 与命令 28 `LaunchClassIsland`、32 `StopAppGuard`、33 `UninstallAppGuard`，不接收账号或课表数据。命令 28 需要 `ControlClassIsland`，命令 32、33 需要 `ManageDeviceGuard`，守护按 `requestedBy.permissions` 复核（`role=Admin` 直接放行，兼容旧服务端）；课表已运行时命令 28 幂等成功。命令 32 停用策略并退出守护进程，保留安装文件；命令 33 先请求 UAC 移除增强服务与登录任务，再停用策略、退出守护并延迟删除默认目录和额外备份。守护先发送 `command_result`，成功后才断开连接；`app_guard_event` 与 `command_result` 是守护允许上报的其他消息。WebUI 只在守护在线且声明 `host.app-guard-manage` 时提供关闭/卸载入口，命令成功后把该设备保存为停用的单设备覆盖。同一凭据有多条守护连接时（旧守护被替换后连接尚未超时断开），服务端按最新接入的守护判断能力并发送守护命令。
 
-命令 34 `UpdateAppGuard` 发给课表插件而不是守护：插件结束守护，用插件包随附的 `RemoteCI.Guard.exe` 强制覆盖后重新部署并启动，在 `command_result.message` 中返回新版本或失败原因；策略未启用时返回 `INVALID_REQUEST`。它同样仅限系统管理员（`ManageUsers` 且 `role=Admin`），是服务端专用命令，需要插件声明 `host.app-guard-update`；该过程不弹 UAC，不改动增强服务。WebUI 在策略启用、课表插件在线且声明该能力，并且守护不是最新时显示“更新守护”；守护在线、声明 `host.app-guard-manage` 且 `peer_capabilities.softwareVersion` 与插件相同即视为最新。守护与插件都上报去掉构建元数据（`+` 之后部分）的 InformationalVersion。
+命令 34 `UpdateAppGuard` 发给课表插件而不是守护：插件结束守护，用插件包随附的 `RemoteCI.Guard.exe` 强制覆盖后重新部署并启动，在 `command_result.message` 中返回新版本或失败原因；策略未启用时返回 `INVALID_REQUEST`。它需要 `ManageDeviceGuard`，是服务端专用命令，需要插件声明 `host.app-guard-update`；该过程不弹 UAC，不改动增强服务。WebUI 在策略启用、课表插件在线且声明该能力，并且守护不是最新时显示“更新守护”；守护在线、声明 `host.app-guard-manage` 且 `peer_capabilities.softwareVersion` 与插件相同即视为最新。守护与插件都上报去掉构建元数据（`+` 之后部分）的 InformationalVersion。
 
 守护使用 .NET Framework 的 `DataContractJsonSerializer`，信封 `timestamp` 必须按 ISO 8601 字符串收发；`DateTimeOffset` 的默认对象格式会让服务端丢弃整条消息。
 
@@ -210,7 +254,7 @@ WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手
 
 服务端按插件凭据记录这些事件，保留 90 天。`restored` 与 `restore-failed` 另向全部系统管理员发送个人通知 `app_guard`，`link` 为 `/AppGuard`。
 
-REST 接口全部仅限系统管理员，其他账号返回 403：
+REST 接口需要系统管理权限 `ManageAppGuard`（系统管理员始终拥有），其他账号返回 403：
 
 - `GET/PUT /api/settings/app-guard`：全局策略，请求体与响应都是 `AppGuardPolicy`。`organizationName` 为只读，在系统配置中修改。
 - `GET/PUT/DELETE /api/devices/{credentialId}/app-guard`：单台设备。响应为 `{credentialId, overridden, policy}`。`PUT` 设置覆盖，`DELETE` 恢复沿用全局；设备不存在返回 404。
@@ -274,15 +318,15 @@ Windows 插件自动播放录音，并显示上述 ClassIsland 通知：强调�
 
 RemoteCI 插件在云端连接建立后通过 `software_inventory` 上报设备名称、ClassIsland 主程序版本和当前已加载插件版本。服务端按插件长期凭据保存最后一份清单，因此设备离线时 WebUI 仍能显示最近一次版本；重新上线后由新清单覆盖。
 
-命令值 10 为 `UpgradePlugins`，命令值 11 为 `UpgradeClassIsland`，命令值 12 为 `RefreshSoftwareInventory`，命令值 20 为 `RestartClassIsland`。前三者都要求账号具有 `ManageUsers` 权限，并分别要求插件声明 `software.upgrade-plugins`、`software.upgrade-classisland`、`software.inventory` 能力；`RestartClassIsland` 仅允许系统管理员使用，不重启 Windows。WebUI 的“批量控制”页按在线插件连接逐台下发，避免同一班级多台设备只收到最早连接的一条命令。
+命令值 10 为 `UpgradePlugins`，命令值 11 为 `UpgradeClassIsland`，命令值 12 为 `RefreshSoftwareInventory`，命令值 20 为 `RestartClassIsland`。前三者都要求 `UpgradeSoftware` 权限，并分别要求插件声明 `software.upgrade-plugins`、`software.upgrade-classisland`、`software.inventory` 能力；`RestartClassIsland` 要求 `ControlClassIsland`，不重启 Windows。WebUI 的“批量控制”页按在线插件连接逐台下发，避免同一班级多台设备只收到最早连接的一条命令。
 
 升级命令只表示任务已被设备接受；实际下载、部署和重启由 ClassIsland 官方插件市场或官方 `UpdateService` 在后台完成。插件升级写入宿主的 `.cipx` 缓存并在重启后安装；ClassIsland 升级使用官方文件图校验和部署流程。完成后设备会主动重启并重新连接，服务端以新的 `software_inventory` 更新版本和最近升级状态。失败或已是最新版本时不会重启，状态随清单回传。
 ## 插件管理、档案分发与集控
 
-命令值 13 为 `InstallPlugins`、14 为 `UninstallPlugins`、15 为 `SetPluginEnabled`、16 为 `SetPluginManagementPolicy`、17 为 `DistributeProfile`、18 为 `UpdateTimeLayout`、19 为 `JoinManagement`。这些命令都要求 `ManageUsers` 权限，并在服务端和插件端再次确认系统管理员身份；能力标识分别为 `plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`schedule.time-layout` 和 `management.join`。
+命令值 13 为 `InstallPlugins`、14 为 `UninstallPlugins`、15 为 `SetPluginEnabled`、16 为 `SetPluginManagementPolicy`、17 为 `DistributeProfile`、18 为 `UpdateTimeLayout`、19 为 `JoinManagement`。13–16 要求 `ManagePlugins`，17、18 要求 `ManageClassProfile`，19 要求 `ControlClassIsland`，服务端与插件端都按同一张权限表复核；能力标识分别为 `plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`schedule.time-layout` 和 `management.join`。
 
 - 插件安装使用 ClassIsland 官方插件市场解析依赖并下载 `.cipx` 缓存，卸载和启停使用宿主公开的 `PluginInfo` 状态接口；RemoteCI 拒绝操作自身，避免远程控制链路被卸载或禁用。
-- 命令值 31 为 `InstallPluginPackages`（能力 `plugin.package-install`，同样要求 `ManageUsers` 并仅限系统管理员；与截图一样只能由服务端入口构造，因为服务端要先为目标设备登记插件包下载权限，通用 `POST /api/commands`、手机/手表通道与局域网直连一律拒绝）：插件从服务端文件中转下载一组 `.cipx` 插件包并安装或更新。参数 `pluginPackages` 为 `{mode, packages, force, restartAfter}`：`mode=1`（Install）安装插件，已安装的显式插件包会被覆盖安装、`isDependency=true` 且本机已安装的依赖包跳过；`mode=2`（Upgrade）只更新本机已安装且包版本更高的插件，`force=true` 时不比较版本。每个 `packages[]` 为 `{pluginId, name, version, isDependency, transferId, downloadKey, size, sha256}`，最多 32 个，下载方式与文件中转相同（`GET /api/plugin/files/{transferId}` + `X-RemoteCI-Transfer-Key`，断点续传、SHA-256 校验），下载进度经 `file_transfer_progress` 回报到对应传输。插件核对包内 `manifest.yml` 的 `id` 与 `pluginId` 一致后，把包放入宿主插件包缓存（`PluginPackages/<id>.cipx`，与 ClassIsland“从本地安装插件”相同），全部处理完后按 `restartAfter` 重启 ClassIsland 由宿主安装。命令立即回执，最终结果随 `software_inventory.lastUpdate`（`operation=2`）回传。该命令可以更新 RemoteCI 自身。
+- 命令值 31 为 `InstallPluginPackages`（能力 `plugin.package-install`，要求 `ManagePlugins`；与截图一样只能由服务端入口构造，因为服务端要先为目标设备登记插件包下载权限，通用 `POST /api/commands`、手机/手表通道与局域网直连一律拒绝）：插件从服务端文件中转下载一组 `.cipx` 插件包并安装或更新。参数 `pluginPackages` 为 `{mode, packages, force, restartAfter}`：`mode=1`（Install）安装插件，已安装的显式插件包会被覆盖安装、`isDependency=true` 且本机已安装的依赖包跳过；`mode=2`（Upgrade）只更新本机已安装且包版本更高的插件，`force=true` 时不比较版本。每个 `packages[]` 为 `{pluginId, name, version, isDependency, transferId, downloadKey, size, sha256}`，最多 32 个，下载方式与文件中转相同（`GET /api/plugin/files/{transferId}` + `X-RemoteCI-Transfer-Key`，断点续传、SHA-256 校验），下载进度经 `file_transfer_progress` 回报到对应传输。插件核对包内 `manifest.yml` 的 `id` 与 `pluginId` 一致后，把包放入宿主插件包缓存（`PluginPackages/<id>.cipx`，与 ClassIsland“从本地安装插件”相同），全部处理完后按 `restartAfter` 重启 ClassIsland 由宿主安装。命令立即回执，最终结果随 `software_inventory.lastUpdate`（`operation=2`）回传。该命令可以更新 RemoteCI 自身。
 - WebUI 的“安装插件”直接列出 ClassIsland 插件市场（服务端读取与宿主相同的 `index.zip`，显示名称、Id、作者、版本、下载量与星标），“升级插件”列出设备上报的可更新插件供勾选（不勾选时升级全部）。两者都可开启“服务端预下载”：服务端从市场下载插件包（按 `Server:PluginMarketMirror` 选择镜像并依次回退，校验 MD5，安装时连同必选依赖），再以 `InstallPluginPackages` 分发；不开启时仍发送 `InstallPlugins` / `UpgradePlugins`，由设备自己访问插件市场。“从 CIPX 安装”先把 `.cipx` 上传到服务端中转（单个不超过 512 MB，服务端校验清单），再以 `mode=1` 分发。
 - `DistributeProfile` 只接收 ClassIsland 档案 JSON 和分发范围（时间表、课表、科目），不接收任意文件路径；请求可带 `importProfileName`、`replaceCurrentProfile`（默认 `false`）和 `enableImportedProfile`（默认 `true`）。默认会把选中的内容写入一个新档案并启用该档案；只有明确开启 `replaceCurrentProfile` 才会写入当前档案。旧命令的 `replaceExisting=true` 会先清空整个所选类别，再写入源数据；关闭时按同 Id 更新并保留其他项目。`UpdateTimeLayout` 接收结构化时间点并由插件在 UI 线程写入档案。
 - 插件对 `Profile` 的字典属性按属性名运行时读取，以兼容 ClassIsland 2.1.0 的 `ObservableDictionary` 与 2.1.1 起的字典实现；因此升级宿主后无需重新生成档案 JSON。
@@ -306,7 +350,7 @@ WebUI 的档案读写通过带 Cookie 与防伪令牌的 Razor Page handlers 完
 - **创建并启用新档案**：使用填写的设备档案名创建并启用，重名返回错误。
 - **作为临时层下发**（`TempLayers`，需要能力 `profile.temp-layer`）：只写入载荷中按日期安排的临时层，不改动设备的常规时间表与课表，`sections` 忽略。见下文“临时层”。
 
-`ApplyProfile` 与 `ReadProfile` 为 `serverOnly` 命令，仅由服务端档案管理入口构造并定向发送；手机、手表的通用 WebSocket 命令通道、`POST /api/commands`、广播接口及插件局域网直连均拒绝。服务端校验管理员或本班班主任身份及 `ManageSchedule`，插件再次验证认证发送人的 `ManageSchedule` 权限。目标可选班级、分组或具体设备；班级级选择只发送到最早接入的在线设备，班主任目标固定本班。各班不同档案按目标设备所属班级组装，离线、缺少 `profile.apply` 或设备执行失败逐台返回结果，不排队；失败后可手动重试。旧插件仍可用于服务端档案编辑，但下发必须升级到支持 `profile.apply` 的插件，不能用旧命令模拟新应用方式。
+`ApplyProfile` 与 `ReadProfile` 为 `serverOnly` 命令，仅由服务端档案管理入口构造并定向发送；手机、手表的通用 WebSocket 命令通道、`POST /api/commands`、广播接口及插件局域网直连均拒绝。服务端校验“档案库”系统权限（全部班级）或该班的 `ManageClassProfile`，插件再次验证认证发送人的 `ManageClassProfile` 权限（旧插件验证 `ManageSchedule`，服务端会补上）。目标可选班级、分组或具体设备；班级级选择只发送到最早接入的在线设备，班主任目标固定本班。各班不同档案按目标设备所属班级组装，离线、缺少 `profile.apply` 或设备执行失败逐台返回结果，不排队；失败后可手动重试。旧插件仍可用于服务端档案编辑，但下发必须升级到支持 `profile.apply` 的插件，不能用旧命令模拟新应用方式。
 
 插件在 UI 线程验证、应用并保存档案，失败恢复原状态，成功后立即重新同步七日课表。创建并启用新档案时插件按宿主实际签名调用 `SettingsService.SaveSettings(string)` 保存档案选择（ClassIsland 2.1 没有无参重载）。旧命令 17 `DistributeProfile`、18 `UpdateTimeLayout` 的编号、载荷、管理员权限和既有语义继续保留，档案页面使用命令 25。
 
@@ -345,7 +389,7 @@ ClassIsland 的临时层是 `ClassPlans` 中 `IsOverlay=true` 的课表：`Overl
 
 ## 远程终端与文件分发
 
-命令值 22 为 `ExecuteTerminalCommand`，23 为 `SendFile`。远程终端要求 `ManageUsers` 权限，并在服务端和插件端再次确认系统管理员身份；文件分发要求 `SendFiles` 权限（值 16384，系统管理员固定拥有，其他账号由管理员在账号权限或角色配置中开启，按目标班级逐个复核）。能力标识分别为 `terminal.execute`、`file.distribute`（内联方式）与 `file.transfer`（中转方式），只进入当前版本能力列表。
+命令值 22 为 `ExecuteTerminalCommand`，23 为 `SendFile`。远程终端要求 `RemoteTerminal` 权限（值 2097152）；文件分发要求 `SendFiles` 权限（值 16384）。两者都按目标班级逐个复核，系统管理员固定拥有，其他账号由管理员在角色或账号权限中开启。能力标识分别为 `terminal.execute`、`file.distribute`（内联方式）与 `file.transfer`（中转方式），只进入当前版本能力列表。
 
 - 远程终端在设备上以当前登录用户执行单条命令，等价于 `cmd /d /c`：每次执行相互独立，进程之间不保留 shell 状态。载荷 `terminalCommand` 包含 `command`（≤4000 字符）、可选 `workingDirectory`（≤260 字符，目录不存在时返回 `INVALID_REQUEST`）和可选 `timeoutSeconds`（1-10，默认 10）。插件合并标准输出与标准错误（中间以 `--- 标准错误 ---` 分隔），放入 `command_result.data` 返回，总上限 64K 字符，超出截断并注明；超时的进程会被强制结束并返回 `COMMAND_TIMEOUT`，`data` 携带已捕获的部分输出。命令正常结束时回执 `success=true`，退出代码写入 `message`，非零退出代码不视为失败。
 
@@ -389,8 +433,8 @@ WebUI 在“批量控制”与班级“控制”页的远程维护区开放这�
 
 命令值 24 为 `ApplyExtensionSettings`，能力标识 `extensions.settings`（只进入当前版本能力列表）。载荷 `extensionSettings` 为 `{groupId, values}`，`values` 只包含本次要修改的字段（部分更新），未出现的字段保持设备当前值；字段必须已在分组中声明，必填字段不能清空。权限口径：
 
-- 服务端只在 WebUI 扩展插件页与 `PUT /api/classes/{classId}/extension-groups/{groupId}/settings` 中接受该操作。班级区的 `/ClassExtensions` 只修改当前班级、不提供范围选择；管理区的 `/ExtensionSettings`（插件批量设置，仅系统管理员）按所选班级、分组或具体设备下发，与当前选中的班级无关。系统管理员可修改任意班级；班主任只能修改系统管理员逐个开放给班级自行管理的插件（扩展插件详情页“班级自治”或 `PUT /api/extension-groups/{groupId}/class-admin-access`，默认都不开放），且在本班拥有 `RunExtensions` 权限。手表、手机的通用命令通道和 `POST /api/commands` 一律拒绝。
-- 插件端要求 `requestedBy` 携带 `RunExtensions` 权限位作为纵深防御；局域网直连无法复核班级自治策略，因此直接返回 `FORBIDDEN`。
+- 服务端只在 WebUI 扩展插件页与 `PUT /api/classes/{classId}/extension-groups/{groupId}/settings` 中接受该操作。班级区的 `/ClassExtensions` 只修改当前班级、不提供范围选择；管理区的 `/ExtensionSettings`（插件批量设置，需要系统管理权限 `ManageExtensionSettings`）按所选班级、分组或具体设备下发，与当前选中的班级无关。系统管理员可修改任意班级；其他账号只能修改逐个开放给班级的插件（扩展插件详情页“班级自治”或 `PUT /api/extension-groups/{groupId}/class-admin-access`，需要 `ManageExtensionSettings`，默认都不开放），且在本班拥有 `ConfigureExtensions` 权限（内置班主任默认拥有）。手表、手机的通用命令通道和 `POST /api/commands` 一律拒绝。
+- 插件端要求 `requestedBy` 携带 `ConfigureExtensions` 权限位作为纵深防御（旧插件认 `RunExtensions`，服务端会补上）；局域网直连无法复核班级自治策略，因此直接返回 `FORBIDDEN`。
 - 下发时该班插件离线：服务端把字段合并保存为待补发并返回 `QUEUED`（REST 为 202）；插件下次发送 `extension_groups_sync` 时，服务端在后台复核下发者权限后定向补发，插件返回明确结果后删除记录，连接再次中断时保留。
 - 写入成功或失败后，插件都会重新发送 `extension_groups_sync`，让 WebUI 预填值反映设备真实状态。批量下发时服务端向所选班级的每一台在线设备逐台发送并逐台返回结果。
 ## 老师、班主任角色与我的日程
@@ -483,7 +527,7 @@ WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebU
 
 ### 电子班牌
 
-系统管理员或本班班主任在 WebUI“电子班牌”页生成私密链接 `/Board/{token}`（每班最多 10 个，令牌只在生成时显示一次，可撤销）。页面匿名、全屏显示班名、教室端本地时钟、当前课程及进度、下一节和今日课表，每 15 秒刷新 `?handler=Content`，可选择不显示任课老师。撤销后返回 404；配置包恢复会删除班级及其班牌链接，需要重新生成。
+在本班拥有 `ManageClassBoards` 权限的账号（内置班主任默认拥有）在 WebUI“电子班牌”页生成私密链接 `/Board/{token}`（每班最多 10 个，令牌只在生成时显示一次，可撤销）。页面匿名、全屏显示班名、教室端本地时钟、当前课程及进度、下一节和今日课表，每 15 秒刷新 `?handler=Content`，可选择不显示任课老师。撤销后返回 404；配置包恢复会删除班级及其班牌链接，需要重新生成。
 
 ### 个人通知新增字段与种类
 
@@ -505,7 +549,7 @@ WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebU
 - `POST /api/swap-requests`、`POST /api/swap-requests/{id}/approve|reject|cancel|revoke|revert`（`{id}` 也接受 8 位 `shortId`；`revert` 仅相关班级班主任与系统管理员）
 - `POST /api/swap-requests/preview`：请求体同 `POST /api/swap-requests`，不写入数据，返回 `{conflicts[]}`
 - `GET /api/classes/{classId}/schedule-adjustments?from=`：该班调课记录（默认从班级今天起），`ScheduleAdjustmentView {id, classId, date, index, fromSubject, toSubject, teacher?, origin: swap|direct|classisland|backfill, status: active|reverted|invalidated|expired, delivery: pending|applied|conflict, effective, conflictCode?, reason?, swapRequestId?, createdByName, createdAt}`
-- `DELETE /api/schedule-adjustments/{id}`：删除直接换课或教室端本地修改产生的有效调课（本班班主任或系统管理员）；来自换课申请的请走撤回
+- `DELETE /api/schedule-adjustments/{id}`：删除直接换课或教室端本地修改产生的有效调课（需要本班 `ManageSchedule`）；来自换课申请的请走撤回
 - `POST /api/swap-requests/seen`（`{ids}`，省略或为空表示全部）：强制换课看过即处理。被强制换课的老师看过后，对应的 `swap_forced` 通知标记已读，该申请不再计入“待我处理”（仍可撤回）；返回 `{pending}` 为剩余待处理数。`GET /api/swap-requests/{id}` 查看强制换课详情也会自动标记。列表项的 `needsAction` 表示是否计入“待我处理”（可审批，或强制换课尚未看过），客户端角标应按它计数，而不是 `canDecide || canRevoke`。
 - `GET /api/me/notifications?after=&unread=&limit=`、`POST /api/me/notifications/read`（`{ids}` 或 `{all:true}`）
 - `GET/DELETE /api/me/sessions`

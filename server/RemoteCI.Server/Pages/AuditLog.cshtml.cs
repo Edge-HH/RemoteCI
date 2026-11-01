@@ -23,7 +23,9 @@ public sealed class AuditLogModel(UserManager<AppUser> users, CommandAuditQueryS
 
     public CommandAuditPage Records { get; private set; } = new([], null);
     public IReadOnlyList<(Guid Id, string Name)> ClassOptions { get; private set; } = [];
-    public bool IsAdmin => CurrentUser.Role == UserRole.Admin;
+    /// <summary>是否查看全部班级（系统管理员或“查看全部操作记录”）。</summary>
+    public bool IsAdmin => _scope is null;
+    private IReadOnlyList<Guid>? _scope;
 
     public static IReadOnlyList<CommandKind> CommandOptions { get; } = Enum.GetValues<CommandKind>()
         .Where(x => x != CommandKind.TeacherComing)
@@ -32,7 +34,7 @@ public sealed class AuditLogModel(UserManager<AppUser> users, CommandAuditQueryS
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        var scope = await audit.GetScopeAsync(CurrentUser, ct);
+        var scope = _scope = await audit.GetScopeAsync(CurrentUser, ct);
         if (scope is { Count: 0 }) return RedirectToPage("/Denied");
         ClassOptions = await LoadClassOptionsAsync(scope, ct);
         Records = await audit.QueryAsync(scope, BuildFilter() with { Before = Before }, ct);

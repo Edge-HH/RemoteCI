@@ -51,6 +51,7 @@ html[data-mobile-ui][data-theme=dark][data-palette=pink] { --m-primary:#ffd8e2; 
 .mobile-app h3 { font-size:16px; }
 .mobile-app p { margin:0 0 12px; }
 .mobile-app small, .mobile-app .muted, .mobile-app .control-note { color:var(--m-muted); }
+.mobile-app small.form-error { color:var(--danger); }
 .mobile-app .page-head { margin:0; padding:0; }
 .mobile-app .page-head h1 { margin:0; }
 .mobile-app .page-head .eyebrow, .mobile-app .member-excel-panel, .mobile-app .api-key-panel, .mobile-app .api-key-reveal-panel { display:none; }
@@ -156,3 +157,5 @@ html[data-mobile-ui] { min-width:0; }
 .mobile-app dialog { max-height:min(90dvh, calc(var(--mobile-viewport-height, 100dvh) - 24px)); }
 /* “我的”页分组标题 */
 .mobile-section-label { margin:20px 4px 8px; color:var(--m-muted, var(--muted)); font-size:13px; font-weight:500; letter-spacing:.02em; }
+.mobile-app .permission-item > label { flex-direction:row; align-items:flex-start; min-height:48px; gap:12px; }
+.mobile-app .permission-group { border-radius:16px; }

@@ -190,15 +190,18 @@ fun RemoteCiApp(context: Context) {
         if (user != null && (!user.has(Protocol.PERMISSION_SEND_NOTIFICATIONS) ||
                 Protocol.CAP_NOTIFICATION_SEND !in availableCapabilities) && screen == Screen.Notification)
             screen = Screen.Home
-        if (user != null && !user.has(Protocol.PERMISSION_POWER_CONTROL) &&
-            screen in listOf(Screen.Power, Screen.Volume))
+        if (user != null && !user.has(Protocol.PERMISSION_POWER_CONTROL) && screen == Screen.Power)
+            screen = Screen.Home
+        if (user != null && !user.can(Protocol.PERMISSION_VOLUME_CONTROL) && screen == Screen.Volume)
             screen = Screen.Home
         if ((user == null || !user.has(Protocol.PERMISSION_SEND_VOICE_MESSAGES) ||
                 Protocol.CAP_VOICE_MESSAGE_SEND !in availableCapabilities) && screen == Screen.VoiceMessage)
             screen = Screen.Home
         if (user != null && !user.has(Protocol.PERMISSION_SEND_NOTIFICATIONS) &&
+            !user.can(Protocol.PERMISSION_CLEAR_NOTIFICATIONS) &&
             !user.has(Protocol.PERMISSION_SEND_VOICE_MESSAGES) &&
             !user.has(Protocol.PERMISSION_POWER_CONTROL) &&
+            !user.can(Protocol.PERMISSION_VOLUME_CONTROL) &&
             !user.has(Protocol.PERMISSION_MAIN_MENU_CONTROL) &&
             !user.has(Protocol.PERMISSION_RUN_EXTENSIONS) && screen == Screen.Control)
             screen = Screen.Home

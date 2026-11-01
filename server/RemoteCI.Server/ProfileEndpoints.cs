@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using RemoteCI.Server.Data;
 using RemoteCI.Server.Services;
 using RemoteCI.Shared.Models;
@@ -123,7 +124,10 @@ public static class ProfileEndpoints
         var services = ctx.RequestServices;
         var principal = await ApiAuth.AuthorizeAsync(ctx, services.GetRequiredService<IdentityCoordinator>(), ct);
         if (principal?.User is null) return ApiAuth.Unauthorized();
-        var actor = await services.GetRequiredService<UserManager<AppUser>>().FindByIdAsync(principal.User.Id.ToString());
+        // 连同角色一并加载：“档案库”系统权限按全局角色默认值与个人调整计算。
+        var actor = await services.GetRequiredService<UserManager<AppUser>>().Users
+            .Include(x => x.RoleDefinition)
+            .SingleOrDefaultAsync(x => x.Id == principal.User.Id, ct);
         if (actor is null) return ApiAuth.Unauthorized();
         try { return await action(actor, services); }
         catch (UnauthorizedAccessException ex) { return ApiAuth.Forbidden(ex.Message); }

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using RemoteCI.Server.Data;
 using RemoteCI.Server.Services;
 using RemoteCI.Shared;
@@ -51,12 +52,14 @@ public static class OperationsEndpoints
 
     private static void MapLessonStatsEndpoints(WebApplication app)
     {
-        // 课时统计：系统管理员看全部班级，班主任看本班；from/to 为教室端本地日期，省略时为本月。
+        // 课时统计：系统管理员或“查看全部课时统计”看全部班级，其他账号看自己有“课时统计”权限的班级；
+        // from/to 为教室端本地日期，省略时为本月。
         app.MapGet("/api/lesson-stats", (DateOnly? from, DateOnly? to, Guid? classId, string? teacher, bool? includeProfile,
             HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
         {
-            var scope = await services.GetRequiredService<ClassAccessService>().GetClassHeadScopeAsync(actor.Id, actor.Role, ct);
-            if (scope is { Count: 0 }) return ApiAuth.Forbidden("只有系统管理员和班主任可以查看课时统计");
+            var scope = await services.GetRequiredService<ClassAccessService>().GetPermissionScopeAsync(
+                actor.Id, actor.Role, UserPermissions.ViewLessonStats, ManagementPermissions.ViewAllLessonStats, ct);
+            if (scope is { Count: 0 }) return ApiAuth.Forbidden("没有查看课时统计的权限");
             var (start, end) = LessonStatsRange(from, to);
             return Results.Ok(await services.GetRequiredService<LessonStatsService>()
                 .GetAsync(scope, start, end, classId, NullIfBlank(teacher), includeProfile == true, ct));
@@ -65,8 +68,9 @@ public static class OperationsEndpoints
         app.MapGet("/api/lesson-stats/export", (DateOnly? from, DateOnly? to, Guid? classId, string? teacher, bool? includeProfile,
             HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
         {
-            var scope = await services.GetRequiredService<ClassAccessService>().GetClassHeadScopeAsync(actor.Id, actor.Role, ct);
-            if (scope is { Count: 0 }) return ApiAuth.Forbidden("只有系统管理员和班主任可以导出课时统计");
+            var scope = await services.GetRequiredService<ClassAccessService>().GetPermissionScopeAsync(
+                actor.Id, actor.Role, UserPermissions.ViewLessonStats, ManagementPermissions.ViewAllLessonStats, ct);
+            if (scope is { Count: 0 }) return ApiAuth.Forbidden("没有导出课时统计的权限");
             var (start, end) = LessonStatsRange(from, to);
             var bytes = await services.GetRequiredService<LessonStatsService>()
                 .ExportAsync(scope, start, end, classId, NullIfBlank(teacher), includeProfile == true, ct);
@@ -134,11 +138,13 @@ public static class OperationsEndpoints
 
     private static void MapDeviceEndpoints(WebApplication app)
     {
-        // 设备状态：在线、版本、当前课程与离线时长；班主任只看本班设备。
+        // 设备状态：在线、版本、当前课程与离线时长；有“设备状态”系统权限看全部，
+        // 其他账号看自己有“操作记录与设备状态”权限的班级。
         app.MapGet("/api/devices/health", (HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
         {
-            var scope = await services.GetRequiredService<ClassAccessService>().GetClassHeadScopeAsync(actor.Id, actor.Role, ct);
-            if (scope is { Count: 0 }) return ApiAuth.Forbidden("只有系统管理员和班主任可以查看设备状态");
+            var scope = await services.GetRequiredService<ClassAccessService>().GetPermissionScopeAsync(
+                actor.Id, actor.Role, UserPermissions.ViewAuditLog, ManagementPermissions.ViewDevices, ct);
+            if (scope is { Count: 0 }) return ApiAuth.Forbidden("没有查看设备状态的权限");
             var overview = await services.GetRequiredService<DeviceHealthService>().GetOverviewAsync(scope, ct);
             return Results.Ok(overview.Devices);
         }));
@@ -146,39 +152,40 @@ public static class OperationsEndpoints
         // 应用守护：全局默认策略与单设备覆盖，只允许系统管理员读写；组织名在系统配置中设置，这里只读。
         app.MapGet("/api/settings/app-guard", (HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
         {
-            RequireAdmin(actor, "只有系统管理员可以查看应用守护设置");
+            RequireAdmin(actor, "没有查看应用守护设置的权限");
             return Results.Ok(await services.GetRequiredService<AppGuardService>().GetGlobalAsync(ct));
         }));
         app.MapPut("/api/settings/app-guard", (AppGuardPolicy body, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
         {
-            RequireAdmin(actor, "只有系统管理员可以修改应用守护设置");
+            RequireAdmin(actor, "没有修改应用守护设置的权限");
             return Results.Ok(await services.GetRequiredService<AppGuardService>().SetGlobalAsync(body, ct));
         }));
         app.MapGet("/api/devices/{credentialId:guid}/app-guard", (Guid credentialId, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
         {
-            RequireAdmin(actor, "只有系统管理员可以查看应用守护设置");
+            RequireAdmin(actor, "没有查看应用守护设置的权限");
             return Results.Ok(await services.GetRequiredService<AppGuardService>().GetDeviceAsync(credentialId, ct));
         }));
         app.MapPut("/api/devices/{credentialId:guid}/app-guard", (Guid credentialId, AppGuardPolicy body, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
         {
-            RequireAdmin(actor, "只有系统管理员可以修改应用守护设置");
+            RequireAdmin(actor, "没有修改应用守护设置的权限");
             return Results.Ok(await services.GetRequiredService<AppGuardService>().SetOverrideAsync(credentialId, body, ct));
         }));
         app.MapDelete("/api/devices/{credentialId:guid}/app-guard", (Guid credentialId, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
         {
-            RequireAdmin(actor, "只有系统管理员可以修改应用守护设置");
+            RequireAdmin(actor, "没有修改应用守护设置的权限");
             return Results.Ok(await services.GetRequiredService<AppGuardService>().ClearOverrideAsync(credentialId, ct));
         }));
         app.MapGet("/api/app-guard/events", (Guid? credentialId, int? limit, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
         {
-            RequireAdmin(actor, "只有系统管理员可以查看应用守护事件");
+            RequireAdmin(actor, "没有查看应用守护事件的权限");
             return Results.Ok(await services.GetRequiredService<AppGuardService>().GetRecentEventsAsync(credentialId, limit ?? 100, ct));
         }));
     }
 
     private static void RequireAdmin(AppUser actor, string message)
     {
-        if (actor.Role != UserRole.Admin) throw new UnauthorizedAccessException(message);
+        if (!AccountPermissions.HasManagement(actor, ManagementPermissions.ManageAppGuard))
+            throw new UnauthorizedAccessException(message);
     }
 
     public const string ExcelContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -189,7 +196,10 @@ public static class OperationsEndpoints
         var services = ctx.RequestServices;
         var principal = await ApiAuth.AuthorizeAsync(ctx, services.GetRequiredService<IdentityCoordinator>(), ct);
         if (principal?.User is null) return ApiAuth.Unauthorized();
-        var actor = await services.GetRequiredService<UserManager<AppUser>>().FindByIdAsync(principal.User.Id.ToString());
+        // 连同角色一并加载：系统管理权限按全局角色默认值与个人调整计算。
+        var actor = await services.GetRequiredService<UserManager<AppUser>>().Users
+            .Include(x => x.RoleDefinition)
+            .SingleOrDefaultAsync(x => x.Id == principal.User.Id, ct);
         if (actor is null || !actor.Enabled) return ApiAuth.Unauthorized();
         try { return await action(actor, services); }
         catch (UnauthorizedAccessException ex) { return ApiAuth.Forbidden(ex.Message); }

@@ -92,8 +92,7 @@ public sealed class HolidaysModel(UserManager<AppUser> users, HolidayCalendarSer
 
     private async Task<IActionResult?> RequireAdminAsync()
     {
-        if (await RequireAsync() is { } denied) return denied;
-        return CurrentUser.Role == UserRole.Admin ? null : RedirectToPage("/Denied");
+        return await RequireManagementAsync(ManagementPermissions.ManageHolidays);
     }
 
     public sealed class SettingsInput

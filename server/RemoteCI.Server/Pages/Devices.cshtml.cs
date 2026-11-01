@@ -37,15 +37,15 @@ public sealed class DevicesModel(
         return Partial("_DeviceGrid", this);
     }
 
-    /// <summary>截取指定教室电脑的屏幕（系统管理员）；返回与控制页相同的 JSON。</summary>
+    /// <summary>截取指定教室电脑的屏幕（“设备状态”系统权限加“屏幕截图”权限）；返回与控制页相同的 JSON。</summary>
     public async Task<IActionResult> OnPostScreenshotAsync(Guid classId, Guid credentialId, CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin)
-            return new JsonResult(CommandResult.Failure(CommandResultCodes.Forbidden, "仅系统管理员可以按设备截图"));
+        if (!HasManagement(ManagementPermissions.ViewDevices) || !Permissions.HasFlag(UserPermissions.CaptureScreen))
+            return new JsonResult(CommandResult.Failure(CommandResultCodes.Forbidden, "没有按设备截图的权限"));
         if (await identities.GetProfileAsync(CurrentUser.Id, ct) is not { } profile)
             return new JsonResult(CommandResult.Failure(CommandResultCodes.Unauthorized, "登录已失效"));
-        var outcome = await screenshots.CaptureAsync(classId, credentialId, profile.WithPermissions(UserPermissions.All), ct);
+        var outcome = await screenshots.CaptureAsync(classId, credentialId, profile.WithPermissions(Permissions), ct);
         return new JsonResult(new
         {
             success = outcome.Record is not null,
@@ -56,8 +56,7 @@ public sealed class DevicesModel(
 
     private async Task<IActionResult?> LoadAsync(CancellationToken ct)
     {
-        if (await RequireAsync() is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ViewDevices) is { } denied) return denied;
         Overview = await health.GetOverviewAsync(null, ct);
         GroupOptions = Overview.Devices.SelectMany(x => x.GroupNames).Distinct().Order(StringComparer.CurrentCulture).ToList();
         Visible = Overview.Devices

@@ -63,6 +63,15 @@ internal static class GuardCommands
     public const int LaunchClassIsland = 28;
     public const int StopAppGuard = 32;
     public const int UninstallAppGuard = 33;
+
+    /// <summary>与 RemoteCI.Shared 的 UserPermissions 同值：启动 ClassIsland 需要 ControlClassIsland，停用/卸载守护需要 ManageDeviceGuard。</summary>
+    public const int ControlClassIslandPermission = 1 << 22;
+    public const int ManageDeviceGuardPermission = 1 << 26;
+    /// <summary>与 UserRole.Admin 同值；系统管理员的权限位固定为全部，按角色放行以兼容旧服务端。</summary>
+    public const int AdminRole = 2;
+
+    public static int RequiredPermission(int command) =>
+        command == LaunchClassIsland ? ControlClassIslandPermission : ManageDeviceGuardPermission;
 }
 
 [DataContract]

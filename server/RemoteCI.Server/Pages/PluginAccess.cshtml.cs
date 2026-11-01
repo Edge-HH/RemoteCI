@@ -22,18 +22,19 @@ public sealed class PluginAccessModel(
     [BindProperty] public SchedulePullInterval PullInterval { get; set; }
     public string? PairCode { get; private set; }
     public IReadOnlyList<PluginCredentialInfo> PluginCredentials { get; private set; } = [];
-    public bool IsAdmin => CurrentUser.Role == UserRole.Admin;
+    /// <summary>固定连接码与统一连接码在班级管理中设置，有“班级管理”权限时给出链接。</summary>
+    public bool CanManageClasses => HasManagement(ManagementPermissions.ManageClasses);
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
+        if (await RequireManagementAsync(ManagementPermissions.ManagePluginAccess) is { } denied) return denied;
         await LoadAsync(ct);
         return Page();
     }
 
     public async Task<IActionResult> OnPostPairCodeAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
+        if (await RequireManagementAsync(ManagementPermissions.ManagePluginAccess) is { } denied) return denied;
         // 配对码绑定当前班级；插件配对后归属该班，只能收发该班的命令与数据。
         if (CurrentClass is null)
         {
@@ -47,12 +48,7 @@ public sealed class PluginAccessModel(
 
     public async Task<IActionResult> OnPostRevokeCredentialAsync(Guid id, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
-        if (!IsAdmin)
-        {
-            TempData["Error"] = "仅管理员可吊销插件凭据。";
-            return RedirectToPage();
-        }
+        if (await RequireManagementAsync(ManagementPermissions.ManagePluginAccess) is { } denied) return denied;
         try
         {
             await identities.RevokePluginCredentialAsync(id, ct);
@@ -65,9 +61,8 @@ public sealed class PluginAccessModel(
 
     public async Task<IActionResult> OnPostPullIntervalAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
-        // 定时拉取间隔对全部班级生效，只有系统管理员可以修改。
-        if (!IsAdmin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManagePluginAccess) is { } denied) return denied;
+        // 定时拉取间隔对全部班级生效，随“插件凭据与连接码”系统权限授予。
         if (!Enum.IsDefined(PullInterval))
         {
             TempData["Error"] = "请选择有效的自动拉取间隔。";
@@ -82,7 +77,6 @@ public sealed class PluginAccessModel(
 
     private async Task LoadAsync(CancellationToken ct)
     {
-        if (!IsAdmin) return;
         PluginCredentials = await identities.ListPluginCredentialsAsync(ct);
         PullInterval = await pullSettings.GetIntervalAsync(ct);
     }

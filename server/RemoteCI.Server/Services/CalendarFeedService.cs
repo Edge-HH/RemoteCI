@@ -151,7 +151,7 @@ public sealed class CalendarFeedService(AppDbContext db, ClassAccessService acce
     }
 
     private async Task<bool> AllowedAsync(AppUser user, Guid? classId, CancellationToken ct) => user.Enabled &&
-        (classId is null || (await access.GetAccessibleClassesAsync(user.Id, user.Role, user.GrantedPermissions, ct)).Any(x => x.Id == classId));
+        (classId is null || (await access.GetAccessibleClassesAsync(user.Id, user.Role, ct)).Any(x => x.Id == classId));
     public static string Escape(string value) => value.Replace("\\", "\\\\").Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\\n").Replace(";", "\\;").Replace(",", "\\,");
     private static string Utc(DateTimeOffset value) => value.UtcDateTime.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture);
     public static string Fold(string value)

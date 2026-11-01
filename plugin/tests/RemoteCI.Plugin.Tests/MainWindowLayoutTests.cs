@@ -185,8 +185,8 @@ public sealed class MainWindowLayoutTests
         }
         Assert.Equal(RemoteCiCapabilities.MainWindowLayoutApply, RemoteCiCapabilities.Required(CommandKind.ApplyMainWindowLayout));
         Assert.Equal(RemoteCiCapabilities.MainWindowLayoutRead, RemoteCiCapabilities.Required(CommandKind.ReadMainWindowLayout));
-        Assert.Equal(UserPermissions.MainMenuControl, CommandPermissions.Required(CommandKind.ApplyMainWindowLayout));
-        Assert.Equal(UserPermissions.MainMenuControl, CommandPermissions.Required(CommandKind.ReadMainWindowLayout));
+        Assert.Equal(UserPermissions.MainWindowLayout, CommandPermissions.Required(CommandKind.ApplyMainWindowLayout));
+        Assert.Equal(UserPermissions.MainWindowLayout, CommandPermissions.Required(CommandKind.ReadMainWindowLayout));
     }
 
     // ---------- 宿主适配器：按 ClassIsland 2.1 ComponentsService 的成员名模拟 ----------

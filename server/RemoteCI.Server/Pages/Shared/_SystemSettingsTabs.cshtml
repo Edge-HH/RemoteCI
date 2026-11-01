@@ -22,7 +22,13 @@
                 <a href="@Url.Page("/SystemConfig")#maintenance">维护</a>
             }
         }
-        <a class="@(active == "access" ? "active" : null)" aria-current="@(active == "access" ? "page" : null)" asp-page="/LoginSettings">登录与访问</a>
-        <a class="@(active == "plugins" ? "active" : null)" aria-current="@(active == "plugins" ? "page" : null)" asp-page="/PluginAccess">插件与课表同步</a>
+        @if (Model.HasManagement(ManagementPermissions.ManageLoginPage))
+        {
+            <a class="@(active == "access" ? "active" : null)" aria-current="@(active == "access" ? "page" : null)" asp-page="/LoginSettings">登录与访问</a>
+        }
+        @if (Model.HasManagement(ManagementPermissions.ManagePluginAccess))
+        {
+            <a class="@(active == "plugins" ? "active" : null)" aria-current="@(active == "plugins" ? "page" : null)" asp-page="/PluginAccess">插件与课表同步</a>
+        }
     </nav>
 }

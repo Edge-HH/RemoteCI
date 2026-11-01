@@ -111,9 +111,11 @@ public sealed class AutomationRuleService(AppDbContext db, TimeProvider timeProv
             .ToList();
     }
 
+    /// <summary>需要“自动化”系统权限；调用方须已加载 actor 的角色。</summary>
     internal static void RequireAdmin(AppUser actor)
     {
-        if (actor.Role != UserRole.Admin) throw new UnauthorizedAccessException("只有系统管理员可以管理自动化规则。");
+        if (!AccountPermissions.HasManagement(actor, ManagementPermissions.ManageAutomation))
+            throw new UnauthorizedAccessException("没有管理自动化规则的权限。");
     }
 
     public static AutomationRuleDto ToDto(AutomationRule row)
@@ -299,9 +301,10 @@ public sealed class AutomationEngine(
         var success = true;
         try
         {
-            var actor = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == rule.CreatedByUserId, ct);
-            if (actor is null || !actor.Enabled || actor.Role != UserRole.Admin)
-                throw new InvalidOperationException("规则最后修改人已停用或不再是系统管理员，请由系统管理员重新保存规则。");
+            var actor = await db.Users.AsNoTracking().Include(x => x.RoleDefinition)
+                .SingleOrDefaultAsync(x => x.Id == rule.CreatedByUserId, ct);
+            if (actor is null || !actor.Enabled || !AccountPermissions.HasManagement(actor, ManagementPermissions.ManageAutomation))
+                throw new InvalidOperationException("规则最后修改人已停用或不再拥有自动化权限，请由有自动化权限的账号重新保存规则。");
             var profile = await identities.GetProfileAsync(actor.Id, ct)
                 ?? throw new InvalidOperationException("无法读取规则修改人的账号信息。");
             var forceSender = await identities.GetForceSenderInTitleAsync(ct);
@@ -394,6 +397,9 @@ public sealed class AutomationEngine(
             default:
                 return (false, "不支持的动作");
         }
+        // 规则以最后修改人的身份执行：每个动作仍需其拥有对应权限（按全局角色计算，与批量控制一致）。
+        if (!profile.Permissions.HasFlag(CommandPermissions.Required(command.Command)))
+            return (false, "规则修改人没有该动作的权限");
         var result = await peers.SendCommandAndWaitAsync(command, classId, CommandTimeout, ct);
         return (result.Success, string.IsNullOrWhiteSpace(result.Message) ? (result.Success ? "成功" : result.Code) : result.Message);
     }

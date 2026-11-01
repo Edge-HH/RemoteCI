@@ -292,30 +292,19 @@
 </div>
 
 
-@if (Model.CurrentUser.Role == UserRole.Admin)
+@if (Model.HasManagement(ManagementPermissions.ManageClasses))
 {
 <section class="panel class-self-service-panel" id="class-self-service">
     <div class="panel-heading">
         <div>
             <h2>班主任权限</h2>
-            <p class="muted">统一决定班主任能否在自己的班级里自行完成以下操作，对全部班级生效；系统管理员始终可以执行。</p>
+            <p class="muted">班主任能否改班名与头像、刷新课表、管理本班档案与插件设置等，现在都是“班主任”角色的默认权限，在<a asp-page="/Users" fragment="roles">人员与角色 · 角色</a>中逐项勾选。扩展插件仍需在“插件批量下发”中逐个开放给班级。</p>
         </div>
     </div>
-    <form method="post" asp-page-handler="SaveSelfService" class="stack">
-        <input type="hidden" name="groupId" value="@Model.SelectedGroupId" />
-        <fieldset class="batch-check-group">
-            <legend>允许班主任</legend>
-            <label class="check"><input type="checkbox" name="SelfServiceOptions.CanRename" value="true" checked="@Model.SelfServicePolicy.CanRename" /> 修改本班班名</label>
-            <label class="check"><input type="checkbox" name="SelfServiceOptions.CanChangeAvatar" value="true" checked="@Model.SelfServicePolicy.CanChangeAvatar" /> 上传或清除本班头像</label>
-            <label class="check"><input type="checkbox" name="SelfServiceOptions.CanPullSchedule" value="true" checked="@Model.SelfServicePolicy.CanPullSchedule" /> 手动从插件拉取本班课表</label>
-        </fieldset>
-        <p class="muted">扩展插件按插件逐个开放：在“扩展插件”页打开某个插件并允许班主任自行管理后，班主任才能在侧栏看到并修改本班设置，默认都不开放。课表定时拉取间隔属于全局设置，始终只有系统管理员可以修改。</p>
-        <div><button type="submit">保存班主任权限</button></div>
-    </form>
 </section>
 }
 
-@if (Model.CurrentUser.Role == UserRole.Admin)
+@if (Model.HasManagement(ManagementPermissions.ManageClasses))
 {
 <section class="panel member-excel-panel pairing-panel">
     <div class="panel-heading">
@@ -380,7 +369,7 @@
 </section>
 }
 
-@if (Model.CurrentUser.Role == UserRole.Admin)
+@if (Model.HasManagement(ManagementPermissions.ManageClasses))
 {
 <section class="panel member-excel-panel">
     <div class="panel-heading">

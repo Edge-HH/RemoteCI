@@ -39,8 +39,8 @@ public sealed record CommandAuditView(
 public sealed record CommandAuditPage(IReadOnlyList<CommandAuditView> Items, long? NextBefore);
 
 /// <summary>
-/// 命令审计的查询与导出。系统管理员查看全部；班主任只看自己担任班主任的班级，
-/// 不属于任何班级的记录（例如未分配设备）只对系统管理员可见。
+/// 命令审计的查询与导出。系统管理员与拥有“查看全部操作记录”的账号查看全部；其他账号只看自己有“操作记录”权限的班级，
+/// 不属于任何班级的记录（例如未分配设备）只在查看全部时可见。
 /// </summary>
 public sealed class CommandAuditQueryService(AppDbContext db, ClassAccessService access)
 {
@@ -49,7 +49,7 @@ public sealed class CommandAuditQueryService(AppDbContext db, ClassAccessService
 
     /// <summary>可查看的班级范围：null 表示全部；空列表表示没有查看权限。</summary>
     public Task<IReadOnlyList<Guid>?> GetScopeAsync(AppUser user, CancellationToken ct = default) =>
-        access.GetClassHeadScopeAsync(user.Id, user.Role, ct);
+        access.GetPermissionScopeAsync(user.Id, user.Role, UserPermissions.ViewAuditLog, ManagementPermissions.ViewAllAuditLogs, ct);
 
     public async Task<CommandAuditPage> QueryAsync(
         IReadOnlyList<Guid>? scope, CommandAuditFilter filter, CancellationToken ct = default)

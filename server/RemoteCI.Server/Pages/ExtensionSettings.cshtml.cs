@@ -197,11 +197,11 @@ public sealed class ExtensionSettingsModel(
         .Select(x => x.Key)
         .FirstOrDefault();
 
-    /// <summary>批量设置只对系统管理员开放；班主任与其他账号转到班级区的本班插件页。</summary>
+    /// <summary>批量设置需要“插件批量下发”系统权限；其他账号转到班级区的本班插件页。</summary>
     private async Task<IActionResult?> RequireAdminAsync()
     {
         if (await RequireAsync() is { } denied) return denied;
-        return CurrentUser.Role == UserRole.Admin
+        return HasManagement(ManagementPermissions.ManageExtensionSettings)
             ? null
             : RedirectToPage("/ClassExtensions", new { groupId = GroupId });
     }

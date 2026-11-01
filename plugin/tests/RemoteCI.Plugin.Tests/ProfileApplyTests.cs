@@ -458,7 +458,7 @@ public sealed class ProfileApplyTests
     {
         Assert.DoesNotContain(RemoteCiCapabilities.ProfileApply, RemoteCiCapabilities.Baseline);
         Assert.Contains(RemoteCiCapabilities.ProfileApply, RemoteCiCapabilities.Current);
-        Assert.Equal(UserPermissions.ManageSchedule, CommandPermissions.Required(CommandKind.ApplyProfile));
+        Assert.Equal(UserPermissions.ManageClassProfile, CommandPermissions.Required(CommandKind.ApplyProfile));
         Assert.True(CommandPermissions.IsServerOnly(CommandKind.ApplyProfile));
         foreach (var capability in new[] { RemoteCiCapabilities.ProfileRead, RemoteCiCapabilities.ProfileTempLayer })
         {
@@ -466,7 +466,7 @@ public sealed class ProfileApplyTests
             Assert.Contains(capability, RemoteCiCapabilities.Current);
         }
         Assert.Equal(RemoteCiCapabilities.ProfileRead, RemoteCiCapabilities.Required(CommandKind.ReadProfile));
-        Assert.Equal(UserPermissions.ManageSchedule, CommandPermissions.Required(CommandKind.ReadProfile));
+        Assert.Equal(UserPermissions.ManageClassProfile, CommandPermissions.Required(CommandKind.ReadProfile));
         Assert.True(CommandPermissions.IsServerOnly(CommandKind.ReadProfile));
     }
 

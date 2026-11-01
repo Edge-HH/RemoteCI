@@ -96,14 +96,8 @@ public sealed class CommandHandler
         if (command.Command == CommandKind.ApplyExtensionSettings)
             return await _extensionRouter.ApplySettingsAsync(command);
 
-        // 远程升级、插件管理、集控、终端与文件分发属于宿主级维护，即使账号被授予 ManageUsers 也只允许系统管理员执行。
-        if (command.Command is (CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
-            CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
-            CommandKind.InstallPluginPackages or
-            CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
-            CommandKind.JoinManagement or CommandKind.RestartClassIsland or CommandKind.UpdateAppGuard or
-            CommandKind.ExecuteTerminalCommand) && command.RequestedBy?.Role != UserRole.Admin)
-            return CommandResult.Failure(CommandResultCodes.Forbidden, "仅系统管理员可以执行远程维护操作");
+        // 远程升级、插件管理、集控与终端按各自独立的权限位放行（升级软件、管理插件、ClassIsland 控制、远程终端），
+        // 不再要求系统管理员身份；服务端按同一张权限表鉴权后才会下发。
         // 文件分发：经服务端中转的文件按 SendFiles 权限放行；旧的内联方式仍只允许系统管理员。
         if (command.Command == CommandKind.SendFile && command.FileDistribution?.IsTransfer != true &&
             command.RequestedBy?.Role != UserRole.Admin)

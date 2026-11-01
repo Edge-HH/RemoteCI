@@ -19,8 +19,7 @@ public sealed class ClassesModel(
     VisitorAccessSettings visitorAccess,
     ClassExcelService classExcel,
     IMemoryCache reportCache,
-    PeerRegistry peers,
-    ClassSelfServiceSettings selfService)
+    PeerRegistry peers)
     : WebPageModel(users)
 {
     /// <summary>虚拟树节点：用于筛选没有任何分组归属的班级。</summary>
@@ -93,19 +92,6 @@ public sealed class ClassesModel(
     public bool AnyVisitorClass { get; private set; }
     public bool AutoEnter { get; private set; }
 
-    /// <summary>班级自治策略：系统管理员统一决定班主任可在本班自行完成的操作。</summary>
-    public ClassSelfServicePolicy SelfServicePolicy { get; private set; } = ClassSelfServicePolicy.Default;
-
-    [BindProperty]
-    public SelfServiceInput SelfServiceOptions { get; set; } = new();
-
-    public sealed class SelfServiceInput
-    {
-        public bool CanRename { get; set; }
-        public bool CanChangeAvatar { get; set; }
-        public bool CanPullSchedule { get; set; }
-    }
-
     /// <summary>是否已设置统一连接码；不展示明文。</summary>
     public bool HasUnifiedCode { get; private set; }
 
@@ -126,16 +112,14 @@ public sealed class ClassesModel(
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         await LoadAsync(ct);
         return Page();
     }
 
     public async Task<IActionResult> OnPostCreateAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         try
         {
             var created = await classrooms.CreateAsync(NewClassName, ct);
@@ -160,8 +144,7 @@ public sealed class ClassesModel(
     /// </summary>
     public async Task<IActionResult> OnPostSetUnifiedCodeAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         try
         {
             var code = await identities.CreateSharedPluginPairingCodeAsync(UnifiedPairCodeInput, ct);
@@ -174,8 +157,7 @@ public sealed class ClassesModel(
     /// <summary>设置或重置某个班级的固定配对码；生成的明文只在本次响应展示一次。</summary>
     public async Task<IActionResult> OnPostSetClassPairCodeAsync(Guid id, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         try
         {
             GeneratedPairCode = await identities.SetClassPairingCodeAsync(id, ClassPairCodeInput, ct);
@@ -194,8 +176,7 @@ public sealed class ClassesModel(
     /// <summary>把未分配设备指派到班级；指派后立即推送该班授权镜像，无需插件重连。</summary>
     public async Task<IActionResult> OnPostAssignDeviceAsync(Guid credentialId, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         if (AssignDeviceClassId == Guid.Empty)
         {
             TempData["Error"] = "请选择要指派到的班级。";
@@ -215,8 +196,7 @@ public sealed class ClassesModel(
     /// <summary>吊销未分配设备的凭据，清理误接入或废弃的连接。</summary>
     public async Task<IActionResult> OnPostRevokeUnassignedAsync(Guid credentialId, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         try
         {
             await identities.RevokePluginCredentialAsync(credentialId, ct);
@@ -229,8 +209,7 @@ public sealed class ClassesModel(
 
     public async Task<IActionResult> OnPostRenameAsync(Guid id, string name, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         try
         {
             await classrooms.RenameAsync(id, name, ct);
@@ -242,8 +221,7 @@ public sealed class ClassesModel(
 
     public async Task<IActionResult> OnPostDeleteAsync(Guid id, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         try
         {
             await classrooms.DeleteAsync(id, ct);
@@ -255,23 +233,9 @@ public sealed class ClassesModel(
         return RedirectToClasses();
     }
 
-    /// <summary>保存班级自治策略；只影响服务端复核，不需要刷新插件授权镜像。</summary>
-    public async Task<IActionResult> OnPostSaveSelfServiceAsync(CancellationToken ct)
-    {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
-        await selfService.SetAsync(new ClassSelfServicePolicy(
-            SelfServiceOptions.CanRename,
-            SelfServiceOptions.CanChangeAvatar,
-            SelfServiceOptions.CanPullSchedule), ct);
-        TempData["Message"] = "班主任权限已保存，对全部班级生效。";
-        return RedirectToClasses();
-    }
-
     public async Task<IActionResult> OnPostToggleVisitorAsync(Guid id, bool enabled, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         try
         {
             await classrooms.SetVisitorAccessAsync(id, enabled, ct);
@@ -283,8 +247,13 @@ public sealed class ClassesModel(
 
     public async Task<IActionResult> OnPostAddMemberAsync(Guid id, Guid userId, Guid roleId, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
+        // 班内“管理员”角色等于该班全部权限；只有系统管理员可以授予，避免借班级管理提权。
+        if (roleId == AccountRole.AdministratorId && CurrentUser.Role != UserRole.Admin)
+        {
+            TempData["Error"] = "只有系统管理员可以把成员设为班内管理员。";
+            return RedirectToClasses();
+        }
         try
         {
             var members = (await classrooms.ListMembersAsync(id, ct)).ToList();
@@ -303,8 +272,7 @@ public sealed class ClassesModel(
 
     public async Task<IActionResult> OnPostRemoveMemberAsync(Guid id, Guid userId, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         try
         {
             var members = (await classrooms.ListMembersAsync(id, ct)).ToList();
@@ -322,8 +290,7 @@ public sealed class ClassesModel(
 
     public async Task<IActionResult> OnPostBatchAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         if (SelectedClassIds.Count == 0)
         {
             TempData["Error"] = "请先勾选要操作的班级。";
@@ -389,8 +356,7 @@ public sealed class ClassesModel(
 
     public async Task<IActionResult> OnPostCreateGroupAsync(Guid? parentGroupId, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         try
         {
             var created = await classrooms.CreateGroupAsync(NewGroupName, parentGroupId, ct);
@@ -406,8 +372,7 @@ public sealed class ClassesModel(
 
     public async Task<IActionResult> OnPostRenameGroupAsync(Guid id, string name, Guid? parentGroupId, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         try
         {
             await classrooms.RenameGroupAsync(id, name, parentGroupId, ct);
@@ -420,8 +385,7 @@ public sealed class ClassesModel(
     /// <summary>整体替换一个分组包含的班级。</summary>
     public async Task<IActionResult> OnPostSetGroupClassesAsync(Guid id, List<Guid> classIds, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         try
         {
             await classrooms.SetGroupClassesAsync(id, classIds ?? [], ct);
@@ -434,8 +398,7 @@ public sealed class ClassesModel(
     /// <summary>整体替换一个班级所属的分组（多归属）。</summary>
     public async Task<IActionResult> OnPostSetClassGroupsAsync(Guid id, List<Guid> groupIds, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         try
         {
             await classrooms.SetClassGroupsAsync(id, groupIds ?? [], ct);
@@ -447,8 +410,7 @@ public sealed class ClassesModel(
 
     public async Task<IActionResult> OnPostDeleteGroupAsync(Guid id, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         try
         {
             await classrooms.DeleteGroupAsync(id, ct);
@@ -462,16 +424,14 @@ public sealed class ClassesModel(
 
     public async Task<IActionResult> OnGetTemplateAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         var content = await classExcel.CreateTemplateAsync(ct);
         return File(content, ClassExcelService.ExcelContentType, ClassExcelService.TemplateFileName);
     }
 
     public async Task<IActionResult> OnGetExportAsync(Guid? groupId, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         try
         {
             var export = await classExcel.ExportAsync(groupId, ct);
@@ -486,8 +446,7 @@ public sealed class ClassesModel(
 
     public async Task<IActionResult> OnPostImportExcelAsync(IFormFile? excelFile, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         var bytes = await ReadExcelFileAsync(excelFile, ct);
         if (bytes is null) return RedirectToClasses();
         try
@@ -505,8 +464,7 @@ public sealed class ClassesModel(
 
     public async Task<IActionResult> OnPostOverwriteExcelAsync(IFormFile? excelFile, CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
         var bytes = await ReadExcelFileAsync(excelFile, ct);
         if (bytes is null) return RedirectToClasses();
         try
@@ -565,7 +523,6 @@ public sealed class ClassesModel(
         AnyVisitorClass = await visitorAccess.AnyVisitorClassEnabledAsync(ct);
         AutoEnter = await visitorAccess.GetAutoEnterAsync(ct);
         HasUnifiedCode = await identities.HasSharedPluginPairingCodeAsync(ct);
-        SelfServicePolicy = await selfService.GetAsync(ct);
         UnassignedDevices = await LoadUnassignedDevicesAsync(ct);
         if (TempData["ClassExcelReportId"] is string reportId &&
             reportCache.TryGetValue(reportId, out ClassExcelImportResult? report))

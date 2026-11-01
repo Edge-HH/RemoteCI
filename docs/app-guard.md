@@ -20,7 +20,7 @@
 | --- | --- |
 | WebUI › 管理 › 应用守护 | 全局策略、单台设备的单独设置、更新/关闭/卸载守护、最近守护事件 |
 | WebUI › 系统配置 › 组织信息 | 恢复提示中的组织名 |
-| REST | `GET/PUT /api/settings/app-guard`、`GET/PUT/DELETE /api/devices/{credentialId}/app-guard`、`GET /api/app-guard/events`（仅系统管理员，见[协议](protocol.md#应用守护)） |
+| REST | `GET/PUT /api/settings/app-guard`、`GET/PUT/DELETE /api/devices/{credentialId}/app-guard`、`GET /api/app-guard/events`（需要“应用守护策略”系统权限；直接关闭、卸载或更新设备守护另需“设备应用守护”权限，见[协议](protocol.md#应用守护)） |
 
 全局策略对所有教室电脑生效。某台设备单独设置后，它使用自己的完整策略，直到点“恢复沿用全局”。策略保存后立即下发给在线设备；离线设备在下次连接时收到。插件会缓存最近一次收到的策略，断网启动时照样生效。
 

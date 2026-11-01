@@ -152,6 +152,9 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("DefaultManagementPermissions")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("DefaultPermissions")
                         .HasColumnType("INTEGER");
 
@@ -335,6 +338,9 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Property<bool>("Enabled")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("GrantedManagementPermissions")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("GrantedPermissions")
                         .HasColumnType("INTEGER");
 
@@ -372,6 +378,12 @@ namespace RemoteCI.Server.Data.Migrations
 
                     b.Property<string>("ProtectedTotpKey")
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("RevokedManagementPermissions")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RevokedPermissions")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("Role")
                         .HasColumnType("INTEGER");

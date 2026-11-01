@@ -62,7 +62,9 @@ public enum UserRole
 }
 
 /// <summary>
-/// 有效权限位。管理员的有效权限固定为 All；普通用户至少拥有 ViewCurrentCourse。
+/// 班级内的有效权限位：按账号在该班级的角色（或任教老师角色）默认权限，再套用个人调整计算。
+/// 管理员的有效权限固定为 All；普通用户至少拥有 ViewCurrentCourse。
+/// 第 16 位起是从原有权限中拆出的独立权限；升级时已拥有原权限的角色与账号会自动补齐，行为不变。
 /// </summary>
 [Flags]
 public enum UserPermissions
@@ -92,28 +94,133 @@ public enum UserPermissions
     SendFiles = 1 << 14,
     // 获取有权班级教室电脑的当前屏幕截图；班级管理员默认拥有。
     CaptureScreen = 1 << 15,
+    // 本班档案：查看、编辑、下发与收集档案，下发时间表；原先随换课与人员管理授予。
+    ManageClassProfile = 1 << 16,
+    // 让在线插件立即重新上报本班课表；原先由班级自治策略控制。
+    PullSchedule = 1 << 17,
+    // 清除教室端通知；原先随发送通知授予。
+    ClearNotifications = 1 << 18,
+    // 调节音量与静音；原先随电源控制授予。
+    VolumeControl = 1 << 19,
+    // 上传与获取 ClassIsland 主界面文件；原先随主界面控制授予。
+    MainWindowLayout = 1 << 20,
+    // 在教室电脑上执行远程终端命令；原先随人员管理授予。
+    RemoteTerminal = 1 << 21,
+    // 启动、重启 ClassIsland 与加入 ClassIsland 集控；原先随人员管理授予。
+    ControlClassIsland = 1 << 22,
+    // 修改本班已开放的扩展插件设置；原先仅本班班主任（随扩展功能）可用。
+    ConfigureExtensions = 1 << 23,
+    // 安装、卸载、启停插件与下发插件包、插件管理策略；原先随人员管理授予。
+    ManagePlugins = 1 << 24,
+    // 升级 ClassIsland 与插件、刷新版本清单；原先随人员管理授予。
+    UpgradeSoftware = 1 << 25,
+    // 停用、卸载与更新本班设备上的应用守护；原先随人员管理授予。
+    ManageDeviceGuard = 1 << 26,
+    // 修改班级名称与头像；原先由班级自治策略控制。
+    ManageClassInfo = 1 << 27,
+    // 生成与吊销本班电子班牌链接；原先仅本班班主任可用。
+    ManageClassBoards = 1 << 28,
+    // 查看本班操作记录；原先仅本班班主任可用。
+    ViewAuditLog = 1 << 29,
+    // 查看本班课时统计；原先仅本班班主任可用。
+    ViewLessonStats = 1 << 30,
     All = ViewCurrentCourse | AccessWebUi | ManageUsers | SendNotifications | ManageSchedule |
           PowerControl | TeacherComing | RunExtensions | MainMenuControl | SendVoiceMessages |
-          ChangeDisplayName | ApiAccess | RequestScheduleSwap | ForceScheduleSwap | SendFiles | CaptureScreen,
+          ChangeDisplayName | ApiAccess | RequestScheduleSwap | ForceScheduleSwap | SendFiles | CaptureScreen |
+          ManageClassProfile | PullSchedule | ClearNotifications | VolumeControl | MainWindowLayout |
+          RemoteTerminal | ControlClassIsland | ConfigureExtensions | ManagePlugins | UpgradeSoftware |
+          ManageDeviceGuard | ManageClassInfo | ManageClassBoards | ViewAuditLog | ViewLessonStats,
+}
+
+/// <summary>
+/// 系统管理权限：面向全部班级的管理功能，只按账号的全局角色与个人调整计算，不随班内角色变化。
+/// 管理员固定拥有全部；系统配置、更新与备份，以及管理员账号本身仍只由系统管理员维护。
+/// </summary>
+[Flags]
+public enum ManagementPermissions
+{
+    None = 0,
+    // 创建、编辑、删除角色及其默认权限。
+    ManageRoles = 1 << 0,
+    // Excel 与文本批量导入、导出人员。
+    ImportUsers = 1 << 1,
+    // 班级管理：建班、分组、成员、连接码、设备分配与访客开关。
+    ManageClasses = 1 << 2,
+    // 档案库：全部班级与模板档案的编辑、下发、收集与版本历史。
+    ManageProfileLibrary = 1 << 3,
+    // 学期与调休。
+    ManageHolidays = 1 << 4,
+    // 设备状态：全部班级的在线、版本与告警。
+    ViewDevices = 1 << 5,
+    // 批量控制：向多个班级下发命令；每项操作仍需对应的班级权限。
+    BatchControl = 1 << 6,
+    // 自动化规则。
+    ManageAutomation = 1 << 7,
+    // 应用守护的全局与单设备策略。
+    ManageAppGuard = 1 << 8,
+    // 插件批量下发、扩展调用策略与插件的班级开放设置。
+    ManageExtensionSettings = 1 << 9,
+    // 登录页外观与访客访问。
+    ManageLoginPage = 1 << 10,
+    // 插件凭据、连接码与课表同步设置。
+    ManagePluginAccess = 1 << 11,
+    // 查看全部班级的操作记录。
+    ViewAllAuditLogs = 1 << 12,
+    // 查看全部班级的课时统计。
+    ViewAllLessonStats = 1 << 13,
+    All = ManageRoles | ImportUsers | ManageClasses | ManageProfileLibrary | ManageHolidays | ViewDevices |
+          BatchControl | ManageAutomation | ManageAppGuard | ManageExtensionSettings | ManageLoginPage |
+          ManagePluginAccess | ViewAllAuditLogs | ViewAllLessonStats,
 }
 
 public static class RolePermissions
 {
     /// <summary>可授予普通账号或自定义角色的权限集合。</summary>
-    public const UserPermissions Assignable = UserPermissions.AccessWebUi | UserPermissions.ManageUsers |
-        UserPermissions.SendNotifications | UserPermissions.ManageSchedule | UserPermissions.PowerControl |
-        UserPermissions.TeacherComing | UserPermissions.RunExtensions | UserPermissions.MainMenuControl |
-        UserPermissions.SendVoiceMessages | UserPermissions.ApiAccess | UserPermissions.RequestScheduleSwap |
-        UserPermissions.ForceScheduleSwap | UserPermissions.SendFiles | UserPermissions.CaptureScreen;
+    public const UserPermissions Assignable = UserPermissions.All &
+        ~UserPermissions.ViewCurrentCourse & ~UserPermissions.ChangeDisplayName;
 
+    /// <summary>
+    /// 有效权限：角色默认权限加上个人新增、减去个人收回。个人设置记录的是相对角色的调整，
+    /// 因此同一套调整在每个班级都按该班的班内角色生效，角色默认权限变化时未调整的权限随之变化。
+    /// </summary>
     public static UserPermissions Effective(
         UserRole role,
         UserPermissions granted,
-        UserPermissions roleDefaults = UserPermissions.None) => role == UserRole.Admin
+        UserPermissions roleDefaults = UserPermissions.None,
+        UserPermissions revoked = UserPermissions.None) => role == UserRole.Admin
         ? UserPermissions.All
         : UserPermissions.ViewCurrentCourse |
-          (roleDefaults & ~UserPermissions.ViewCurrentCourse) |
-          (granted & ~UserPermissions.ViewCurrentCourse);
+          (((roleDefaults | granted) & ~revoked) & ~UserPermissions.ViewCurrentCourse);
+
+    /// <summary>系统管理权限的有效值，规则与班级权限相同：角色默认 + 个人新增 − 个人收回。</summary>
+    public static ManagementPermissions EffectiveManagement(
+        UserRole role,
+        ManagementPermissions roleDefaults,
+        ManagementPermissions granted = ManagementPermissions.None,
+        ManagementPermissions revoked = ManagementPermissions.None) => role == UserRole.Admin
+        ? ManagementPermissions.All
+        : (roleDefaults | granted) & ~revoked & ManagementPermissions.All;
+
+    /// <summary>
+    /// 把编辑器里勾选的完整权限集合换算成相对角色默认的个人调整：
+    /// 勾选但角色没有的记为新增，角色有但未勾选的记为收回。
+    /// </summary>
+    public static (UserPermissions Granted, UserPermissions Revoked) Adjust(
+        UserPermissions roleDefaults, UserPermissions selected)
+    {
+        roleDefaults &= Assignable;
+        selected &= Assignable;
+        return (selected & ~roleDefaults, roleDefaults & ~selected);
+    }
+
+    /// <inheritdoc cref="Adjust(UserPermissions, UserPermissions)"/>
+    public static (ManagementPermissions Granted, ManagementPermissions Revoked) Adjust(
+        ManagementPermissions roleDefaults, ManagementPermissions selected)
+    {
+        roleDefaults &= ManagementPermissions.All;
+        selected &= ManagementPermissions.All;
+        return (selected & ~roleDefaults, roleDefaults & ~selected);
+    }
 
     public static bool Has(UserProfileLike user, UserPermissions permission) =>
         (Effective(user.Role, user.GrantedPermissions) & permission) == permission;
@@ -232,31 +339,67 @@ public static class CommandPermissions
 
     public static UserPermissions Required(CommandKind command) => command switch
     {
-        CommandKind.ChangeSchedule or CommandKind.SetSubjectTeacher or CommandKind.ApplyProfile or CommandKind.ReadProfile => UserPermissions.ManageSchedule,
-        CommandKind.SendNotification or CommandKind.ClearNotifications => UserPermissions.SendNotifications,
+        CommandKind.ChangeSchedule or CommandKind.SetSubjectTeacher => UserPermissions.ManageSchedule,
+        CommandKind.ApplyProfile or CommandKind.ReadProfile or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout
+            => UserPermissions.ManageClassProfile,
+        CommandKind.SendNotification => UserPermissions.SendNotifications,
+        CommandKind.ClearNotifications => UserPermissions.ClearNotifications,
         CommandKind.SendVoiceMessage => UserPermissions.SendVoiceMessages,
         CommandKind.TeacherComing => UserPermissions.TeacherComing,
-        CommandKind.SetMainMenuVisibility or CommandKind.ApplyMainWindowLayout or CommandKind.ReadMainWindowLayout
-            => UserPermissions.MainMenuControl,
-        CommandKind.Power or CommandKind.Volume => UserPermissions.PowerControl,
-        // 服务端另按“系统管理员或获准的班管理员”复核，插件端只校验扩展权限位作为纵深防御。
-        CommandKind.ApplyExtensionSettings => UserPermissions.RunExtensions,
+        CommandKind.SetMainMenuVisibility => UserPermissions.MainMenuControl,
+        CommandKind.ApplyMainWindowLayout or CommandKind.ReadMainWindowLayout => UserPermissions.MainWindowLayout,
+        CommandKind.Power => UserPermissions.PowerControl,
+        CommandKind.Volume => UserPermissions.VolumeControl,
+        // 服务端另按插件的班级开放策略复核，插件端只校验权限位作为纵深防御。
+        CommandKind.ApplyExtensionSettings => UserPermissions.ConfigureExtensions,
         // 文件分发只写入固定的用户文件夹；内联文件（旧方式）另外仅限系统管理员，由通用命令通道与插件分别复核。
         CommandKind.SendFile => UserPermissions.SendFiles,
         CommandKind.CaptureScreen => UserPermissions.CaptureScreen,
-        // 远程升级、插件管理、集控与终端都会改变教室端程序、配置或系统状态，
-        // 与账号管理同属高风险管理员操作。
-        CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
+        CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory
+            => UserPermissions.UpgradeSoftware,
         CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
-        CommandKind.InstallPluginPackages or
-        CommandKind.SetPluginManagementPolicy or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
-        CommandKind.JoinManagement
-        or CommandKind.RestartClassIsland or CommandKind.LaunchClassIsland or CommandKind.StopAppGuard or CommandKind.UninstallAppGuard
-        or CommandKind.UpdateAppGuard
-        or CommandKind.ExecuteTerminalCommand
-            => UserPermissions.ManageUsers,
+        CommandKind.InstallPluginPackages or CommandKind.SetPluginManagementPolicy
+            => UserPermissions.ManagePlugins,
+        CommandKind.RestartClassIsland or CommandKind.LaunchClassIsland or CommandKind.JoinManagement
+            => UserPermissions.ControlClassIsland,
+        CommandKind.StopAppGuard or CommandKind.UninstallAppGuard or CommandKind.UpdateAppGuard
+            => UserPermissions.ManageDeviceGuard,
+        CommandKind.ExecuteTerminalCommand => UserPermissions.RemoteTerminal,
         _ => UserPermissions.None,
     };
+
+    /// <summary>
+    /// 权限细化前（3.4 之前）插件对同一命令校验的权限位。旧插件只认这些位，
+    /// 服务端代发命令时据此补上，避免已获授权的新权限在未升级的教室端被误拒。
+    /// </summary>
+    public static UserPermissions LegacyRequired(CommandKind command) => command switch
+    {
+        CommandKind.ApplyProfile or CommandKind.ReadProfile => UserPermissions.ManageSchedule,
+        CommandKind.ClearNotifications => UserPermissions.SendNotifications,
+        CommandKind.ApplyMainWindowLayout or CommandKind.ReadMainWindowLayout => UserPermissions.MainMenuControl,
+        CommandKind.Volume => UserPermissions.PowerControl,
+        CommandKind.ApplyExtensionSettings => UserPermissions.RunExtensions,
+        CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout or
+        CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
+        CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
+        CommandKind.InstallPluginPackages or CommandKind.SetPluginManagementPolicy or
+        CommandKind.RestartClassIsland or CommandKind.LaunchClassIsland or CommandKind.JoinManagement or
+        CommandKind.StopAppGuard or CommandKind.UninstallAppGuard or CommandKind.UpdateAppGuard or
+        CommandKind.ExecuteTerminalCommand => UserPermissions.ManageUsers,
+        _ => Required(command),
+    };
+
+    /// <summary>
+    /// 服务端把命令发往插件前调用：发起人已具备该命令的新权限时，在这一条命令携带的权限里补上旧插件认的权限位。
+    /// 只影响这一条命令消息，服务端鉴权始终以 <see cref="Required"/> 为准。
+    /// </summary>
+    public static UserPermissions ForDispatch(CommandKind command, UserPermissions permissions)
+    {
+        var required = Required(command);
+        return required != UserPermissions.None && permissions.HasFlag(required)
+            ? permissions | LegacyRequired(command)
+            : permissions;
+    }
 }
 
 /// <summary>V3 协议内稳定、可追加的功能能力标识。</summary>

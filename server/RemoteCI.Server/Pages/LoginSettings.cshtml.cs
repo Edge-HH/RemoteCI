@@ -23,7 +23,10 @@ public sealed class LoginSettingsModel(
     [BindProperty] public string? MobileServerUrl { get; set; }
     [BindProperty] public bool AutoEnterVisitorPage { get; set; }
 
-    public bool IsAdmin => CurrentUser.Role == UserRole.Admin;
+    /// <summary>登录页外观与扫码登录地址：拥有“登录页与访客”系统权限即可修改。</summary>
+    public bool CanEditAppearance => HasManagement(ManagementPermissions.ManageLoginPage);
+    /// <summary>逐班访客开关在班级管理中，有“班级管理”权限时给出链接。</summary>
+    public bool CanManageClasses => HasManagement(ManagementPermissions.ManageClasses);
 
     public bool HasBackground { get; private set; }
     public DateTimeOffset? BackgroundUpdatedAt { get; private set; }
@@ -31,7 +34,7 @@ public sealed class LoginSettingsModel(
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
+        if (await RequireManagementAsync(ManagementPermissions.ManageLoginPage) is { } denied) return denied;
         await LoadAsync(ct);
         return Page();
     }
@@ -93,7 +96,7 @@ public sealed class LoginSettingsModel(
 
     public async Task<IActionResult> OnPostVisitorAccessAsync(CancellationToken ct)
     {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
+        if (await RequireManagementAsync(ManagementPermissions.ManageLoginPage) is { } denied) return denied;
         // 班级级“开放访客”开关在班级管理页逐班配置；这里只保留登录页自动进入的全局行为。
         var autoEnter = await visitorAccess.SetAutoEnterAsync(AutoEnterVisitorPage, ct);
         TempData["Message"] = autoEnter
@@ -105,7 +108,6 @@ public sealed class LoginSettingsModel(
     private async Task LoadAsync(CancellationToken ct = default)
     {
         AutoEnterVisitorPage = await visitorAccess.GetAutoEnterAsync(ct);
-        if (!IsAdmin) return;
         MobileServerUrl = await mobileLogin.GetServerUrlAsync(ct);
         var appearance = await settings.GetAppearanceAsync(ct);
         Appearance = new AppearanceInput { Theme = appearance.Theme, Opacity = appearance.Opacity, CardPosition = appearance.CardPosition };
@@ -113,12 +115,8 @@ public sealed class LoginSettingsModel(
         BackgroundUpdatedAt = appearance.BackgroundUpdatedAt;
     }
 
-    /// <summary>登录页外观与扫码登录地址属于系统级配置，只允许系统管理员修改。</summary>
-    private async Task<IActionResult?> RequireAdminAsync()
-    {
-        if (await RequireAsync(UserPermissions.ManageUsers) is { } denied) return denied;
-        return CurrentUser.Role == UserRole.Admin ? null : RedirectToPage("/Denied");
-    }
+    /// <summary>登录页外观与扫码登录地址属于系统级配置，需要“登录页与访客”系统权限。</summary>
+    private Task<IActionResult?> RequireAdminAsync() => RequireManagementAsync(ManagementPermissions.ManageLoginPage);
 
     public sealed class AppearanceInput
     {

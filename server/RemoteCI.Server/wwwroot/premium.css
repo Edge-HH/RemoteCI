@@ -2471,3 +2471,46 @@ body.sidebar-collapsed .nav-group.collapsed > .nav-link:not(.active) { display: 
 .plugin-manual-ids[open] summary {
     margin-bottom: 8px;
 }
+
+/* 分组权限清单（角色与人员编辑器）：每组一张卡片，组头带图标、范围、计数与全选，组内为列表行。
+   人员编辑器中与角色默认不同的行在左侧加色条并标注“已新增 / 已收回”。 */
+.permission-field { grid-column: 1 / -1; min-width: 0; }
+.permission-checklist { display: grid; gap: 10px; min-width: 0; }
+.permission-checklist-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.permission-checklist-head > div { display: grid; gap: 2px; min-width: 0; }
+.permission-checklist-head strong { font-size: 13px; }
+.permission-checklist-head small { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.permission-reset { flex: none; min-height: 30px; padding: 4px 10px; font-size: 12px; }
+.permission-group { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface-inset); }
+.permission-group-head { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 12px; border-bottom: 1px solid var(--line); background: var(--surface-soft); }
+.permission-group-icon { display: grid; flex: none; width: 28px; height: 28px; place-items: center; border-radius: 7px; background: var(--accent-faint); color: var(--accent-strong); }
+.permission-group-icon svg { width: 16px; height: 16px; }
+.permission-group-title { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; }
+.permission-group-title strong { font-size: 13px; }
+.permission-group-title small { padding: 1px 6px; border: 1px solid var(--line); border-radius: var(--radius-pill); color: var(--muted); font-size: 10px; white-space: nowrap; }
+.permission-group-count { color: var(--muted); font-family: var(--font-mono); font-size: 11px; white-space: nowrap; }
+.permission-group-all { min-height: 26px; padding: 2px 9px; font-size: 11px; }
+.permission-list { margin: 0; padding: 0; list-style: none; }
+.permission-item + .permission-item { border-top: 1px solid var(--line); }
+.permission-item > label { display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px; cursor: pointer; }
+.permission-item > label:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.permission-item input { flex: none; margin-top: 2px; }
+.permission-item-copy { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.permission-item-copy strong { font-size: 12.5px; font-weight: 600; }
+.permission-item-copy small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.permission-item-flag { flex: none; align-self: center; padding: 1px 7px; border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--accent-strong); font-size: 10.5px; white-space: nowrap; }
+.permission-item-flag:empty { display: none; }
+.permission-item.is-adjusted { box-shadow: inset 3px 0 0 var(--accent); }
+.permission-item.is-adjusted:has(input:not(:checked)) { box-shadow: inset 3px 0 0 var(--warning); }
+.permission-item.is-adjusted:has(input:not(:checked)) .permission-item-flag { background: var(--warning-soft); color: var(--warning); }
+.permission-checklist.is-locked .permission-item > label,
+.permission-item:has(input[data-base]) > label { cursor: default; }
+.permission-checklist.is-locked .permission-item > label:hover,
+.permission-item:has(input[data-base]) > label:hover { background: none; }
+.permission-admin-note { margin: 0; color: var(--muted); font-size: 11px; }
+.role-edit-dialog-form .permission-checklist { margin-top: 2px; }
+
+@media (max-width: 640px) {
+    .permission-checklist-head { flex-direction: column; }
+    .permission-group-title { flex-direction: column; align-items: flex-start; gap: 3px; }
+}

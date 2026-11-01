@@ -83,7 +83,7 @@ public sealed class ClassSelfServiceTests
             $"/api/classes/{classId}/extension-groups/demo.settings/settings", classAdminToken,
             new { values = new Dictionary<string, string?> { ["volume"] = "30" } }))).StatusCode);
         Assert.Empty((await groups.ListClassAdminEditableAsync(
-            profile.Id, profile.Role, profile.GrantedPermissions, classId))!);
+            profile.Id, profile.Role, classId))!);
 
         // 只有系统管理员可以开放插件，且只开放被点名的插件。
         Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(Bearer(HttpMethod.Put,
@@ -93,7 +93,7 @@ public sealed class ClassSelfServiceTests
         Assert.True(await groups.CanEditSettingsAsync(profile, classId, "demo.settings"));
         Assert.False(await groups.CanEditSettingsAsync(profile, classId, "demo.other"));
         Assert.Equal(["demo.settings"], (await groups.ListClassAdminEditableAsync(
-            profile.Id, profile.Role, profile.GrantedPermissions, classId))!);
+            profile.Id, profile.Role, classId))!);
 
         // 权限复核通过后，班级未上报该分组时返回明确的业务错误，而不是越权。
         var missing = await client.SendAsync(Bearer(HttpMethod.Put,
@@ -196,7 +196,8 @@ public sealed class ClassSelfServiceTests
         await using var factory = new TestWebApplicationFactory();
         var (admin, _, classAdmin) = await CreateClassWithClassAdminAsync(factory, "接口一班", "self.api");
         using var client = factory.CreateClient();
-        var changed = new { canRename = false, canChangeAvatar = true, canPullSchedule = true };
+        // 旧接口映射到班主任角色：班名与头像合并为一项“班级名称与头像”权限，任一开启即两项都开启。
+        var changed = new { canRename = false, canChangeAvatar = true, canPullSchedule = false };
 
         Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(Bearer(HttpMethod.Put,
             "/api/settings/class-self-service", classAdmin, changed))).StatusCode);
@@ -205,7 +206,12 @@ public sealed class ClassSelfServiceTests
 
         var read = await (await client.SendAsync(Bearer(HttpMethod.Get, "/api/settings/class-self-service", classAdmin)))
             .Content.ReadFromJsonAsync<ClassSelfServicePolicy>();
-        Assert.Equal(new ClassSelfServicePolicy(false, true, true), read);
+        Assert.Equal(new ClassSelfServicePolicy(true, true, false), read);
+        using var scope = factory.Services.CreateScope();
+        var role = await scope.ServiceProvider.GetRequiredService<AccountRoleService>().ListAsync();
+        var classHead = role.Single(x => x.Id == AccountRole.ClassAdministratorId).DefaultPermissions;
+        Assert.True(classHead.HasFlag(UserPermissions.ManageClassInfo));
+        Assert.False(classHead.HasFlag(UserPermissions.PullSchedule));
     }
 
     private static async Task SetPolicyAsync(TestWebApplicationFactory factory, ClassSelfServicePolicy policy)

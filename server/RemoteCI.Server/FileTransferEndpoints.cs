@@ -75,7 +75,7 @@ public static class FileTransferEndpoints
             if (!Enum.IsDefined(body.TargetFolder))
                 return ApiAuth.Error(ApiErrorCodes.InvalidRequest, "目标文件夹无效", StatusCodes.Status400BadRequest);
 
-            var classes = await access.GetAccessibleClassesAsync(user.Id, user.Role, user.GrantedPermissions, ct);
+            var classes = await access.GetAccessibleClassesAsync(user.Id, user.Role, ct);
             var (targets, error) = await ResolveTargetsAsync(body, user, classes, schedule, ct);
             if (error is not null) return ApiAuth.Error(ApiErrorCodes.InvalidRequest, error, StatusCodes.Status400BadRequest);
             var permissions = classes.ToDictionary(x => x.Id, x => x.Permissions ?? UserPermissions.None);
@@ -109,7 +109,7 @@ public static class FileTransferEndpoints
     /// <summary>上传前的粗检：系统管理员，或至少在一个班级拥有 SendFiles。发送时再按班级逐个复核。</summary>
     private static async Task<bool> CanSendFilesAnywhereAsync(UserProfile user, ClassAccessService access, CancellationToken ct) =>
         user.Role == UserRole.Admin ||
-        (await access.GetAccessibleClassesAsync(user.Id, user.Role, user.GrantedPermissions, ct))
+        (await access.GetAccessibleClassesAsync(user.Id, user.Role, ct))
             .Any(x => x.Permissions?.HasFlag(UserPermissions.SendFiles) == true);
 
     private static async Task<(IReadOnlyList<Guid> Targets, string? Error)> ResolveTargetsAsync(

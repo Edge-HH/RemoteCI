@@ -60,8 +60,9 @@ public sealed class ControlModel(
     public bool PluginOnline => peers.HasPluginFor(CurrentClassId);
     public bool GuardOnline => peers.HasGuardFor(CurrentClassId);
     public bool GuardOnly => GuardOnline && !PluginOnline;
-    public bool CanLaunchClassIsland => CurrentUser.Role == UserRole.Admin &&
-        ClassPermissions.HasFlag(UserPermissions.ManageUsers) &&
+    /// <summary>课表在线时 ClassIsland 已在运行，不再展示远程打开。</summary>
+    public bool CanLaunchClassIsland => !PluginOnline &&
+        ClassPermissions.HasFlag(UserPermissions.ControlClassIsland) &&
         peers.PrimaryGuardSupports(CurrentClassId, RemoteCiCapabilities.AppGuardLaunch);
     public ClassStateSnapshot? Snapshot { get; private set; }
     public IReadOnlyList<ExtensionControlItem> Extensions { get; private set; } = [];
@@ -73,17 +74,20 @@ public sealed class ControlModel(
     public IReadOnlySet<string>? EditableExtensionGroupIds { get; private set; }
 
     /// <summary>
-    /// 当前账号能否修改本班该插件的设置：系统管理员；或该插件已开放班级自治、且在本班拥有扩展功能权限的班主任。
+    /// 当前账号能否修改本班该插件的设置：系统管理员；或该插件已开放给班级、且在本班拥有“修改本班插件设置”权限。
     /// 与 ExtensionGroupService.CanEditSettingsAsync 的口径一致。
     /// </summary>
     public bool CanEditExtensionSettings(ExtensionGroupView group) =>
         group.HasSettings && (EditableExtensionGroupIds is null
-            ? ClassPermissions.HasFlag(UserPermissions.RunExtensions)
+            ? ClassPermissions.HasFlag(UserPermissions.ConfigureExtensions)
             : EditableExtensionGroupIds.Contains(group.Id));
 
     /// <summary>分组是否在控制页展示：有可见扩展，或当前账号可以打开它的设置页。</summary>
     public bool ShowExtensionGroup(ExtensionGroupView group) =>
         group.Extensions.Count > 0 || CanEditExtensionSettings(group);
+
+    /// <summary>扩展调用策略（启用、是否开放给非管理员、默认手表展示）对全部班级生效，需要“插件批量下发”系统权限。</summary>
+    public bool CanManageExtensionPolicy => HasManagement(ManagementPermissions.ManageExtensionSettings);
 
     public ExtensionControlItem ExtensionItem(ExtensionDefinition definition) =>
         Extensions.First(item => string.Equals(item.Definition.Id, definition.Id, StringComparison.Ordinal));
@@ -91,14 +95,14 @@ public sealed class ControlModel(
     public bool CanTeacherComing => ClassPermissions.HasFlag(UserPermissions.TeacherComing) && Supports(RemoteCiCapabilities.TeacherComing);
     public bool CanSendNotifications => ClassPermissions.HasFlag(UserPermissions.SendNotifications) && Supports(RemoteCiCapabilities.NotificationSend);
     public bool CanSendVoiceMessages => ClassPermissions.HasFlag(UserPermissions.SendVoiceMessages) && Supports(RemoteCiCapabilities.VoiceMessageSend);
-    public bool CanClearNotifications => ClassPermissions.HasFlag(UserPermissions.SendNotifications) && Supports(RemoteCiCapabilities.NotificationClear);
+    public bool CanClearNotifications => ClassPermissions.HasFlag(UserPermissions.ClearNotifications) && Supports(RemoteCiCapabilities.NotificationClear);
     public bool CanControlMainMenu => ClassPermissions.HasFlag(UserPermissions.MainMenuControl) && Supports(RemoteCiCapabilities.MainMenuVisibility);
     public bool CanControlPower => ClassPermissions.HasFlag(UserPermissions.PowerControl) && Supports(RemoteCiCapabilities.PowerControl);
-    public bool CanControlVolume => ClassPermissions.HasFlag(UserPermissions.PowerControl) && Supports(RemoteCiCapabilities.VolumeControl);
+    public bool CanControlVolume => ClassPermissions.HasFlag(UserPermissions.VolumeControl) && Supports(RemoteCiCapabilities.VolumeControl);
     public bool CanUseExtensions => ClassPermissions.HasFlag(UserPermissions.RunExtensions) && Supports(RemoteCiCapabilities.ExtensionsRun);
     public bool CanCaptureScreen => ClassPermissions.HasFlag(UserPermissions.CaptureScreen) && Supports(RemoteCiCapabilities.ScreenCapture);
-    public bool CanUploadMainWindowLayout => ClassPermissions.HasFlag(UserPermissions.MainMenuControl) && Supports(RemoteCiCapabilities.MainWindowLayoutApply);
-    public bool CanReadMainWindowLayout => ClassPermissions.HasFlag(UserPermissions.MainMenuControl) && Supports(RemoteCiCapabilities.MainWindowLayoutRead);
+    public bool CanUploadMainWindowLayout => ClassPermissions.HasFlag(UserPermissions.MainWindowLayout) && Supports(RemoteCiCapabilities.MainWindowLayoutApply);
+    public bool CanReadMainWindowLayout => ClassPermissions.HasFlag(UserPermissions.MainWindowLayout) && Supports(RemoteCiCapabilities.MainWindowLayoutRead);
     public override bool IsSingleControl => true;
 
     public override async Task<IActionResult> OnGetAsync(CancellationToken ct)
@@ -229,7 +233,7 @@ public sealed class ControlModel(
     public async Task<IActionResult> OnPostClearNotificationsAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (RequireClass(UserPermissions.SendNotifications) is { } classDenied) return classDenied;
+        if (RequireClass(UserPermissions.ClearNotifications) is { } classDenied) return classDenied;
         return RedirectWithResult(await SendAsync(
             new CommandMessage { Command = CommandKind.ClearNotifications }, ct));
     }
@@ -249,7 +253,7 @@ public sealed class ControlModel(
     public async Task<IActionResult> OnPostMainWindowLayoutAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (RequireClass(UserPermissions.MainMenuControl) is { } classDenied) return classDenied;
+        if (RequireClass(UserPermissions.MainWindowLayout) is { } classDenied) return classDenied;
         if (LayoutFile is null || LayoutFile.Length == 0)
             return RedirectWithResult(CommandResult.Failure(CommandResultCodes.InvalidRequest, "请选择主界面文件"));
         if (LayoutFile.Length > MainWindowLayoutRules.MaxUtf8Bytes + 3)
@@ -278,7 +282,7 @@ public sealed class ControlModel(
     public async Task<IActionResult> OnPostDownloadMainWindowLayoutAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (RequireClass(UserPermissions.MainMenuControl) is { } classDenied) return classDenied;
+        if (RequireClass(UserPermissions.MainWindowLayout) is { } classDenied) return classDenied;
         var result = await SendAsync(new CommandMessage { Command = CommandKind.ReadMainWindowLayout }, ct);
         if (!result.Success) return RedirectWithResult(result);
         MainWindowLayoutSnapshot? snapshot = null;
@@ -293,7 +297,7 @@ public sealed class ControlModel(
     public async Task<IActionResult> OnPostVolumeAsync(bool unmute, CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (RequireClass(UserPermissions.PowerControl) is { } classDenied) return classDenied;
+        if (RequireClass(UserPermissions.VolumeControl) is { } classDenied) return classDenied;
         if (VolumeLevel is < 0 or > 100)
             return VolumeResult(CommandResult.Failure(
                 CommandResultCodes.InvalidRequest, "音量必须在 0 到 100 之间"));
@@ -310,7 +314,7 @@ public sealed class ControlModel(
     public async Task<IActionResult> OnPostMuteAsync(bool muted, CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (RequireClass(UserPermissions.PowerControl) is { } classDenied) return classDenied;
+        if (RequireClass(UserPermissions.VolumeControl) is { } classDenied) return classDenied;
         return RedirectWithResult(await SendAsync(new CommandMessage
         {
             Command = CommandKind.Volume,
@@ -337,9 +341,7 @@ public sealed class ControlModel(
     public async Task<IActionResult> OnPostRestartClassIslandAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin)
-            return RedirectToPage("/Denied");
-        if (RequireClass(UserPermissions.ManageUsers) is { } classDenied) return classDenied;
+        if (RequireClass(UserPermissions.ControlClassIsland) is { } classDenied) return classDenied;
         return RedirectWithResult(await SendAsync(new CommandMessage
         {
             Command = CommandKind.RestartClassIsland,
@@ -349,8 +351,7 @@ public sealed class ControlModel(
     public async Task<IActionResult> OnPostLaunchClassIslandAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
-        if (RequireClass(UserPermissions.ManageUsers) is { } classDenied) return classDenied;
+        if (RequireClass(UserPermissions.ControlClassIsland) is { } classDenied) return classDenied;
         var requestedBy = (await Identities.GetProfileAsync(CurrentUser.Id, ct))?.WithPermissions(ClassPermissions);
         if (requestedBy is null) return RedirectToPage("/Login");
         return RedirectWithResult(await peers.LaunchClassIslandAsync(CurrentClassId, requestedBy, CommandTimeout, ct));
@@ -406,7 +407,7 @@ public sealed class ControlModel(
         CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
-        if (CurrentUser.Role != UserRole.Admin) return RedirectToPage("/Denied");
+        if (!CanManageExtensionPolicy) return RedirectToPage("/Denied");
         if (!HasCurrentExtension(extensionId))
         {
             TempData["Error"] = "扩展功能不存在或尚未同步";
@@ -444,7 +445,7 @@ public sealed class ControlModel(
         return RedirectToPage();
     }
 
-    // ---------- 班级设置（班名/头像）：系统管理员或本班班主任 ----------
+    // ---------- 班级设置（班名/头像）：本班“班级信息”权限 ----------
 
     public async Task<IActionResult> OnPostClassInfoAsync(CancellationToken ct)
     {
@@ -510,7 +511,7 @@ public sealed class ControlModel(
         ExtensionGroups = extensionGroups.BuildForClass(
             CurrentClassId, Extensions.Select(item => item.Definition).ToList());
         EditableExtensionGroupIds = await extensionGroups.ListClassAdminEditableAsync(
-            CurrentUser.Id, CurrentUser.Role, CurrentUser.GrantedPermissions, CurrentClassId, ct);
+            CurrentUser.Id, CurrentUser.Role, CurrentClassId, ct);
         return !MobileUi.IsMobile(HttpContext) && !CanTeacherComing && !CanSendNotifications && !CanSendVoiceMessages && !CanClearNotifications && !CanControlMainMenu &&
             !CanControlPower && !CanControlVolume && !CanUseExtensions && !HasMaintenanceOperations
             ? RedirectToPage("/Denied")

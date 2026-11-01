@@ -16,20 +16,111 @@ document.addEventListener("submit", event => {
 });
 function closeMobileSidebar() { document.body.classList.remove("sidebar-open"); }
 
-function syncRolePermissions(form) {
+// ---------- 分组权限清单：勾选状态就是最终拥有的权限，人员编辑器以所选角色的默认权限为基准 ----------
+function permissionBaseline(checklist, kind) {
+    return Number(kind === "management" ? checklist.dataset.baselineManagement : checklist.dataset.baseline) || 0;
+}
+
+function permissionInputs(root) {
+    return [...root.querySelectorAll('input[type="checkbox"][data-kind]')];
+}
+
+function syncPermissionChecklist(checklist) {
+    const showBaseline = checklist.dataset.showBaseline === "true";
+    const locked = checklist.classList.contains("is-locked");
+    checklist.querySelectorAll("[data-permission-group]").forEach(group => {
+        const inputs = permissionInputs(group);
+        const count = group.querySelector("[data-permission-count]");
+        if (count) count.textContent = `${inputs.filter(input => input.checked).length}/${inputs.length}`;
+        const toggle = group.querySelector("[data-permission-group-all]");
+        const editable = inputs.filter(input => input.dataset.base !== "true");
+        if (toggle) {
+            toggle.disabled = locked || editable.length === 0;
+            toggle.textContent = editable.length && editable.every(input => input.checked) ? "全不选" : "全选";
+        }
+    });
+    let adjusted = 0;
+    checklist.querySelectorAll("[data-permission-item]").forEach(item => {
+        const input = item.querySelector('input[type="checkbox"][data-kind]');
+        if (!input) return;
+        const isBase = input.dataset.base === "true";
+        const inBaseline = isBase || (permissionBaseline(checklist, input.dataset.kind) & Number(input.value)) !== 0;
+        const changed = showBaseline && !locked && !isBase && input.checked !== inBaseline;
+        if (changed) adjusted++;
+        item.classList.toggle("is-adjusted", changed);
+        const flag = item.querySelector("[data-permission-flag]");
+        if (flag) flag.textContent = changed ? (input.checked ? "已新增" : "已收回") : "";
+    });
+    const reset = checklist.querySelector("[data-permission-reset]");
+    if (reset) reset.disabled = locked || adjusted === 0;
+}
+
+/** 按基准（角色默认权限）重新勾选，相当于清除个人调整。 */
+function applyPermissionBaseline(checklist) {
+    permissionInputs(checklist).forEach(input => {
+        if (input.dataset.base === "true") return;
+        input.checked = (permissionBaseline(checklist, input.dataset.kind) & Number(input.value)) !== 0;
+    });
+    syncPermissionChecklist(checklist);
+}
+
+/** 管理员角色固定拥有全部权限：全部勾选并锁定；切回其他角色时解锁。 */
+function setPermissionChecklistLocked(checklist, locked) {
+    const description = checklist.querySelector("[data-permission-description]");
+    if (description && description.dataset.defaultText === undefined && !checklist.classList.contains("is-locked"))
+        description.dataset.defaultText = description.textContent;
+    checklist.classList.toggle("is-locked", locked);
+    permissionInputs(checklist).forEach(input => {
+        input.disabled = locked || input.dataset.base === "true";
+        if (locked) input.checked = true;
+    });
+    if (description) {
+        description.textContent = locked
+            ? "管理员固定拥有全部权限。"
+            : description.dataset.defaultText ?? "已按角色自动勾选；勾选或取消即为该账号单独调整，在各班级中以班内角色为基础套用同样的调整。";
+    }
+    syncPermissionChecklist(checklist);
+}
+
+document.addEventListener("change", event => {
+    const input = event.target.closest?.('[data-permission-checklist] input[type="checkbox"][data-kind]');
+    if (input) syncPermissionChecklist(input.closest("[data-permission-checklist]"));
+});
+
+document.addEventListener("click", event => {
+    const toggle = event.target.closest?.("[data-permission-group-all]");
+    if (toggle) {
+        const group = toggle.closest("[data-permission-group]");
+        const editable = permissionInputs(group).filter(input => !input.disabled);
+        const checkAll = !editable.every(input => input.checked);
+        editable.forEach(input => { input.checked = checkAll; });
+        syncPermissionChecklist(toggle.closest("[data-permission-checklist]"));
+        return;
+    }
+    const reset = event.target.closest?.("[data-permission-reset]");
+    if (reset) applyPermissionBaseline(reset.closest("[data-permission-checklist]"));
+});
+
+document.querySelectorAll("[data-permission-checklist]").forEach(syncPermissionChecklist);
+
+function syncRolePermissions(form, roleChanged = false) {
     const roleSelect = form.querySelector("[data-role-select]");
-    const permissions = form.querySelector("[data-role-permissions]");
-    const adminNote = form.querySelector("[data-admin-permission-note]");
+    const checklist = form.querySelector("[data-permission-checklist]");
     const teacherUsernameNote = form.querySelector("[data-teacher-username-note]");
     if (!roleSelect) return;
 
-    const isAdmin = roleSelect.selectedOptions[0]?.dataset.admin === "true" || roleSelect.value === "Admin" || roleSelect.value === "2";
-    const isTeacher = roleSelect.selectedOptions[0]?.dataset.teacher === "true";
-    if (permissions) {
-        permissions.hidden = isAdmin;
-        permissions.querySelectorAll('input[type="checkbox"]').forEach(input => { input.disabled = isAdmin; });
+    const option = roleSelect.selectedOptions[0];
+    const isAdmin = option?.dataset.admin === "true" || roleSelect.value === "Admin" || roleSelect.value === "2";
+    const isTeacher = option?.dataset.teacher === "true";
+    if (checklist) {
+        // 切换角色时以新角色的默认权限为基准并自动勾选；打开编辑窗口时保留账号已有的调整。
+        if (roleChanged && option) {
+            checklist.dataset.baseline = option.dataset.permissions ?? "0";
+            checklist.dataset.baselineManagement = option.dataset.management ?? "0";
+        }
+        setPermissionChecklistLocked(checklist, isAdmin);
+        if (roleChanged && !isAdmin) applyPermissionBaseline(checklist);
     }
-    if (adminNote) adminNote.hidden = !isAdmin;
     if (teacherUsernameNote) teacherUsernameNote.hidden = roleSelect.selectedOptions[0]?.dataset.teacher !== "true";
     // 老师按课表教师名动态绑定班级，不需要在建号时选择班级；隐藏字段时同步解除 required。
     const classField = form.querySelector("[data-create-class-field]");
@@ -186,7 +277,6 @@ else {
     const savedTheme = localStorage.getItem("remoteci-theme");
     if (savedTheme === "dark") document.documentElement.dataset.theme = "dark";
 }
-if (localStorage.getItem("remoteci-sidebar-collapsed") === "1" && !window.matchMedia("(max-width: 820px)").matches) document.body.classList.add("sidebar-collapsed");
 
 const searchInput = document.querySelector("[data-app-search]");
 const searchFeedback = document.querySelector("[data-search-feedback]");
@@ -365,30 +455,29 @@ document.querySelectorAll("[data-schedule-change-form]").forEach(form => {
 
 document.querySelectorAll("[data-role-form]").forEach(form => {
     const roleSelect = form.querySelector("[data-role-select]");
-    roleSelect?.addEventListener("change", () => syncRolePermissions(form));
+    roleSelect?.addEventListener("change", () => syncRolePermissions(form, true));
     syncRolePermissions(form);
 });
 
-// 登录页与设置新密码的密码框只接受英文字母和数字：输入法、粘贴带入的其他字符直接过滤并提示。
-document.querySelectorAll("[data-alnum-password]").forEach(input => {
+// 登录页与设置新密码的密码框只接受英文字母、数字和英文符号（可见 ASCII 字符）：中文、全角符号、空格等直接过滤并提示。
+document.querySelectorAll("[data-ascii-password]").forEach(input => {
     const hint = document.createElement("small");
     hint.className = "form-error";
-    hint.textContent = "密码只能输入英文字母和数字";
+    hint.textContent = "密码只能输入英文字母、数字和英文符号";
     hint.hidden = true;
     input.insertAdjacentElement("afterend", hint);
-    let hintTimer = 0;
+    // 被过滤时在输入框下方常驻红字，离开输入框后才收起，避免一闪而过像是按键没反应。
     const strip = () => {
-        const cleaned = input.value.replace(/[^A-Za-z0-9]/g, "");
+        const cleaned = input.value.replace(/[^!-~]/g, "");
         if (cleaned === input.value) return;
         const caret = Math.max(0, (input.selectionStart ?? cleaned.length) - (input.value.length - cleaned.length));
         input.value = cleaned;
         try { input.setSelectionRange(caret, caret); } catch { }
         hint.hidden = false;
-        window.clearTimeout(hintTimer);
-        hintTimer = window.setTimeout(() => { hint.hidden = true; }, 2500);
     };
     input.addEventListener("input", event => { if (!event.isComposing) strip(); });
     input.addEventListener("compositionend", strip);
+    input.addEventListener("blur", () => { hint.hidden = true; });
     strip();
 });
 
@@ -582,42 +671,4 @@ function syncRollingHint(scope) {
             try { localStorage.setItem(key, JSON.stringify(collapsed)); } catch { }
         });
     });
-})();
-
-// 页面内 tab：[data-page-tabs] 中带 data-tab-link 的链接切换同页 [data-tab] 区块，其他链接是跨页 tab。
-// 打开顺序：地址栏锚点（tab 名或区块内元素 id）> 本页上次停留的 tab > 第一个 tab；表单提交后重定向回来仍停在原 tab。
-(() => {
-    const nav = document.querySelector("[data-page-tabs]");
-    if (!nav) return;
-    const links = [...nav.querySelectorAll("[data-tab-link]")];
-    if (links.length === 0) return;
-    const storeKey = `remoteci-tab:${location.pathname.toLowerCase()}`;
-    const names = links.map(link => link.dataset.tabLink);
-    const show = (name, remember) => {
-        links.forEach(link => {
-            const active = link.dataset.tabLink === name;
-            link.classList.toggle("active", active);
-            if (active) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
-        });
-        document.querySelectorAll("[data-tab]").forEach(section => { section.hidden = section.dataset.tab !== name; });
-        if (remember) { try { sessionStorage.setItem(storeKey, name); } catch { } }
-    };
-    const fromHash = () => {
-        const hash = decodeURIComponent(location.hash.slice(1));
-        if (!hash) return null;
-        if (names.includes(hash)) return hash;
-        const owner = document.getElementById(hash)?.closest("[data-tab]");
-        return owner && names.includes(owner.dataset.tab) ? owner.dataset.tab : null;
-    };
-    let stored = null;
-    try { stored = sessionStorage.getItem(storeKey); } catch { }
-    const initial = fromHash() ?? (names.includes(stored) ? stored : names[0]);
-    show(initial, true);
-    if (location.hash && !names.includes(decodeURIComponent(location.hash.slice(1)))) document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView();
-    links.forEach(link => link.addEventListener("click", event => {
-        event.preventDefault();
-        show(link.dataset.tabLink, true);
-        history.replaceState(null, "", `#${link.dataset.tabLink}`);
-    }));
-    window.addEventListener("hashchange", () => { const name = fromHash(); if (name) show(name, true); });
 })();

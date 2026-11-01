@@ -35,7 +35,7 @@ public sealed class ProfileHistoryModel(
     {
         if (await RequireAsync() is { } denied) return denied;
         Profiles = await library.ListManageableAsync(CurrentUser, ct);
-        if (Profiles.Count == 0 && CurrentUser.Role != RemoteCI.Shared.UserRole.Admin) return RedirectToPage("/Denied");
+        if (Profiles.Count == 0 && !HasManagement(RemoteCI.Shared.ManagementPermissions.ManageProfileLibrary)) return RedirectToPage("/Denied");
         ClassNames = (await classrooms.ListAsync(ct)).ToDictionary(x => x.Id, x => x.Name);
         var classIds = Profiles.Where(x => x.ClassId is not null).Select(x => x.ClassId!.Value).ToList();
         Drift = await drift.LatestAsync(classIds, ct);

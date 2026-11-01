@@ -622,9 +622,21 @@ public sealed class PeerRegistry(
     internal static string? GetNotificationError(CommandMessage command) =>
         command.Command == CommandKind.SendNotification ? NotificationRequest.Validate(command.Notification) : null;
 
+    /// <summary>
+    /// 发往插件前，在这一条命令携带的权限里补上权限细化前旧插件认的权限位（发起人已具备新权限时）；
+    /// 服务端鉴权已按新权限完成，这里只避免未升级的教室端误拒。
+    /// </summary>
+    private static void ApplyLegacyPermissions(CommandMessage command)
+    {
+        if (command.RequestedBy is { } requestedBy)
+            command.RequestedBy = requestedBy.WithPermissions(
+                CommandPermissions.ForDispatch(command.Command, requestedBy.Permissions));
+    }
+
     public async Task<CommandResult> SendCommandAndWaitAsync(
         CommandMessage command, Guid classId, TimeSpan timeout, CancellationToken ct = default)
     {
+        ApplyLegacyPermissions(command);
         var envelope = Envelope.Command(command);
         var plugin = PluginPeersFor(classId).FirstOrDefault();
         var auditId = audit.Start(command, envelope.MessageId, classId, plugin?.Id, DeviceNameOf(plugin));
@@ -675,6 +687,7 @@ public sealed class PeerRegistry(
         TimeSpan timeout,
         CancellationToken ct = default)
     {
+        ApplyLegacyPermissions(command);
         var envelope = Envelope.Command(command);
         _pluginPeers.TryGetValue(connectionId, out var target);
         var auditId = audit.Start(

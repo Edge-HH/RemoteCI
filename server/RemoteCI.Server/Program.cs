@@ -615,7 +615,7 @@ app.MapGet("/api/classes/{classId:guid}/schedule-adjustments", async (
     return Results.Ok(await adjustments.ListAsync(classId, from, ct));
 });
 
-// 删除直接换课或教室端本地修改产生的调课记录（换课申请产生的请走撤回），仅系统管理员与本班班主任。
+// 删除直接换课或教室端本地修改产生的调课记录（换课申请产生的请走撤回），需要本班“直接换课”权限。
 app.MapDelete("/api/schedule-adjustments/{id:guid}", async (
     Guid id, HttpContext ctx, IdentityCoordinator identities, ClassAccessService access, ScheduleAdjustmentService adjustments,
     IStateStore store, PeerRegistry peers, CancellationToken ct) =>
@@ -625,7 +625,8 @@ app.MapDelete("/api/schedule-adjustments/{id:guid}", async (
     if (await adjustments.FindAsync(id, ct) is not { } row ||
         !await access.CanAccessAsync(principal.User.Id, principal.User.Role, row.ClassId, ct))
         return Results.Json(Error(ApiErrorCodes.NotFound, "调课记录不存在"), statusCode: StatusCodes.Status404NotFound);
-    if (!await access.IsClassAdminAsync(principal.User.Id, principal.User.Role, row.ClassId, ct)) return Forbidden();
+    if (!(await access.GetEffectivePermissionsAsync(principal.User.Id, principal.User.Role, row.ClassId, ct))
+            .HasFlag(UserPermissions.ManageSchedule)) return Forbidden();
     if (row.SwapRequestId is not null)
         return Results.Json(Error(ApiErrorCodes.InvalidRequest, "这条调课来自换课申请，请在换课申请中撤回"), statusCode: StatusCodes.Status400BadRequest);
     if (row.Status != ScheduleAdjustmentStatus.Active)
@@ -725,7 +726,7 @@ app.MapPost("/api/commands", async (
             "请使用 POST /api/files 上传后再发送；内联文件分发仅限系统管理员"), statusCode: StatusCodes.Status403Forbidden);
     command.ClassId = target;
     var classPermissions = await access.GetEffectivePermissionsAsync(
-        principal.User.Id, principal.User.Role, target, principal.User.GrantedPermissions, ct);
+        principal.User.Id, principal.User.Role, target, ct);
     if (command.Command == CommandKind.RunExtension)
     {
         // 与 WS 路径一致：独立扩展权限和管理员逐扩展策略必须同时通过。
@@ -771,7 +772,7 @@ usersApi.MapPost("/", async (
     if ((request.Role == UserRole.Admin || request.RoleId == AccountRole.AdministratorId) && principal.User.Role != UserRole.Admin) return Forbidden();
     try
     {
-        var created = await identities.CreateUserAsync(request, ct);
+        var created = await identities.CreateUserAsync(request, ct, Delegation(principal));
         await authorizationSync.SyncAsync(ct);
         return Results.Created($"/api/users/{created.Id}", created);
     }
@@ -791,7 +792,7 @@ usersApi.MapPut("/{id:guid}", async (
     try
     {
         await identities.EnsureCanManageAsync(principal.User.Id, id, ct);
-        var updated = await identities.UpdateUserAsync(id, request, ct);
+        var updated = await identities.UpdateUserAsync(id, request, ct, Delegation(principal));
         await authorizationSync.SyncAsync(ct);
         return Results.Ok(updated);
     }
@@ -824,7 +825,7 @@ usersApi.MapPost("/batch-import", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ImportUsers)) return Forbidden();
     try
     {
         var result = await importService.ImportAsync(request.Text, request.DefaultClassId, request.DefaultRoleId, ct);
@@ -858,7 +859,7 @@ app.MapPost("/api/plugin/pairing-code", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (!HasPermission(principal, UserPermissions.ManageUsers)) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManagePluginAccess)) return Forbidden();
     // unified=统一连接码（设备进入未分配列表）；persistent=班级固定码；否则为绑定班级的一次性码。
     if (body?.Unified != true && body?.ClassId is null)
         return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "请指定配对码要绑定的班级 classId，或使用 unified 统一连接码"));
@@ -881,7 +882,7 @@ groupApi.MapGet("/", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageClasses)) return Forbidden();
     return Results.Ok(await classrooms.ListGroupsAsync(ct));
 });
 groupApi.MapPost("/", async (
@@ -889,7 +890,7 @@ groupApi.MapPost("/", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageClasses)) return Forbidden();
     if (MissingFields(request.Name) is { } bad) return bad;
     try { return Results.Ok(await classrooms.CreateGroupAsync(request.Name, request.ParentId, ct)); }
     catch (IdentityOperationException ex) { return OperationError(ex); }
@@ -899,7 +900,7 @@ groupApi.MapPut("/{id:guid}", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageClasses)) return Forbidden();
     if (MissingFields(request.Name) is { } bad) return bad;
     try { await classrooms.RenameGroupAsync(id, request.Name, request.ParentId, ct); return Results.NoContent(); }
     catch (IdentityOperationException ex) { return OperationError(ex); }
@@ -911,7 +912,7 @@ groupApi.MapPut("/{id:guid}/classes", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageClasses)) return Forbidden();
     try
     {
         await classrooms.SetGroupClassesAsync(id, request.ClassIds, ct);
@@ -925,7 +926,7 @@ groupApi.MapDelete("/{id:guid}", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageClasses)) return Forbidden();
     try { await classrooms.DeleteGroupAsync(id, ct); return Results.NoContent(); }
     catch (IdentityOperationException ex) { return OperationError(ex); }
 });
@@ -957,17 +958,17 @@ app.MapGet("/api/me/classes", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    return Results.Ok(await access.GetAccessibleClassesAsync(principal.User.Id, principal.User.Role, principal.User.GrantedPermissions, ct));
+    return Results.Ok(await access.GetAccessibleClassesAsync(principal.User.Id, principal.User.Role, ct));
 });
 
-// 班级管理：仅系统管理员。
+// 班级管理：需要“班级管理”系统权限。
 var classesApi = app.MapGroup("/api/classes");
 classesApi.MapGet("/", async (
     HttpContext ctx, IdentityCoordinator identities, ClassroomService classrooms, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageClasses)) return Forbidden();
     return Results.Ok(await classrooms.ListAsync(ct));
 });
 classesApi.MapPost("/", async (
@@ -976,7 +977,7 @@ classesApi.MapPost("/", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageClasses)) return Forbidden();
     if (MissingFields(request.Name) is { } bad) return bad;
     try
     {
@@ -991,7 +992,7 @@ classesApi.MapPut("/{id:guid}", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageClasses)) return Forbidden();
     if (MissingFields(request.Name) is { } bad) return bad;
     try { await classrooms.RenameAsync(id, request.Name, ct); return Results.NoContent(); }
     catch (IdentityOperationException ex) { return OperationError(ex); }
@@ -1002,7 +1003,7 @@ classesApi.MapDelete("/{id:guid}", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageClasses)) return Forbidden();
     try
     {
         await classrooms.DeleteAsync(id, ct);
@@ -1076,7 +1077,7 @@ classesApi.MapPut("/{id:guid}/visitor", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageClasses)) return Forbidden();
     try
     {
         await classrooms.SetVisitorAccessAsync(id, request.Enabled, ct);
@@ -1090,7 +1091,7 @@ classesApi.MapPut("/{id:guid}/groups", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageClasses)) return Forbidden();
     try
     {
         await classrooms.SetClassGroupsAsync(id, request.GroupIds, ct);
@@ -1103,7 +1104,7 @@ classesApi.MapGet("/{id:guid}/members", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageClasses)) return Forbidden();
     try { return Results.Ok(await classrooms.ListMembersAsync(id, ct)); }
     catch (IdentityOperationException ex) { return OperationError(ex); }
 });
@@ -1113,7 +1114,10 @@ classesApi.MapPut("/{id:guid}/members", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageClasses)) return Forbidden();
+    // 班内“管理员”角色等于该班全部权限，只有系统管理员可以授予。
+    if (principal.User.Role != UserRole.Admin && request.Members.Any(x => x.RoleId == AccountRole.AdministratorId))
+        return Forbidden();
     try
     {
         await classrooms.UpdateMembersAsync(id, request, ct);
@@ -1128,7 +1132,7 @@ classesApi.MapPost("/batch", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageClasses)) return Forbidden();
     if (MissingFields(request.Operation) is { } bad) return bad;
     BatchClassOperationResult result;
     try
@@ -1156,7 +1160,7 @@ app.MapGet("/api/plugins/credentials", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManagePluginAccess)) return Forbidden();
     return Results.Ok(await identities.ListPluginCredentialsAsync(ct));
 });
 
@@ -1165,7 +1169,7 @@ app.MapDelete("/api/plugins/credentials/{id:guid}", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManagePluginAccess)) return Forbidden();
     try
     {
         await identities.RevokePluginCredentialAsync(id, ct);
@@ -1203,26 +1207,32 @@ app.MapGet("/api/roles", async (HttpContext ctx, IdentityCoordinator identities,
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (!HasPermission(principal, UserPermissions.ManageUsers)) return Forbidden();
+    if (!HasPermission(principal, UserPermissions.ManageUsers) &&
+        !HasManagement(principal, ManagementPermissions.ManageRoles)) return Forbidden();
     return Results.Ok(await roles.ListAsync(ct));
 });
 app.MapPost("/api/roles", async (HttpContext ctx, CreateAccountRoleRequest request, AccountRoleService roles, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities: ctx.RequestServices.GetRequiredService<IdentityCoordinator>(), ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageRoles)) return Forbidden();
     if (MissingFields(request.Name) is { } bad) return bad;
-    try { return Results.Ok(await roles.CreateAsync(request.Name, request.DefaultPermissions, ct)); }
+    try
+    {
+        return Results.Ok(await roles.CreateAsync(request.Name, request.DefaultPermissions, ct,
+            request.DefaultManagementPermissions ?? ManagementPermissions.None, Delegation(principal)));
+    }
     catch (IdentityOperationException ex) { return OperationError(ex); }
 });
 app.MapPut("/api/roles/{id:guid}", async (Guid id, HttpContext ctx, UpdateAccountRoleRequest request, AccountRoleService roles, AuthorizationSyncService authorizationSync, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, ctx.RequestServices.GetRequiredService<IdentityCoordinator>(), ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageRoles)) return Forbidden();
     try
     {
-        await roles.UpdateAsync(id, request.Name, request.DefaultPermissions, ct);
+        await roles.UpdateAsync(id, request.Name, request.DefaultPermissions, ct,
+            request.DefaultManagementPermissions, Delegation(principal));
         await authorizationSync.SyncAsync(ct);
         return Results.NoContent();
     }
@@ -1232,7 +1242,7 @@ app.MapDelete("/api/roles/{id:guid}", async (Guid id, HttpContext ctx, AccountRo
 {
     var principal = await AuthorizeAsync(ctx, ctx.RequestServices.GetRequiredService<IdentityCoordinator>(), ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageRoles)) return Forbidden();
     try { await roles.DeleteAsync(id, ct); return Results.NoContent(); }
     catch (IdentityOperationException ex) { return OperationError(ex); }
 });
@@ -1242,7 +1252,7 @@ app.MapGet("/api/visitor", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (!HasPermission(principal, UserPermissions.ManageUsers)) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageLoginPage)) return Forbidden();
     var classes = await classrooms.ListAsync(ct);
     return Results.Ok(new
     {
@@ -1256,7 +1266,7 @@ app.MapPut("/api/visitor", async (
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (!HasPermission(principal, UserPermissions.ManageUsers)) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageLoginPage)) return Forbidden();
     return Results.Ok(new { autoEnter = await visitor.SetAutoEnterAsync(body.AutoEnter, ct) });
 });
 app.MapGet("/api/settings/notifications", async (HttpContext ctx, IdentityCoordinator identities, CancellationToken ct) =>
@@ -1287,7 +1297,7 @@ app.MapPut("/api/settings/class-self-service", async (HttpContext ctx, ClassSelf
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageRoles)) return Forbidden();
     await selfService.SetAsync(body, ct);
     return Results.Ok(await selfService.GetAsync(ct));
 });
@@ -1301,8 +1311,8 @@ app.MapPut("/api/settings/schedule-pull", async (HttpContext ctx, SchedulePullIn
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    // 定时拉取间隔对全部班级生效，属于全局设置，只允许系统管理员修改。
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    // 定时拉取间隔对全部班级生效，属于全局设置，随“插件凭据与连接码”系统权限授予。
+    if (!HasManagement(principal, ManagementPermissions.ManagePluginAccess)) return Forbidden();
     var interval = Enum.IsDefined(typeof(SchedulePullInterval), body.IntervalMinutes)
         ? (SchedulePullInterval)body.IntervalMinutes
         : SchedulePullInterval.Disabled;
@@ -1319,8 +1329,8 @@ app.MapPut("/api/settings/semester", async (HttpContext ctx, SemesterSettings bo
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    // 学期开始日期影响全校课表推算与教室端轮换，只允许系统管理员修改。
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    // 学期开始日期影响全校课表推算与教室端轮换，需要“学期与调休”系统权限。
+    if (!HasManagement(principal, ManagementPermissions.ManageHolidays)) return Forbidden();
     try
     {
         await semester.SetAsync(body, ct);
@@ -1345,7 +1355,7 @@ app.MapGet("/api/settings/login-background", async (HttpContext ctx, LoginPageSe
     if (principal?.User is null) return Unauthorized();
     if (await ResolveClassAsync(principal, classId, access, ct) is not { } target) return Forbidden();
     var definitions = store.GetLatestExtensions(target) ?? [];
-    var classPermissions = await access.GetEffectivePermissionsAsync(principal.User.Id, principal.User.Role, target, principal.User.GrantedPermissions, ct);
+    var classPermissions = await access.GetEffectivePermissionsAsync(principal.User.Id, principal.User.Role, target, ct);
     var items = await policies.ListForUserAsync(principal.User.Id, principal.User.Role, classPermissions, definitions, ct);
     return Results.Ok(items.Select(item => new
     {
@@ -1364,7 +1374,7 @@ app.MapPut("/api/extensions/{id}", async (string id, ExtensionPolicyBody body, H
     if (principal?.User is null) return Unauthorized();
     try
     {
-        if (principal.User.Role == UserRole.Admin)
+        if (HasManagement(principal, ManagementPermissions.ManageExtensionSettings))
             await policies.UpdateAdminAsync(principal.User.Id, id, body.Enabled ?? true, body.AllowNonAdmin ?? false, body.ShowOnWatch ?? true, ct);
         else
             await policies.UpdatePersonalAsync(principal.User.Id, id, body.ShowOnWatch ?? true, ct);
@@ -1382,10 +1392,9 @@ app.MapGet("/api/extension-groups", async (
     if (principal?.User is null) return Unauthorized();
     if (await ResolveClassAsync(principal, classId, access, ct) is not { } target) return Forbidden();
     var classPermissions = await access.GetEffectivePermissionsAsync(
-        principal.User.Id, principal.User.Role, target, principal.User.GrantedPermissions, ct);
+        principal.User.Id, principal.User.Role, target, ct);
     if (!classPermissions.HasFlag(UserPermissions.RunExtensions)) return Forbidden();
-    var editable = await groups.ListClassAdminEditableAsync(
-        principal.User.Id, principal.User.Role, principal.User.GrantedPermissions, target, ct);
+    var editable = await groups.ListClassAdminEditableAsync(principal.User.Id, principal.User.Role, target, ct);
     var allowed = await groupPolicies.ListClassAdminAllowedAsync(ct);
     return Results.Ok(groups.BuildForClass(target)
         .Where(group => !group.IsUngrouped)
@@ -1406,14 +1415,14 @@ app.MapGet("/api/extension-groups", async (
             };
         }));
 });
-// 逐插件的班级自治开关：仅系统管理员可改；开放后本班班主任可在侧栏“扩展插件”中自行修改本班设置。
+// 逐插件的班级开放开关：需要“插件批量下发”系统权限；开放后，本班有“修改本班插件设置”权限的账号可在侧栏“本班插件”中修改。
 app.MapPut("/api/extension-groups/{groupId}/class-admin-access", async (
     string groupId, ExtensionGroupAccessBody body, HttpContext ctx, IdentityCoordinator identities,
     ExtensionGroupPolicyService groupPolicies, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
-    if (principal.User.Role != UserRole.Admin) return Forbidden();
+    if (!HasManagement(principal, ManagementPermissions.ManageExtensionSettings)) return Forbidden();
     if (!ExtensionGroupPolicyService.IsValidGroupId(groupId))
         return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "扩展插件 Id 无效"));
     await groupPolicies.SetClassAdminAllowedAsync(groupId, body.AllowClassAdmin, ct);
@@ -1577,6 +1586,15 @@ static async Task<Guid> ResolveSwapIdAsync(ScheduleSwapService swaps, AuthPrinci
 
 static bool HasPermission(AuthPrincipal? principal, UserPermissions permission) =>
     principal?.User?.Permissions.HasFlag(permission) == true;
+
+/// <summary>系统管理权限；系统管理员始终拥有（旧令牌里的管理员资料也按角色放行）。</summary>
+static bool HasManagement(AuthPrincipal? principal, ManagementPermissions permission) =>
+    principal?.User is { } user && (user.Role == UserRole.Admin || user.ManagementPermissions.HasFlag(permission));
+
+/// <summary>REST 调用者修改他人或角色权限时的授权边界：非管理员只能授予自己拥有的权限。</summary>
+static PermissionDelegation Delegation(AuthPrincipal principal) => new(
+    principal.User!.Role, principal.User.Permissions,
+    principal.User.Role == UserRole.Admin ? ManagementPermissions.All : principal.User.ManagementPermissions);
 
 /// <summary>主体的全局角色是否拥有个人“我的日程”（内置老师或班主任）；按角色种类判断，不受角色改名影响。</summary>
 static bool HasPersonalSchedule(AuthPrincipal principal) =>

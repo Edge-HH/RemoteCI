@@ -1300,4 +1300,10 @@ a.batch-action-card { color: inherit; text-decoration: none; }
 
 /* 同站页面跳转（含表单提交后的重定向）用交叉淡入代替白屏刷新；不支持的浏览器忽略。 */
 @view-transition { navigation: auto; }
+/* 侧边栏和顶栏换页前后基本不变，单独成层直接显示新状态，只让正文淡入，避免整页一起闪。 */
+.sidebar { view-transition-name: app-sidebar; }
+.topbar { view-transition-name: app-topbar; }
+::view-transition-old(app-sidebar), ::view-transition-old(app-topbar) { display: none; }
+::view-transition-group(app-sidebar), ::view-transition-group(app-topbar), ::view-transition-new(app-sidebar), ::view-transition-new(app-topbar) { animation: none; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .15s; }
 @media (prefers-reduced-motion: reduce) { @view-transition { navigation: none; } }

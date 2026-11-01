@@ -288,8 +288,15 @@ data class UserListItem(
     val role: Int = Protocol.ROLE_USER,
     @SerialName("roleId") val roleId: String? = null,
     @SerialName("roleName") val roleName: String? = null,
+    /** 相对角色默认权限新增的班级权限。 */
     @SerialName("grantedPermissions") val grantedPermissions: Int = 0,
+    /** 相对角色默认权限收回的班级权限；旧服务端不下发。 */
+    @SerialName("revokedPermissions") val revokedPermissions: Int = 0,
     @SerialName("effectivePermissions") val effectivePermissions: Int = 0,
+    @SerialName("grantedManagementPermissions") val grantedManagementPermissions: Int = 0,
+    @SerialName("revokedManagementPermissions") val revokedManagementPermissions: Int = 0,
+    /** 有效系统管理权限；旧服务端不下发时为 null。 */
+    @SerialName("effectiveManagementPermissions") val effectiveManagementPermissions: Int? = null,
     val enabled: Boolean = true,
     @SerialName("updatedAt") val updatedAt: String? = null,
 )
@@ -302,6 +309,9 @@ data class CreateUserRequest(
     val role: Int = Protocol.ROLE_USER,
     @SerialName("roleId") val roleId: String? = null,
     @SerialName("grantedPermissions") val grantedPermissions: Int = 0,
+    @SerialName("revokedPermissions") val revokedPermissions: Int? = null,
+    @SerialName("grantedManagementPermissions") val grantedManagementPermissions: Int? = null,
+    @SerialName("revokedManagementPermissions") val revokedManagementPermissions: Int? = null,
 )
 
 @Serializable
@@ -311,6 +321,10 @@ data class UpdateUserRequest(
     @SerialName("roleId") val roleId: String? = null,
     @SerialName("grantedPermissions") val grantedPermissions: Int = 0,
     val enabled: Boolean,
+    /** 以下三项省略（null）时服务端保持原值，兼容只认“附加权限”的旧版本。 */
+    @SerialName("revokedPermissions") val revokedPermissions: Int? = null,
+    @SerialName("grantedManagementPermissions") val grantedManagementPermissions: Int? = null,
+    @SerialName("revokedManagementPermissions") val revokedManagementPermissions: Int? = null,
 )
 
 @Serializable data class ResetPasswordRequest(val password: String)
@@ -326,13 +340,19 @@ data class AccountRoleInfo(
     val name: String = "",
     val kind: String = "",
     @SerialName("defaultPermissions") val defaultPermissions: Int = 0,
+    /** 角色默认的系统管理权限；旧服务端不下发。 */
+    @SerialName("defaultManagementPermissions") val defaultManagementPermissions: Int = 0,
     @SerialName("userCount") val userCount: Int = 0,
-)
+) {
+    val isAdministrator: Boolean get() = kind == "Administrator"
+    val isCustom: Boolean get() = kind == "Custom"
+}
 
 @Serializable
 data class AccountRoleMutation(
     val name: String,
     @SerialName("defaultPermissions") val defaultPermissions: Int,
+    @SerialName("defaultManagementPermissions") val defaultManagementPermissions: Int? = null,
 )
 
 @Serializable

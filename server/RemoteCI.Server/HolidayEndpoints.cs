@@ -42,7 +42,10 @@ public static class HolidayEndpoints
     {
         var principal = await ApiAuth.AuthorizeAsync(ctx, identities, ct);
         if (principal?.User is null) return ApiAuth.Unauthorized();
-        if (principal.User.Role != UserRole.Admin) return ApiAuth.Forbidden();
+        // 调休日历与学期设置需要“学期与调休”系统权限；系统管理员始终可以修改。
+        if (principal.User.Role != UserRole.Admin &&
+            !principal.User.ManagementPermissions.HasFlag(ManagementPermissions.ManageHolidays))
+            return ApiAuth.Forbidden();
         try { return await action(principal); }
         catch (Exception ex) when (ex is HolidayOperationException or ArgumentException)
         {

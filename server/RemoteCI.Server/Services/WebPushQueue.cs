@@ -58,7 +58,7 @@ public sealed class WebPushQueue(AppDbContext db, ClassAccessService access, Tim
 
     public async Task<bool> CanAccessAsync(WebPushSubscription sub, Guid classId, CancellationToken ct)
     {
-        var classes = await access.GetAccessibleClassesAsync(sub.UserId, sub.User.Role, sub.User.GrantedPermissions, ct);
+        var classes = await access.GetAccessibleClassesAsync(sub.UserId, sub.User.Role, ct);
         return classes.Any(x => x.Id == classId);
     }
 }

@@ -88,20 +88,23 @@ public class ProfilesModel(
 
     private async Task<bool> CanOpenAsync(CancellationToken ct) => IsClassPage
         ? CurrentClass is not null && await library.CanManageClassAsync(CurrentUser, CurrentClassId, ct)
-        : CurrentUser.Role == UserRole.Admin;
+        : HasManagement(ManagementPermissions.ManageProfileLibrary);
 
     private async Task<object> DataAsync(CancellationToken ct)
     {
         var profiles = await library.ListAsync(CurrentUser, OnlyClass, ct);
         var allDevices = await devices.ListAsync(ct);
-        var classes = IsClassPage ? AccessibleClasses.Where(x => x.Id == CurrentClassId) : AccessibleClasses;
+        // 档案库按“档案库”系统权限管理全部班级，不限于账号自己能进入的班级。
+        var classes = IsClassPage
+            ? AccessibleClasses.Where(x => x.Id == CurrentClassId).Select(x => (x.Id, x.Name)).ToList()
+            : (await classrooms.ListAsync(ct)).Select(x => (x.Id, x.Name)).ToList();
         IReadOnlyList<ClassGroupInfo> groups = IsClassPage ? [] : await classrooms.ListGroupsAsync(ct);
         return new
         {
-            isAdmin = CurrentUser.Role == UserRole.Admin,
+            isAdmin = HasManagement(ManagementPermissions.ManageProfileLibrary),
             currentClassId = CurrentClassId,
             profiles,
-            classes = classes.Select(x => new { x.Id, x.Name }),
+            classes = classes.Select(x => new { id = x.Id, name = x.Name }),
             // 临时层是否过期以教室端日期为准，浏览器与教室可能不在同一时区。
             classToday = classes.ToDictionary(x => x.Id.ToString(), x => ClassClock.Today(state, x.Id).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
             groups = groups.Select(x => new { x.Id, x.Name }),

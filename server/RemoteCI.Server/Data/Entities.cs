@@ -346,6 +346,8 @@ public sealed class AccountRole
     public string NormalizedName { get; set; } = string.Empty;
     public AccountRoleKind Kind { get; set; }
     public RemoteCI.Shared.UserPermissions DefaultPermissions { get; set; }
+    /// <summary>该角色作为账号全局角色时的默认系统管理权限；作为班内角色时不使用。</summary>
+    public RemoteCI.Shared.ManagementPermissions DefaultManagementPermissions { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public ICollection<AppUser> Users { get; set; } = [];

@@ -9,25 +9,42 @@ namespace RemoteCI.Server.Services;
 /// 用户与班级的访问关系及按班级的有效权限计算。
 /// 系统管理员自动可访问全部班级；普通用户按 ClassMembership 成员关系与班内角色判定；
 /// “老师”角色账号额外按显示名绑定课表科目教师名获得任教班级的访问与默认权限。
-/// 方法以 userId/role/granted 表达身份，REST 主体（UserProfile）与页面实体（AppUser）都能调用。
+/// 每个班级的有效权限 = 该班角色默认权限 + 个人新增 − 个人收回；个人调整由本服务按账号 Id 读取，
+/// 调用方不必（也不能）自行传入，保证 WebUI、REST、WebSocket 与局域网镜像使用同一份数据。
 /// </summary>
 public sealed class ClassAccessService(AppDbContext db, TeacherBindingService teachers)
 {
     /// <summary>老师账号按显示名绑定任教班级时的身份信息：绑定名、全局角色默认权限与角色名。</summary>
     private sealed record TeacherBinding(string BoundName, UserPermissions RoleDefaults, string RoleName);
 
-    /// <summary>用户的全局角色为内置“老师”时返回其绑定上下文；其他角色返回 null。</summary>
-    private async Task<TeacherBinding?> GetTeacherBindingAsync(Guid userId, CancellationToken ct)
+    /// <summary>计算班级权限所需的账号信息：个人调整，以及全局角色为内置“老师”时的绑定上下文。</summary>
+    private sealed record AccountContext(PermissionAdjustment Adjustment, TeacherBinding? Teacher);
+
+    private async Task<AccountContext> GetAccountContextAsync(Guid userId, CancellationToken ct)
     {
         var info = await db.Users.AsNoTracking()
-            .Where(x => x.Id == userId && x.RoleDefinition!.Kind == AccountRoleKind.Teacher)
-            .Select(x => new { x.DisplayName, RoleName = x.RoleDefinition!.Name, x.RoleDefinition!.DefaultPermissions })
+            .Where(x => x.Id == userId)
+            .Select(x => new
+            {
+                x.GrantedPermissions,
+                x.RevokedPermissions,
+                x.DisplayName,
+                RoleKind = x.RoleDefinition!.Kind,
+                RoleName = x.RoleDefinition!.Name,
+                x.RoleDefinition!.DefaultPermissions,
+            })
             .SingleOrDefaultAsync(ct);
-        return info is null ? null : new TeacherBinding(info.DisplayName, info.DefaultPermissions, info.RoleName);
+        if (info is null) return new AccountContext(PermissionAdjustment.None, null);
+        return new AccountContext(
+            new PermissionAdjustment(info.GrantedPermissions, info.RevokedPermissions),
+            info.RoleKind == AccountRoleKind.Teacher
+                ? new TeacherBinding(info.DisplayName, info.DefaultPermissions, info.RoleName)
+                : null);
     }
+
     /// <summary>用户可访问的班级列表（含每班角色与有效权限），供班级切换器与客户端使用。</summary>
     public async Task<IReadOnlyList<ClassSummary>> GetAccessibleClassesAsync(
-        Guid userId, UserRole role, UserPermissions granted = UserPermissions.None, CancellationToken ct = default)
+        Guid userId, UserRole role, CancellationToken ct = default)
     {
         if (role == UserRole.Admin)
         {
@@ -65,26 +82,26 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
                     RoleDefaults = y.DefaultPermissions,
                 })
             .ToListAsync(ct);
+        var account = await GetAccountContextAsync(userId, ct);
         var results = memberships.OrderBy(x => x.CreatedAt).Select(x => new ClassSummary
         {
             Id = x.Id,
             Name = x.Name,
             RoleName = x.RoleName,
             RoleKind = (int)x.RoleKind,
-            Permissions = EffectiveForMembership(role, x.RoleDefaults, granted),
+            Permissions = account.Adjustment.Apply(role, x.RoleDefaults),
             VisitorEnabled = x.VisitorAccessEnabled,
             GroupNames = x.GroupNames,
             HasAvatar = x.Avatar != null,
         }).ToList();
 
         // 老师按显示名绑定任教班级：成员班级合并任教权限，非成员的任教班级也进入班级列表。
-        var binding = await GetTeacherBindingAsync(userId, ct);
-        if (binding is not null)
+        if (account.Teacher is { } binding)
         {
             var taught = await teachers.GetTaughtClassesAsync(binding.BoundName, ct);
             foreach (var taughtClass in taught)
             {
-                var taughtPermissions = EffectiveForMembership(role, binding.RoleDefaults, granted);
+                var taughtPermissions = account.Adjustment.Apply(role, binding.RoleDefaults);
                 var member = results.FirstOrDefault(x => x.Id == taughtClass.ClassId);
                 if (member is not null)
                 {
@@ -120,8 +137,7 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
             .OrderBy(x => x.ClassroomId)
             .Select(x => x.ClassroomId)
             .ToListAsync(ct);
-        var binding = await GetTeacherBindingAsync(userId, ct);
-        if (binding is not null)
+        if ((await GetAccountContextAsync(userId, ct)).Teacher is { } binding)
             results.AddRange((await teachers.GetTaughtClassesAsync(binding.BoundName, ct))
                 .Select(x => x.ClassId).Except(results));
         return results;
@@ -129,21 +145,21 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
 
     /// <summary>用户在指定班级的有效权限；非成员且非任教老师返回 None。</summary>
     public async Task<UserPermissions> GetEffectivePermissionsAsync(
-        Guid userId, UserRole role, Guid classId, UserPermissions granted = UserPermissions.None, CancellationToken ct = default)
+        Guid userId, UserRole role, Guid classId, CancellationToken ct = default)
     {
         if (role == UserRole.Admin) return UserPermissions.All;
         var roleDefaults = await db.ClassMemberships.AsNoTracking()
             .Where(x => x.UserId == userId && x.ClassroomId == classId)
             .Join(db.AccountRoles, x => x.RoleDefinitionId, y => y.Id, (x, y) => (UserPermissions?)y.DefaultPermissions)
             .SingleOrDefaultAsync(ct);
-        var binding = await GetTeacherBindingAsync(userId, ct);
-        // 任教班级的老师：任教权限来自其全局老师角色的默认权限（角色设置中可追加），
-        // 与班内成员角色权限取并集，保证班主任等成员身份不被覆盖。
-        var taughtPermissions = binding is not null && teachers.IsTaughtClass(binding.BoundName, classId)
-            ? EffectiveForMembership(role, binding.RoleDefaults, granted)
+        var account = await GetAccountContextAsync(userId, ct);
+        // 任教班级的老师：任教权限来自其全局老师角色的默认权限，
+        // 与班内成员角色权限取并集，保证班主任等成员身份不被覆盖；两者都套用同一套个人调整。
+        var taughtPermissions = account.Teacher is { } binding && teachers.IsTaughtClass(binding.BoundName, classId)
+            ? account.Adjustment.Apply(role, binding.RoleDefaults)
             : UserPermissions.None;
         if (roleDefaults is null) return taughtPermissions;
-        return EffectiveForMembership(role, roleDefaults.Value, granted) | taughtPermissions;
+        return account.Adjustment.Apply(role, roleDefaults.Value) | taughtPermissions;
     }
 
     /// <summary>用户是否可以访问指定班级（访问本身，不含具体权限位判断）。</summary>
@@ -152,8 +168,8 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
         if (role == UserRole.Admin)
             return await db.Classrooms.AnyAsync(x => x.Id == classId, ct);
         if (await db.ClassMemberships.AnyAsync(x => x.UserId == userId && x.ClassroomId == classId, ct)) return true;
-        var binding = await GetTeacherBindingAsync(userId, ct);
-        return binding is not null && teachers.IsTaughtClass(binding.BoundName, classId);
+        return (await GetAccountContextAsync(userId, ct)).Teacher is { } binding &&
+            teachers.IsTaughtClass(binding.BoundName, classId);
     }
 
     /// <summary>
@@ -168,31 +184,44 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
                 .AnyAsync(kind => kind == AccountRoleKind.ClassAdministrator, ct);
 
     /// <summary>
-    /// 集控运维页面（操作记录、设备状态、课时统计）的可见班级：系统管理员返回 null 表示全部；
-    /// 其他账号返回自己担任班主任的班级，可能为空。
+    /// 按权限划定的可见班级：系统管理员或拥有对应系统管理权限（查看全部）时返回 null 表示全部；
+    /// 其他账号返回自己在其中拥有该班级权限的班级，可能为空。供操作记录、课时统计与设备状态共用。
     /// </summary>
-    public async Task<IReadOnlyList<Guid>?> GetClassHeadScopeAsync(Guid userId, UserRole role, CancellationToken ct = default)
+    public async Task<IReadOnlyList<Guid>?> GetPermissionScopeAsync(
+        Guid userId, UserRole role, UserPermissions classPermission, ManagementPermissions viewAll,
+        CancellationToken ct = default)
     {
-        if (role == UserRole.Admin) return null;
-        return await db.ClassMemberships.AsNoTracking()
-            .Where(x => x.UserId == userId)
-            .Join(db.AccountRoles, x => x.RoleDefinitionId, y => y.Id, (x, y) => new { x.ClassroomId, y.Kind })
-            .Where(x => x.Kind == AccountRoleKind.ClassAdministrator)
-            .Select(x => x.ClassroomId)
-            .Distinct()
-            .ToListAsync(ct);
+        if (role == UserRole.Admin || (await GetManagementPermissionsAsync(userId, role, ct)).HasFlag(viewAll)) return null;
+        return (await GetAccessibleClassesAsync(userId, role, ct))
+            .Where(x => (x.Permissions ?? UserPermissions.None).HasFlag(classPermission))
+            .Select(x => x.Id)
+            .ToList();
+    }
+
+    /// <summary>账号的系统管理权限：全局角色默认 + 个人新增 − 个人收回；系统管理员为全部。</summary>
+    public async Task<ManagementPermissions> GetManagementPermissionsAsync(
+        Guid userId, UserRole role, CancellationToken ct = default)
+    {
+        if (role == UserRole.Admin) return ManagementPermissions.All;
+        var info = await db.Users.AsNoTracking()
+            .Where(x => x.Id == userId)
+            .Select(x => new { x.RoleDefinition!.DefaultManagementPermissions, x.GrantedManagementPermissions, x.RevokedManagementPermissions })
+            .SingleOrDefaultAsync(ct);
+        return info is null
+            ? ManagementPermissions.None
+            : RolePermissions.EffectiveManagement(role, info.DefaultManagementPermissions,
+                info.GrantedManagementPermissions, info.RevokedManagementPermissions);
     }
 
     /// <summary>
-    /// 用户在指定班级可以自行完成的班级管理操作：系统管理员全部允许；
-    /// 本班班主任按系统管理员统一设置的班级自治策略；其他账号全部禁止。
+    /// 用户在指定班级可以自行完成的班级管理操作，由班级权限决定：
+    /// “班级信息”允许改班名与头像，“刷新课表”允许从插件拉取课表；系统管理员全部允许。
     /// </summary>
     public async Task<ClassSelfServicePolicy> GetClassSelfServiceAsync(
         Guid userId, UserRole role, Guid classId, CancellationToken ct = default)
     {
         if (role == UserRole.Admin) return ClassSelfServicePolicy.All;
-        if (!await IsClassAdminAsync(userId, role, classId, ct)) return ClassSelfServicePolicy.None;
-        return await ClassSelfServiceSettings.ReadAsync(db, ct);
+        return ClassSelfServicePolicy.From(await GetEffectivePermissionsAsync(userId, role, classId, ct));
     }
 
     /// <summary>解析用户未显式选择班级时的默认班级：第一个可访问班级；没有可访问班级返回 null。</summary>
@@ -209,16 +238,39 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
             .Select(x => (Guid?)x.ClassroomId).FirstOrDefaultAsync(ct);
         if (membershipClassId is not null) return membershipClassId;
         // 没有成员关系的老师落到第一个任教班级，保持登录即有所属班级的体验。
-        var binding = await GetTeacherBindingAsync(userId, ct);
-        if (binding is null) return null;
+        if ((await GetAccountContextAsync(userId, ct)).Teacher is not { } binding) return null;
         return (await teachers.GetTaughtClassesAsync(binding.BoundName, ct))
             .Select(x => (Guid?)x.ClassId).FirstOrDefault();
     }
 
-    /// <summary>按成员角色的有效权限：与全局角色同一套规则（ViewCurrentCourse 为底 + 角色默认 + 个人授予）。</summary>
+    /// <summary>按成员角色的有效权限：与全局角色同一套规则（ViewCurrentCourse 为底 + 角色默认 + 个人新增 − 个人收回）。</summary>
     public static UserPermissions EffectiveForMembership(
-        UserRole role, UserPermissions membershipRoleDefaults, UserPermissions granted = UserPermissions.None) =>
-        role == UserRole.Admin
-            ? UserPermissions.All
-            : RolePermissions.Effective(UserRole.User, granted, membershipRoleDefaults);
+        UserRole role, UserPermissions membershipRoleDefaults, PermissionAdjustment adjustment) =>
+        adjustment.Apply(role, membershipRoleDefaults);
+}
+
+/// <summary>账号相对角色默认权限的个人调整：新增与收回。同一套调整在每个班级都按该班的班内角色生效。</summary>
+public readonly record struct PermissionAdjustment(UserPermissions Granted, UserPermissions Revoked)
+{
+    public static PermissionAdjustment None => default;
+
+    public static PermissionAdjustment Of(AppUser user) => new(user.GrantedPermissions, user.RevokedPermissions);
+
+    public UserPermissions Apply(UserRole role, UserPermissions roleDefaults) =>
+        RolePermissions.Effective(role, Granted, roleDefaults, Revoked);
+}
+
+/// <summary>按账号实体计算的全局权限；调用方须已加载 <see cref="AppUser.RoleDefinition"/>（未加载时只有系统管理员视为有权限）。</summary>
+public static class AccountPermissions
+{
+    public static UserPermissions Global(AppUser user) =>
+        PermissionAdjustment.Of(user).Apply(user.Role, user.RoleDefinition?.DefaultPermissions ?? UserPermissions.None);
+
+    public static ManagementPermissions Management(AppUser user) =>
+        RolePermissions.EffectiveManagement(user.Role,
+            user.RoleDefinition?.DefaultManagementPermissions ?? ManagementPermissions.None,
+            user.GrantedManagementPermissions, user.RevokedManagementPermissions);
+
+    public static bool HasManagement(AppUser user, ManagementPermissions permission) =>
+        Management(user).HasFlag(permission);
 }

@@ -6,11 +6,11 @@
 @{
     var current = User.Identity?.IsAuthenticated == true ? await Users.GetUserAsync(User) : null;
     var path = Context.Request.Path.Value ?? "";
-    var classes = current is null ? [] : await Access.GetAccessibleClassesAsync(current.Id, current.Role, current.GrantedPermissions, Context.RequestAborted);
+    var classes = current is null ? [] : await Access.GetAccessibleClassesAsync(current.Id, current.Role, Context.RequestAborted);
     var selected = Guid.TryParse(Context.Request.Cookies[WebPageModel.CurrentClassCookie], out var classId) ? classId : Guid.Empty;
     var classroom = classes.FirstOrDefault(x => x.Id == selected) ?? classes.FirstOrDefault();
     var defaults = current is null ? UserPermissions.None : await Db.AccountRoles.Where(x => x.Id == current.RoleDefinitionId).Select(x => x.DefaultPermissions).FirstOrDefaultAsync();
-    var permissions = current is null ? UserPermissions.None : RolePermissions.Effective(current.Role, current.GrantedPermissions, defaults);
+    var permissions = current is null ? UserPermissions.None : PermissionAdjustment.Of(current).Apply(current.Role, defaults);
     // 底栏四个主页面：今天、课表（含我的日程与换课申请）、控制、我的。
     var primary = path is "/Mobile/Today" or "/Mobile/Schedule" or "/Mobile/MySchedule" or "/Mobile/SwapRequests" or "/Mobile/Control" or "/Mobile/Account";
     var title = ViewData["Title"]?.ToString() ?? "RemoteCI";
@@ -30,6 +30,7 @@
     <title>@title · RemoteCI</title>
     <script>try {const a=localStorage.getItem('remoteci-mobile-appearance')||'system';document.documentElement.dataset.theme=a==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):a;document.documentElement.dataset.palette=localStorage.getItem('remoteci-mobile-palette')||'green';} catch {}</script>
     <link rel="stylesheet" href="~/vendor/material-symbols/material-symbols.css" asp-append-version="true" />
+    <link rel="expect" href="#page-state-ready" blocking="render" />
     <link rel="stylesheet" href="~/app.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/premium.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/mobile.css" asp-append-version="true" />
@@ -73,7 +74,9 @@
         }
     </div>
     <div class="toast-stack" data-toast-stack aria-live="polite"></div>
-    <script src="~/page-state.js" asp-append-version="true" defer></script>
+    @* 同步执行：在首次绘制前恢复 tab、滚动位置和未保存的选择；head 中的 rel=expect 让浏览器等到下面的标记解析完再绘制。 *@
+    <script src="~/page-state.js" asp-append-version="true"></script>
+    <span id="page-state-ready" hidden></span>
     <script src="~/app.js" asp-append-version="true" defer></script>
     <script src="~/mobile.js" asp-append-version="true" defer></script>
     <script src="~/voice-message.js" asp-append-version="true" defer></script>

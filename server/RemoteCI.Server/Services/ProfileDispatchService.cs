@@ -204,7 +204,7 @@ public sealed class ProfileDispatchService(ProfileLibraryService library, Device
             ?? throw new UnauthorizedAccessException("账号状态已变化，请重新登录。");
         foreach (var classId in ids)
             result[classId] = identity.WithPermissions(await access.GetEffectivePermissionsAsync(
-                actor.Id, actor.Role, classId, actor.GrantedPermissions, ct));
+                actor.Id, actor.Role, classId, ct));
         return result;
     }
 

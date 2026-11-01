@@ -15,7 +15,17 @@ public abstract class WebPageModel(UserManager<AppUser> users) : PageModel
 
     protected UserManager<AppUser> Users { get; } = users;
     public AppUser CurrentUser { get; private set; } = null!;
+    /// <summary>按全局角色计算的有效权限（全局入口如 AccessWebUi/ManageUsers 使用）。</summary>
     public UserPermissions Permissions { get; private set; }
+
+    /// <summary>系统管理权限（全局，不随班级变化）；系统管理员为全部。</summary>
+    public ManagementPermissions Management { get; private set; }
+
+    /// <summary>是否拥有某项系统管理权限；系统管理员始终拥有。</summary>
+    public bool HasManagement(ManagementPermissions permission) => Management.HasFlag(permission);
+
+    /// <summary>当前操作者修改他人或角色权限时的授权边界：非管理员只能授予自己拥有的权限。</summary>
+    public PermissionDelegation Delegation => new(CurrentUser.Role, Permissions, Management);
 
     /// <summary>当前选中的班级（Cookie 优先，否则落到第一个可访问班级）；为 null 表示账号没有任何可访问班级。</summary>
     public ClassSummary? CurrentClass { get; private set; }
@@ -26,8 +36,8 @@ public abstract class WebPageModel(UserManager<AppUser> users) : PageModel
     public IReadOnlyList<ClassSummary> AccessibleClasses { get; private set; } = [];
 
     /// <summary>
-    /// 当前用户在当前班级可自行完成的班级管理操作：系统管理员全部允许，
-    /// 本班班主任按系统管理员设置的班级自治策略，其他账号全部禁止。
+    /// 当前用户在当前班级可自行完成的班级管理操作，由本班的“班级名称与头像”“从教室刷新课表”权限决定；
+    /// 系统管理员全部允许。
     /// </summary>
     public ClassSelfServicePolicy ClassSelfService { get; private set; } = ClassSelfServicePolicy.None;
 
@@ -49,16 +59,15 @@ public abstract class WebPageModel(UserManager<AppUser> users) : PageModel
             : null;
         if (user is null || !user.Enabled) return RedirectToPage("/Login");
         CurrentUser = user;
-        Permissions = RolePermissions.Effective(
-            user.Role,
-            user.GrantedPermissions,
-            user.RoleDefinition.DefaultPermissions);
+        Permissions = PermissionAdjustment.Of(user).Apply(user.Role, user.RoleDefinition.DefaultPermissions);
+        Management = RolePermissions.EffectiveManagement(user.Role, user.RoleDefinition.DefaultManagementPermissions,
+            user.GrantedManagementPermissions, user.RevokedManagementPermissions);
 
         var access = HttpContext.RequestServices.GetRequiredService<ClassAccessService>();
         try
         {
             AccessibleClasses = await access.GetAccessibleClassesAsync(
-                user.Id, user.Role, user.GrantedPermissions, HttpContext.RequestAborted);
+                user.Id, user.Role, HttpContext.RequestAborted);
             var cookieClass = Guid.TryParse(Request.Cookies[CurrentClassCookie], out var parsed) ? parsed : (Guid?)null;
             CurrentClass = AccessibleClasses.FirstOrDefault(x => x.Id == cookieClass) ?? AccessibleClasses.FirstOrDefault();
             // 没有任何可访问班级时班级 Id 为空、权限为 None，页面自然呈现无权限状态。
@@ -104,4 +113,11 @@ public abstract class WebPageModel(UserManager<AppUser> users) : PageModel
     /// <summary>RequireAsync 之后按当前班级的有效权限做检查；班级内操作（通知/课表/控制）使用此方法。</summary>
     protected IActionResult? RequireClass(UserPermissions permission) =>
         ClassPermissions.HasFlag(permission) ? null : RedirectToPage("/Denied");
+
+    /// <summary>加载当前用户并要求某项系统管理权限（系统管理员始终通过）；系统级页面使用此方法。</summary>
+    protected async Task<IActionResult?> RequireManagementAsync(ManagementPermissions permission)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        return HasManagement(permission) ? null : RedirectToPage("/Denied");
+    }
 }

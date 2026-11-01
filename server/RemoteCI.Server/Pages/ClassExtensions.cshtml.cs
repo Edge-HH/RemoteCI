@@ -76,7 +76,7 @@ public sealed class ClassExtensionsModel(
         if (await RequireAsync() is { } denied) return denied;
         if (CurrentClass is null) return RedirectToPage("/Denied");
         EditableGroupIds = await extensionGroups.ListClassAdminEditableAsync(
-            CurrentUser.Id, CurrentUser.Role, CurrentUser.GrantedPermissions, CurrentClassId, HttpContext.RequestAborted);
+            CurrentUser.Id, CurrentUser.Role, CurrentClassId, HttpContext.RequestAborted);
         return EditableGroupIds is null || EditableGroupIds.Count > 0 ? null : RedirectToPage("/Denied");
     }
 
