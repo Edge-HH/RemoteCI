@@ -1303,12 +1303,5 @@ a.batch-action-card { color: inherit; text-decoration: none; }
     accent-color: var(--accent, currentColor);
 }
 
-/* 同站页面跳转（含表单提交后的重定向）用交叉淡入代替白屏刷新；不支持的浏览器忽略。 */
-@view-transition { navigation: auto; }
-/* 侧边栏和顶栏换页前后基本不变，单独成层直接显示新状态，只让正文淡入，避免整页一起闪。 */
-.sidebar { view-transition-name: app-sidebar; }
-.topbar { view-transition-name: app-topbar; }
-::view-transition-old(app-sidebar), ::view-transition-old(app-topbar) { display: none; }
-::view-transition-group(app-sidebar), ::view-transition-group(app-topbar), ::view-transition-new(app-sidebar), ::view-transition-new(app-topbar) { animation: none; }
-::view-transition-old(root), ::view-transition-new(root) { animation-duration: .15s; }
-@media (prefers-reduced-motion: reduce) { @view-transition { navigation: none; } }
+/* 换页不使用跨文档视图过渡（@view-transition）：新页面就绪后浏览器会把旧页面快照盖回来再淡出，看起来像闪回上一页。
+   同站跳转时浏览器本身会保留旧页面直到新页面可绘制，布局里的 rel=expect 又把首次绘制推迟到状态恢复之后，不会白屏。 */

@@ -1,34 +1,43 @@
 @model WebPageModel
 @{
     // “系统设置”的 tab：常规、维护在系统配置页内切换，登录与访问、插件与课表同步是独立页面。
-    // ViewData["SystemTab"] 标明当前 tab；手机网页版不显示 tab，各区块直接纵向排列。
+    // ViewData["SystemTab"] 标明当前 tab；电脑版与“管理”子菜单一样竖排在内容左侧（由各页面包在 .hub-layout 里），
+    // 手机网页版不显示 tab，各区块直接纵向排列。
     var active = ViewData["SystemTab"] as string;
     var isAdmin = Model.CurrentUser.Role == UserRole.Admin;
     var inSystemConfig = active is "general" or "maintenance";
+
+    void Icon(string paths)
+    {
+        <svg class="hub-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" aria-hidden="true">@Html.Raw(paths)</svg>
+    }
 }
 @if (!MobileUi.IsMobile(Context))
 {
-    <nav class="page-tabs" aria-label="系统设置分类" data-page-tabs>
+    const string generalIcon = "<path d='M14 17H5M19 7h-9'/><circle cx='17' cy='17' r='3'/><circle cx='7' cy='7' r='3'/>";
+    const string maintenanceIcon = "<path d='M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94z'/>";
+    <nav class="hub-nav" aria-label="系统设置分类" data-page-tabs>
+        <div class="hub-nav-head"><strong>系统设置</strong></div>
         @if (isAdmin)
         {
             if (inSystemConfig)
             {
-                <a href="#general" data-tab-link="general">常规</a>
-                <a href="#maintenance" data-tab-link="maintenance">维护</a>
+                <a class="hub-nav-link" href="#general" data-tab-link="general">@{ Icon(generalIcon); }<span>常规</span></a>
+                <a class="hub-nav-link" href="#maintenance" data-tab-link="maintenance">@{ Icon(maintenanceIcon); }<span>维护</span></a>
             }
             else
             {
-                <a href="@Url.Page("/SystemConfig")#general">常规</a>
-                <a href="@Url.Page("/SystemConfig")#maintenance">维护</a>
+                <a class="hub-nav-link" href="@Url.Page("/SystemConfig")#general">@{ Icon(generalIcon); }<span>常规</span></a>
+                <a class="hub-nav-link" href="@Url.Page("/SystemConfig")#maintenance">@{ Icon(maintenanceIcon); }<span>维护</span></a>
             }
         }
         @if (Model.HasManagement(ManagementPermissions.ManageLoginPage))
         {
-            <a class="@(active == "access" ? "active" : null)" aria-current="@(active == "access" ? "page" : null)" asp-page="/LoginSettings">登录与访问</a>
+            <a class="@(active == "access" ? "hub-nav-link active" : "hub-nav-link")" aria-current="@(active == "access" ? "page" : null)" asp-page="/LoginSettings">@{ Icon("<path d='M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5l-5-5m5 5H3'/>"); }<span>登录与访问</span></a>
         }
         @if (Model.HasManagement(ManagementPermissions.ManagePluginAccess))
         {
-            <a class="@(active == "plugins" ? "active" : null)" aria-current="@(active == "plugins" ? "page" : null)" asp-page="/PluginAccess">插件与课表同步</a>
+            <a class="@(active == "plugins" ? "hub-nav-link active" : "hub-nav-link")" aria-current="@(active == "plugins" ? "page" : null)" asp-page="/PluginAccess">@{ Icon("<path d='M21 12a9 9 0 0 0-9-9a9.75 9.75 0 0 0-6.74 2.74L3 8'/><path d='M3 3v5h5m-5 4a9 9 0 0 0 9 9a9.75 9.75 0 0 0 6.74-2.74L21 16'/><path d='M16 16h5v5'/>"); }<span>插件与课表同步</span></a>
         }
     </nav>
 }

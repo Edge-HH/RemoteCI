@@ -97,6 +97,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.KeyboardType
@@ -513,7 +514,7 @@ fun HomeShell(
                         onClick = { onTab(item.tab) },
                         icon = {
                             if (item.tab == HomeTab.Schedule && canRequestSwap && pendingSwaps > 0) {
-                                BadgedBox(badge = { Badge { Text(pendingSwaps.toString()) } }) {
+                                BadgedBox(badge = { Badge(containerColor = Color(0xFFFBE9A8), contentColor = Color(0xFF6B4E12)) { Text(pendingSwaps.toString()) } }) {
                                     Icon(item.icon, contentDescription = item.label)
                                 }
                             } else {

@@ -1,5 +1,26 @@
 @model AccountModel
-@{ ViewData["Title"] = MobileUi.IsMobile(Context) ? "我的" : "个人账号"; }
+@{
+    ViewData["Title"] = MobileUi.IsMobile(Context) ? "我的" : "个人账号";
+
+    void Icon(string paths)
+    {
+        <svg class="hub-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" aria-hidden="true">@Html.Raw(paths)</svg>
+    }
+}
+<div class="@(MobileUi.IsMobile(Context) ? null : "hub-layout")">
+@if (!MobileUi.IsMobile(Context))
+{
+    @* 个人账号按主题分 tab，与“管理”子菜单一样竖排在内容左侧；手机网页版不显示 tab，各区块纵向排列。 *@
+    <nav class="hub-nav" aria-label="个人账号分类" data-page-tabs>
+        <div class="hub-nav-head"><strong>个人</strong></div>
+        @if (Model.CanChangeDisplayName) { <a class="hub-nav-link" href="#profile" data-tab-link="profile">@{ Icon("<circle cx='12' cy='8' r='5'/><path d='M20 21a8 8 0 0 0-16 0'/>"); }<span>资料</span></a> }
+        <a class="hub-nav-link" href="#security" data-tab-link="security">@{ Icon("<rect width='18' height='11' x='3' y='11' rx='2'/><path d='M7 11V7a5 5 0 0 1 10 0v4'/>"); }<span>安全</span></a>
+        <a class="hub-nav-link" href="#sessions" data-tab-link="sessions">@{ Icon("<rect width='14' height='20' x='5' y='2' rx='2'/><path d='M12 18h.01'/>"); }<span>已登录设备</span></a>
+        <a class="hub-nav-link" href="#qr-login" data-tab-link="qr-login">@{ Icon("<path d='M3 7V5a2 2 0 0 1 2-2h2m10 0h2a2 2 0 0 1 2 2v2m0 10v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10'/>"); }<span>扫码登录</span></a>
+        @if (Model.ShowApiPanel) { <a class="hub-nav-link" href="#api" data-tab-link="api">@{ Icon("<path d='m15.5 7.5l2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4m2-2l-9.6 9.6'/><circle cx='7.5' cy='15.5' r='5.5'/>"); }<span>API Key</span></a> }
+    </nav>
+}
+<div class="hub-content">
 <div class="page-head"><div><p class="eyebrow">个人安全</p><h1>@Model.CurrentUser.DisplayName</h1><p class="muted">ID：@Model.CurrentUser.UserName · @Model.CurrentUser.Role</p></div></div>
 @if (MobileUi.IsMobile(Context))
 {
@@ -46,17 +67,6 @@
         </div>
     }
     <p class="mobile-section-label">账号与安全</p>
-}
-@if (!MobileUi.IsMobile(Context))
-{
-    @* 个人账号按主题分 tab；手机网页版不显示 tab，各区块纵向排列。 *@
-    <nav class="page-tabs" aria-label="个人账号分类" data-page-tabs>
-        @if (Model.CanChangeDisplayName) { <a href="#profile" data-tab-link="profile">资料</a> }
-        <a href="#security" data-tab-link="security">安全</a>
-        <a href="#sessions" data-tab-link="sessions">已登录设备</a>
-        <a href="#qr-login" data-tab-link="qr-login">扫码登录</a>
-        @if (Model.ShowApiPanel) { <a href="#api" data-tab-link="api">API Key</a> }
-    </nav>
 }
 <div class="two-column">
     <section class="panel" id="two-factor" data-tab="security">
@@ -193,3 +203,5 @@
     <a class="button ghost" href="/?view=auto">恢复自动选择手机或电脑界面</a>
     <form method="post" asp-page="/Logout" data-mobile-logout><button type="submit" class="ghost danger">退出登录</button></form>
 }
+</div>
+</div>

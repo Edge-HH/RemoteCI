@@ -29,6 +29,7 @@
     --accent-soft: var(--ui-mint-200);
     --accent-faint: var(--ui-mint-100);
     --accent-ink: var(--ui-ink);
+    --on-accent-soft: var(--ui-ink);
     --sky: var(--ui-sky);
     --sky-ink: #2f5a85;
     --success: var(--ui-teal);
@@ -37,6 +38,9 @@
     --danger-soft: #fbe4e4;
     --warning: #8a5a1f;
     --warning-soft: #fbebd6;
+    /* 未读、待处理数量小圆标：浅黄底深棕字，不用刺眼的红色。 */
+    --badge-bg: #fbe9a8;
+    --badge-ink: #6b4e12;
     --shadow: 0 10px 30px rgba(39, 107, 92, .08);
 
     --nav-bg: var(--sidebar);
@@ -94,40 +98,44 @@
 /* 深色：同一套薄荷色相压到深墨绿，保持低饱和。 */
 :root[data-theme="dark"] {
     color-scheme: dark;
-    --bg: #0f1815;
-    --surface: #16221e;
-    --surface-soft: #1c2b26;
-    --surface-inset: #13201b;
-    --sidebar: #16221e;
-    --line: #24362f;
-    --line-strong: #31483f;
-    --text: #e4f1eb;
-    --muted: #9db5ab;
+    /* 层次靠明度拉开：页面底 < 卡片 < 卡片内小块 / 输入框 < 悬停与薄荷选中。 */
+    --bg: #0b1310;
+    --surface: #17241f;
+    --surface-soft: #22352d;
+    --surface-inset: #1e2e28;
+    --sidebar: #17241f;
+    --line: #2b4038;
+    --line-strong: #5f7f6f;
+    --text: #e8f3ee;
+    --muted: #a9bfb5;
     --accent: var(--ui-sage);
     --accent-hover: #a6d8cb;
     --accent-strong: #a9dccb;
-    --accent-soft: #24453b;
-    --accent-faint: #1a3029;
+    --accent-soft: #2f5347;
+    --accent-faint: #1f3830;
     --accent-ink: #10221c;
-    --sky: #1e2e40;
-    --sky-ink: #a9c8ea;
+    --on-accent-soft: #eaf7f1;
+    --sky: #223650;
+    --sky-ink: #b4d0ef;
     --success: #9ed6c2;
-    --success-soft: #1a3029;
+    --success-soft: #1f3830;
     --danger: #f0a6a3;
     --danger-soft: #3a2224;
     --warning: #e8c48e;
     --warning-soft: #3a2e1c;
+    --badge-bg: #f3dc8f;
+    --badge-ink: #3a2c0c;
     --shadow: 0 18px 44px rgba(0, 0, 0, .3);
 
-    --nav-border: #1f302a;
-    --nav-muted: #9db5ab;
-    --nav-text: #e4f1eb;
-    --nav-active-bg: #2b4a40;
-    --nav-active-text: #e4f1eb;
-    --nav-hover-bg: #1f302a;
-    --nav-heading: #9db5ab;
-    --nav-user-text: #e4f1eb;
-    --nav-user-muted: #9db5ab;
+    --nav-border: #24382f;
+    --nav-muted: #a9bfb5;
+    --nav-text: #e8f3ee;
+    --nav-active-bg: #2f5347;
+    --nav-active-text: #eaf7f1;
+    --nav-hover-bg: #22352d;
+    --nav-heading: #a9bfb5;
+    --nav-user-text: #e8f3ee;
+    --nav-user-muted: #a9bfb5;
     --nav-shadow: 0 18px 44px rgba(0, 0, 0, .28);
 }
 
@@ -841,7 +849,7 @@ textarea:focus-visible {
     line-height: 1.08;
 }
 
-.metric-card-primary .metric-value, .metric-card-primary .metric-label { color: var(--accent-ink); }
+.metric-card-primary .metric-value, .metric-card-primary .metric-label { color: var(--on-accent-soft); }
 .metric-value-text { font-size: clamp(30px, 3vw, 44px); }
 
 .metric-chip {
@@ -877,6 +885,9 @@ textarea:focus-visible {
 }
 
 .dashboard-panel { padding: var(--pad-card); }
+/* 深色下柔和阴影看不出层次：卡片与顶栏控件补一圈细边，输入框用比卡片更亮的内嵌色。 */
+:root[data-theme="dark"] :is(.dashboard-panel, .panel, .day-card, .metric-card:not(.metric-card-primary), .batch-action-card, .flash, .notice, .topbar-button, .app-search input, .class-switcher) { border-color: var(--line); }
+:root[data-theme="dark"] :is(input:not([type="checkbox"], [type="radio"], [type="range"]), select, textarea) { background: var(--surface-inset); }
 .panel { margin-bottom: 20px; padding: var(--pad-card); }
 .panel > h2 { margin-bottom: 0; }
 
@@ -947,7 +958,7 @@ textarea:focus-visible {
 .inline-status.online {
     border-color: transparent;
     background: var(--accent-soft);
-    color: var(--accent-ink);
+    color: var(--on-accent-soft);
 }
 
 .status-pill.offline,
@@ -1012,7 +1023,7 @@ textarea:focus-visible {
     color: var(--accent-strong);
 }
 
-.activity-icon.success { background: var(--accent-soft); color: var(--accent-ink); }
+.activity-icon.success { background: var(--accent-soft); color: var(--on-accent-soft); }
 .activity-icon.alert { background: var(--danger-soft); color: var(--danger); }
 
 .task-table > a,
@@ -1846,7 +1857,7 @@ textarea { resize: vertical; }
     border: 0;
     border-radius: var(--radius-icon);
     background: var(--accent-soft);
-    color: var(--accent-ink);
+    color: var(--on-accent-soft);
     line-height: 1;
 }
 
@@ -2233,8 +2244,8 @@ textarea { resize: vertical; }
     place-items: center;
     padding: 0 5px;
     border-radius: 9px;
-    background: var(--danger);
-    color: var(--accent-ink);
+    background: var(--badge-bg);
+    color: var(--badge-ink);
     font-size: 11px;
     font-weight: 700;
     line-height: 1;
@@ -2250,8 +2261,8 @@ body.sidebar-collapsed .nav-link .nav-badge { position: absolute; top: 4px; righ
     height: 16px;
     padding: 0 4px;
     border-radius: 8px;
-    background: var(--danger);
-    color: var(--accent-ink);
+    background: var(--badge-bg);
+    color: var(--badge-ink);
     font-size: 10px;
     font-weight: 700;
     line-height: 16px;
@@ -2347,25 +2358,116 @@ body.sidebar-collapsed .nav-link .nav-badge { position: absolute; top: 4px; righ
     .swap-actions button, .swap-decision button { flex: 1 1 auto; }
 }
 
-/* 勾选框与单选框：全局统一为与文字等高的小控件、主题色，不吃通用输入框的整宽/最小高度。
-   开关（.extension-switch）等自绘控件用更具体的选择器覆盖。 */
+/* 勾选框、单选框与滑块：全局自绘，和按钮、输入框同一套薄荷配色与圆角，不再用浏览器原生外观。
+   颜色走 --control-* 变量，移动版在 mobile.css 里换成 --m-* 色板；开关（.extension-switch）等自绘控件用更具体的选择器覆盖。 */
+:root {
+    --control-on: var(--accent);
+    --control-on-ink: var(--accent-ink);
+    --control-off-bg: var(--surface);
+    --control-off-line: var(--line-strong);
+    --control-track: color-mix(in srgb, var(--line-strong) 70%, var(--surface));
+    --control-size: 16px;
+}
 input[type="checkbox"], input[type="radio"] {
-    width: 15px;
-    height: 15px;
+    -webkit-appearance: none;
+    appearance: none;
+    position: relative;
+    display: inline-grid;
+    place-content: center;
+    width: var(--control-size);
+    height: var(--control-size);
     min-height: 0;
-    flex: 0 0 15px;
+    flex: 0 0 var(--control-size);
+    margin: 0;
+    padding: 0;
+    border: 1.5px solid var(--control-off-line);
+    border-radius: 5px;
+    background: var(--control-off-bg);
+    box-shadow: none;
+    cursor: pointer;
+    transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+input[type="radio"] { border-radius: 50%; }
+input[type="checkbox"]::before {
+    content: "";
+    width: calc(var(--control-size) * .62);
+    height: calc(var(--control-size) * .62);
+    background: var(--control-on-ink);
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3.2 3L13 4.5' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3.2 3L13 4.5' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+    transform: scale(0);
+    transition: transform .12s ease;
+}
+input[type="checkbox"]:indeterminate::before {
+    -webkit-mask: none;
+    mask: none;
+    height: 2px;
+    border-radius: 2px;
+}
+input[type="radio"]::before {
+    content: "";
+    width: calc(var(--control-size) * .44);
+    height: calc(var(--control-size) * .44);
+    border-radius: 50%;
+    background: var(--control-on-ink);
+    transform: scale(0);
+    transition: transform .12s ease;
+}
+input[type="checkbox"]:hover, input[type="radio"]:hover { border-color: var(--control-on); }
+input:is([type="checkbox"], [type="radio"]):is(:checked, :indeterminate) { border-color: var(--control-on); background: var(--control-on); }
+input:is([type="checkbox"], [type="radio"]):is(:checked, :indeterminate)::before { transform: scale(1); }
+input[type="checkbox"]:disabled, input[type="radio"]:disabled { cursor: not-allowed; opacity: .5; }
+input[type="checkbox"]:focus, input[type="radio"]:focus { outline: none; box-shadow: none; }
+input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible { box-shadow: 0 0 0 4px color-mix(in srgb, var(--control-on) 30%, transparent); }
+label:where(:has(> input[type="checkbox"], > input[type="radio"])) { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+.batch-risk-confirm input[type="checkbox"] { margin-top: 2px; }
+
+/* 滑块：圆角细轨 + 主题色已选段 + 白色圆钮。已选段宽度由 app.js 写入 --range-fill（Firefox 用原生 progress）。 */
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 22px;
+    min-height: 0;
     margin: 0;
     padding: 0;
     border: 0;
-    background: none;
-    accent-color: var(--accent);
+    border-radius: 999px;
+    background: transparent;
+    box-shadow: none;
     cursor: pointer;
 }
-input[type="checkbox"]:disabled, input[type="radio"]:disabled { cursor: not-allowed; }
-input[type="checkbox"]:focus, input[type="radio"]:focus { outline: none; }
-input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 2px; }
-label:where(:has(> input[type="checkbox"], > input[type="radio"])) { display: flex; align-items: center; gap: 7px; cursor: pointer; }
-.batch-risk-confirm input[type="checkbox"] { margin-top: 2px; }
+input[type="range"]:hover, input[type="range"]:focus { border: 0; box-shadow: none; outline: none; }
+input[type="range"]::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 999px;
+    background: linear-gradient(to right, var(--control-on) 0 var(--range-fill, 0%), var(--control-track) var(--range-fill, 0%) 100%);
+}
+input[type="range"]::-moz-range-track { height: 6px; border-radius: 999px; background: var(--control-track); }
+input[type="range"]::-moz-range-progress { height: 6px; border-radius: 999px; background: var(--control-on); }
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    margin-top: -6px;
+    border: 2px solid var(--control-on);
+    border-radius: 50%;
+    background: var(--control-off-bg);
+    box-shadow: 0 1px 4px rgba(31, 59, 51, .18);
+    transition: transform .12s ease, box-shadow .12s ease;
+}
+input[type="range"]::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--control-on);
+    border-radius: 50%;
+    background: var(--control-off-bg);
+    box-shadow: 0 1px 4px rgba(31, 59, 51, .18);
+}
+input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.1); }
+input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 5px color-mix(in srgb, var(--control-on) 30%, transparent); }
+input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 5px color-mix(in srgb, var(--control-on) 30%, transparent); }
+input[type="range"]:disabled { cursor: not-allowed; opacity: .5; }
 
 /* 侧边栏分组：不带标题，按任务用细分隔线隔开。 */
 .nav-group { display: grid; gap: 6px; }
@@ -2403,7 +2505,7 @@ label:where(:has(> input[type="checkbox"], > input[type="radio"])) { display: fl
 }
 .hub-nav-icon { width: 17px; height: 17px; flex: 0 0 17px; }
 .hub-nav-link:hover { background: var(--surface-soft); color: var(--text); }
-.hub-nav-link.active { background: var(--accent-soft); color: var(--accent-ink); }
+.hub-nav-link.active { background: var(--accent-soft); color: var(--on-accent-soft); }
 .hub-nav-link:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 1px; }
 @media (max-width: 1080px) {
     .hub-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }

@@ -22,13 +22,16 @@
         : "none";
     var previewStyle = $"--login-preview-image:{previewImage};--login-preview-opacity:{Math.Clamp(Model.Appearance.Opacity, 0, 100) / 100d:0.##};--login-preview-align:{previewAlign}";
 }
+@* 电脑版 tab 与“管理”子菜单一样竖排在内容左侧；手机网页版不显示 tab，不套用分栏。 *@
+<div class="@(MobileUi.IsMobile(HttpContext) ? null : "hub-layout")">
+@await Html.PartialAsync("_SystemSettingsTabs", Model)
+<div class="hub-content">
 <div class="page-head">
     <div>
         <p class="eyebrow">服务端管理</p>
         <h1>系统设置</h1>
     </div>
 </div>
-@await Html.PartialAsync("_SystemSettingsTabs", Model)
 @if (Model.CanEditAppearance)
 {
 <section class="panel" id="login-appearance">
@@ -100,6 +103,8 @@
         <button type="submit">保存访客设置</button>
     </form>
 </section>
+</div>
+</div>
 @if (Model.CanEditAppearance)
 {
 <script src="~/login-settings.js" asp-append-version="true" defer></script>

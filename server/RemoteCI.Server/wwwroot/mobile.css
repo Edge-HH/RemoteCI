@@ -2,7 +2,7 @@
 /* 默认“清新”配色：雾白卡片、薄荷选中、鼠尾草主按钮、晴空蓝次按钮，与桌面版 premium.css 同一色板。
    --m-primary 是浅底上的强调文字与图标；--m-button 是主按钮底色。其他配色沿用 M3 tonal palette。 */
 html[data-mobile-ui] { --m-bg:#edf6f1; --m-surface:#fafcfb; --m-card:#fafcfb; --m-high:#e3f3ea; --m-text:#1f3b33; --m-muted:#50685f; --m-primary:#276b5c; --m-button:#93cdbf; --m-on-button:#1f3b33; --m-container:#bbe5d3; --m-on-container:#1f3b33; --m-sky:#e1eefb; --m-on-sky:#2f5a85; --m-line:#dcede4; --m-danger:#a2454a; --m-danger-soft:#fbe4e4; --m-shadow:0 10px 30px rgba(39,107,92,.08); color-scheme:light; }
-html[data-mobile-ui][data-theme=dark] { --m-bg:#0f1815; --m-surface:#16221e; --m-card:#1c2b26; --m-high:#24362f; --m-text:#e4f1eb; --m-muted:#9db5ab; --m-primary:#a9dccb; --m-button:#93cdbf; --m-on-button:#10221c; --m-container:#2b4a40; --m-on-container:#e4f1eb; --m-sky:#1e2e40; --m-on-sky:#a9c8ea; --m-line:#31483f; --m-danger:#f0a6a3; --m-danger-soft:#3a2224; --m-shadow:0 18px 44px rgba(0,0,0,.3); color-scheme:dark; }
+html[data-mobile-ui][data-theme=dark] { --m-bg:#0b1310; --m-surface:#17241f; --m-card:#1e2e28; --m-high:#2a4038; --m-text:#e8f3ee; --m-muted:#a9bfb5; --m-primary:#a9dccb; --m-button:#93cdbf; --m-on-button:#10221c; --m-container:#2f5347; --m-on-container:#eaf7f1; --m-sky:#223650; --m-on-sky:#b4d0ef; --m-line:#4f6d5f; --m-danger:#f0a6a3; --m-danger-soft:#3a2224; --m-shadow:0 18px 44px rgba(0,0,0,.3); color-scheme:dark; }
 html[data-mobile-ui]:is([data-palette=green],[data-palette=lavender],[data-palette=purple],[data-palette=blue],[data-palette=orange],[data-palette=pink]) { --m-card:var(--m-high); --m-button:var(--m-primary); --m-on-button:var(--m-bg); --m-sky:var(--m-high); --m-on-sky:var(--m-primary); }
 html[data-mobile-ui][data-palette=green] { --m-bg:#f7fbf1; --m-surface:#f1f5eb; --m-high:#ebefe6; --m-text:#181d17; --m-muted:#424940; --m-primary:#3b6939; --m-container:#bcf0b4; --m-on-container:#002204; --m-line:#c2c9bd; }
 html[data-mobile-ui][data-theme=dark][data-palette=green] { --m-bg:#10140f; --m-surface:#181d17; --m-high:#1c211b; --m-text:#e0e4db; --m-muted:#c2c9bd; --m-primary:#a1d39a; --m-container:#235023; --m-on-container:#bcf0b4; --m-line:#424940; }
@@ -32,10 +32,12 @@ html[data-mobile-ui][data-theme=dark][data-palette=pink] { --m-primary:#ffd8e2; 
 .mobile-desktop-hint { margin-top:auto; text-align:center; color:var(--m-muted); font-size:13px; padding:24px 4px 4px; }
 .mobile-desktop-hint a { color:var(--m-primary); font-weight:800; text-decoration:none; display:inline-block; padding:12px 2px; }
 .mobile-bottom-nav { position:fixed; z-index:40; bottom:calc(16px + env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%); width:min(calc(100% - 32px),568px); display:flex; gap:6px; padding:8px; min-height:72px; background:var(--m-surface); border-radius:36px; box-shadow:0 12px 32px rgba(39,107,92,.16); }
+/* 深色下阴影看不出来，底栏补一圈细边与更深的投影，才能和下面滚过的卡片分开。 */
+html[data-theme=dark] .mobile-bottom-nav { border:1px solid var(--m-line); box-shadow:0 12px 32px rgba(0,0,0,.55); }
 .mobile-bottom-nav>a { flex:1; min-width:0; text-align:center; font-size:12px; font-weight:700; text-decoration:none; color:var(--m-muted); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; border-radius:28px; }
 .mobile-bottom-nav>a>span { position:relative; display:grid; place-content:center; min-width:40px; height:28px; font-size:24px; }
 .mobile-bottom-nav>a.active { background:var(--m-container); color:var(--m-on-container); font-weight:800; }
-.mobile-bottom-nav b { position:absolute; top:-4px; right:-6px; background:var(--m-sky); color:var(--m-on-sky); border-radius:12px; padding:0 6px; font-size:11px; font-weight:800; }
+.mobile-bottom-nav b { position:absolute; top:-4px; right:-6px; background:#fbe9a8; color:#6b4e12; border-radius:12px; padding:0 6px; font-size:11px; font-weight:800; }
 .mobile-app a { color:var(--m-primary); }
 .mobile-app .mobile-icon { color:var(--m-text); }
 .mobile-app .mobile-bottom-nav>a { color:var(--m-muted); }
@@ -47,8 +49,13 @@ html[data-mobile-ui][data-theme=dark][data-palette=pink] { --m-primary:#ffd8e2; 
 .mobile-app input, .mobile-app select, .mobile-app textarea { min-height:52px; width:100%; max-width:100%; border:2px solid var(--m-line); color:var(--m-text); background:var(--m-surface); border-radius:26px; font:inherit; padding:12px 18px; }
 .mobile-app textarea { border-radius:20px; }
 .mobile-app input:focus, .mobile-app select:focus, .mobile-app textarea:focus { border-color:var(--m-button); outline:0; box-shadow:0 0 0 4px var(--m-high); }
-.mobile-app input[type=checkbox], .mobile-app input[type=radio] { width:22px; min-height:22px; height:22px; padding:0; flex-shrink:0; accent-color:var(--m-primary); }
-.mobile-app input[type=range] { padding:0; accent-color:var(--m-primary); }
+/* 勾选框、单选框与滑块沿用 premium.css 的自绘样式，只换成移动版色板；需压住上面通用 input 的整宽、胶囊圆角与描边。 */
+.mobile-app { --control-on:var(--m-button); --control-on-ink:var(--m-on-button); --control-off-bg:var(--m-surface); --control-off-line:var(--m-line); --control-track:var(--m-high); --control-size:22px; }
+.mobile-app input[type=checkbox], .mobile-app input[type=radio] { width:var(--control-size); min-height:0; height:var(--control-size); padding:0; flex-shrink:0; border:2px solid var(--control-off-line); border-radius:7px; background:var(--control-off-bg); }
+.mobile-app input[type=radio] { border-radius:50%; }
+.mobile-app input:is([type=checkbox], [type=radio]):is(:checked, :indeterminate) { border-color:var(--control-on); background:var(--control-on); }
+.mobile-app input:is([type=checkbox], [type=radio], [type=range]):focus { box-shadow:none; }
+.mobile-app input[type=range] { min-height:0; height:32px; padding:0; border:0; border-radius:999px; background:transparent; }
 .mobile-app label { display:flex; flex-direction:column; gap:8px; color:var(--m-text); }
 .mobile-app label.check, .mobile-app .permissions label { flex-direction:row; align-items:center; min-height:48px; gap:12px; }
 .mobile-app .stack, .mobile-app .form-grid, .mobile-app .two-column, .mobile-app .control-grid, .mobile-app .user-edit-form, .mobile-app .my-schedule-list { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; }

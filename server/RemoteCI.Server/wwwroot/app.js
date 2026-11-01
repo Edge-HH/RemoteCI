@@ -303,6 +303,16 @@ document.querySelectorAll("[data-schedule-pull-form]").forEach(form => {
     });
 });
 
+// 滑块已选段：Chromium 的轨道没有原生 progress，用 --range-fill 画出当前值；脚本改值的滑块（如数字框联动）在同一次输入事件里一并刷新。
+function paintRangeFill(range) {
+    const min = Number(range.min || 0), max = Number(range.max || 100);
+    const ratio = max > min ? (Number(range.value) - min) / (max - min) : 0;
+    range.style.setProperty("--range-fill", `${Math.min(100, Math.max(0, ratio * 100))}%`);
+}
+const paintAllRangeFills = () => document.querySelectorAll('input[type="range"]').forEach(paintRangeFill);
+paintAllRangeFills();
+["input", "change"].forEach(type => document.addEventListener(type, () => requestAnimationFrame(paintAllRangeFills)));
+
 document.querySelectorAll("[data-volume-form]").forEach(form => {
     const slider = form.querySelector("[data-volume-slider]");
     const output = form.querySelector("[data-volume-output]");
