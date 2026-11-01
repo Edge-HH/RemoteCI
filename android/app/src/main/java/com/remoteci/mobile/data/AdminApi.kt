@@ -83,6 +83,18 @@ object AdminApi {
         else put("/api/me/schedule/courses/${enc(id)}", body, PersonalCourseRequest.serializer(), PersonalCourseView.serializer())
     suspend fun deletePersonalCourse(id: String) { request("DELETE", "/api/me/schedule/courses/${enc(id)}") }
     suspend fun semester(): SemesterSettingsView = get("/api/settings/semester", SemesterSettingsView.serializer())
+    /** 按周浏览班级课表；from/to 为 yyyy-MM-dd。 */
+    suspend fun scheduleWeek(classId: String, from: String, to: String): ScheduleWeekResponse =
+        get("/api/schedule/week?classId=${enc(classId)}&from=${enc(from)}&to=${enc(to)}", ScheduleWeekResponse.serializer())
+    /** 按周浏览“我的日程”。 */
+    suspend fun myScheduleWeek(from: String, to: String): MyScheduleWeekResponse =
+        get("/api/me/schedule/week?from=${enc(from)}&to=${enc(to)}&timeZoneOffsetMinutes=${deviceOffsetMinutes()}", MyScheduleWeekResponse.serializer())
+    /** 学科颜色（按账号保存）。 */
+    suspend fun subjectColors(): SubjectColorsResponse = get("/api/me/subject-colors", SubjectColorsResponse.serializer())
+    suspend fun setSubjectColor(name: String, color: String) {
+        put("/api/me/subject-colors", SubjectColorRequest(name, color), SubjectColorRequest.serializer(), UnitSerializer)
+    }
+    suspend fun resetSubjectColor(name: String) { request("DELETE", "/api/me/subject-colors?name=${enc(name)}") }
     /** 老师状态栏/超级岛使用的当前课与下一节课。 */
     suspend fun myNextCourse(): MyNextCourseResponse =
         get("/api/me/schedule/next?timeZoneOffsetMinutes=${deviceOffsetMinutes()}", MyNextCourseResponse.serializer())

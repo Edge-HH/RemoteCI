@@ -60,6 +60,16 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Today
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.CalendarViewWeek
+import androidx.compose.material.icons.automirrored.rounded.ViewList
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.ui.graphics.luminance
+import com.remoteci.mobile.data.CourseEntry
+import com.remoteci.mobile.data.MyScheduleWeekResponse
+import com.remoteci.mobile.data.SchedulePeriod
+import com.remoteci.mobile.data.ScheduleWeekResponse
+import com.remoteci.mobile.data.SubjectColorStore
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
@@ -114,7 +124,6 @@ import androidx.compose.ui.semantics.Role
 import com.journeyapps.barcodescanner.ScanContract
 import com.remoteci.mobile.data.AdminApi
 import com.remoteci.mobile.data.ConnectionManager
-import com.remoteci.mobile.data.CourseEntry
 import com.remoteci.mobile.data.MyScheduleResponse
 import com.remoteci.mobile.data.MyCourseSlot
 import com.remoteci.mobile.data.Protocol
@@ -560,8 +569,10 @@ fun HomeShell(
             when (tab) {
                 HomeTab.Today -> TodayScreen(settings, snackbar, onOpen, onTab, onSwapRequests = { onHome(Screen.Home(HomeTab.Schedule, openSwapRequests = true)) })
                 HomeTab.Schedule -> ScheduleScreen(
+                    settings = settings,
                     snackbar = snackbar,
                     onOpen = onOpen,
+                    onPersist = onPersist,
                     openSwapRequests = home.openSwapRequests,
                 )
                 HomeTab.Control -> ControlListScreen(settings, snackbar = snackbar, onOpen = onOpen)
@@ -596,8 +607,14 @@ fun TodayScreen(settings: WatchSettings, snackbar: SnackbarHostState, onOpen: (S
         else if (shouldShowStateProgress(snapshot)) lessonProgress(snapshot?.currentTimeLayoutItem, now) else 0f
     val period = if (teacherMode) teacherCurrent?.course?.label ?: teacherNext?.course?.label ?: "—"
         else extractPeriod(home.timeLayoutItem) ?: snapshot?.currentTimeLayoutItem?.substringBefore(' ') ?: "—"
-    val room = if (teacherMode) listOfNotNull(teacherCurrent?.className, teacherNext?.className).firstOrNull().orEmpty()
-        else home.timeLayoutItem?.substringAfter(' ', missingDelimiterValue = "")?.ifBlank { snapshot?.classPlanName }.orEmpty()
+    // 有科目地点时显示真实地点（老师显示“班级 · 地点”）；没有时沿用时间表名称推测。
+    val teacherSlot = teacherCurrent ?: teacherNext
+    val room = if (teacherMode) listOfNotNull(
+            teacherSlot?.className,
+            teacherSlot?.course?.location?.takeIf { teacherSlot.course.personalCourseId == null },
+        ).joinToString(" · ")
+        else schedule?.subjects?.firstOrNull { it.name == home.subject.trim() }?.location
+            ?: home.timeLayoutItem?.substringAfter(' ', missingDelimiterValue = "")?.ifBlank { snapshot?.classPlanName }.orEmpty()
     val timeRange = if (teacherMode) teacherCurrent?.let(::teacherSlotRange) ?: teacherNext?.let(::teacherSlotRange) ?: "—"
         else extractTimeRange(home.timeLayoutItem).ifBlank { "—" }
     val stateTitle = if (teacherMode) teacher.title else when (snapshot?.currentState) {
@@ -723,8 +740,10 @@ fun TodayScreen(settings: WatchSettings, snackbar: SnackbarHostState, onOpen: (S
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScheduleScreen(
+    settings: WatchSettings,
     snackbar: SnackbarHostState,
     onOpen: (Screen) -> Unit,
+    onPersist: (WatchSettings) -> Unit,
     openSwapRequests: Boolean = false,
 ) {
     val bundle by ConnectionManager.schedule.collectAsState()
@@ -745,6 +764,7 @@ fun ScheduleScreen(
     val canChange = (classPermissions and Protocol.PERMISSION_MANAGE_SCHEDULE) == Protocol.PERMISSION_MANAGE_SCHEDULE &&
         bundle?.fromProfile != true
     val canPull = user?.canPullScheduleFor(currentClassId) == true
+    val scope = rememberCoroutineScope()
 
     // 老师与班主任：显示名与课表教师名绑定后，可跨班级查看“我的日程”；null 表示尚未手动切换。
     // 老师默认进入“我的日程”，班主任默认仍看本班课表。
@@ -786,14 +806,68 @@ fun ScheduleScreen(
     val myDays = mySchedule?.days.orEmpty()
     if (mySelected >= myDays.size) mySelected = 0
 
+    // 学科颜色按账号同步：进入课表页与刷新时拉取，离线时用本机缓存。
+    val colorState by SubjectColorStore.state.collectAsState()
+    val overrides = remember(colorState) { SubjectColorStore.overrides(colorState) }
+    val colorOf: (String) -> String = { SubjectColorStore.colorOf(overrides, it) }
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    LaunchedEffect(user?.id) { if (user != null) SubjectColorStore.refresh() }
+
+    // 表格/列表视图：班级课表与我的日程各自记在本机，默认列表。表格按周浏览，数据单独按周读取。
+    val tableMode = if (mineMode) settings.myScheduleView == "table" else settings.classScheduleView == "table"
+    val today = LocalDate.now()
+    var classWeekStart by remember { mutableStateOf(mondayOf(today)) }
+    var myWeekStart by remember(user?.id) { mutableStateOf(mondayOf(today)) }
+    var classWeek by remember { mutableStateOf<ScheduleWeekResponse?>(null) }
+    var myWeek by remember(user?.id) { mutableStateOf<MyScheduleWeekResponse?>(null) }
+    var weekStatus by remember { mutableStateOf<String?>(null) }
+    var weekRefresh by remember { mutableIntStateOf(0) }
+    LaunchedEffect(tableMode, mineMode, swapMode, currentClassId, classWeekStart, weekRefresh, bundle?.generatedAt) {
+        if (!tableMode || mineMode || swapMode) return@LaunchedEffect
+        val classId = currentClassId ?: return@LaunchedEffect
+        runCatching { AdminApi.scheduleWeek(classId, classWeekStart.toString(), classWeekStart.plusDays(6).toString()) }
+            .onSuccess { classWeek = it; weekStatus = null }
+            .onFailure { weekStatus = it.message ?: "暂时无法读取这一周的课表" }
+    }
+    LaunchedEffect(tableMode, mineMode, swapMode, user?.id, myWeekStart, weekRefresh, myScheduleRefresh) {
+        if (!tableMode || !mineMode || swapMode || user == null) return@LaunchedEffect
+        runCatching { AdminApi.myScheduleWeek(myWeekStart.toString(), myWeekStart.plusDays(6).toString()) }
+            .onSuccess { myWeek = it; weekStatus = null }
+            .onFailure { weekStatus = it.message ?: "暂时无法读取这一周的日程" }
+    }
+    val display = ScheduleGridDisplay(
+        mine = mineMode,
+        showTeacher = settings.scheduleShowTeacher,
+        showClass = settings.scheduleShowClass,
+        showLocation = settings.scheduleShowLocation,
+        weekendMode = settings.scheduleWeekendMode,
+        merge = settings.scheduleMergeConsecutive,
+    )
+
     Column(Modifier.fillMaxSize()) {
         // 班级名与换班入口在共用顶栏里；刷新只放顶栏一处，“我的日程”刷新个人日程，班级课表请求插件拉取。
         HomeTopBar("课表", snackbar, onOpen) {
-            if (!swapMode) IconButton(
-                onClick = { if (mineMode) myScheduleRefresh++ else ConnectionManager.requestSchedulePull() },
-                enabled = mineMode || (canPull && schedulePullActionEnabled(pull)),
-            ) {
-                Icon(Icons.Rounded.Refresh, contentDescription = if (mineMode) "刷新" else "拉取课表")
+            if (!swapMode) {
+                IconButton(onClick = {
+                    val next = if (tableMode) "list" else "table"
+                    onPersist(if (mineMode) settings.copy(myScheduleView = next) else settings.copy(classScheduleView = next))
+                }) {
+                    Icon(
+                        if (tableMode) Icons.AutoMirrored.Rounded.ViewList else Icons.Rounded.CalendarViewWeek,
+                        contentDescription = if (tableMode) "切换到列表" else "切换到表格",
+                    )
+                }
+                IconButton(onClick = { onOpen(Screen.ScheduleDisplay) }) { Icon(Icons.Rounded.Tune, contentDescription = "显示设置") }
+                IconButton(
+                    onClick = {
+                        if (mineMode) myScheduleRefresh++ else ConnectionManager.requestSchedulePull()
+                        weekRefresh++
+                        scope.launch { SubjectColorStore.refresh() }
+                    },
+                    enabled = mineMode || tableMode || (canPull && schedulePullActionEnabled(pull)),
+                ) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = if (mineMode) "刷新" else "拉取课表")
+                }
             }
         }
         if (user != null) {
@@ -830,6 +904,42 @@ fun ScheduleScreen(
         }
         if (swapMode) {
             SwapRequestsScreen(snackbar = snackbar, showTopBar = false)
+        } else if (mineMode && tableMode) {
+            val week = myWeek?.takeIf { it.from == myWeekStart.toString() }
+            ScheduleWeekPane(
+                weekStart = myWeekStart,
+                today = today,
+                teachingWeek = week?.teachingWeek,
+                minDate = week?.minDate?.let(::parseScheduleDate),
+                maxDate = week?.maxDate?.let(::parseScheduleDate),
+                status = weekStatus.takeIf { week == null },
+                periods = week?.periods.orEmpty(),
+                days = myGridDays(week, myWeekStart),
+                display = display,
+                colorOf = colorOf,
+                zoom = settings.scheduleZoom,
+                onZoomCommit = { onPersist(settings.copy(scheduleZoom = it)) },
+                onWeek = { myWeekStart = it },
+                onBlockClick = { block, date ->
+                    val course = block.entry.course
+                    val classId = block.entry.classId
+                    when {
+                        course.personalCourseId != null -> {
+                            editingCourse = personalCourses.firstOrNull { it.id == course.personalCourseId }
+                            if (editingCourse != null) showCourseEditor = true
+                        }
+                        classId != null && classes.any { it.id == classId } -> {
+                            // 跳到该班课表表格的那一周。
+                            if (classId != currentClassId) ConnectionManager.switchClass(classId)
+                            classWeekStart = mondayOf(date)
+                            mineChoice = false
+                            if (settings.classScheduleView != "table") onPersist(settings.copy(classScheduleView = "table"))
+                        }
+                        else -> scope.launch { snackbar.showSnackbar("没有${block.entry.className ?: "该班级"}的课表访问权限") }
+                    }
+                },
+                modifier = Modifier.weight(1f),
+            )
         } else if (mineMode) {
             // 单双周课程本周可能不出现在日程里，统一从列表查看、修改和删除；列表里也能新增。
             TextButton(
@@ -867,29 +977,68 @@ fun ScheduleScreen(
                     ) {
                         myDay.items.forEach { item ->
                             // 插件从未同步过课表的班级按档案推算，可能与教室端实际课表不同，与 WebUI 一样标注出来。
-                            val title = if (item.source == Protocol.BUNDLE_SOURCE_PROFILE) "${item.className} · 按档案推算" else item.className
-                            Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                            ConnectedListCard {
-                                item.courses.forEachIndexed { index, course ->
-                                    val time = listOfNotNull(course.startTime, course.endTime).joinToString("–")
-                                    AppListItem(
-                                        title = "${course.label} · ${course.subject}",
-                                        supporting = listOfNotNull(time.ifEmpty { null }, course.teacher).joinToString(" · "),
-                                        leading = subjectIcon(course.subject),
-                                        index = index,
-                                        count = item.courses.size,
-                                        trailing = if (course.personalCourseId != null) Icons.Rounded.Edit else null,
-                                        onClick = course.personalCourseId?.let { id -> ({
-                                            editingCourse = personalCourses.firstOrNull { it.id == id }
-                                            if (editingCourse != null) showCourseEditor = true
-                                        }) },
-                                    )
+                            // 自定义课程的“班级名”就是它的地点，始终显示；班级名按“显示班级”设置。
+                            if (item.isPersonal || settings.scheduleShowClass) {
+                                val title = if (item.source == Protocol.BUNDLE_SOURCE_PROFILE) "${item.className} · 按档案推算" else item.className
+                                Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                            }
+                            ScheduleLogicGroups(item.courses, item.dividerAfterIndexes) { group ->
+                                ConnectedListCard {
+                                    group.forEachIndexed { index, course ->
+                                        val time = listOfNotNull(course.startTime, course.endTime).joinToString("–")
+                                        val (container, content) = subjectColorPair(colorOf(course.subject), dark)
+                                        AppListItem(
+                                            title = "${course.label} · ${course.subject}",
+                                            supporting = listOfNotNull(
+                                                time.ifEmpty { null },
+                                                course.teacher,
+                                                course.location?.takeIf { settings.scheduleShowLocation && !item.isPersonal },
+                                            ).joinToString(" · "),
+                                            leading = subjectIcon(course.subject),
+                                            leadingContainerColor = container,
+                                            leadingContentColor = content,
+                                            index = index,
+                                            count = group.size,
+                                            trailing = if (course.personalCourseId != null) Icons.Rounded.Edit else null,
+                                            onClick = course.personalCourseId?.let { id -> ({
+                                                editingCourse = personalCourses.firstOrNull { it.id == id }
+                                                if (editingCourse != null) showCourseEditor = true
+                                            }) },
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
+        } else if (tableMode) {
+            if (bundle?.fromProfile == true) {
+                Box(Modifier.padding(horizontal = 16.dp)) {
+                    PermissionHint("${classDisplayName(classes, currentClassId)}教室端尚未同步过课表，以下按班级档案推算，可能与实际课表不同。")
+                }
+            }
+            val week = classWeek?.takeIf { it.from == classWeekStart.toString() && it.classId.equals(currentClassId, ignoreCase = true) }
+            ScheduleWeekPane(
+                weekStart = classWeekStart,
+                today = today,
+                teachingWeek = week?.teachingWeek,
+                minDate = week?.minDate?.let(::parseScheduleDate),
+                maxDate = week?.maxDate?.let(::parseScheduleDate),
+                status = weekStatus.takeIf { week == null },
+                periods = week?.periods.orEmpty(),
+                days = classGridDays(week, classWeekStart),
+                display = display,
+                colorOf = colorOf,
+                zoom = settings.scheduleZoom,
+                onZoomCommit = { onPersist(settings.copy(scheduleZoom = it)) },
+                onWeek = { classWeekStart = it },
+                onBlockClick = { block, date ->
+                    if (canChange && !date.isBefore(today) && week?.source != Protocol.BUNDLE_SOURCE_PROFILE)
+                        onOpen(Screen.Swap(date.toString(), block.indexes.firstOrNull() ?: block.entry.course.index))
+                },
+                modifier = Modifier.weight(1f),
+            )
         } else {
         if (user != null && classes.isNotEmpty()) CalendarSyncRow(snackbar, 0, CalendarFeed.Class, classes.firstOrNull { it.id == currentClassId })
         if (days.isEmpty()) {
@@ -914,18 +1063,28 @@ fun ScheduleScreen(
                 if (courses.isEmpty()) {
                     EmptyState("这一天没有课程", if (canPull) "可点右上角刷新按钮拉取最新课表，或选择其他日期。" else "请选择其他日期。")
                 } else {
-                    ConnectedListCard {
-                        courses.forEachIndexed { index, course ->
-                            val time = listOfNotNull(course.startTime, course.endTime).joinToString("–")
-                            AppListItem(
-                                title = "${course.label} · ${course.subject}",
-                                supporting = listOfNotNull(time.ifEmpty { null }, course.teacher).joinToString(" · "),
-                                leading = subjectIcon(course.subject),
-                                trailing = if (canChange) Icons.Rounded.Edit else null,
-                                index = index,
-                                count = courses.size,
-                                onClick = if (canChange) ({ onOpen(Screen.Swap(day.date, course.index)) }) else null,
-                            )
+                    // 档案中的分割线处分成多组，组间留出间隔。
+                    ScheduleLogicGroups(courses, day.dividerAfterIndexes) { group ->
+                        ConnectedListCard {
+                            group.forEachIndexed { index, course ->
+                                val time = listOfNotNull(course.startTime, course.endTime).joinToString("–")
+                                val (container, content) = subjectColorPair(colorOf(course.subject), dark)
+                                AppListItem(
+                                    title = "${course.label} · ${course.subject}",
+                                    supporting = listOfNotNull(
+                                        time.ifEmpty { null },
+                                        course.teacher?.takeIf { settings.scheduleShowTeacher },
+                                        course.location?.takeIf { settings.scheduleShowLocation },
+                                    ).joinToString(" · "),
+                                    leading = subjectIcon(course.subject),
+                                    leadingContainerColor = container,
+                                    leadingContentColor = content,
+                                    trailing = if (canChange) Icons.Rounded.Edit else null,
+                                    index = index,
+                                    count = group.size,
+                                    onClick = if (canChange) ({ onOpen(Screen.Swap(day.date, course.index)) }) else null,
+                                )
+                            }
                         }
                     }
                 }
@@ -945,6 +1104,77 @@ fun ScheduleScreen(
                 pullText?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
         }
+        }
+    }
+}
+
+/** 列表按档案分割线把课程分组逐组渲染，组与组之间隔开。 */
+@Composable
+private fun ScheduleLogicGroups(
+    courses: List<CourseEntry>,
+    dividers: List<Int>?,
+    content: @Composable (List<CourseEntry>) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ScheduleGridLogic.splitAtDividers(courses, dividers).forEach { group -> content(group) }
+    }
+}
+
+/** 表格视图：周标题、翻周按钮与周课表。 */
+@Composable
+private fun ScheduleWeekPane(
+    weekStart: LocalDate,
+    today: LocalDate,
+    teachingWeek: Int?,
+    minDate: LocalDate?,
+    maxDate: LocalDate?,
+    status: String?,
+    periods: List<SchedulePeriod>,
+    days: List<GridDay>,
+    display: ScheduleGridDisplay,
+    colorOf: (String) -> String,
+    zoom: Float,
+    onZoomCommit: (Float) -> Unit,
+    onWeek: (LocalDate) -> Unit,
+    onBlockClick: (GridBlock, LocalDate) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    fun allowed(target: LocalDate) =
+        (minDate == null || !target.plusDays(6).isBefore(minDate)) && (maxDate == null || !target.isAfter(maxDate))
+    val previous = weekStart.minusWeeks(1).takeIf(::allowed)
+    val next = weekStart.plusWeeks(1).takeIf(::allowed)
+    Column(modifier) {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(teachingWeek?.let { "第 $it 周" } ?: if (weekStart == mondayOf(today)) "本周" else "课表", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "${weekStart.monthValue}月${weekStart.dayOfMonth}日 – ${weekStart.plusDays(6).monthValue}月${weekStart.plusDays(6).dayOfMonth}日",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (weekStart != mondayOf(today)) TextButton(onClick = { onWeek(mondayOf(today)) }) { Text("回到本周") }
+            IconButton(onClick = { previous?.let(onWeek) }, enabled = previous != null) {
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = "上一周")
+            }
+            IconButton(onClick = { next?.let(onWeek) }, enabled = next != null) {
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "下一周")
+            }
+        }
+        if (status != null) {
+            EmptyState("暂时无法读取这一周的课表", status)
+        } else {
+            ScheduleWeekGrid(
+                periods = periods,
+                days = days,
+                today = today,
+                display = display,
+                colorOf = colorOf,
+                zoom = zoom,
+                onZoomCommit = onZoomCommit,
+                onSwipeWeek = { delta -> (if (delta > 0) next else previous)?.let(onWeek) },
+                onBlockClick = onBlockClick,
+            )
         }
     }
 }

@@ -42,6 +42,20 @@ data class WatchSettings(
     val controlFavorites: List<String>? = null,
     /** 控制页控制项的排列顺序（控制项 id）；为空表示默认顺序。 */
     val controlOrder: List<String> = emptyList(),
+    /** 课表显示设置只保存在本机（学科颜色按账号同步，见 SubjectColorStore）。显示老师只作用于班级课表。 */
+    val scheduleShowTeacher: Boolean = true,
+    /** 显示班级只作用于“我的日程”。 */
+    val scheduleShowClass: Boolean = true,
+    val scheduleShowLocation: Boolean = true,
+    /** 表格的周末列：auto（本周周末有课才显示）、always、never。 */
+    val scheduleWeekendMode: String = "auto",
+    /** 表格中合并相邻的同一门课（连堂）。 */
+    val scheduleMergeConsecutive: Boolean = true,
+    /** 班级课表与我的日程各自记住的视图：list 或 table，手机默认列表。 */
+    val classScheduleView: String = "list",
+    val myScheduleView: String = "list",
+    /** 表格的缩放比例（1 为各列铺满屏幕宽度）。 */
+    val scheduleZoom: Float = 1f,
 )
 
 class SettingsStore(context: Context) {
@@ -79,6 +93,14 @@ class SettingsStore(context: Context) {
             prefs.getString(KEY_CONTROL_FAVORITES, "")?.parseIdLines().orEmpty()
         } else null,
         controlOrder = prefs.getString(KEY_CONTROL_ORDER, "")?.parseIdLines().orEmpty(),
+        scheduleShowTeacher = prefs.getBoolean(KEY_SCHEDULE_SHOW_TEACHER, true),
+        scheduleShowClass = prefs.getBoolean(KEY_SCHEDULE_SHOW_CLASS, true),
+        scheduleShowLocation = prefs.getBoolean(KEY_SCHEDULE_SHOW_LOCATION, true),
+        scheduleWeekendMode = prefs.getString(KEY_SCHEDULE_WEEKEND, "auto")?.takeIf { it in setOf("auto", "always", "never") } ?: "auto",
+        scheduleMergeConsecutive = prefs.getBoolean(KEY_SCHEDULE_MERGE, true),
+        classScheduleView = prefs.getString(KEY_CLASS_SCHEDULE_VIEW, "list") ?: "list",
+        myScheduleView = prefs.getString(KEY_MY_SCHEDULE_VIEW, "list") ?: "list",
+        scheduleZoom = prefs.getFloat(KEY_SCHEDULE_ZOOM, 1f),
     )
 
     fun save(settings: WatchSettings) {
@@ -108,6 +130,14 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_PLUGIN_NOTIFICATIONS, settings.receivePluginNotifications)
             .putString(KEY_APPEARANCE, settings.appearanceMode)
             .putString(KEY_CONTROL_ORDER, settings.controlOrder.joinToString("\n"))
+            .putBoolean(KEY_SCHEDULE_SHOW_TEACHER, settings.scheduleShowTeacher)
+            .putBoolean(KEY_SCHEDULE_SHOW_CLASS, settings.scheduleShowClass)
+            .putBoolean(KEY_SCHEDULE_SHOW_LOCATION, settings.scheduleShowLocation)
+            .putString(KEY_SCHEDULE_WEEKEND, settings.scheduleWeekendMode)
+            .putBoolean(KEY_SCHEDULE_MERGE, settings.scheduleMergeConsecutive)
+            .putString(KEY_CLASS_SCHEDULE_VIEW, settings.classScheduleView)
+            .putString(KEY_MY_SCHEDULE_VIEW, settings.myScheduleView)
+            .putFloat(KEY_SCHEDULE_ZOOM, settings.scheduleZoom)
         // null 表示未自定义：删除键回到默认常用项，不能用空串代替。
         val favorites = settings.controlFavorites
         if (favorites != null) editor.putString(KEY_CONTROL_FAVORITES, favorites.joinToString("\n"))
@@ -159,6 +189,14 @@ class SettingsStore(context: Context) {
         const val KEY_APPEARANCE = "appearanceMode"
         const val KEY_CONTROL_FAVORITES = "controlFavorites"
         const val KEY_CONTROL_ORDER = "controlOrder"
+        const val KEY_SCHEDULE_SHOW_TEACHER = "scheduleShowTeacher"
+        const val KEY_SCHEDULE_SHOW_CLASS = "scheduleShowClass"
+        const val KEY_SCHEDULE_SHOW_LOCATION = "scheduleShowLocation"
+        const val KEY_SCHEDULE_WEEKEND = "scheduleWeekendMode"
+        const val KEY_SCHEDULE_MERGE = "scheduleMergeConsecutive"
+        const val KEY_CLASS_SCHEDULE_VIEW = "classScheduleView"
+        const val KEY_MY_SCHEDULE_VIEW = "myScheduleView"
+        const val KEY_SCHEDULE_ZOOM = "scheduleZoom"
     }
 }
 

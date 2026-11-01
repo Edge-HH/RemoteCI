@@ -70,6 +70,9 @@ sealed interface Screen {
     data object NotificationSettings : Screen
     data object CalendarSync : Screen
     data object ScheduleSettings : Screen
+    /** 课表与日程的显示设置（本机）与学科颜色（按账号同步）。 */
+    data object ScheduleDisplay : Screen
+    data object SubjectColors : Screen
     data object Appearance : Screen
     data object Updates : Screen
     data object System : Screen
@@ -93,6 +96,7 @@ fun RemoteCiApp(appContext: android.content.Context) {
 
     DisposableEffect(Unit) {
         ConnectionManager.initialize(appContext)
+        com.remoteci.mobile.data.SubjectColorStore.initialize(appContext)
         onDispose { }
     }
 
@@ -102,7 +106,11 @@ fun RemoteCiApp(appContext: android.content.Context) {
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> ConnectionManager.onForeground(settings)
+                Lifecycle.Event.ON_START -> {
+                    ConnectionManager.onForeground(settings)
+                    // 学科颜色可能在网页端改过：回到前台时重新拉取（未登录时请求失败，保留缓存）。
+                    scope.launch { com.remoteci.mobile.data.SubjectColorStore.refresh() }
+                }
                 Lifecycle.Event.ON_STOP -> ConnectionManager.onBackground()
                 else -> Unit
             }

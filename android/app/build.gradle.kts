@@ -119,6 +119,9 @@ android {
         buildConfig = true
         compose = true
     }
+
+    // 与服务端测试共用的夹具：周课表排布与学科颜色两端必须一致。
+    sourceSets["test"].resources.srcDir("../../shared/test-fixtures")
 }
 
 kotlin {

@@ -44,7 +44,9 @@ internal fun calendarEvents(
                         "RemoteCI 我的日程 · ${course.label}", course.teacher,
                         "按档案推算，可能与实际课表不同".takeIf { item.source == "profile" },
                     ).joinToString("\n"),
-                    location = item.className,
+                    // 班级课程的地点写“班级 · 科目地点”；自定义课程的班级名已是它的地点。
+                    location = course.location?.takeIf { course.personalCourseId == null && it != item.className }
+                        ?.let { "${item.className} · $it" } ?: item.className,
                     startsAt = window.startsAt.toEpochMilli(), endsAt = window.endsAt.toEpochMilli(),
                     timeZone = window.timeZone,
                 ))
@@ -76,7 +78,7 @@ internal fun classCalendarEvents(
                     "RemoteCI 班级课表 · $className · ${course.label}", course.teacher,
                     "按档案推算，可能与实际课表不同".takeIf { bundle.fromProfile },
                 ).joinToString("\n"),
-                location = className,
+                location = course.location?.let { "$className · $it" } ?: className,
                 startsAt = window.startsAt.toEpochMilli(), endsAt = window.endsAt.toEpochMilli(),
                 timeZone = window.timeZone,
             ))
