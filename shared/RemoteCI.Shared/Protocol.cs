@@ -316,6 +316,8 @@ public enum CommandKind
     UninstallAppGuard = 33,
     /// <summary>由课表插件立即用插件包随附的守护程序覆盖本机守护并重新启动，失败时返回原因。</summary>
     UpdateAppGuard = 34,
+    /// <summary>设置班级某科目的上课地点，写入 ClassIsland 档案科目的附加数据并随课表推送生效。</summary>
+    SetSubjectLocation = 35,
 }
 
 public enum PowerActionKind
@@ -339,7 +341,7 @@ public static class CommandPermissions
 
     public static UserPermissions Required(CommandKind command) => command switch
     {
-        CommandKind.ChangeSchedule or CommandKind.SetSubjectTeacher => UserPermissions.ManageSchedule,
+        CommandKind.ChangeSchedule or CommandKind.SetSubjectTeacher or CommandKind.SetSubjectLocation => UserPermissions.ManageSchedule,
         CommandKind.ApplyProfile or CommandKind.ReadProfile or CommandKind.DistributeProfile or CommandKind.UpdateTimeLayout
             => UserPermissions.ManageClassProfile,
         CommandKind.SendNotification => UserPermissions.SendNotifications,
@@ -431,6 +433,8 @@ public static class RemoteCiCapabilities
     public const string ScheduleChangePermanent = "schedule.change-permanent";
     /// <summary>设置班级科目的授课教师（写入 ClassIsland 档案）。</summary>
     public const string ScheduleSubjectTeacher = "schedule.subject-teacher";
+    /// <summary>设置班级科目的上课地点（写入 ClassIsland 档案科目的附加数据），课表上报带出地点与分割线。</summary>
+    public const string ScheduleSubjectLocation = "schedule.subject-location";
     /// <summary>在设备上执行远程终端命令并取回输出。</summary>
     public const string TerminalExecute = "terminal.execute";
     /// <summary>把文件分发到设备的用户文件夹。</summary>
@@ -491,7 +495,7 @@ public static class RemoteCiCapabilities
             ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings, ProfileApply, HolidayCalendar,
             ProfileRead, ProfileTempLayer, Semester, FileTransfer, AppGuard, ScheduleChangePermanent, ScheduleAdjustments,
             ScreenCapture, AppGuardLaunch, AppGuardManage, MainWindowLayoutApply, MainWindowLayoutRead, PluginPackageInstall,
-            AppGuardUpdate];
+            AppGuardUpdate, ScheduleSubjectLocation];
 
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
@@ -519,6 +523,7 @@ public static class RemoteCiCapabilities
         TimeLayoutUpdate => "修改时间表",
         ManagementJoin => "加入集控",
         ScheduleSubjectTeacher => "设置科目教师",
+        ScheduleSubjectLocation => "设置科目地点",
         TerminalExecute => "远程终端",
         FileDistribute => "文件分发",
         FileTransfer => "大文件分发（断点续传）",
@@ -563,6 +568,7 @@ public static class RemoteCiCapabilities
         CommandKind.UpdateTimeLayout => TimeLayoutUpdate,
         CommandKind.JoinManagement => ManagementJoin,
         CommandKind.SetSubjectTeacher => ScheduleSubjectTeacher,
+        CommandKind.SetSubjectLocation => ScheduleSubjectLocation,
         CommandKind.ExecuteTerminalCommand => TerminalExecute,
         CommandKind.SendFile => FileDistribute,
         CommandKind.ApplyExtensionSettings => ExtensionsSettings,

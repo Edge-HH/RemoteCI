@@ -20,6 +20,42 @@ public sealed class SchedulePipelineTests
             planId = PlanId;
             return Plan;
         }
+        public IReadOnlyList<int>? TimeTypes { get; set; }
+        public IReadOnlyList<int>? GetTimeTypes(ClassPlan plan) => TimeTypes;
+    }
+
+    [Fact]
+    public void BuildDay_ReportsLocationAndDividersWithoutChangingRevision()
+    {
+        var subjectId = Guid.NewGuid();
+        var backend = new FakeBackend
+        {
+            PlanId = Guid.NewGuid(),
+            Plan = new ClassPlan
+            {
+                Name = "主课表",
+                Classes =
+                {
+                    new ClassInfo { SubjectId = subjectId, IsEnabled = true },
+                    new ClassInfo { SubjectId = subjectId, IsEnabled = true },
+                },
+            },
+        };
+        var subject = new Subject { Name = "信息" };
+        backend.Subjects[subjectId] = subject;
+        var catalog = new ScheduleCatalog(backend);
+        var day = new DateTime(2026, 11, 2);
+        var before = catalog.BuildDay(day);
+
+        subject.WriteAttachedObject(SubjectLocations.AttachedObjectId, new SubjectLocationAttachment { Location = "机房" });
+        backend.TimeTypes = [0, 2, 0];
+        var after = catalog.BuildDay(day);
+
+        Assert.Null(before.DividerAfterIndexes);
+        Assert.Equal([0], after.DividerAfterIndexes!);
+        Assert.All(after.Courses, course => Assert.Equal("机房", course.Location));
+        Assert.Equal("机房", Assert.Single(catalog.BuildBundle(day).Subjects).Location);
+        Assert.Equal(before.Revision, after.Revision);
     }
 
     [Fact]

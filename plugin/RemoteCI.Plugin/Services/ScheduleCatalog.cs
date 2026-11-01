@@ -18,7 +18,13 @@ public sealed class ScheduleCatalog(IScheduleBackend backend, IHolidayCalendarLo
             Days = Enumerable.Range(0, ScheduleBundle.HorizonDays).Select(offset => BuildDay(from.AddDays(offset))).ToList(),
             Subjects = backend.Subjects
                 .Where(x => !string.IsNullOrWhiteSpace(x.Value.Name) && x.Value.Name != StateCollector.UnsetSubjectPlaceholder)
-                .Select(x => new SubjectEntry { Id = x.Key, Name = x.Value.Name, Teacher = NormalizeTeacher(x.Value.TeacherName) })
+                .Select(x => new SubjectEntry
+                {
+                    Id = x.Key,
+                    Name = x.Value.Name,
+                    Teacher = NormalizeTeacher(x.Value.TeacherName),
+                    Location = SubjectLocationExecutor.Read(x.Value),
+                })
                 // Ordinal 排序不受运行环境区域设置影响，保证同一课表各端看到的顺序一致。
                 .OrderBy(x => x.Name, StringComparer.Ordinal)
                 .ToList(),
@@ -46,6 +52,8 @@ public sealed class ScheduleCatalog(IScheduleBackend backend, IHolidayCalendarLo
                 _ => null,
             },
             HolidayName = holiday?.Name,
+            // 分割线与地点只用于显示，不参与修订号。
+            DividerAfterIndexes = isOff || plan is null ? null : backend.GetTimeTypes(plan) is { } types ? ProfileDocument.DividerAfterIndexes(types) : null,
         };
         // 托管临时层的日期标出基础科目与生效的调课，服务端据此确定调课守卫、显示调课来源；不参与修订号。
         if (!isOff && overlays is not null && overlays.TryGetDate(result.Date, out var baseSubjects, out var applied) &&
@@ -74,6 +82,7 @@ public sealed class ScheduleCatalog(IScheduleBackend backend, IHolidayCalendarLo
             StartTime = item == TimeLayoutItem.Empty ? null : item.StartTime.ToString("hh\\:mm"),
             EndTime = item == TimeLayoutItem.Empty ? null : item.EndTime.ToString("hh\\:mm"),
             Teacher = subject is null ? null : NormalizeTeacher(subject.TeacherName),
+            Location = subject is null ? null : SubjectLocationExecutor.Read(subject),
             Enabled = course.IsEnabled,
         };
     }
