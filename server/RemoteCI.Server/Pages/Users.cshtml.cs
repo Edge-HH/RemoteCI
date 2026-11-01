@@ -442,6 +442,8 @@ public sealed class UsersModel(
         TempData["Error"] = message;
         Accounts = await identities.ListUsersAsync(ct);
         RoleDefinitions = await roleService.ListAsync(ct);
+        Classes = await classrooms.ListAsync(ct);
+        ImportGroups = await classrooms.ListGroupsAsync(ct);
         await LoadApiKeyStateAsync(ct);
         return Page();
     }
