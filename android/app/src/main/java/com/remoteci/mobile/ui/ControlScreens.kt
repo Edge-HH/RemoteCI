@@ -51,6 +51,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
@@ -73,94 +74,100 @@ import com.remoteci.mobile.data.VoiceRecorder
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** 当前班级可用的控制项；权限按当前班级计算，插件能力随插件上下线变化。 */
 @Composable
-fun ControlListScreen(embedded: Boolean, snackbar: androidx.compose.material3.SnackbarHostState, onOpen: (Screen) -> Unit, onBack: (() -> Unit)?) {
+internal fun rememberVisibleControlItems(): List<ControlItem> {
     val user by ConnectionManager.currentUser.collectAsState()
     val classes by ConnectionManager.classes.collectAsState()
     val currentClassId by ConnectionManager.currentClassId.collectAsState()
-    val snapshot by ConnectionManager.snapshot.collectAsState()
     val caps by ConnectionManager.availableCapabilities.collectAsState()
     val classPermissions = effectiveClassPermissions(classes, currentClassId, user?.permissions ?: 0)
-    // 旧服务端没有细化后的独立权限位（音量、清除通知等），按原来合并在一起的旧权限判断。
     val refined = user?.usesRefinedPermissions == true || Protocol.hasRefinedBits(classPermissions)
-    fun can(permission: Int): Boolean = Protocol.hasPermission(classPermissions, permission, refined)
-    // 控制项按“消息 / 大屏 / 扩展”分组显示。
-    data class Row(
-        val group: String,
-        val title: String,
-        val supporting: String,
-        val icon: androidx.compose.ui.graphics.vector.ImageVector,
-        val visible: Boolean,
-        val screen: Screen?,
-        val action: (() -> Unit)? = null,
-    )
-    val rows = listOf(
-        Row("消息", "发送通知", "标题、正文、强调特效、音效和语音朗读", Icons.Rounded.NotificationsActive,
-            can(Protocol.PERMISSION_SEND_NOTIFICATIONS) && Protocol.CAP_NOTIFICATION_SEND in caps, Screen.Notify),
-        Row("消息", "发送语音", "最长 60 秒的语音消息", Icons.Rounded.Mic,
-            can(Protocol.PERMISSION_SEND_VOICE_MESSAGES) && Protocol.CAP_VOICE_MESSAGE_SEND in caps, Screen.Voice),
-        Row("消息", "清除提醒", "清除 ClassIsland 当前提醒与手表提示", Icons.Rounded.NotificationsOff,
-            can(Protocol.PERMISSION_CLEAR_NOTIFICATIONS) && Protocol.CAP_NOTIFICATION_CLEAR in caps, null,
-            { ConnectionManager.clearNotifications() }),
-        Row("大屏", "主界面", if (snapshot?.isMainMenuVisible == true) "当前显示中，点击可隐藏" else "当前已隐藏，点击可显示",
-            Icons.Rounded.Visibility,
-            can(Protocol.PERMISSION_MAIN_MENU_CONTROL) && Protocol.CAP_MAIN_MENU_VISIBILITY in caps, Screen.MainMenu),
-        Row("大屏", "屏幕截图", "查看教室电脑当前屏幕", Icons.Rounded.DesktopWindows,
-            can(Protocol.PERMISSION_CAPTURE_SCREEN) && Protocol.CAP_SCREEN_CAPTURE in caps, Screen.Screenshot),
-        Row("大屏", "音量", "音量调节和切换静音", Icons.Rounded.VolumeUp,
-            can(Protocol.PERMISSION_VOLUME_CONTROL) && Protocol.CAP_VOLUME_CONTROL in caps, Screen.Volume),
-        Row("大屏", "电源控制", "关机、睡眠或休眠", Icons.Rounded.PowerSettingsNew,
-            can(Protocol.PERMISSION_POWER_CONTROL) && Protocol.CAP_POWER_CONTROL in caps, Screen.Power),
-        Row("扩展", "扩展功能", "运行已注册扩展", Icons.Rounded.Extension,
-            can(Protocol.PERMISSION_RUN_EXTENSIONS) && Protocol.CAP_EXTENSIONS_RUN in caps, Screen.Extensions),
-    ).filter { it.visible }
+    return visibleControlItems(classPermissions, refined, caps)
+}
+
+internal val ControlItem.icon: ImageVector
+    get() = when (this) {
+        ControlItem.Notify -> Icons.Rounded.NotificationsActive
+        ControlItem.Voice -> Icons.Rounded.Mic
+        ControlItem.ClearNotifications -> Icons.Rounded.NotificationsOff
+        ControlItem.MainMenu -> Icons.Rounded.Visibility
+        ControlItem.Screenshot -> Icons.Rounded.DesktopWindows
+        ControlItem.Volume -> Icons.Rounded.VolumeUp
+        ControlItem.Power -> Icons.Rounded.PowerSettingsNew
+        ControlItem.Extensions -> Icons.Rounded.Extension
+    }
+
+/** 磁贴上的一行状态：主界面显示当前显隐状态，其余用简短说明。 */
+internal fun ControlItem.tileSupporting(mainMenuVisible: Boolean): String = when (this) {
+    ControlItem.Notify -> "文字提醒"
+    ControlItem.Voice -> "最长 60 秒"
+    ControlItem.ClearNotifications -> "一键清除"
+    ControlItem.MainMenu -> if (mainMenuVisible) "显示中 · 点击隐藏" else "已隐藏 · 点击显示"
+    ControlItem.Screenshot -> "查看大屏"
+    else -> supporting
+}
+
+/** 执行控制项：一键操作直接发命令（结果由全局 snackbar 提示），其余进入对应页面。 */
+internal fun runControl(item: ControlItem, mainMenuVisible: Boolean, onOpen: (Screen) -> Unit) {
+    when (item) {
+        ControlItem.Notify -> onOpen(Screen.Notify)
+        ControlItem.Voice -> onOpen(Screen.Voice)
+        ControlItem.ClearNotifications -> ConnectionManager.clearNotifications()
+        ControlItem.MainMenu -> ConnectionManager.setMainMenuVisible(!mainMenuVisible)
+        ControlItem.Screenshot -> onOpen(Screen.Screenshot)
+        ControlItem.Volume -> onOpen(Screen.Volume)
+        ControlItem.Power -> onOpen(Screen.Power)
+        ControlItem.Extensions -> onOpen(Screen.Extensions)
+    }
+}
+
+/** 底栏“控制”：顶部磁贴放一键与高频操作，下方按“大屏 / 扩展”分组列出需要进入二级页的控制。 */
+@Composable
+fun ControlListScreen(snackbar: androidx.compose.material3.SnackbarHostState, onOpen: (Screen) -> Unit) {
+    val snapshot by ConnectionManager.snapshot.collectAsState()
+    val mainMenuVisible = snapshot?.isMainMenuVisible == true
+    val items = rememberVisibleControlItems()
+    val quick = items.filter { it.quick }
+    val rest = items.filterNot { it.quick }
     Column(Modifier.fillMaxSize()) {
-        TopAppBar(
-            title = {
-                // 副标题标明控制命令发往哪个班级；班级列表缺失（局域网镜像、旧服务端）时不显示。
-                val className = classes.firstOrNull { it.id == currentClassId }?.name?.takeIf(String::isNotBlank)
-                Column {
-                    Text("课堂控制", style = MaterialTheme.typography.titleLarge)
-                    className?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            },
-            navigationIcon = { IconButton(onClick = { onBack?.invoke() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } },
-            // 单班级账号副标题已显示班名，不再重复放一个无法切换的芯片。
-            actions = { if (classes.size > 1) ClassSwitcherChip(Modifier.padding(end = 8.dp)) },
-        )
-        if (rows.isEmpty()) {
+        HomeTopBar("课堂控制", snackbar, onOpen)
+        if (items.isEmpty()) {
             EmptyState("没有可用的控制项", "这取决于账号权限，以及当前插件是否在线。")
+            Spacer(Modifier.weight(1f))
         } else {
             // 控制项多于一屏（小屏或长说明换行）时必须可滚动，否则底部的“扩展功能”等入口无法触达。
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
-                rows.groupBy { it.group }.forEach { (group, groupRows) ->
+                if (quick.isNotEmpty()) {
+                    ListSectionLabel("常用")
+                    QuickActionGrid(quick, Modifier.padding(horizontal = 16.dp)) { item, modifier ->
+                        QuickActionTile(
+                            title = item.title,
+                            icon = item.icon,
+                            supporting = item.tileSupporting(mainMenuVisible),
+                            modifier = modifier,
+                            onClick = { runControl(item, mainMenuVisible, onOpen) },
+                        )
+                    }
+                }
+                rest.groupBy { it.group }.forEach { (group, groupItems) ->
                     ListSectionLabel(group)
                     ConnectedListCard(Modifier.padding(horizontal = 16.dp)) {
-                        groupRows.forEachIndexed { index, row ->
+                        groupItems.forEachIndexed { index, item ->
                             AppListItem(
-                                title = row.title,
-                                supporting = row.supporting,
-                                leading = row.icon,
+                                title = item.title,
+                                supporting = item.supporting,
+                                leading = item.icon,
                                 trailing = Icons.Rounded.ChevronRight,
                                 index = index,
-                                count = groupRows.size,
-                                onClick = { row.screen?.let(onOpen) ?: row.action?.invoke() },
+                                count = groupItems.size,
+                                onClick = { runControl(item, mainMenuVisible, onOpen) },
                             )
                         }
                     }
                 }
             }
         }
-        if (rows.isEmpty()) Spacer(Modifier.weight(1f))
         WebUiHint("更多控制操作请使用", "/Control", snackbar)
     }
 }

@@ -22,6 +22,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.VisualTransformation
 import com.remoteci.mobile.calendar.CalendarFeed
 import com.remoteci.mobile.data.parseWebLoginQrPayload
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,9 +32,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -70,13 +74,13 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Tab
@@ -106,6 +110,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.Role
 import com.journeyapps.barcodescanner.ScanContract
 import com.remoteci.mobile.data.AdminApi
 import com.remoteci.mobile.data.ConnectionManager
@@ -438,7 +443,7 @@ fun LoginScreen(
     }
 }
 
-/** 登录后的班级选择页：多班级账号先选一个进入，进入后可在课表页、控制页顶部或“账号与设置”中切换。 */
+/** 登录后的班级选择页：多班级账号先选一个进入，进入后可点任一页面顶栏的班级名切换。 */
 @Composable
 fun ClassPickerScreen(onPicked: () -> Unit) {
     val classes by ConnectionManager.classes.collectAsState()
@@ -450,7 +455,7 @@ fun ClassPickerScreen(onPicked: () -> Unit) {
         ) {
             Text("选择进入的班级", style = MaterialTheme.typography.headlineSmall)
             Text(
-                "该账号拥有多个班级的访问权限，进入后可在课表页、控制页顶部或“账号与设置”中切换。",
+                "该账号拥有多个班级的访问权限，进入后可点任一页面顶栏的班级名切换。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -494,36 +499,59 @@ fun HomeShell(
     val pendingSwaps by ConnectionManager.pendingSwapCount.collectAsState()
     // 换课申请在“课表”里，待处理数挂在“课表”图标上。
     val canRequestSwap = user?.has(com.remoteci.mobile.data.Protocol.PERMISSION_REQUEST_SWAP) == true
+    // 其他板块按返回键先回到“今天”，只有在“今天”再按返回才退出 App。
+    BackHandler(enabled = tab != HomeTab.Today) { onTab(HomeTab.Today) }
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            // 底栏上沿大圆角；选中指示器用主色容器（清新配色下是薄荷），与 WebUI 底栏一致。
-            NavigationBar(
-                modifier = Modifier.clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)),
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            // 悬浮的胶囊底栏：选中项整块铺主色容器（清新配色下是薄荷），与 WebUI 移动版底栏一致。
+            Box(
+                Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp),
             ) {
-                data class Item(val tab: HomeTab, val label: String, val icon: ImageVector)
-                listOf(
-                    Item(HomeTab.Today, "今天", Icons.Rounded.Today),
-                    Item(HomeTab.Schedule, "课表", Icons.Rounded.CalendarMonth),
-                    Item(HomeTab.Control, "控制", Icons.Rounded.Tune),
-                    Item(HomeTab.Me, "我的", Icons.Rounded.AccountCircle),
-                ).forEach { item ->
-                    NavigationBarItem(
-                        selected = tab == item.tab,
-                        onClick = { onTab(item.tab) },
-                        icon = {
-                            if (item.tab == HomeTab.Schedule && canRequestSwap && pendingSwaps > 0) {
-                                BadgedBox(badge = { Badge(containerColor = Color(0xFFFBE9A8), contentColor = Color(0xFF6B4E12)) { Text(pendingSwaps.toString()) } }) {
-                                    Icon(item.icon, contentDescription = item.label)
+                Surface(
+                    shape = RoundedCornerShape(36.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    shadowElevation = 10.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        Modifier.selectableGroup().height(72.dp).padding(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        data class Item(val tab: HomeTab, val label: String, val icon: ImageVector)
+                        listOf(
+                            Item(HomeTab.Today, "今天", Icons.Rounded.Today),
+                            Item(HomeTab.Schedule, "课表", Icons.Rounded.CalendarMonth),
+                            Item(HomeTab.Control, "控制", Icons.Rounded.Tune),
+                            Item(HomeTab.Me, "我的", Icons.Rounded.AccountCircle),
+                        ).forEach { item ->
+                            val selected = tab == item.tab
+                            val colors = MaterialTheme.colorScheme
+                            Column(
+                                Modifier.weight(1f).fillMaxHeight()
+                                    .clip(RoundedCornerShape(28.dp))
+                                    .background(if (selected) colors.primaryContainer else Color.Transparent)
+                                    .selectable(selected = selected, role = Role.Tab, onClick = { onTab(item.tab) }),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                            ) {
+                                val tint = if (selected) colors.onPrimaryContainer else colors.onSurfaceVariant
+                                if (item.tab == HomeTab.Schedule && canRequestSwap && pendingSwaps > 0) {
+                                    BadgedBox(badge = { Badge(containerColor = Color(0xFFFBE9A8), contentColor = Color(0xFF6B4E12)) { Text(pendingSwaps.toString()) } }) {
+                                        Icon(item.icon, contentDescription = null, tint = tint)
+                                    }
+                                } else {
+                                    Icon(item.icon, contentDescription = null, tint = tint)
                                 }
-                            } else {
-                                Icon(item.icon, contentDescription = item.label)
+                                Text(
+                                    item.label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                    color = tint,
+                                )
                             }
-                        },
-                        label = { Text(item.label, style = MaterialTheme.typography.labelMedium) },
-                        colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.primaryContainer),
-                    )
+                        }
+                    }
                 }
             }
         },
@@ -532,14 +560,12 @@ fun HomeShell(
             when (tab) {
                 HomeTab.Today -> TodayScreen(snackbar, onOpen, onTab, onSwapRequests = { onHome(Screen.Home(HomeTab.Schedule, openSwapRequests = true)) })
                 HomeTab.Schedule -> ScheduleScreen(
-                    embedded = true,
                     snackbar = snackbar,
                     onOpen = onOpen,
-                    onBack = { onTab(HomeTab.Today) },
                     openSwapRequests = home.openSwapRequests,
                 )
-                HomeTab.Control -> ControlListScreen(embedded = true, snackbar = snackbar, onOpen = onOpen, onBack = { onTab(HomeTab.Today) })
-                HomeTab.Me -> AccountScreen(settings, onOpen, onPersist, onLoggedOut)
+                HomeTab.Control -> ControlListScreen(snackbar = snackbar, onOpen = onOpen)
+                HomeTab.Me -> AccountScreen(settings, snackbar, onOpen, onPersist, onLoggedOut)
             }
         }
     }
@@ -552,16 +578,10 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
     val schedule by ConnectionManager.schedule.collectAsState()
     val user by ConnectionManager.currentUser.collectAsState()
     val personalNext by ConnectionManager.personalNextCourse.collectAsState()
-    val connection by ConnectionManager.state.collectAsState()
-    val status by ConnectionManager.schedulePullState.collectAsState()
-    val admin = remember { mutableStateOf<com.remoteci.mobile.data.AdminStatus?>(null) }
     var nowTick by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     var generatedElapsed by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(snapshot?.generatedAt) { generatedElapsed = SystemClock.elapsedRealtime() }
     LaunchedEffect(Unit) { while (true) { delay(1000); nowTick = SystemClock.elapsedRealtime() } }
-    LaunchedEffect(connection) {
-        admin.value = runCatching { com.remoteci.mobile.data.AdminApi.adminStatus() }.getOrNull()
-    }
     val today = pluginToday(snapshot?.generatedAt, snapshot?.timeZoneOffsetMinutes, generatedElapsed, nowTick)
     val now = pluginLocalNow(snapshot?.generatedAt, snapshot?.timeZoneOffsetMinutes, generatedElapsed, nowTick)
     val day = schedule?.days?.firstOrNull { it.date == today.toString() }
@@ -587,17 +607,12 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
         Protocol.STATE_AFTER_SCHOOL -> "放学"
         else -> "待机"
     }
-    val connected = connection is ConnectionManager.State.CloudConnected || connection is ConnectionManager.State.LanConnected
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        TopAppBar(
-            title = { Text("RemoteCI", style = MaterialTheme.typography.titleLarge) },
-            actions = {
-                // 扫描 WebUI 登录页的“手机扫码”二维码，确认后电脑浏览器以当前账号登录。
-                WebLoginScanAction(snackbar)
-                IconButton({ onOpen(Screen.Inbox) }) { Icon(Icons.Rounded.Notifications, contentDescription = "通知") }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
-        )
+    val controls = rememberVisibleControlItems().filter { it.todayShortcut }
+    val pendingSwaps by ConnectionManager.pendingSwapCount.collectAsState()
+    Column(Modifier.fillMaxSize()) {
+    // 连接状态改为标题右侧的云朵图标，点开看课表同步与手表状态。
+    HomeTopBar("RemoteCI", snackbar, onOpen, showConnection = true)
+    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Card(
             onClick = {
                 if (teacherMode) onTab(HomeTab.Schedule)
@@ -606,24 +621,22 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
                     onOpen(Screen.Swap(day?.date, index))
                 }
             },
-            modifier = Modifier.fillMaxWidth().height(168.dp),
+            modifier = Modifier.fillMaxWidth().height(176.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
             shape = androidx.compose.foundation.shape.RoundedCornerShape(32.dp),
         ) {
-            // 右上角两枚低透明度圆点装饰，只做点缀，不参与布局。
-            Box(Modifier.fillMaxSize()) {
-                Box(
-                    Modifier.align(Alignment.TopEnd).offset(x = 54.dp, y = (-64).dp).size(176.dp)
-                        .clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-                )
-                Box(
-                    Modifier.align(Alignment.TopEnd).offset(x = (-118).dp, y = 72.dp).size(28.dp)
-                        .clip(CircleShape).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)),
-                )
-            }
             Box(Modifier.fillMaxSize().padding(20.dp)) {
-                Column {
-                    Text(stateTitle, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // 状态做成雾白小胶囊，和 WebUI 移动版首页卡片一致。
+                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerLowest) {
+                        Text(
+                            stateTitle,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                     Text("$period ${room.ifBlank { "" }}".trim(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
                 Row(
@@ -666,56 +679,51 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
                         (snapshot?.nextClassTimeLayoutItem?.substringAfter(' ', "")?.let { " · $it" } ?: ""),
                     leading = Icons.Rounded.DirectionsRun,
                     trailing = Icons.Rounded.SwapHoriz,
-                    index = 0,
-                    count = 2,
                     onClick = {
                         if (teacherMode) onTab(HomeTab.Schedule)
                         else onOpen(Screen.Swap(day?.date, nextQuickSwapLessonIndex(day, snapshot)))
                     },
                 )
             } else {
-                AppListItem("下一节", "目前没有下一节课程", Icons.Rounded.DirectionsRun, index = 0, count = 2)
+                AppListItem("下一节", "目前没有下一节课程", Icons.Rounded.DirectionsRun)
             }
-            val syncText = when (val currentStatus = status) {
-                is ConnectionManager.SchedulePullState.Pulling -> currentStatus.message
-                is ConnectionManager.SchedulePullState.Success -> currentStatus.message
-                is ConnectionManager.SchedulePullState.Error -> currentStatus.message
-                else -> formatLocalSyncTime(snapshot?.generatedAt)?.let { "课表已于 $it 同步" } ?: "尚未同步课表"
-            }
-            val watchText = if ((admin.value?.watchConnections ?: 0) > 0) "手表已连接" else "手表未连接"
+        }
+        // 有待处理的换课申请时才提示；平时换课申请从“课表”进入，不再占首页位置。
+        val canSwap = user?.has(Protocol.PERMISSION_REQUEST_SWAP) == true
+        if (canSwap && pendingSwaps > 0) {
             AppListItem(
-                title = if (connected) "RemoteCI 已连接" else "RemoteCI 未连接",
-                supporting = "$syncText · $watchText",
-                leading = if (connected) Icons.Rounded.CloudDone else Icons.Rounded.CloudOff,
-                trailing = if (connected) Icons.Rounded.CheckCircle else null,
-                index = 1,
-                count = 2,
+                title = "换课申请待处理",
+                supporting = "有 $pendingSwaps 条换课申请需要你处理",
+                leading = Icons.Rounded.SwapHoriz,
+                trailing = Icons.Rounded.ChevronRight,
+                onClick = onSwapRequests,
             )
         }
-        // 底栏已有课表与控制，这里放两个最常用的直达操作；没有对应权限时不显示。
-        val canSwap = user?.has(Protocol.PERMISSION_REQUEST_SWAP) == true
-        val canNotify = ConnectionManager.hasClassPermission(Protocol.PERMISSION_SEND_NOTIFICATIONS)
-        when {
-            canSwap && canNotify -> ConnectedButtons(
-                firstLabel = "换课申请",
-                secondLabel = "发送通知",
-                onFirst = onSwapRequests,
-                onSecond = { onOpen(Screen.Notify) },
-            )
-            canSwap -> FilledTonalButton(onClick = onSwapRequests, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("换课申请") }
-            canNotify -> FilledTonalButton(onClick = { onOpen(Screen.Notify) }, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("发送通知") }
+        // 快捷控制：与“控制”页同一份权限与能力判断，没有可用项时不显示。
+        if (controls.isNotEmpty()) {
+            Text("快捷控制", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 4.dp, top = 4.dp))
+            val mainMenuVisible = snapshot?.isMainMenuVisible == true
+            QuickActionGrid(controls, columns = 2) { item, modifier ->
+                QuickActionTile(
+                    title = item.title,
+                    icon = item.icon,
+                    supporting = item.tileSupporting(mainMenuVisible),
+                    modifier = modifier,
+                    onClick = { runControl(item, mainMenuVisible, onOpen) },
+                )
+            }
         }
         Spacer(Modifier.height(16.dp))
+    }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScheduleScreen(
-    embedded: Boolean,
     snackbar: SnackbarHostState,
     onOpen: (Screen) -> Unit,
-    onBack: (() -> Unit)?,
     openSwapRequests: Boolean = false,
 ) {
     val bundle by ConnectionManager.schedule.collectAsState()
@@ -778,35 +786,43 @@ fun ScheduleScreen(
     if (mySelected >= myDays.size) mySelected = 0
 
     Column(Modifier.fillMaxSize()) {
-        TopAppBar(
-            title = { Text("课表", style = MaterialTheme.typography.titleLarge) },
-            navigationIcon = {
-                IconButton(onClick = { onBack?.invoke() ?: onOpen(Screen.Home(HomeTab.Today)) }) {
-                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
-                }
-            },
-            actions = {
-                if (!swapMode) IconButton(
-                    onClick = { if (mineMode) myScheduleRefresh++ else ConnectionManager.requestSchedulePull() },
-                    enabled = mineMode || (canPull && schedulePullActionEnabled(pull)),
-                ) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
-                }
-            },
-        )
-        if (user != null) {
-            Row(
-                Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+        // 班级名与换班入口在共用顶栏里；刷新只放顶栏一处，“我的日程”刷新个人日程，班级课表请求插件拉取。
+        HomeTopBar("课表", snackbar, onOpen) {
+            if (!swapMode) IconButton(
+                onClick = { if (mineMode) myScheduleRefresh++ else ConnectionManager.requestSchedulePull() },
+                enabled = mineMode || (canPull && schedulePullActionEnabled(pull)),
             ) {
-                FilterChip(selected = !swapMode && mineMode, onClick = { mineChoice = true; swapChoice = false }, label = { Text("我的日程") })
-                // 班级芯片显示真实班名；已在班级视图时再点一次展开班级菜单，直接换班。
-                ClassSwitcherChip(selected = !swapMode && !mineMode, onSelect = { mineChoice = false; swapChoice = false })
-                if (ScheduleSegment.SwapRequests in segments) {
-                    FilterChip(
-                        selected = swapMode,
-                        onClick = { swapChoice = true },
-                        label = { Text(if (pendingSwaps > 0) "换课申请 · $pendingSwaps" else "换课申请") },
+                Icon(Icons.Rounded.Refresh, contentDescription = if (mineMode) "刷新" else "拉取课表")
+            }
+        }
+        if (user != null) {
+            val current = when {
+                swapMode -> ScheduleSegment.SwapRequests
+                mineMode -> ScheduleSegment.Mine
+                else -> ScheduleSegment.Class
+            }
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                segments.forEachIndexed { index, segment ->
+                    SegmentedButton(
+                        selected = segment == current,
+                        onClick = {
+                            when (segment) {
+                                ScheduleSegment.Mine -> { mineChoice = true; swapChoice = false }
+                                ScheduleSegment.Class -> { mineChoice = false; swapChoice = false }
+                                ScheduleSegment.SwapRequests -> swapChoice = true
+                            }
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(index, segments.size),
+                        label = {
+                            Text(
+                                when (segment) {
+                                    ScheduleSegment.Mine -> "我的日程"
+                                    ScheduleSegment.Class -> "班级课表"
+                                    ScheduleSegment.SwapRequests -> if (pendingSwaps > 0) "换课申请 $pendingSwaps" else "换课申请"
+                                },
+                                maxLines = 1,
+                            )
+                        },
                     )
                 }
             }
@@ -814,12 +830,16 @@ fun ScheduleScreen(
         if (swapMode) {
             SwapRequestsScreen(snackbar = snackbar, showTopBar = false)
         } else if (mineMode) {
-            Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { editingCourse = null; showCourseEditor = true }) { Text("添加自定义课程") }
-                // 单双周课程本周可能不出现在日程里，统一从列表查看、修改和删除。
-                TextButton(onClick = { showCourseList = true }) {
-                    Text(if (personalCourses.isEmpty()) "管理自定义课程" else "管理自定义课程（${personalCourses.size}）")
-                }
+            // 单双周课程本周可能不出现在日程里，统一从列表查看、修改和删除；列表里也能新增。
+            TextButton(
+                onClick = {
+                    if (personalCourses.isEmpty()) { editingCourse = null; showCourseEditor = true } else showCourseList = true
+                },
+                modifier = Modifier.padding(horizontal = 8.dp),
+            ) {
+                Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(8.dp))
+                Text(if (personalCourses.isEmpty()) "添加自定义课程" else "自定义课程（${personalCourses.size}）")
             }
             CalendarSyncRow(snackbar, myScheduleRefresh, CalendarFeed.Personal)
             when {
@@ -872,7 +892,7 @@ fun ScheduleScreen(
         } else {
         if (user != null && classes.isNotEmpty()) CalendarSyncRow(snackbar, 0, CalendarFeed.Class, classes.firstOrNull { it.id == currentClassId })
         if (days.isEmpty()) {
-            EmptyState("还没有课表", if (canPull) "连接成功后会显示未来七日课程。管理员或班主任可刷新课表。" else "连接成功后会显示未来七日课程。")
+            EmptyState("还没有课表", if (canPull) "连接成功后会显示未来七日课程。可点右上角刷新按钮拉取课表。" else "连接成功后会显示未来七日课程。")
         } else {
             PrimaryScrollableTabRow(selectedTabIndex = selected.coerceAtMost(days.lastIndex)) {
                 days.forEachIndexed { index, day ->
@@ -891,7 +911,7 @@ fun ScheduleScreen(
                     PermissionHint("${classDisplayName(classes, currentClassId)}教室端尚未同步过课表，以下按班级档案推算，可能与实际课表不同；插件同步后自动改用实际课表，届时才能换课。")
                 }
                 if (courses.isEmpty()) {
-                    EmptyState("这一天没有课程", if (canPull) "管理员或班主任可拉取最新课表，或选择其他日期。" else "请选择其他日期。")
+                    EmptyState("这一天没有课程", if (canPull) "可点右上角刷新按钮拉取最新课表，或选择其他日期。" else "请选择其他日期。")
                 } else {
                     ConnectedListCard {
                         courses.forEachIndexed { index, course ->
@@ -908,15 +928,8 @@ fun ScheduleScreen(
                         }
                     }
                 }
-                if (canPull) {
-                    ConnectedButtons(
-                        firstLabel = "拉取课表",
-                        secondLabel = "换课",
-                        onFirst = { ConnectionManager.requestSchedulePull() },
-                        onSecond = { onOpen(Screen.Swap(day.date, courses.firstOrNull()?.index)) },
-                        firstFilled = false,
-                    )
-                } else if (canChange) {
+                // 拉取课表在顶栏刷新按钮；这里只保留换课主操作。
+                if (canChange) {
                     Button(
                         onClick = { onOpen(Screen.Swap(day.date, courses.firstOrNull()?.index)) },
                         modifier = Modifier.fillMaxWidth().height(56.dp),

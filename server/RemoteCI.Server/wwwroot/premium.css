@@ -80,6 +80,10 @@
     --radius-icon: 50%;
     /* 行内代码、色块、细进度条等不贴卡片边的小元素。 */
     --radius-small: 8px;
+    /* 下拉浮层（班级切换、账号菜单）：浮层 18、内边距 6 → 菜单项 12，比卡片的 36 收敛，避免短菜单变成药丸。 */
+    --radius-menu: 18px;
+    --pad-menu: 6px;
+    --radius-menu-item: calc(var(--radius-menu) - var(--pad-menu));
 
     --space-1: 4px;
     --space-2: 8px;
@@ -539,10 +543,10 @@ form.class-switcher:hover, form.class-switcher:has(.class-menu[open]) { border-c
     max-width: min(280px, 80vw);
     max-height: min(360px, 60vh);
     gap: 2px;
-    padding: 6px;
+    padding: var(--pad-menu);
     overflow-y: auto;
     border: 1px solid var(--line-strong);
-    border-radius: var(--radius-card);
+    border-radius: var(--radius-menu);
     background: var(--surface);
     box-shadow: var(--shadow);
 }
@@ -555,7 +559,7 @@ form.class-switcher:hover, form.class-switcher:has(.class-menu[open]) { border-c
     gap: 12px;
     padding: 0 14px;
     border: 0;
-    border-radius: var(--radius-button);
+    border-radius: var(--radius-menu-item);
     background: transparent;
     color: var(--text);
     font-size: 14px;
@@ -2534,9 +2538,9 @@ input[type="range"]:disabled { cursor: not-allowed; opacity: .5; }
     display: grid;
     min-width: 180px;
     gap: 2px;
-    padding: 4px;
+    padding: var(--pad-menu);
     border: 1px solid var(--line-strong);
-    border-radius: var(--radius-card);
+    border-radius: var(--radius-menu);
     background: var(--surface);
     box-shadow: var(--shadow);
 }
@@ -2551,7 +2555,7 @@ input[type="range"]:disabled { cursor: not-allowed; opacity: .5; }
     align-items: center;
     padding: 0 10px;
     border: 0;
-    border-radius: var(--radius-button);
+    border-radius: var(--radius-menu-item);
     background: transparent;
     box-shadow: none;
     color: var(--text);

@@ -27,14 +27,23 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.CloudSync
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +58,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +74,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.remoteci.mobile.data.AdminApi
 import com.remoteci.mobile.data.ClassSummary
 import com.remoteci.mobile.data.ConnectionManager
 import com.remoteci.mobile.data.classDisplayName
@@ -284,6 +295,183 @@ fun ClassSwitcherChip(
                         { Icon(Icons.Rounded.Check, contentDescription = "当前班级") }
                     } else null,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * 底栏四个板块共用的顶栏：左上角是标题和当前班级，多班级账号点击这一整块即可换班；
+ * [showConnection] 时标题右侧显示云朵连接状态图标（“今天”页）。右侧固定为
+ * [actions]（板块自己的操作，如刷新）、扫码登录网页版和通知收件箱，保证全局入口在每个板块位置一致。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HomeTopBar(
+    title: String,
+    snackbar: SnackbarHostState,
+    onOpen: (Screen) -> Unit,
+    showConnection: Boolean = false,
+    actions: @Composable RowScope.() -> Unit = {},
+) {
+    val classes by ConnectionManager.classes.collectAsState()
+    val currentClassId by ConnectionManager.currentClassId.collectAsState()
+    val switchable = classes.size > 1
+    var picking by remember { mutableStateOf(false) }
+    // 班级列表缺失（局域网镜像、旧服务端）时不显示班名。
+    val className = classes.firstOrNull { it.id == currentClassId }?.name?.takeIf(String::isNotBlank)
+        ?: if (switchable) "未选择班级" else null
+    TopAppBar(
+        title = {
+            Column(
+                Modifier.clip(RoundedCornerShape(12.dp)).clickable(enabled = switchable, onClickLabel = "切换班级") { picking = true },
+            ) {
+                // 云朵图标只跟标题一行垂直居中，不随下方班名把整块撑高。
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(title, style = MaterialTheme.typography.titleLarge)
+                    if (showConnection) ConnectionStatusIcon(onOpen)
+                }
+                className?.let {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (switchable) {
+                            Icon(
+                                Icons.Rounded.ArrowDropDown,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        actions = {
+            actions()
+            // 扫描 WebUI 登录页的“手机扫码”二维码，确认后电脑浏览器以当前账号登录。
+            WebLoginScanAction(snackbar)
+            IconButton({ onOpen(Screen.Inbox) }) { Icon(Icons.Rounded.Notifications, contentDescription = "通知") }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+    )
+    if (picking) ClassSwitchDialog(classes, currentClassId, onDismiss = { picking = false })
+}
+
+/**
+ * 云朵连接状态图标：云端/局域网已连接、连接中、失败、未连接各用不同图标与颜色。
+ * 点击展开详情（连接方式、课表同步时间、手表是否在线），并可进入“服务器与连接方式”。
+ */
+@Composable
+private fun ConnectionStatusIcon(onOpen: (Screen) -> Unit) {
+    val connection by ConnectionManager.state.collectAsState()
+    val snapshot by ConnectionManager.snapshot.collectAsState()
+    val pull by ConnectionManager.schedulePullState.collectAsState()
+    val indicator = connectionIndicator(connection)
+    var expanded by remember { mutableStateOf(false) }
+    var watchConnections by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(connection, expanded) {
+        if (expanded) watchConnections = runCatching { AdminApi.adminStatus().watchConnections }.getOrNull()
+    }
+    val colors = MaterialTheme.colorScheme
+    val (icon, tint) = when (indicator) {
+        ConnectionIndicator.Cloud -> Icons.Rounded.CloudDone to colors.primary
+        ConnectionIndicator.Lan -> Icons.Rounded.Cloud to colors.tertiary
+        ConnectionIndicator.Connecting -> Icons.Rounded.CloudSync to colors.onSurfaceVariant
+        ConnectionIndicator.Error -> Icons.Rounded.CloudOff to colors.error
+        ConnectionIndicator.Offline -> Icons.Rounded.CloudOff to colors.onSurfaceVariant
+    }
+    Box {
+        // 比标准 IconButton 小，放在标题行里不增加行高。
+        Box(
+            Modifier.size(32.dp).clip(CircleShape).clickable(onClickLabel = "连接详情") { expanded = true },
+            contentAlignment = Alignment.Center,
+        ) { Icon(icon, contentDescription = indicator.label, tint = tint, modifier = Modifier.size(20.dp)) }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            val syncText = when (val current = pull) {
+                is ConnectionManager.SchedulePullState.Pulling -> current.message
+                is ConnectionManager.SchedulePullState.Success -> current.message
+                is ConnectionManager.SchedulePullState.Error -> current.message
+                else -> formatLocalSyncTime(snapshot?.generatedAt)?.let { "课表已于 $it 同步" } ?: "尚未同步课表"
+            }
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    (connection as? ConnectionManager.State.Error)?.message ?: indicator.label,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = if (indicator == ConnectionIndicator.Error) colors.error else colors.onSurface,
+                )
+                Text(syncText, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                watchConnections?.let {
+                    Text(if (it > 0) "手表已连接" else "手表未连接", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                }
+            }
+            DropdownMenuItem(
+                text = { Text("服务器与连接方式") },
+                onClick = { expanded = false; onOpen(Screen.Connection) },
+            )
+        }
+    }
+}
+
+/** 快捷操作磁贴：图标、标题和一行状态说明，用于控制页顶部和“今天”页的快捷控制。 */
+@Composable
+fun QuickActionTile(
+    title: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    supporting: String? = null,
+    onClick: () -> Unit,
+) {
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.97f else 1f, label = "tile-press")
+    Column(
+        modifier
+            .scale(scale)
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .clickable(interactionSource = source, indication = null, onClick = onClick)
+            .heightIn(min = 96.dp)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            Modifier.size(40.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(22.dp))
+        }
+        Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        supporting?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** 把磁贴按 [columns] 列排成网格；最后一行不足时用空位补齐，保持磁贴等宽。 */
+@Composable
+fun <T> QuickActionGrid(
+    items: List<T>,
+    modifier: Modifier = Modifier,
+    columns: Int = 2,
+    tile: @Composable (item: T, modifier: Modifier) -> Unit,
+) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items.chunked(columns).forEach { rowItems ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowItems.forEach { tile(it, Modifier.weight(1f)) }
+                repeat(columns - rowItems.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }

@@ -120,6 +120,7 @@ fun SecondaryHost(
         Screen.Updates -> UpdatesScreen(settings, onBack, onPersist)
         Screen.System -> SystemScreen(onBack, snackbar)
         Screen.Replace -> SwapScreen(null, null, onBack, snackbar, onOpen)
+        Screen.Management -> ManagementScreen(onBack, onOpen)
         // 登录、班级选择与首页由 RemoteCiApp 直接渲染，不会进入这里。
         else -> Unit
     }
@@ -156,15 +157,18 @@ private fun SettingsGroup(label: String, rows: List<SettingsRow>, onOpen: (Scree
 @Composable
 fun AccountScreen(
     settings: WatchSettings,
+    snackbar: SnackbarHostState,
     onOpen: (Screen) -> Unit,
     onPersist: (WatchSettings) -> Unit,
     onLoggedOut: () -> Unit,
 ) {
     val user by ConnectionManager.currentUser.collectAsState()
-    val currentClassId by ConnectionManager.currentClassId.collectAsState()
     val connection by ConnectionManager.state.collectAsState()
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        TopAppBar(title = { Text("我的", style = MaterialTheme.typography.titleLarge) })
+    val classes by ConnectionManager.classes.collectAsState()
+    Column(Modifier.fillMaxSize()) {
+    // 当前班级与换班入口在共用顶栏里，与其他板块一致。
+    HomeTopBar("我的", snackbar, onOpen)
+    Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
         Card(
             modifier = Modifier.padding(16.dp).fillMaxWidth().height(136.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
@@ -185,71 +189,52 @@ fun AccountScreen(
                 )
             }
         }
-        // 多班级账号在这里换班；首页不再放班级切换行，避免顶栏被挤到状态栏下方。
-        val classes by ConnectionManager.classes.collectAsState()
-        if (classes.size > 1) {
-            var pickingClass by remember { mutableStateOf(false) }
-            val currentClass = classes.firstOrNull { it.id == currentClassId }
-            Card(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
-                onClick = { pickingClass = true },
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("当前班级", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        currentClass?.name ?: "未选择 · 点击切换班级",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            if (pickingClass) ClassSwitchDialog(classes, currentClassId, onDismiss = { pickingClass = false })
-            // 只有按显示名绑定课表的老师与班主任才有跨班级的个人日程可跟随。
-            if (canAutoFollowTeachingClass(user, classes)) {
-                Card(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth()) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("上课时自动切换到任教班级", style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                "按我的日程在上课时或课前 10 分钟切到所在班级；手动换班后，当前课结束前不再自动切回",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(settings.autoFollowTeachingClass, { onPersist(settings.copy(autoFollowTeachingClass = it)) })
-                    }
-                }
+        // 管理项单独成页：“我的”只放一个入口，避免个人设置被管理项淹没。
+        val management = visibleManagementItems(user)
+        if (management.isNotEmpty()) {
+            ListSectionLabel("管理")
+            ConnectedListCard(Modifier.padding(horizontal = 16.dp)) {
+                AppListItem(
+                    title = "管理",
+                    supporting = management.joinToString("、") { it.title },
+                    leading = Icons.Rounded.AdminPanelSettings,
+                    trailing = Icons.Rounded.ChevronRight,
+                    onClick = { onOpen(Screen.Management) },
+                )
             }
         }
-        SettingsGroup(
-            "我的偏好",
-            listOf(
+        ListSectionLabel("我的偏好")
+        ConnectedListCard(Modifier.padding(horizontal = 16.dp)) {
+            // 只有按显示名绑定课表的老师与班主任才有跨班级的个人日程可跟随。
+            val autoFollow = classes.size > 1 && canAutoFollowTeachingClass(user, classes)
+            val rows = listOf(
                 SettingsRow("通知设置", "课程、自动化和第三方插件提醒的同步开关", Screen.NotificationSettings, Icons.Rounded.Notifications),
                 SettingsRow("系统日历", "把我的日程或班级课表同步到系统日历，由日历应用提醒", Screen.CalendarSync, Icons.Rounded.CalendarMonth),
                 SettingsRow("外观", "主题与显示偏好", Screen.Appearance, Icons.Rounded.Palette),
-            ),
-            onOpen,
-        )
+            )
+            val count = rows.size + if (autoFollow) 1 else 0
+            rows.forEachIndexed { index, row ->
+                AppListItem(row.title, row.supporting, row.icon, trailing = Icons.Rounded.ChevronRight,
+                    index = index, count = count, onClick = { onOpen(row.screen) })
+            }
+            if (autoFollow) {
+                AppListItem(
+                    title = "上课时自动切换到任教班级",
+                    supporting = "按我的日程在上课时或课前 10 分钟切到所在班级；手动换班后，当前课结束前不再自动切回",
+                    leading = Icons.Rounded.Schedule,
+                    switchChecked = settings.autoFollowTeachingClass,
+                    onSwitch = { onPersist(settings.copy(autoFollowTeachingClass = it)) },
+                    index = rows.size,
+                    count = count,
+                )
+            }
+        }
         SettingsGroup(
-            "账号与连接",
+            "账号与安全",
             listOf(
                 SettingsRow("密码与设备会话", "修改密码，查看并吊销已登录的手机和手表", Screen.Sessions, Icons.Rounded.Key),
                 SettingsRow("服务器与连接方式", "账号、服务器地址、局域网插件发现，以及云端与局域网连接开关", Screen.Connection, Icons.Rounded.Wifi),
             ),
-            onOpen,
-        )
-        SettingsGroup(
-            "管理",
-            visibleManagementItems(user).map { item ->
-                when (item) {
-                    ManagementItem.Users -> SettingsRow(item.title, item.supporting, Screen.Users, Icons.Rounded.Group)
-                    ManagementItem.Roles -> SettingsRow(item.title, item.supporting, Screen.Roles, Icons.Rounded.AdminPanelSettings)
-                    ManagementItem.VisitorAccess -> SettingsRow(item.title, item.supporting, Screen.VisitorAccess, Icons.Rounded.PersonOutline)
-                    ManagementItem.Pairing -> SettingsRow(item.title, item.supporting, Screen.Pairing, Icons.Rounded.Link)
-                    ManagementItem.ScheduleSettings -> SettingsRow(item.title, item.supporting, Screen.ScheduleSettings, Icons.Rounded.Schedule)
-                    ManagementItem.ServerMaintenance -> SettingsRow(item.title, item.supporting, Screen.System, Icons.Rounded.Settings)
-                }
-            },
             onOpen,
         )
         SettingsGroup(
@@ -268,6 +253,44 @@ fun AccountScreen(
             )
         }
     }
+    }
+}
+
+/** “我的 → 管理”：只列出当前账号有权限的管理项，鉴权规则见 [visibleManagementItems]。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ManagementScreen(onBack: () -> Unit, onOpen: (Screen) -> Unit) {
+    val user by ConnectionManager.currentUser.collectAsState()
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        TopAppBar(
+            title = { Text("管理") },
+            navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回") } },
+        )
+        val items = visibleManagementItems(user)
+        if (items.isEmpty()) {
+            EmptyState("没有可用的管理项", "当前账号没有管理权限。")
+        } else {
+            SettingsGroup(
+                "人员与访问",
+                items.filter { it in setOf(ManagementItem.Users, ManagementItem.Roles, ManagementItem.VisitorAccess) }.map(::managementRow),
+                onOpen,
+            )
+            SettingsGroup(
+                "插件与服务端",
+                items.filter { it in setOf(ManagementItem.Pairing, ManagementItem.ScheduleSettings, ManagementItem.ServerMaintenance) }.map(::managementRow),
+                onOpen,
+            )
+        }
+    }
+}
+
+private fun managementRow(item: ManagementItem): SettingsRow = when (item) {
+    ManagementItem.Users -> SettingsRow(item.title, item.supporting, Screen.Users, Icons.Rounded.Group)
+    ManagementItem.Roles -> SettingsRow(item.title, item.supporting, Screen.Roles, Icons.Rounded.AdminPanelSettings)
+    ManagementItem.VisitorAccess -> SettingsRow(item.title, item.supporting, Screen.VisitorAccess, Icons.Rounded.PersonOutline)
+    ManagementItem.Pairing -> SettingsRow(item.title, item.supporting, Screen.Pairing, Icons.Rounded.Link)
+    ManagementItem.ScheduleSettings -> SettingsRow(item.title, item.supporting, Screen.ScheduleSettings, Icons.Rounded.Schedule)
+    ManagementItem.ServerMaintenance -> SettingsRow(item.title, item.supporting, Screen.System, Icons.Rounded.Settings)
 }
 
 /** 与 WebUI“自动拉取课表”使用同一个管理 API；旧服务端不支持时保留当前页面并提示原因。 */

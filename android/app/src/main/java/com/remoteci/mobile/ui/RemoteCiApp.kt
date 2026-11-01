@@ -41,7 +41,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
-/** 底栏四个板块；换课申请在“课表”里，管理项在“我的”里。 */
+/** 底栏四个板块；换课申请在“课表”里，管理项在“我的 → 管理”里。班级切换、扫码与通知在各板块共用顶栏。 */
 enum class HomeTab { Today, Schedule, Control, Me }
 
 sealed interface Screen {
@@ -72,6 +72,8 @@ sealed interface Screen {
     data object System : Screen
     data object Help : Screen
     data object Replace : Screen
+    /** “我的 → 管理”：账号、角色、访客、插件配对等管理项列表。 */
+    data object Management : Screen
 }
 
 @Composable

@@ -75,10 +75,7 @@ html[data-theme=dark] .mobile-bottom-nav { border:1px solid var(--m-line); box-s
 .mobile-app .page-head .eyebrow, .mobile-app .member-excel-panel, .mobile-app .api-key-panel, .mobile-app .api-key-reveal-panel { display:none; }
 .mobile-app .notice, .mobile-app .flash { padding:14px 18px; margin:0; border:0; border-radius:20px; background:var(--m-container); color:var(--m-on-container); box-shadow:none; overflow-wrap:anywhere; }
 .mobile-app .flash.error { background:var(--m-danger-soft); color:var(--m-danger); }
-.mobile-hero { position:relative; overflow:hidden; isolation:isolate; border-radius:42px; background:var(--m-container); color:var(--m-on-container); padding:20px; min-height:290px; display:flex; flex-direction:column; align-items:start; }
-.mobile-hero::before, .mobile-hero::after { content:""; position:absolute; z-index:-1; border-radius:50%; pointer-events:none; }
-.mobile-hero::before { top:-54px; right:-54px; width:180px; height:180px; background:var(--m-button); opacity:.4; }
-.mobile-hero::after { top:86px; right:70px; width:44px; height:44px; background:var(--m-surface); opacity:.55; }
+.mobile-hero { border-radius:42px; background:var(--m-container); color:var(--m-on-container); padding:20px; min-height:290px; display:flex; flex-direction:column; align-items:start; }
 .mobile-hero-label { font-size:14px; font-weight:800; margin-bottom:12px; color:var(--m-on-container); }
 .mobile-hero h1 { font-size:40px; margin:0 0 6px; font-weight:800; }
 .mobile-countdown { font-size:44px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:1px; margin:12px 0; }

@@ -11,6 +11,7 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Typography
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.darkColorScheme
@@ -21,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 
@@ -92,6 +94,21 @@ private val FreshDarkBase = darkColorScheme(
 )
 
 /** 大圆角：卡片 24、大卡片 32、对话框 36；按钮本身已是胶囊形。 */
+/** 标题与标签加粗，配合大圆角显得更圆润可爱；正文保持常规字重。 */
+private val FreshTypography = Typography().run {
+    copy(
+        headlineLarge = headlineLarge.copy(fontWeight = FontWeight.ExtraBold),
+        headlineMedium = headlineMedium.copy(fontWeight = FontWeight.ExtraBold),
+        headlineSmall = headlineSmall.copy(fontWeight = FontWeight.ExtraBold),
+        titleLarge = titleLarge.copy(fontWeight = FontWeight.ExtraBold),
+        titleMedium = titleMedium.copy(fontWeight = FontWeight.Bold),
+        titleSmall = titleSmall.copy(fontWeight = FontWeight.Bold),
+        labelLarge = labelLarge.copy(fontWeight = FontWeight.Bold),
+        labelMedium = labelMedium.copy(fontWeight = FontWeight.SemiBold),
+        bodyLarge = bodyLarge.copy(fontWeight = FontWeight.Medium),
+    )
+}
+
 private val FreshShapes = Shapes(
     extraSmall = RoundedCornerShape(12.dp),
     small = RoundedCornerShape(16.dp),
@@ -199,7 +216,7 @@ fun RemoteCiTheme(
             }
         }
     }
-    MaterialTheme(colorScheme = scheme, shapes = FreshShapes) {
+    MaterialTheme(colorScheme = scheme, shapes = FreshShapes, typography = FreshTypography) {
         Surface(modifier = Modifier.fillMaxSize(), color = scheme.background, content = content)
     }
 }
