@@ -65,7 +65,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | 64 | `BatchControl`（批量控制；每项操作仍需对应的班级权限位，按全局角色计算） |
 | 128 | `ManageAutomation`（自动化规则；规则以最后修改人的权限执行） |
 | 256 | `ManageAppGuard`（应用守护全局与单设备策略；直接关闭/卸载/更新守护另需 `ManageDeviceGuard`） |
-| 512 | `ManageExtensionSettings`（插件批量下发、扩展调用策略与插件的班级开放） |
+| 512 | `ManageExtensionSettings`（插件控制、扩展调用策略与插件的班级开放） |
 | 1024 | `ManageLoginPage`（登录页外观、扫码登录地址与访客） |
 | 2048 | `ManagePluginAccess`（插件凭据、配对码与课表自动拉取间隔） |
 | 4096 | `ViewAllAuditLogs`（全部班级的操作记录） |
@@ -434,7 +434,7 @@ WebUI 在“批量控制”与班级“控制”页的远程维护区开放这�
 
 命令值 24 为 `ApplyExtensionSettings`，能力标识 `extensions.settings`（只进入当前版本能力列表）。载荷 `extensionSettings` 为 `{groupId, values}`，`values` 只包含本次要修改的字段（部分更新），未出现的字段保持设备当前值；字段必须已在分组中声明，必填字段不能清空。权限口径：
 
-- 服务端只在 WebUI 扩展插件页与 `PUT /api/classes/{classId}/extension-groups/{groupId}/settings` 中接受该操作。班级区的 `/ClassExtensions` 只修改当前班级、不提供范围选择；管理区的 `/ExtensionSettings`（插件批量设置，需要系统管理权限 `ManageExtensionSettings`）按所选班级、分组或具体设备下发，与当前选中的班级无关。系统管理员可修改任意班级；其他账号只能修改逐个开放给班级的插件（扩展插件详情页“班级自治”或 `PUT /api/extension-groups/{groupId}/class-admin-access`，需要 `ManageExtensionSettings`，默认都不开放），且在本班拥有 `ConfigureExtensions` 权限（内置班主任默认拥有）。手表、手机的通用命令通道和 `POST /api/commands` 一律拒绝。
+- 服务端只在 WebUI 扩展插件页与 `PUT /api/classes/{classId}/extension-groups/{groupId}/settings` 中接受该操作。“班级管理 › 插件”（`/ClassExtensions`） 只修改当前班级、不提供范围选择；“管理 › 插件控制”（`/ExtensionSettings`，需要系统管理权限 `ManageExtensionSettings`）按所选班级、分组或具体设备下发，与当前选中的班级无关。系统管理员可修改任意班级；其他账号只能修改逐个开放给班级的插件（扩展插件详情页“班级自治”或 `PUT /api/extension-groups/{groupId}/class-admin-access`，需要 `ManageExtensionSettings`，默认都不开放），且在本班拥有 `ConfigureExtensions` 权限（内置班主任默认拥有）。手表、手机的通用命令通道和 `POST /api/commands` 一律拒绝。
 - 插件端要求 `requestedBy` 携带 `ConfigureExtensions` 权限位作为纵深防御（旧插件认 `RunExtensions`，服务端会补上）；局域网直连无法复核班级自治策略，因此直接返回 `FORBIDDEN`。
 - 下发时该班插件离线：服务端把字段合并保存为待补发并返回 `QUEUED`（REST 为 202）；插件下次发送 `extension_groups_sync` 时，服务端在后台复核下发者权限后定向补发，插件返回明确结果后删除记录，连接再次中断时保留。
 - 写入成功或失败后，插件都会重新发送 `extension_groups_sync`，让 WebUI 预填值反映设备真实状态。批量下发时服务端向所选班级的每一台在线设备逐台发送并逐台返回结果。

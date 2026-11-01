@@ -94,7 +94,7 @@
 
 <section class="panel" id="visitor">
     <h2>访客访问</h2>
-    <p class="muted">@if (Model.CanManageClasses) { <text>在<a asp-page="/Classes">班级管理</a>中</text> } else { <text>由有“班级管理”权限的账号在班级管理中</text> }逐班开启访客功能后，登录页会出现“仅查看”，访客只能浏览开放班级的课表。</p>
+    <p class="muted">@if (Model.CanManageClasses) { <text>在<a asp-page="/Classes">管理 › 班级</a>中</text> } else { <text>由有“班级管理”权限的账号在“管理 › 班级”中</text> }逐班开启访客功能后，登录页会出现“仅查看”，访客只能浏览开放班级的课表。</p>
     <form method="post" asp-page-handler="VisitorAccess" class="stack">
         <label class="check"><input asp-for="AutoEnterVisitorPage" /> 自动进入访客页</label>
         <button type="submit">保存访客设置</button>

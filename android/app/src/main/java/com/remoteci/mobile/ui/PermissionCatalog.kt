@@ -150,7 +150,7 @@ internal object PermissionCatalog {
             m("批量控制", "向多个班级下发命令；每项操作仍需上面对应的权限", Protocol.MANAGEMENT_BATCH_CONTROL),
             m("自动化", "创建与运行自动化规则；规则以修改人的权限执行", Protocol.MANAGEMENT_MANAGE_AUTOMATION),
             m("应用守护策略", "设置全局与单设备的应用守护策略", Protocol.MANAGEMENT_MANAGE_APP_GUARD),
-            m("插件批量下发", "跨班级下发插件设置，管理扩展调用策略与插件的班级开放", Protocol.MANAGEMENT_MANAGE_EXTENSION_SETTINGS),
+            m("插件控制", "跨班级下发插件设置，管理扩展调用策略与插件的班级开放", Protocol.MANAGEMENT_MANAGE_EXTENSION_SETTINGS),
             m("登录页与访客", "登录页外观、扫码登录地址与访客自动进入", Protocol.MANAGEMENT_MANAGE_LOGIN_PAGE),
             m("插件凭据与连接码", "生成配对码，吊销插件凭据，设置课表自动拉取间隔", Protocol.MANAGEMENT_MANAGE_PLUGIN_ACCESS),
         )),

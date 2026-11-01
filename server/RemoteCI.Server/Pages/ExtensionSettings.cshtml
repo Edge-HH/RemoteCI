@@ -1,13 +1,13 @@
 @page
 @model ExtensionSettingsModel
 @{
-    ViewData["Title"] = Model.Group is { } current ? $"{current.DisplayName} 批量下发" : "插件批量下发";
+    ViewData["Title"] = Model.Group is { } current ? $"{current.DisplayName} · 插件控制" : "插件控制";
     var group = Model.Group;
 }
 <div class="page-head">
     <div>
-        <p class="eyebrow">插件批量下发</p>
-        <h1>@(group?.DisplayName ?? "插件批量下发")</h1>
+        <p class="eyebrow">插件控制</p>
+        <h1>@(group?.DisplayName ?? "插件控制")</h1>
         @if (!string.IsNullOrWhiteSpace(group?.Description))
         {
             <p class="muted">@group.Description</p>
@@ -25,7 +25,7 @@
         <div class="panel-heading">
             <div>
                 <h2>已上报设置页的插件</h2>
-                <p class="muted">汇总全部班级设备上报的插件；修改会下发到你选择的班级、分组或具体设备，不受当前选中班级影响。只改当前班级请使用班级区的“扩展插件”。打开插件还可以设置是否允许各班班主任自行管理。</p>
+                <p class="muted">汇总全部班级设备上报的插件；修改会下发到你选择的班级、分组或具体设备，不受当前选中班级影响。只改当前班级请使用“班级管理 › 插件”。打开插件还可以设置是否允许各班班主任自行管理。</p>
             </div>
         </div>
         @if (Model.Groups.Count == 0)
@@ -86,7 +86,7 @@ else
             <div class="panel-heading">
                 <div>
                     <h2>班级自治</h2>
-                    <p class="muted">开放后，各班班主任可以在班级区的“扩展插件”中看到此插件并修改本班设置；不开放时只能由系统管理员修改。</p>
+                    <p class="muted">开放后，各班班主任可以在“班级管理 › 插件”中看到此插件并修改本班设置；不开放时只能由系统管理员修改。</p>
                 </div>
                 <span class="status-pill @(open ? "online" : null)">@(open ? "班级可自行管理" : "仅统一管理")</span>
             </div>

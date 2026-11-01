@@ -43,7 +43,7 @@
     </div>
 }
 
-<section class="metric-grid" aria-label="关键状态">
+<section class="metric-grid metric-grid-pair" aria-label="关键状态">
     <article class="metric-card metric-card-primary">
         <span class="metric-label">当前课程</span>
         <strong class="metric-value metric-value-text">@(Model.Snapshot?.CurrentSubject ?? "暂无课程")</strong>
@@ -53,14 +53,6 @@
         <span class="metric-label">插件连接</span>
         <strong class="metric-value">@(Model.PluginOnline ? "在线" : Model.PluginProtocolMismatch is null ? "离线" : "协议不匹配")</strong>
         <span class="metric-chip @(Model.PluginOnline ? "positive" : "danger")"><i class="icon @(Model.PluginOnline ? "icon-arrow-upward" : "icon-priority-high")" aria-hidden="true"></i>@(Model.PluginOnline ? "可执行操作" : Model.PluginProtocolMismatch is null ? "需要检查" : "请升级插件")</span>
-    </article>
-    <article class="metric-card">
-        <span class="metric-label">在线手表</span><strong class="metric-value">@Model.WatchConnections</strong>
-        <span class="metric-chip neutral"><i class="icon icon-watch" aria-hidden="true"></i>已连接设备</span>
-    </article>
-    <article class="metric-card">
-        <span class="metric-label">系统账号</span><strong class="metric-value">@Model.AccountCount</strong>
-        <span class="metric-chip neutral"><i class="icon icon-group" aria-hidden="true"></i>权限内账号</span>
     </article>
 </section>
 
@@ -95,71 +87,17 @@
                 <span class="activity-icon"><i class="icon icon-event-available" aria-hidden="true"></i></span>
                 <div><strong>@(Model.Schedule is null ? "尚无课表" : "课表已同步")</strong><small>@(Model.Schedule?.GeneratedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "连接插件后可立即拉取")</small></div><span>课表</span>
             </article>
-            <article>
-                <span class="activity-icon"><i class="icon icon-watch" aria-hidden="true"></i></span>
-                <div><strong>@Model.WatchConnections 台手表在线</strong></div><span>设备</span>
-            </article>
         </div>
     </section>
 </div>
 
-@if (Model.Permissions.HasFlag(UserPermissions.ManageSchedule) || Model.Permissions.HasFlag(UserPermissions.SendNotifications))
-{
-    <section class="dashboard-panel execution-panel">
-        <header class="panel-heading execution-heading"><div><h2>常用任务</h2></div></header>
-        <div class="task-table">
-            @if (Model.Permissions.HasFlag(UserPermissions.ManageSchedule) && Model.Supports(RemoteCiCapabilities.ScheduleChange))
-            {
-                <a asp-page="/Schedule" data-search-label="课表 换课 同步课表">
-                    <span class="task-main"><i class="icon icon-date-range" aria-hidden="true"></i><span><strong>课表</strong><small>查看、拉取并调整未来七天课程</small></span></span>
-                    <span class="task-owner">课程管理</span><span class="task-status healthy">可用</span><i class="icon icon-arrow-forward" aria-hidden="true"></i>
-                </a>
-            }
-            @if (Model.Permissions.HasFlag(UserPermissions.SendNotifications) && Model.Supports(RemoteCiCapabilities.NotificationSend))
-            {
-                <a asp-page="/Control" asp-fragment="send-notification" data-search-label="发送通知 提醒 清除提醒">
-                    <span class="task-main"><i class="icon icon-send" aria-hidden="true"></i><span><strong>发送通知</strong><small>向课堂发送文字通知或清除提醒</small></span></span>
-                    <span class="task-owner">课堂消息</span><span class="task-status @(Model.PluginOnline ? "healthy" : "risk")">@(Model.PluginOnline ? "可用" : "离线")</span><i class="icon icon-arrow-forward" aria-hidden="true"></i>
-                </a>
-            }
-            <a asp-page="/Account" data-search-label="个人账号 密码 登录设备">
-                <span class="task-main"><i class="icon icon-manage-accounts" aria-hidden="true"></i><span><strong>个人账号</strong><small>管理密码与登录设备</small></span></span>
-                <span class="task-owner">账号安全</span><span class="task-status healthy">可用</span><i class="icon icon-arrow-forward" aria-hidden="true"></i>
-            </a>
-            @if (Model.CurrentUser.Role == UserRole.Admin)
-            {
-                <a asp-page="/SystemConfig" data-search-label="系统设置 系统配置 系统更新 服务端维护">
-                    <span class="task-main"><i class="icon icon-tune" aria-hidden="true"></i><span><strong>系统设置</strong><small>管理服务端全局配置与系统更新</small></span></span>
-                    <span class="task-owner">系统管理</span><span class="task-status healthy">可用</span><i class="icon icon-arrow-forward" aria-hidden="true"></i>
-                </a>
-            }
-        </div>
-    </section>
-}
-
-<section class="mobile-login-card" aria-labelledby="mobile-login-title">
-    <div class="mobile-login-copy">
-        <p class="eyebrow">ANDROID</p>
-        <h2 id="mobile-login-title">手机扫码登录</h2>
-        <p class="muted">在安卓版登录页点击二维码按钮扫描，直接登录当前账号 @Model.CurrentUser.UserName。二维码 5 分钟内有效且只能使用一次，请勿在投屏或截图中展示。</p>
-        <div class="mobile-login-url">
-            <code>@Model.MobileLoginUrl</code>
-            <button class="copy-button" type="button" data-copy-value="@Model.MobileLoginUrl" aria-label="复制服务器地址" title="复制服务器地址"><i class="icon icon-content-copy" aria-hidden="true"></i></button>
-        </div>
-        <form method="post" asp-page-handler="MobileLoginQr" class="mobile-login-actions" data-mobile-login-form>
-            <button type="submit" data-mobile-login-generate><i class="icon icon-qr-code" aria-hidden="true"></i> 生成登录二维码</button>
-            <span class="muted" data-mobile-login-status aria-live="polite"></span>
-        </form>
-    </div>
-    <div class="mobile-login-qr" data-mobile-login-qr hidden aria-label="安卓版扫码登录二维码"></div>
-</section>
+@await Html.PartialAsync("_MobileLoginQrCard", new MobileLoginQrCardModel(Model.MobileLoginUrl, Model.CurrentUser.UserName ?? string.Empty))
 
 <div class="dashboard-grid lower-grid">
     <section class="dashboard-panel system-panel">
         <header class="panel-heading"><div><h2>系统信息</h2></div></header>
         <dl class="system-table">
             <div><dt>服务端版本</dt><dd>@(Model.ServerVersion)</dd></div><div><dt>协议版本</dt><dd>v@(Protocol.Version)</dd></div>
-            <div><dt>在线手表</dt><dd>@Model.WatchConnections</dd></div><div><dt>账号数量</dt><dd>@Model.AccountCount</dd></div>
             <div><dt>插件状态</dt><dd><span class="inline-status @(Model.PluginOnline ? "online" : "offline")">@(Model.PluginOnline ? "在线" : Model.PluginProtocolMismatch is null ? "离线" : "协议不匹配")</span></dd></div>
         </dl>
     </section>

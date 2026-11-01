@@ -27,7 +27,7 @@
     else
     {
         <h1>新建第一个班级</h1>
-        <p class="muted">RemoteCI 不再自动创建默认班级。先建一个班级，再用它的配对码连接教室端插件；以后可以在“班级管理”中继续添加。</p>
+        <p class="muted">RemoteCI 不再自动创建默认班级。先建一个班级，再用它的配对码连接教室端插件；以后可以在“管理 › 班级”中继续添加。</p>
         <form method="post" asp-page-handler="Class" class="stack">
             <div asp-validation-summary="All" class="validation"></div>
             <label>班级名称<input asp-for="ClassName" maxlength="40" placeholder="例如：高一（1）班" required autofocus /></label>

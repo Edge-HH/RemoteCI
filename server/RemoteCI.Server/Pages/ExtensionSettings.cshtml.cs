@@ -10,10 +10,10 @@ using RemoteCI.Shared.Models;
 namespace RemoteCI.Server.Pages;
 
 /// <summary>
-/// “设备与控制”分组的“插件批量下发”页（仅系统管理员）：插件通过扩展分组声明的设置字段在这里统一渲染，
+/// “管理”中的“插件控制”页（仅系统管理员）：插件通过扩展分组声明的设置字段在这里统一渲染，
 /// 修改按所选范围下发——按班级/分组下发到班内每一台设备，或直接勾选具体设备——而不是当前选中的班级；
 /// 同时对比各班当前值，并决定每个插件是否开放给班主任自行管理。
-/// 只修改当前班级请使用班级区的“扩展插件”页（/ClassExtensions）。
+/// 只修改当前班级请使用“班级管理”中的插件页（/ClassExtensions）。
 /// </summary>
 [Authorize]
 public sealed class ExtensionSettingsModel(
@@ -197,7 +197,7 @@ public sealed class ExtensionSettingsModel(
         .Select(x => x.Key)
         .FirstOrDefault();
 
-    /// <summary>批量设置需要“插件批量下发”系统权限；其他账号转到班级区的本班插件页。</summary>
+    /// <summary>批量设置需要“插件控制”系统权限；其他账号转到“班级管理”中的插件页。</summary>
     private async Task<IActionResult?> RequireAdminAsync()
     {
         if (await RequireAsync() is { } denied) return denied;

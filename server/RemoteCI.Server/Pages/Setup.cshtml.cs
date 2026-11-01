@@ -111,7 +111,7 @@ public sealed class SetupModel(
             ModelState.AddModelError(string.Empty, ex.Message);
             return Page();
         }
-        TempData["Message"] = "第一个班级已创建。点击“生成配对码”把教室端插件连接到这个班级，或到“班级管理”继续添加班级。";
+        TempData["Message"] = "第一个班级已创建。点击“生成配对码”把教室端插件连接到这个班级，或到“管理 › 班级”继续添加班级。";
         return SeeOther("/Index");
     }
 

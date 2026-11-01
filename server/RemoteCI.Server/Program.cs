@@ -1415,7 +1415,7 @@ app.MapGet("/api/extension-groups", async (
             };
         }));
 });
-// 逐插件的班级开放开关：需要“插件批量下发”系统权限；开放后，本班有“修改本班插件设置”权限的账号可在侧栏“本班插件”中修改。
+// 逐插件的班级开放开关：需要“插件控制”系统权限；开放后，本班有“修改本班插件设置”权限的账号可在“班级管理 › 插件”中修改。
 app.MapPut("/api/extension-groups/{groupId}/class-admin-access", async (
     string groupId, ExtensionGroupAccessBody body, HttpContext ctx, IdentityCoordinator identities,
     ExtensionGroupPolicyService groupPolicies, CancellationToken ct) =>

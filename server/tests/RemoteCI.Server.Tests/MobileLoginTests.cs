@@ -59,6 +59,15 @@ public sealed class MobileLoginTests
         using var json = JsonDocument.Parse(await qr.Content.ReadAsStringAsync());
         Assert.Equal("https://ci.example.com/remoteci", json.RootElement.GetProperty("serverUrl").GetString());
         Assert.StartsWith("<svg", json.RootElement.GetProperty("svg").GetString());
+
+        // 个人账号页的“扫码登录”tab 生成同样的二维码。
+        var accountHtml = await browser.GetStringAsync("/Account");
+        Assert.Contains("https://ci.example.com/remoteci", accountHtml);
+        var accountQr = await PostFormAsync(browser, "/Account?handler=MobileLoginQr", accountHtml, new());
+        Assert.Equal(HttpStatusCode.OK, accountQr.StatusCode);
+        using var accountJson = JsonDocument.Parse(await accountQr.Content.ReadAsStringAsync());
+        Assert.Equal("https://ci.example.com/remoteci", accountJson.RootElement.GetProperty("serverUrl").GetString());
+        Assert.StartsWith("<svg", accountJson.RootElement.GetProperty("svg").GetString());
     }
 
     [Fact]

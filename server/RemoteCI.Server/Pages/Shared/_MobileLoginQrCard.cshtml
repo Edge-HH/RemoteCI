@@ -1,0 +1,18 @@
+@model MobileLoginQrCardModel
+@* 手机扫码登录卡片：概览页与个人账号页共用，表单提交到所在页面的 MobileLoginQr handler。 *@
+<section class="mobile-login-card" aria-labelledby="mobile-login-title">
+    <div class="mobile-login-copy">
+        <p class="eyebrow">ANDROID</p>
+        <h2 id="mobile-login-title">手机扫码登录</h2>
+        <p class="muted">在安卓版登录页点击二维码按钮扫描，直接登录当前账号 @Model.Username。二维码 5 分钟内有效且只能使用一次，请勿在投屏或截图中展示。</p>
+        <div class="mobile-login-url">
+            <code>@Model.ServerUrl</code>
+            <button class="copy-button" type="button" data-copy-value="@Model.ServerUrl" aria-label="复制服务器地址" title="复制服务器地址"><i class="icon icon-content-copy" aria-hidden="true"></i></button>
+        </div>
+        <form method="post" asp-page-handler="MobileLoginQr" class="mobile-login-actions" data-mobile-login-form>
+            <button type="submit" data-mobile-login-generate><i class="icon icon-qr-code" aria-hidden="true"></i> 生成登录二维码</button>
+            <span class="muted" data-mobile-login-status aria-live="polite"></span>
+        </form>
+    </div>
+    <div class="mobile-login-qr" data-mobile-login-qr hidden aria-label="安卓版扫码登录二维码"></div>
+</section>

@@ -6,7 +6,8 @@
 @{
     var current = User.Identity?.IsAuthenticated == true ? await Users.GetUserAsync(User) : null;
     var path = Context.Request.Path.Value ?? "";
-    var classes = current is null ? [] : await Access.GetAccessibleClassesAsync(current.Id, current.Role, Context.RequestAborted);
+    // 与桌面布局相同：布局里的查询不跟随 RequestAborted，避免切换页面时取消异常从视图里抛出。
+    var classes = current is null ? [] : await Access.GetAccessibleClassesAsync(current.Id, current.Role, CancellationToken.None);
     var selected = Guid.TryParse(Context.Request.Cookies[WebPageModel.CurrentClassCookie], out var classId) ? classId : Guid.Empty;
     var classroom = classes.FirstOrDefault(x => x.Id == selected) ?? classes.FirstOrDefault();
     var defaults = current is null ? UserPermissions.None : await Db.AccountRoles.Where(x => x.Id == current.RoleDefinitionId).Select(x => x.DefaultPermissions).FirstOrDefaultAsync();

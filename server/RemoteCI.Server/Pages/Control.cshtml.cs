@@ -86,7 +86,7 @@ public sealed class ControlModel(
     public bool ShowExtensionGroup(ExtensionGroupView group) =>
         group.Extensions.Count > 0 || CanEditExtensionSettings(group);
 
-    /// <summary>扩展调用策略（启用、是否开放给非管理员、默认手表展示）对全部班级生效，需要“插件批量下发”系统权限。</summary>
+    /// <summary>扩展调用策略（启用、是否开放给非管理员、默认手表展示）对全部班级生效，需要“插件控制”系统权限。</summary>
     public bool CanManageExtensionPolicy => HasManagement(ManagementPermissions.ManageExtensionSettings);
 
     public ExtensionControlItem ExtensionItem(ExtensionDefinition definition) =>

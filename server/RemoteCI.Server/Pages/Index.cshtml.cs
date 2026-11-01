@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using QRCoder;
 using RemoteCI.Server.Data;
 using RemoteCI.Server.Services;
 using RemoteCI.Shared;
@@ -15,8 +14,6 @@ public sealed class IndexModel(
     : WebPageModel(users)
 {
     public bool PluginOnline => peers.HasPluginFor(CurrentClassId);
-    public int WatchConnections { get; private set; }
-    public int AccountCount { get; private set; }
     public ClassStateSnapshot? Snapshot { get; private set; }
     public ScheduleBundle? Schedule { get; private set; }
     public string? PairCode { get; private set; }
@@ -65,35 +62,16 @@ public sealed class IndexModel(
         return Page();
     }
 
-    /// <summary>
-    /// 按需生成手机扫码登录二维码：内含服务器地址、当前登录 ID 与一次性票据，
-    /// 安卓版扫码后直接登录当前 WebUI 账号。票据 5 分钟内有效且只能使用一次。
-    /// </summary>
+    /// <summary>按需生成手机扫码登录二维码，见 <see cref="MobileLoginQr"/>。</summary>
     public async Task<IActionResult> OnPostMobileLoginQrAsync(CancellationToken ct)
     {
         if (await RequireAsync(UserPermissions.AccessWebUi) is { } denied) return denied;
-        var serverUrl = await ResolveMobileServerUrlAsync(ct);
-        var ticket = await identities.CreateMobileLoginTicketAsync(CurrentUser.Id, ct);
-        var payload = MobileLoginSettings.BuildLoginQrPayload(serverUrl, ticket.Username, ticket.Ticket);
-        using var qrData = QRCodeGenerator.GenerateQrCode(payload, QRCodeGenerator.ECCLevel.M);
-        using var renderer = new SvgQRCode(qrData);
-        return new JsonResult(new
-        {
-            svg = renderer.GetGraphic(4),
-            serverUrl,
-            expiresInSeconds = (int)IdentityCoordinator.MobileLoginTicketLifetime.TotalSeconds,
-        });
+        return await MobileLoginQr.CreateAsync(identities, mobileLogin, Request, CurrentUser.Id, ct);
     }
-
-    /// <summary>二维码服务器地址：系统设置“登录与访问”中指定的地址优先，否则使用当前访问地址。</summary>
-    private async Task<string> ResolveMobileServerUrlAsync(CancellationToken ct) =>
-        await mobileLogin.GetServerUrlAsync(ct) ?? $"{Request.Scheme}://{Request.Host}{Request.PathBase}".TrimEnd('/');
 
     private async Task LoadAsync(CancellationToken ct)
     {
-        MobileLoginUrl = await ResolveMobileServerUrlAsync(ct);
-        WatchConnections = peers.WatchCount;
-        AccountCount = (await identities.ListUsersAsync(ct)).Count;
+        MobileLoginUrl = await MobileLoginQr.ResolveServerUrlAsync(mobileLogin, Request, ct);
         Snapshot = state.GetLatestSnapshot(CurrentClassId);
         Schedule = state.GetLatestSchedule(CurrentClassId);
         if (CurrentUser.Role == UserRole.Admin)

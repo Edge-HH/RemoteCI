@@ -54,13 +54,32 @@ public sealed class MobileWebTests
         await using var factory = new TestWebApplicationFactory();
         var owner = await factory.LoginAsync();
 
-        // 电脑版：侧边栏按任务分组，系统级设置收拢到“系统设置”，顶栏不再有指向个人账号的齿轮。
+        // 电脑版：侧边栏按任务分隔，“班级管理”“管理”“记录与统计”是合并入口，系统级设置收拢到“系统设置”，“个人”进入个人账号。
         using var desktop = await BrowserAsync(factory, owner, phone: false);
         var index = WebUtility.HtmlDecode(await desktop.GetStringAsync("/Index"));
-        foreach (var label in new[] { ">日常<", ">我的<", ">记录与统计<", ">教务<", ">设备与控制<", ">组织与权限<", "<span>系统设置</span>", "<span>档案库</span>", "<span>插件批量下发</span>", "<span>人员与角色</span>" })
+        foreach (var label in new[] { "<span>概览</span>", "<span>班级管理</span>", "<span>管理</span>", "<span>记录与统计</span>", "<span>系统设置</span>", "<span>个人</span>",
+                     ">班级管理 · 控制</a>", ">管理 · 插件控制</a>", ">管理 · 班级</a>", ">管理 · 档案库</a>", ">管理 · 学期与调休</a>" })
             Assert.Contains(label, index);
-        foreach (var removed in new[] { "<span>系统配置</span>", "<span>登录页设置</span>", "<span>个人账号</span>", "aria-label=\"打开个人账号\"" })
+        foreach (var removed in new[] { "<span>系统配置</span>", "<span>登录页设置</span>", "<span>个人账号</span>", "aria-label=\"打开个人账号\"", "data-nav-group", "<span>设备状态</span>", "<span>控制</span>", "<span>档案库</span>", "<span>插件批量下发</span>", "class=\"hub-nav\"" })
             Assert.DoesNotContain(removed, index);
+        // 合并入口的子页面在页面内子菜单中切换，自动化编辑页也归到“自动化”。
+        var devices = WebUtility.HtmlDecode(await desktop.GetStringAsync("/Devices"));
+        Assert.Contains("class=\"hub-nav\" aria-label=\"管理\"", devices);
+        foreach (var label in new[] { "<span>设备状态</span>", "<span>批量控制</span>", "<span>自动化</span>", "<span>应用守护</span>", "<span>插件控制</span>", "<span>班级</span>", "<span>人员与角色</span>", "<span>档案库</span>", "<span>学期与调休</span>" })
+            Assert.Contains(label, devices);
+        Assert.Contains("class=\"hub-nav-link active\" aria-current=\"page\" href=\"/Devices\"", devices);
+        var records = WebUtility.HtmlDecode(await desktop.GetStringAsync("/AuditLog"));
+        Assert.Contains("class=\"hub-nav\" aria-label=\"记录与统计\"", records);
+        Assert.Contains("href=\"/LessonStats\"", records);
+        // “班级管理”收入控制页，子菜单标题显示当前班级。
+        var control = WebUtility.HtmlDecode(await desktop.GetStringAsync("/Control"));
+        Assert.Contains("class=\"hub-nav\" aria-label=\"班级管理\"", control);
+        Assert.Contains("class=\"hub-nav-link active\" aria-current=\"page\" href=\"/Control\"", control);
+        // 个人账号页带“扫码登录”tab，二维码提交到本页的 handler。
+        var account = WebUtility.HtmlDecode(await desktop.GetStringAsync("/Account"));
+        Assert.Contains("data-tab-link=\"qr-login\"", account);
+        Assert.Contains("data-mobile-login-form", account);
+        Assert.Contains("handler=MobileLoginQr", account);
         Assert.Contains("data-account-menu", index);
         var system = WebUtility.HtmlDecode(await desktop.GetStringAsync("/SystemConfig"));
         Assert.Contains("data-page-tabs", system);

@@ -105,7 +105,7 @@ public static class PermissionCatalog
                 new("批量控制", "向多个班级下发命令；每项操作仍需上面对应的权限", Management: ManagementPermissions.BatchControl),
                 new("自动化", "创建与运行自动化规则；规则以修改人的权限执行", Management: ManagementPermissions.ManageAutomation),
                 new("应用守护策略", "设置全局与单设备的应用守护策略", Management: ManagementPermissions.ManageAppGuard),
-                new("插件批量下发", "跨班级下发插件设置，管理扩展调用策略与插件的班级开放", Management: ManagementPermissions.ManageExtensionSettings),
+                new("插件控制", "跨班级下发插件设置，管理扩展调用策略与插件的班级开放", Management: ManagementPermissions.ManageExtensionSettings),
                 new("登录页与访客", "登录页外观、扫码登录地址与访客自动进入", Management: ManagementPermissions.ManageLoginPage),
                 new("插件凭据与连接码", "生成配对码，吊销插件凭据，设置课表自动拉取间隔", Management: ManagementPermissions.ManagePluginAccess),
             ]),

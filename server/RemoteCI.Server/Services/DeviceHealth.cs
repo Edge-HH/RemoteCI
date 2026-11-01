@@ -149,6 +149,9 @@ public sealed class DeviceAlertEvaluator(
             .Select(x => x.PluginCredentialId)
             .OfType<Guid>()
             .ToHashSet();
+        // 与设备状态页一致，每班只对最后连接的那台设备告警；旧设备的告警状态随下面的清理一并移除。
+        credentials = DeviceHealthService.LatestPerClass(
+            credentials, x => x.ClassroomId!.Value, x => online.Contains(x.Id), x => x.LastSeenAt).ToList();
         var states = await db.DeviceAlertStates.ToDictionaryAsync(x => x.CredentialId, ct);
         var known = credentials.Select(x => x.Id).ToHashSet();
         db.DeviceAlertStates.RemoveRange(states.Values.Where(x => !known.Contains(x.CredentialId)));
@@ -323,8 +326,14 @@ public sealed class DeviceHealthService(
     public async Task<DeviceHealthOverview> GetOverviewAsync(IReadOnlyList<Guid>? classScope, CancellationToken ct = default)
     {
         var now = timeProvider.GetUtcNow();
-        var devices = (await inventory.ListAsync(ct))
-            .Where(x => x.Assigned && (classScope is null || classScope.Contains(x.ClassId)))
+        var lastSeen = await db.PluginCredentials.AsNoTracking()
+            .Where(x => x.Assigned && x.Enabled)
+            .Select(x => new { x.Id, x.LastSeenAt })
+            .ToDictionaryAsync(x => x.Id, x => x.LastSeenAt, ct);
+        var devices = LatestPerClass(
+                (await inventory.ListAsync(ct))
+                    .Where(x => x.Assigned && (classScope is null || classScope.Contains(x.ClassId))),
+                x => x.ClassId, x => x.Online, x => lastSeen.GetValueOrDefault(x.CredentialId))
             .ToList();
         var credentialIds = devices.Select(x => x.CredentialId).ToList();
         var groups = await db.ClassGroupAssignments.AsNoTracking()
@@ -392,6 +401,15 @@ public sealed class DeviceHealthService(
         .ToList();
         return new DeviceHealthOverview(now, AppVersion.Version, dayStart, now, items);
     }
+
+    /// <summary>
+    /// 每班只保留最后连接的一台设备：在线优先，其次最近活跃时间。换电脑或重新配对后留下的旧凭据
+    /// 不再显示，也不再参与离线告警。
+    /// </summary>
+    internal static IEnumerable<T> LatestPerClass<T>(
+        IEnumerable<T> devices, Func<T, Guid> classId, Func<T, bool> online, Func<T, DateTimeOffset> lastSeen) =>
+        devices.GroupBy(classId)
+            .Select(group => group.OrderByDescending(online).ThenByDescending(lastSeen).First());
 
     /// <summary>档案差异检查结果（每班最新且仍对应当前服务端档案修订的一份）。</summary>
     private async Task<Dictionary<Guid, int>> LoadDriftAsync(CancellationToken ct) =>

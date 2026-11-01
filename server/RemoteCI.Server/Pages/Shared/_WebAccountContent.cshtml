@@ -54,6 +54,7 @@
         @if (Model.CanChangeDisplayName) { <a href="#profile" data-tab-link="profile">资料</a> }
         <a href="#security" data-tab-link="security">安全</a>
         <a href="#sessions" data-tab-link="sessions">已登录设备</a>
+        <a href="#qr-login" data-tab-link="qr-login">扫码登录</a>
         @if (Model.ShowApiPanel) { <a href="#api" data-tab-link="api">API Key</a> }
     </nav>
 }
@@ -89,6 +90,11 @@
     }
     <section class="panel" id="device-sessions" data-tab="sessions"><h2>已登录设备</h2>@if (Model.Sessions.Count == 0) { <p class="muted">暂无手表设备会话。</p> } else { <div class="list">@foreach (var session in Model.Sessions) { <article><div><strong>@session.DeviceName</strong><small>最近使用 @session.LastSeenAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</small></div><form method="post" asp-page-handler="Revoke"><input type="hidden" name="id" value="@session.Id" /><button class="danger ghost" type="submit">撤销</button></form></article> }</div> }</section>
 </div>
+@if (!MobileUi.IsMobile(Context))
+{
+    @* 扫码登录：生成一次性二维码，安卓版扫描后直接登录当前账号；与概览页的卡片相同。 *@
+    <div id="qr-login" data-tab="qr-login">@await Html.PartialAsync("_MobileLoginQrCard", new MobileLoginQrCardModel(Model.MobileLoginUrl, Model.CurrentUser.UserName ?? string.Empty))</div>
+}
 @if (Model.ShowApiPanel)
 {
     <section class="panel api-key-panel" id="api-keys" data-tab="api">

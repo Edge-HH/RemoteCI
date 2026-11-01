@@ -272,15 +272,6 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
     overscroll-behavior: contain;
 }
 
-.nav-section-label {
-    margin: 13px 10px 4px;
-    color: var(--nav-heading);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: .02em;
-    user-select: none;
-}
-
 .nav-link {
     position: relative;
     display: flex;
@@ -409,7 +400,6 @@ body.sidebar-collapsed .brand { justify-content: center; padding-inline: 8px; }
 body.sidebar-collapsed .brand-link { display: none; }
 body.sidebar-collapsed .sidebar-collapse-button { display: inline-grid; }
 body.sidebar-collapsed .brand-copy,
-body.sidebar-collapsed .nav-section-label,
 body.sidebar-collapsed .nav-link span,
 body.sidebar-collapsed .sidebar-user-copy,
 body.sidebar-collapsed .logout-button span { display: none; }
@@ -791,6 +781,9 @@ textarea:focus-visible {
     gap: 12px;
     margin-bottom: 14px;
 }
+
+/* 总览只剩“当前课程”和“插件连接”两张卡片。 */
+.metric-grid.metric-grid-pair { grid-template-columns: 1.3fr minmax(0, 1fr); }
 
 .metric-card {
     min-height: 124px;
@@ -1403,7 +1396,6 @@ textarea { resize: vertical; }
     body.sidebar-collapsed .brand { justify-content: space-between; padding-inline: 12px 10px; }
     body.sidebar-collapsed .brand-link { padding: 6px 4px; }
     body.sidebar-collapsed .brand-copy,
-    body.sidebar-collapsed .nav-section-label,
     body.sidebar-collapsed .nav-link span,
     body.sidebar-collapsed .sidebar-user-copy,
     body.sidebar-collapsed .logout-button span { display: grid; }
@@ -1467,7 +1459,7 @@ textarea { resize: vertical; }
 }
 
 @media (max-width: 520px) {
-    .metric-grid { grid-template-columns: 1fr; }
+    .metric-grid, .metric-grid.metric-grid-pair { grid-template-columns: 1fr; }
     .metric-card { min-height: 98px; }
     .topbar-button { width: 38px; height: 38px; min-height: 38px; flex-basis: 38px; }
     .user-avatar { display: none; }
@@ -2327,29 +2319,59 @@ input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible { outlin
 label:where(:has(> input[type="checkbox"], > input[type="radio"])) { display: flex; align-items: center; gap: 7px; cursor: pointer; }
 .batch-risk-confirm input[type="checkbox"] { margin-top: 2px; }
 
-/* 侧边栏分组：标题可点击折叠，折叠状态按分组记在本地；当前页所在分组始终展开。 */
+/* 侧边栏分组：不带标题，按任务用细分隔线隔开。 */
 .nav-group { display: grid; gap: 1px; }
-button.nav-section-label {
+.nav-group + .nav-group { margin-top: 5px; padding-top: 6px; border-top: 1px solid var(--nav-border); }
+
+/* 页面内子菜单：侧边栏合并入口（班级管理、管理、记录与统计）的子页面竖排在内容左侧，当前页带强调色竖条。 */
+.hub-layout { display: grid; grid-template-columns: 188px minmax(0, 1fr); gap: 28px; align-items: start; }
+.hub-content { min-width: 0; }
+.hub-nav { position: sticky; top: 94px; display: grid; gap: 2px; }
+.hub-nav-head { display: grid; gap: 2px; min-width: 0; padding: 4px 12px 12px; }
+.hub-nav-head strong { color: var(--text); font-size: 17px; font-weight: 700; }
+.hub-nav-head small { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+/* “班级管理”子菜单的标题就是班级切换菜单：小字标明入口，大字是当前班级，点开即可切换。 */
+.hub-class-switcher { display: block; max-width: none; min-height: 0; margin: 0 0 8px; border-color: transparent; border-radius: var(--radius-button); background: transparent; }
+.hub-class-switcher .class-menu > summary { min-height: 0; justify-content: space-between; padding: 6px 10px 8px 12px; }
+.hub-class-copy { display: grid; min-width: 0; gap: 2px; }
+.hub-class-copy small { color: var(--muted); font-size: 12px; font-weight: 600; }
+.hub-class-switcher .class-menu-label { max-width: none; color: var(--text); font-size: 17px; font-weight: 700; }
+.hub-class-switcher .class-menu-chevron { width: 15px; height: 15px; color: var(--muted); }
+.hub-class-switcher .class-menu-list { right: auto; left: -1px; }
+.hub-nav-link {
+    position: relative;
     display: flex;
-    width: calc(100% - 20px);
-    min-height: 0;
+    min-height: 40px;
     align-items: center;
-    justify-content: space-between;
-    gap: 6px;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    box-shadow: none;
-    color: var(--nav-heading);
-    text-align: left;
-    cursor: pointer;
+    gap: 10px;
+    padding: 0 12px;
+    border-radius: var(--radius-button);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background var(--duration-fast) ease, color var(--duration-fast) ease;
 }
-button.nav-section-label::after { content: ""; width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); opacity: .7; transition: transform var(--duration-fast) ease; }
-button.nav-section-label:hover { background: transparent; color: var(--text); }
-button.nav-section-label:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 2px; }
-.nav-group.collapsed > button.nav-section-label::after { transform: rotate(-45deg); }
-.nav-group.collapsed > .nav-link:not(.active) { display: none; }
-body.sidebar-collapsed .nav-group.collapsed > .nav-link:not(.active) { display: flex; }
+.hub-nav-icon { width: 17px; height: 17px; flex: 0 0 17px; }
+.hub-nav-link:hover { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
+.hub-nav-link.active { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.hub-nav-link.active::before { content: ""; position: absolute; top: 10px; bottom: 10px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+.hub-nav-link.active .hub-nav-icon { color: var(--accent); }
+.hub-nav-link:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 1px; }
+@media (max-width: 1080px) {
+    .hub-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+    .hub-nav { position: static; display: flex; gap: 4px; overflow-x: auto; padding-bottom: 8px; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+    .hub-nav:has(.class-menu[open]) { overflow: visible; }
+    .hub-nav-head { flex: 0 0 auto; align-content: center; padding: 0 12px 0 0; margin-right: 4px; border-right: 1px solid var(--line); }
+    .hub-nav-head strong { font-size: 14px; }
+    .hub-nav-head small { max-width: 120px; }
+    .hub-class-switcher { flex: 0 0 auto; margin: 0 4px 0 0; }
+    .hub-class-switcher .class-menu > summary { padding: 2px 10px; }
+    .hub-class-switcher .class-menu-label { max-width: 140px; font-size: 14px; }
+    .hub-nav-link { flex: 0 0 auto; min-height: 34px; }
+    .hub-nav-link.active::before { top: auto; right: 12px; bottom: -8px; left: 12px; width: auto; height: 2px; border-radius: 2px; }
+}
 
 /* 顶栏头像菜单：个人账号与退出登录。 */
 .account-menu { position: relative; }

@@ -651,24 +651,3 @@ function syncRollingHint(scope) {
     if (scope) syncRollingHint(scope);
 }));
 
-// 侧边栏分组折叠：状态按分组记在本地；含当前页的分组不折叠，避免当前位置被藏起来。
-(() => {
-    const key = "remoteci-nav-collapsed";
-    let collapsed = [];
-    try { collapsed = JSON.parse(localStorage.getItem(key) || "[]"); } catch { collapsed = []; }
-    document.querySelectorAll("[data-nav-group]").forEach(group => {
-        const toggle = group.querySelector("[data-nav-group-toggle]");
-        const apply = value => {
-            group.classList.toggle("collapsed", value);
-            toggle?.setAttribute("aria-expanded", value ? "false" : "true");
-        };
-        apply(collapsed.includes(group.dataset.navGroup) && !group.querySelector(".nav-link.active"));
-        toggle?.addEventListener("click", () => {
-            const next = !group.classList.contains("collapsed");
-            apply(next);
-            collapsed = collapsed.filter(name => name !== group.dataset.navGroup);
-            if (next) collapsed.push(group.dataset.navGroup);
-            try { localStorage.setItem(key, JSON.stringify(collapsed)); } catch { }
-        });
-    });
-})();

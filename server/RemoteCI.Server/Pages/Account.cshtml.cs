@@ -16,7 +16,8 @@ public sealed class AccountModel(
     IdentityCoordinator identities,
     AuthorizationSyncService authorizationSync,
     SignInManager<AppUser> signIn,
-    IMemoryCache cache) : WebPageModel(users)
+    IMemoryCache cache,
+    MobileLoginSettings mobileLogin) : WebPageModel(users)
 {
     [BindProperty]
     public PasswordInput Password { get; set; } = new();
@@ -29,6 +30,9 @@ public sealed class AccountModel(
 
     public IReadOnlyList<DeviceSessionSummary> Sessions { get; private set; } = [];
     public IReadOnlyList<ApiKeyInfo> ApiKeys { get; private set; } = [];
+
+    /// <summary>“扫码登录”tab 中二维码写入的服务器地址。</summary>
+    public string MobileLoginUrl { get; private set; } = string.Empty;
 
     /// <summary>创建成功后仅在本次重定向回显一次；明文不写入数据库或日志。</summary>
     public ApiKeyCreationResult? CreatedApiKey { get; private set; }
@@ -165,8 +169,16 @@ public sealed class AccountModel(
         return RedirectToPage();
     }
 
+    /// <summary>按需生成手机扫码登录二维码，见 <see cref="MobileLoginQr"/>。</summary>
+    public async Task<IActionResult> OnPostMobileLoginQrAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        return await MobileLoginQr.CreateAsync(identities, mobileLogin, Request, CurrentUser.Id, ct);
+    }
+
     private async Task LoadAsync(CancellationToken ct)
     {
+        MobileLoginUrl = await MobileLoginQr.ResolveServerUrlAsync(mobileLogin, Request, ct);
         Sessions = await identities.ListSessionsAsync(CurrentUser.Id, null, ct);
         ApiKeys = await identities.ListApiKeysAsync(CurrentUser.Id, ct);
         CreatedApiKey = TakeCreatedApiKey();
