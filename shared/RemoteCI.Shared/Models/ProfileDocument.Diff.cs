@@ -89,6 +89,10 @@ public static partial class ProfileDocument
             var newTeacher = Blank(Text(right, "TeacherName"));
             if (oldTeacher != newTeacher)
                 changes.Add(new ProfileChange("科目", $"「{newName}」任课教师 {oldTeacher ?? "未设置"} → {newTeacher ?? "未设置"}"));
+            var oldLocation = SubjectLocations.Read(left);
+            var newLocation = SubjectLocations.Read(right);
+            if (oldLocation != newLocation)
+                changes.Add(new ProfileChange("科目", $"「{newName}」科目地点 {oldLocation ?? "未设置"} → {newLocation ?? "未设置"}"));
         }
     }
 

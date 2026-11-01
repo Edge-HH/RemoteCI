@@ -20,4 +20,9 @@
     <ProjectReference Include="../../RemoteCI.Server/RemoteCI.Server.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 与 Android 单元测试共用的夹具：周课表排布与学科颜色两端必须一致。 -->
+    <None Include="../../../shared/test-fixtures/**/*.json" LinkBase="test-fixtures" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

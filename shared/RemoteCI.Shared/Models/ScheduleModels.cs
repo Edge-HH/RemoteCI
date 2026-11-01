@@ -127,6 +127,14 @@ public sealed class ScheduleDay
     [JsonPropertyName("holidayName")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? HolidayName { get; set; }
+
+    /// <summary>
+    /// 时间表中分割线的位置：值 i 表示第 i 节（零基）与第 i+1 节之间有分割线；第一节前、最后一节后的分割线不输出。
+    /// 只用于显示，不参与修订号；旧版插件不下发。
+    /// </summary>
+    [JsonPropertyName("dividerAfterIndexes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<int>? DividerAfterIndexes { get; set; }
 }
 
 public sealed class CourseEntry
@@ -168,6 +176,11 @@ public sealed class CourseEntry
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Teacher { get; set; }
 
+    /// <summary>科目地点（见 <see cref="SubjectLocations"/>）或自定义课程的地点；没有时不输出，旧版插件不下发。</summary>
+    [JsonPropertyName("location")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Location { get; set; }
+
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; }
 
@@ -199,6 +212,22 @@ public sealed class SubjectEntry
     [JsonPropertyName("teacher")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Teacher { get; set; }
+
+    /// <summary>科目地点，存放在 ClassIsland 档案科目的附加数据中（见 <see cref="SubjectLocations"/>）；旧版插件不下发。</summary>
+    [JsonPropertyName("location")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Location { get; set; }
+}
+
+/// <summary>SetSubjectLocation 命令参数：location 为空表示清除该科目的地点。</summary>
+public sealed class SubjectLocationRequest
+{
+    [JsonPropertyName("subjectId")]
+    public Guid SubjectId { get; set; }
+
+    [JsonPropertyName("location")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Location { get; set; }
 }
 
 /// <summary>SetSubjectTeacher 命令参数：teacherName 为空表示清除该科目的教师。</summary>
@@ -262,6 +291,15 @@ public sealed class MyScheduleDay
 
     [JsonPropertyName("items")]
     public List<MyScheduleItem> Items { get; set; } = [];
+
+    /// <summary>放假日为 "holiday"、调休上学日为 "makeup"（见 <see cref="ScheduleDayKinds"/>），普通日不输出。</summary>
+    [JsonPropertyName("dayKind")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DayKind { get; set; }
+
+    [JsonPropertyName("holidayName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? HolidayName { get; set; }
 }
 
 /// <summary>某一天中用户在某个班级的课程集合。</summary>
@@ -284,6 +322,11 @@ public sealed class MyScheduleItem
     [JsonPropertyName("source")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Source { get; set; }
+
+    /// <summary>该班当天时间表的分割线位置，含义同 <see cref="ScheduleDay.DividerAfterIndexes"/>。</summary>
+    [JsonPropertyName("dividerAfterIndexes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<int>? DividerAfterIndexes { get; set; }
 }
 
 /// <summary>“我的日程”中的一节课：所在班级、课程以及换算成绝对时间的起止时刻。</summary>
