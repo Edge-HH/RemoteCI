@@ -35,6 +35,7 @@ internal sealed class GuardPolicyPayload
     [DataMember(Name = "restartAfterExit")] public bool RestartAfterExit { get; set; }
     [DataMember(Name = "restartAfterExitDelayMinutes")] public int RestartAfterExitDelayMinutes { get; set; }
     [DataMember(Name = "restartOnCrash")] public bool RestartOnCrash { get; set; }
+    [DataMember(Name = "launchOnStartup")] public bool? LaunchOnStartup { get; set; }
     [DataMember(Name = "preventDeletion")] public bool PreventDeletion { get; set; }
     [DataMember(Name = "backupIntervalHours")] public int BackupIntervalHours { get; set; } = 24;
     [DataMember(Name = "randomBackupPath")] public bool RandomBackupPath { get; set; }

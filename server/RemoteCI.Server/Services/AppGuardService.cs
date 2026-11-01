@@ -35,6 +35,7 @@ public sealed class AppGuardService(
         row.AppGuardRestartAfterExit = normalized.RestartAfterExit;
         row.AppGuardRestartDelayMinutes = normalized.RestartAfterExitDelayMinutes;
         row.AppGuardRestartOnCrash = normalized.RestartOnCrash;
+        row.AppGuardLaunchOnStartup = normalized.LaunchOnStartup;
         row.AppGuardPreventDeletion = normalized.PreventDeletion;
         row.AppGuardBackupIntervalHours = normalized.BackupIntervalHours;
         row.AppGuardEnhancedMode = normalized.EnhancedMode;
@@ -77,6 +78,7 @@ public sealed class AppGuardService(
         entry.RestartAfterExit = normalized.RestartAfterExit;
         entry.RestartDelayMinutes = normalized.RestartAfterExitDelayMinutes;
         entry.RestartOnCrash = normalized.RestartOnCrash;
+        entry.LaunchOnStartup = normalized.LaunchOnStartup;
         entry.PreventDeletion = normalized.PreventDeletion;
         entry.BackupIntervalHours = normalized.BackupIntervalHours;
         entry.EnhancedMode = normalized.EnhancedMode;
@@ -224,6 +226,7 @@ public sealed class AppGuardService(
         RestartAfterExit = row.AppGuardRestartAfterExit,
         RestartAfterExitDelayMinutes = row.AppGuardRestartDelayMinutes,
         RestartOnCrash = row.AppGuardRestartOnCrash,
+        LaunchOnStartup = row.AppGuardLaunchOnStartup,
         PreventDeletion = row.AppGuardPreventDeletion,
         BackupIntervalHours = row.AppGuardBackupIntervalHours,
         EnhancedMode = row.AppGuardEnhancedMode,
@@ -240,6 +243,7 @@ public sealed class AppGuardService(
         RestartAfterExit = entry.RestartAfterExit,
         RestartAfterExitDelayMinutes = entry.RestartDelayMinutes,
         RestartOnCrash = entry.RestartOnCrash,
+        LaunchOnStartup = entry.LaunchOnStartup,
         PreventDeletion = entry.PreventDeletion,
         BackupIntervalHours = entry.BackupIntervalHours,
         EnhancedMode = entry.EnhancedMode,

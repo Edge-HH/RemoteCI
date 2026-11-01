@@ -140,6 +140,8 @@ internal sealed class GuardCloudClient : IDisposable
         current.RestartAfterExit = payload.RestartAfterExit;
         current.RestartDelayMinutes = Math.Max(0, Math.Min(1440, payload.RestartAfterExitDelayMinutes));
         current.RestartOnCrash = payload.RestartOnCrash;
+        // 旧服务端不下发该字段时保留插件写入的值。
+        if (payload.LaunchOnStartup is { } launchOnStartup) current.LaunchOnStartup = launchOnStartup;
         current.PreventDeletion = payload.PreventDeletion;
         current.BackupIntervalHours = Math.Max(1, Math.Min(168, payload.BackupIntervalHours));
         current.BackupDirectoryName = GuardFiles.NormalizeBackupDirectoryName(payload.BackupDirectoryName);

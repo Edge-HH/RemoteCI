@@ -16,6 +16,8 @@
         </label>
         <label class="check"><input type="checkbox" name="@(prefix).RestartOnCrash" value="true" checked="@input.RestartOnCrash" /> 检测到程序意外退出（崩溃、被结束进程）时立即重新启动</label>
         <input type="hidden" name="@(prefix).RestartOnCrash" value="false" />
+        <label class="check"><input type="checkbox" name="@(prefix).LaunchOnStartup" value="true" checked="@input.LaunchOnStartup" /> 开机自动启动：登录 Windows 1 分钟后 ClassIsland 仍未运行时由守护启动（不改动 ClassIsland 自身的开机自启设置）</label>
+        <input type="hidden" name="@(prefix).LaunchOnStartup" value="false" />
         <label class="check"><input type="checkbox" name="@(prefix).PreventDeletion" value="true" checked="@input.PreventDeletion" /> 禁止删除：定时备份 ClassIsland，发现被删除后自动恢复并启动</label>
         <input type="hidden" name="@(prefix).PreventDeletion" value="false" />
         <label>备份间隔（小时，@AppGuardPolicy.MinBackupIntervalHours-@AppGuardPolicy.MaxBackupIntervalHours；ClassIsland 版本变化时也会立即备份）

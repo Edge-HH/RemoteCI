@@ -225,6 +225,7 @@ WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手
 | `restartAfterExit` | 正常退出后自动启动 |
 | `restartAfterExitDelayMinutes` | 退出后延时分钟数，0–1440；0 为立即 |
 | `restartOnCrash` | 意外退出时重启 |
+| `launchOnStartup` | 开机（登录 Windows）1 分钟后 ClassIsland 仍未运行时由守护启动，默认 `true`；不改动 ClassIsland 自身的开机自启设置。旧服务端不发送该字段时，插件按 `true` 处理 |
 | `preventDeletion` | 定时备份，被删除后恢复 |
 | `backupIntervalHours` | 备份间隔小时数，1–168，默认 24 |
 | `enhancedMode` | 安装自动启动 Windows 服务，维护普通权限用户代理 |

@@ -266,6 +266,16 @@ public sealed class AppGuardServiceTests : IDisposable
     }
 
     [Fact]
+    public void BuildConfig_CarriesLaunchOnStartup()
+    {
+        var policy = Enabled();
+        Assert.True(AppGuardService.BuildConfig(policy, _host.Info, 1).LaunchOnStartup);
+
+        policy.LaunchOnStartup = false;
+        Assert.False(AppGuardService.BuildConfig(policy, _host.Info, 1).LaunchOnStartup);
+    }
+
+    [Fact]
     public void Store_PersistsPolicy_AndPolicyMessageIsReadFromEnvelope()
     {
         var path = Path.Combine(_root, "config", "AppGuardPolicy.json");

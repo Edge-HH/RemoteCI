@@ -64,7 +64,7 @@ public sealed class ConfigurationArchiveService(
             .Select(x => new HolidayOverrideSnapshot(x.Date, x.FollowWeekday)).ToListAsync(ct);
         var appGuardOverrides = await db.AppGuardOverrides.AsNoTracking().Select(x => new AppGuardOverrideSnapshot(
             x.CredentialId, x.Enabled, x.RestartAfterExit, x.RestartDelayMinutes, x.RestartOnCrash, x.PreventDeletion,
-            x.BackupIntervalHours, x.UpdatedAt, x.EnhancedMode, x.BackupPathsJson, x.RandomBackupPath, x.ProcessName, x.BackupDirectoryName)).ToListAsync(ct);
+            x.BackupIntervalHours, x.UpdatedAt, x.EnhancedMode, x.BackupPathsJson, x.RandomBackupPath, x.ProcessName, x.BackupDirectoryName, x.LaunchOnStartup)).ToListAsync(ct);
         var automationRules = await db.AutomationRules.AsNoTracking().Select(x => new AutomationRuleSnapshot(
             x.Id, x.Name, x.Enabled, x.TriggerJson, x.ActionsJson, x.TargetJson, x.ValidFrom, x.ValidTo,
             x.CreatedByUserId, x.CreatedByName, x.CreatedAtUnixMs, x.UpdatedAtUnixMs)).ToListAsync(ct);
@@ -100,7 +100,8 @@ public sealed class ConfigurationArchiveService(
                 metadata.OrganizationName, metadata.AppGuardEnabled, metadata.AppGuardRestartAfterExit,
                 metadata.AppGuardRestartDelayMinutes, metadata.AppGuardRestartOnCrash, metadata.AppGuardPreventDeletion,
                 metadata.AppGuardBackupIntervalHours, appGuardOverrides, metadata.AppGuardEnhancedMode,
-                metadata.AppGuardBackupPathsJson, metadata.AppGuardRandomBackupPath, metadata.AppGuardProcessName, metadata.AppGuardBackupDirectoryName));
+                metadata.AppGuardBackupPathsJson, metadata.AppGuardRandomBackupPath, metadata.AppGuardProcessName, metadata.AppGuardBackupDirectoryName,
+                metadata.AppGuardLaunchOnStartup));
     }
 
     public async Task<BackupFileInfo> CreateLocalBackupAsync(string source, CancellationToken ct = default)
@@ -307,6 +308,7 @@ public sealed class ConfigurationArchiveService(
             {
                 Enabled = guard.Enabled, RestartAfterExit = guard.RestartAfterExit,
                 RestartAfterExitDelayMinutes = guard.RestartDelayMinutes, RestartOnCrash = guard.RestartOnCrash,
+                LaunchOnStartup = guard.LaunchOnStartup ?? true,
                 PreventDeletion = guard.PreventDeletion, BackupIntervalHours = guard.BackupIntervalHours,
                 EnhancedMode = guard.EnhancedMode, RandomBackupPath = guard.RandomBackupPath,
                 BackupDirectoryName = guard.BackupDirectoryName ?? string.Empty, ProcessName = guard.ProcessName ?? AppGuardPolicy.DefaultProcessName,
@@ -317,6 +319,7 @@ public sealed class ConfigurationArchiveService(
             metadata.AppGuardRestartAfterExit = normalized.RestartAfterExit;
             metadata.AppGuardRestartDelayMinutes = normalized.RestartAfterExitDelayMinutes;
             metadata.AppGuardRestartOnCrash = normalized.RestartOnCrash;
+            metadata.AppGuardLaunchOnStartup = normalized.LaunchOnStartup;
             metadata.AppGuardPreventDeletion = normalized.PreventDeletion;
             metadata.AppGuardBackupIntervalHours = normalized.BackupIntervalHours;
             metadata.AppGuardEnhancedMode = normalized.EnhancedMode;
@@ -332,7 +335,7 @@ public sealed class ConfigurationArchiveService(
                 {
                     CredentialId = x.CredentialId, Enabled = x.Enabled, RestartAfterExit = x.RestartAfterExit,
                     RestartDelayMinutes = Math.Clamp(x.RestartDelayMinutes, 0, AppGuardPolicy.MaxRestartDelayMinutes),
-                    RestartOnCrash = x.RestartOnCrash, PreventDeletion = x.PreventDeletion,
+                    RestartOnCrash = x.RestartOnCrash, LaunchOnStartup = x.LaunchOnStartup ?? true, PreventDeletion = x.PreventDeletion,
                     BackupIntervalHours = Math.Clamp(x.BackupIntervalHours, AppGuardPolicy.MinBackupIntervalHours, AppGuardPolicy.MaxBackupIntervalHours),
                     EnhancedMode = x.EnhancedMode, RandomBackupPath = x.RandomBackupPath,
                     BackupDirectoryName = new AppGuardPolicy { BackupDirectoryName = x.BackupDirectoryName ?? string.Empty }.Normalized().BackupDirectoryName,
@@ -454,8 +457,8 @@ public sealed class ConfigurationArchiveService(
 
 public sealed record BackupFileInfo(string Name, DateTimeOffset CreatedAt, long Size, string Source);
 public sealed record ConfigurationSnapshot(int Version, DateTimeOffset CreatedAt, List<RoleSnapshot> Roles, List<UserSnapshot> Users, List<PluginSnapshot> Plugins, MetadataSnapshot Metadata, BackupSettingsSnapshot Backup, ScheduleBundle? Schedule, List<ExtensionPolicySnapshot>? ExtensionPolicies = null, List<ExtensionPreferenceSnapshot>? ExtensionPreferences = null, List<ClassroomSnapshot>? Classrooms = null, List<MembershipSnapshot>? Memberships = null, List<GroupSnapshot>? ClassGroups = null, List<ApiKeySnapshot>? ApiKeys = null, List<StoredProfileSnapshot>? Profiles = null, HolidaySettingsSnapshot? Holidays = null, List<ExtensionGroupPolicySnapshot>? ExtensionGroupPolicies = null, OperationsSettingsSnapshot? Operations = null, List<AutomationRuleSnapshot>? AutomationRules = null, AppGuardSettingsSnapshot? AppGuard = null);
-public sealed record AppGuardSettingsSnapshot(string? OrganizationName, bool Enabled, bool RestartAfterExit, int RestartDelayMinutes, bool RestartOnCrash, bool PreventDeletion, int BackupIntervalHours, List<AppGuardOverrideSnapshot>? Overrides, bool EnhancedMode = false, string? BackupPathsJson = null, bool RandomBackupPath = false, string? ProcessName = null, string? BackupDirectoryName = null);
-public sealed record AppGuardOverrideSnapshot(Guid CredentialId, bool Enabled, bool RestartAfterExit, int RestartDelayMinutes, bool RestartOnCrash, bool PreventDeletion, int BackupIntervalHours, DateTimeOffset UpdatedAt, bool EnhancedMode = false, string? BackupPathsJson = null, bool RandomBackupPath = false, string? ProcessName = null, string? BackupDirectoryName = null);
+public sealed record AppGuardSettingsSnapshot(string? OrganizationName, bool Enabled, bool RestartAfterExit, int RestartDelayMinutes, bool RestartOnCrash, bool PreventDeletion, int BackupIntervalHours, List<AppGuardOverrideSnapshot>? Overrides, bool EnhancedMode = false, string? BackupPathsJson = null, bool RandomBackupPath = false, string? ProcessName = null, string? BackupDirectoryName = null, bool? LaunchOnStartup = null);
+public sealed record AppGuardOverrideSnapshot(Guid CredentialId, bool Enabled, bool RestartAfterExit, int RestartDelayMinutes, bool RestartOnCrash, bool PreventDeletion, int BackupIntervalHours, DateTimeOffset UpdatedAt, bool EnhancedMode = false, string? BackupPathsJson = null, bool RandomBackupPath = false, string? ProcessName = null, string? BackupDirectoryName = null, bool? LaunchOnStartup = null);
 public sealed record OperationsSettingsSnapshot(int AuditRetentionDays, bool DeviceAlertsEnabled, int DeviceAlertThresholdMinutes, bool DeviceAlertNotifyAdmins, bool DeviceAlertNotifyClassHeads, bool DeviceAlertSchoolHoursOnly, bool ProfileDriftCheckEnabled = true, string? ProfileDriftCheckTime = null);
 public sealed record AutomationRuleSnapshot(Guid Id, string Name, bool Enabled, string TriggerJson, string ActionsJson, string TargetJson, string? ValidFrom, string? ValidTo, Guid CreatedByUserId, string CreatedByName, long CreatedAtUnixMs, long UpdatedAtUnixMs);
 public sealed record HolidaySettingsSnapshot(bool Enabled, string? SourceUrlTemplate, List<HolidayOverrideSnapshot> Overrides);

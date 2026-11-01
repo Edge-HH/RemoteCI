@@ -104,9 +104,14 @@ internal sealed class GuardConfig
     [DataMember(Name = "restartAfterExit")] public bool RestartAfterExit { get; set; }
     [DataMember(Name = "restartDelayMinutes")] public int RestartDelayMinutes { get; set; }
     [DataMember(Name = "restartOnCrash")] public bool RestartOnCrash { get; set; }
+
+    /// <summary>开机（登录）后由守护启动 ClassIsland；旧插件写的配置没有该字段（null），沿用“开了任一自启项就启动”。</summary>
+    [DataMember(Name = "launchOnStartup", EmitDefaultValue = false)] public bool? LaunchOnStartup { get; set; }
     [DataMember(Name = "preventDeletion")] public bool PreventDeletion { get; set; }
     [DataMember(Name = "backupIntervalHours")] public int BackupIntervalHours { get; set; } = 24;
     [DataMember(Name = "organizationName")] public string? OrganizationName { get; set; }
+
+    public bool ShouldLaunchOnStartup => LaunchOnStartup ?? (RestartAfterExit || RestartOnCrash);
 
     /// <summary>启动 ClassIsland 使用的程序（优先启动器 ClassIsland.exe）。</summary>
     [DataMember(Name = "launchPath")] public string LaunchPath { get; set; } = string.Empty;

@@ -210,6 +210,9 @@ public sealed class SystemMetadata
 
     public bool AppGuardRestartOnCrash { get; set; } = true;
 
+    /// <summary>开机（登录 Windows）后由守护进程启动 ClassIsland，不改动 ClassIsland 自身的开机自启设置。</summary>
+    public bool AppGuardLaunchOnStartup { get; set; } = true;
+
     public bool AppGuardPreventDeletion { get; set; }
 
     /// <summary>防删除定时备份间隔小时数（1-168）。</summary>

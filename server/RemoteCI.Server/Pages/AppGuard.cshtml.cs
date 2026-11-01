@@ -192,6 +192,7 @@ public sealed class AppGuardModel(
         public bool RestartAfterExit { get; set; }
         public int RestartAfterExitDelayMinutes { get; set; }
         public bool RestartOnCrash { get; set; }
+        public bool LaunchOnStartup { get; set; } = true;
         public bool PreventDeletion { get; set; }
         public int BackupIntervalHours { get; set; } = AppGuardPolicy.DefaultBackupIntervalHours;
         public bool EnhancedMode { get; set; }
@@ -206,6 +207,7 @@ public sealed class AppGuardModel(
             RestartAfterExit = RestartAfterExit,
             RestartAfterExitDelayMinutes = RestartAfterExitDelayMinutes,
             RestartOnCrash = RestartOnCrash,
+            LaunchOnStartup = LaunchOnStartup,
             PreventDeletion = PreventDeletion,
             BackupIntervalHours = BackupIntervalHours,
             EnhancedMode = EnhancedMode,
@@ -221,6 +223,7 @@ public sealed class AppGuardModel(
             RestartAfterExit = policy.RestartAfterExit,
             RestartAfterExitDelayMinutes = policy.RestartAfterExitDelayMinutes,
             RestartOnCrash = policy.RestartOnCrash,
+            LaunchOnStartup = policy.LaunchOnStartup,
             PreventDeletion = policy.PreventDeletion,
             BackupIntervalHours = policy.BackupIntervalHours,
             EnhancedMode = policy.EnhancedMode,

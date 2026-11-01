@@ -68,6 +68,7 @@ public sealed class GuardWireContractTests
         {
             Enabled = true,
             RestartAfterExitDelayMinutes = 40,
+            LaunchOnStartup = false,
             BackupPaths = [@"D:\Backup"],
             OrganizationName = "实验中学",
         }), JsonDefaults.Options);
@@ -82,6 +83,7 @@ public sealed class GuardWireContractTests
         var guardPolicy = GuardJson.Deserialize<GuardEnvelope<GuardPolicyPayload>>(policy)!.Payload!;
         Assert.True(guardPolicy.Enabled);
         Assert.Equal(40, guardPolicy.RestartAfterExitDelayMinutes);
+        Assert.False(guardPolicy.LaunchOnStartup);
         Assert.Equal([@"D:\Backup"], guardPolicy.BackupPaths);
         Assert.Equal("实验中学", guardPolicy.OrganizationName);
     }

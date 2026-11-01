@@ -35,6 +35,13 @@ public sealed class AppGuardPolicy
     [JsonPropertyName("restartOnCrash")]
     public bool RestartOnCrash { get; set; }
 
+    /// <summary>
+    /// 开机（登录 Windows）后由守护进程启动 ClassIsland：守护启动一分钟后 ClassIsland 仍未运行就把它拉起。
+    /// 只决定守护是否代为启动，不改动 ClassIsland 自身的开机自启设置。
+    /// </summary>
+    [JsonPropertyName("launchOnStartup")]
+    public bool LaunchOnStartup { get; set; } = true;
+
     /// <summary>禁止删除：定时备份 ClassIsland，发现被删除后自动恢复并启动。</summary>
     [JsonPropertyName("preventDeletion")]
     public bool PreventDeletion { get; set; }
@@ -73,6 +80,7 @@ public sealed class AppGuardPolicy
         RestartAfterExit = RestartAfterExit,
         RestartAfterExitDelayMinutes = Math.Clamp(RestartAfterExitDelayMinutes, 0, MaxRestartDelayMinutes),
         RestartOnCrash = RestartOnCrash,
+        LaunchOnStartup = LaunchOnStartup,
         PreventDeletion = PreventDeletion,
         BackupIntervalHours = Math.Clamp(BackupIntervalHours, MinBackupIntervalHours, MaxBackupIntervalHours),
         EnhancedMode = EnhancedMode,
@@ -120,6 +128,7 @@ public sealed class AppGuardPolicy
         if (RestartAfterExit)
             parts.Add(RestartAfterExitDelayMinutes > 0 ? $"退出 {RestartAfterExitDelayMinutes} 分钟后自启" : "退出后立即自启");
         if (RestartOnCrash) parts.Add("意外退出时重启");
+        if (LaunchOnStartup) parts.Add("开机自动启动");
         if (PreventDeletion) parts.Add(BackupPaths.Count > 0 || RandomBackupPath ? $"禁止删除（{BackupPaths.Count + 1 + (RandomBackupPath ? 1 : 0)} 个备份目标）" : "禁止删除");
         if (EnhancedMode) parts.Add("增强守护");
         if (RandomBackupPath) parts.Add(string.IsNullOrEmpty(BackupDirectoryName) ? "随机安全备份" : $"安全备份目录 {BackupDirectoryName}");

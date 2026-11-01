@@ -12,6 +12,7 @@ public sealed class AppGuardOverride
     public bool RestartAfterExit { get; set; }
     public int RestartDelayMinutes { get; set; }
     public bool RestartOnCrash { get; set; }
+    public bool LaunchOnStartup { get; set; } = true;
     public bool PreventDeletion { get; set; }
     public int BackupIntervalHours { get; set; } = RemoteCI.Shared.Models.AppGuardPolicy.DefaultBackupIntervalHours;
     public bool EnhancedMode { get; set; }

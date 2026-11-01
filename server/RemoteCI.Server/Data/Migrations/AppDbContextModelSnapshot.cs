@@ -283,6 +283,9 @@ namespace RemoteCI.Server.Data.Migrations
                     b.Property<bool>("EnhancedMode")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("LaunchOnStartup")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("PreventDeletion")
                         .HasColumnType("INTEGER");
 
@@ -1707,6 +1710,9 @@ namespace RemoteCI.Server.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("AppGuardEnhancedMode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AppGuardLaunchOnStartup")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("AppGuardPreventDeletion")

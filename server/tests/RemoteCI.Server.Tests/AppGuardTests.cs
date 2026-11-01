@@ -36,10 +36,11 @@ public sealed class AppGuardTests
         Assert.True(inherited.Enabled);
         Assert.Equal(40, inherited.RestartAfterExitDelayMinutes);
         Assert.Equal("实验中学信息中心", inherited.OrganizationName);
-        Assert.Equal("退出 40 分钟后自启 / 意外退出时重启 / 禁止删除", inherited.Describe());
+        Assert.Equal("退出 40 分钟后自启 / 意外退出时重启 / 开机自动启动 / 禁止删除", inherited.Describe());
 
-        var view = await guard.SetOverrideAsync(credentialId, new AppGuardPolicy { Enabled = false, RestartAfterExitDelayMinutes = 99999 });
+        var view = await guard.SetOverrideAsync(credentialId, new AppGuardPolicy { Enabled = false, RestartAfterExitDelayMinutes = 99999, LaunchOnStartup = false });
         Assert.True(view.Overridden);
+        Assert.False(view.Policy.LaunchOnStartup);
         Assert.False((await guard.GetEffectiveAsync(credentialId)).Enabled);
         Assert.Equal(AppGuardPolicy.MaxRestartDelayMinutes, view.Policy.RestartAfterExitDelayMinutes);
 

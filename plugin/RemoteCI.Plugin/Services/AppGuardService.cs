@@ -273,6 +273,7 @@ public sealed class AppGuardService : IDisposable
             RestartAfterExit = policy.RestartAfterExit,
             RestartDelayMinutes = policy.RestartAfterExitDelayMinutes,
             RestartOnCrash = policy.RestartOnCrash,
+            LaunchOnStartup = policy.LaunchOnStartup,
             // MSIX 包安装在系统保护目录，无法备份与还原。
             PreventDeletion = policy.PreventDeletion && !info.IsMsix,
             BackupIntervalHours = policy.BackupIntervalHours,

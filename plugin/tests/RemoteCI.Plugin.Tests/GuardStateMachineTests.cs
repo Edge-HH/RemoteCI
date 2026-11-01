@@ -219,6 +219,39 @@ public sealed class GuardStateMachineTests
     }
 
     [Fact]
+    public void GuardStartup_DoesNotLaunch_WhenLaunchOnStartupIsOff()
+    {
+        var policy = Policy();
+        policy.LaunchOnStartup = false;
+        var machine = new GuardStateMachine();
+
+        machine.Tick(See(Start), policy);
+        Assert.Equal(GuardAction.None, machine.Tick(See(Start + GuardStateMachine.StartupGraceMs), policy).Action);
+        Assert.False(machine.HasPendingLaunch);
+    }
+
+    [Fact]
+    public void GuardStartup_LaunchesWithoutRestartOptions_WhenLaunchOnStartupIsOn()
+    {
+        var policy = Policy(restartAfterExit: false, restartOnCrash: false);
+        policy.LaunchOnStartup = true;
+        var machine = new GuardStateMachine();
+
+        machine.Tick(See(Start), policy);
+        Assert.Equal(GuardAction.Launch, machine.Tick(See(Start + GuardStateMachine.StartupGraceMs), policy).Action);
+    }
+
+    [Fact]
+    public void GuardStartup_FallsBackToRestartOptions_WhenConfigPredatesLaunchOnStartup()
+    {
+        var legacy = GuardJson.Deserialize<GuardConfig>("{\"enabled\":true,\"restartAfterExit\":false,\"restartOnCrash\":false}")!;
+
+        Assert.Null(legacy.LaunchOnStartup);
+        Assert.False(legacy.ShouldLaunchOnStartup);
+        Assert.True(Policy().ShouldLaunchOnStartup);
+    }
+
+    [Fact]
     public void GuardEventKinds_MatchSharedProtocol()
     {
         static Dictionary<string, string?> Constants(Type type) => type

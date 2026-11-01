@@ -128,7 +128,7 @@ internal sealed class GuardStateMachine
         {
             // 守护进程刚启动（通常是登录 Windows 后）：给 ClassIsland 自己的开机自启留一分钟，仍未运行再拉起。
             _wasRunning = false;
-            if (policy.RestartAfterExit || policy.RestartOnCrash)
+            if (policy.ShouldLaunchOnStartup)
                 Schedule(o.NowMs + StartupGraceMs, null, "登录后启动");
             return GuardDecision.None;
         }
