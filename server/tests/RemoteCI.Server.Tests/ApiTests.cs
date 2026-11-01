@@ -1707,7 +1707,8 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         using var browser = CreateBrowserClient();
         await LoginWebUiAsync(browser, "role.navigation", "Role-Navigation-Password-2026");
         var accountHtml = WebUtility.HtmlDecode(await browser.GetStringAsync("/Account"));
-        Assert.Contains("<span>控制</span>", accountHtml);
+        // “控制”收在侧边栏“班级管理”合并入口下，以隐藏的“班级管理 · 控制”链接供搜索直达。
+        Assert.Contains("班级管理 · 控制", accountHtml);
         var control = await browser.GetAsync("/Control");
         Assert.Equal(HttpStatusCode.OK, control.StatusCode);
         Assert.DoesNotContain("老师来了", WebUtility.HtmlDecode(await control.Content.ReadAsStringAsync()));
@@ -1722,7 +1723,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         using var browser = CreateBrowserClient();
         await LoginWebUiAsync(browser, "role.legacy-coming", "Role-Navigation-Password-2026");
         var accountHtml = WebUtility.HtmlDecode(await browser.GetStringAsync("/Account"));
-        Assert.DoesNotContain("<span>控制</span>", accountHtml);
+        Assert.DoesNotContain("班级管理 · 控制", accountHtml);
         Assert.DoesNotContain("老师来了", accountHtml);
     }
 
