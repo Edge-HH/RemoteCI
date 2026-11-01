@@ -9,13 +9,13 @@
     const applyTheme = () => {
         const mode = localStorage.getItem("remoteci-mobile-appearance") || "system";
         root.dataset.theme = mode === "system" ? (systemTheme.matches ? "dark" : "light") : mode;
-        document.querySelector('meta[name="theme-color"]').content = getComputedStyle(root).getPropertyValue("--m-bg").trim() || "#F7FBF1";
+        document.querySelector('meta[name="theme-color"]').content = getComputedStyle(root).getPropertyValue("--m-bg").trim() || "#EDF6F1";
     };
     systemTheme.addEventListener("change", applyTheme);
     for (const [selector, key, attr] of [["[data-mobile-appearance]", "remoteci-mobile-appearance", null], ["[data-mobile-palette]", "remoteci-mobile-palette", "palette"]]) {
         const select = document.querySelector(selector);
         if (!select) continue;
-        select.value = localStorage.getItem(key) || (attr ? "green" : "system");
+        select.value = localStorage.getItem(key) || (attr ? "fresh" : "system");
         select.addEventListener("change", () => { localStorage.setItem(key, select.value); if (attr) root.dataset[attr] = select.value; applyTheme(); });
     }
     applyTheme();

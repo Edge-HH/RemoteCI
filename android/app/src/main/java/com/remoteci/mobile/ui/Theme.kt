@@ -6,8 +6,10 @@ import android.content.ContextWrapper
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Surface
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -19,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 
 const val DynamicThemeId = "dynamic"
@@ -55,6 +58,51 @@ private val DarkBase = darkColorScheme(
     outlineVariant = Color(0xFF464651),
 )
 
+// “清新”配色的底色：雾白与浅薄荷的低饱和表面，与 WebUI 的 premium.css / mobile.css 同一色板。
+private val FreshLightBase = lightColorScheme(
+    background = Color(0xFFFAFCFB),
+    onBackground = Color(0xFF1F3B33),
+    surface = Color(0xFFFAFCFB),
+    onSurface = Color(0xFF1F3B33),
+    surfaceVariant = Color(0xFFE3F3EA),
+    onSurfaceVariant = Color(0xFF50685F),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFEDF6F1),
+    surfaceContainer = Color(0xFFE3F3EA),
+    surfaceContainerHigh = Color(0xFFDCEDE4),
+    surfaceContainerHighest = Color(0xFFD3E8DD),
+    outline = Color(0xFF7A968C),
+    outlineVariant = Color(0xFFC3DED0),
+)
+
+private val FreshDarkBase = darkColorScheme(
+    background = Color(0xFF0F1815),
+    onBackground = Color(0xFFE4F1EB),
+    surface = Color(0xFF0F1815),
+    onSurface = Color(0xFFE4F1EB),
+    surfaceVariant = Color(0xFF24362F),
+    onSurfaceVariant = Color(0xFF9DB5AB),
+    surfaceContainerLowest = Color(0xFF0B1310),
+    surfaceContainerLow = Color(0xFF16221E),
+    surfaceContainer = Color(0xFF1C2B26),
+    surfaceContainerHigh = Color(0xFF24362F),
+    surfaceContainerHighest = Color(0xFF2C4038),
+    outline = Color(0xFF7F978D),
+    outlineVariant = Color(0xFF31483F),
+)
+
+/** 大圆角：卡片 24、大卡片 32、对话框 36；按钮本身已是胶囊形。 */
+private val FreshShapes = Shapes(
+    extraSmall = RoundedCornerShape(12.dp),
+    small = RoundedCornerShape(16.dp),
+    medium = RoundedCornerShape(24.dp),
+    large = RoundedCornerShape(32.dp),
+    extraLarge = RoundedCornerShape(36.dp),
+)
+
+/** 次要强调色（容器与其上的文字）；为空时与主色相同。 */
+data class AccentPair(val container: Color, val onContainer: Color)
+
 data class MobilePalette(
     val id: String,
     val label: String,
@@ -64,21 +112,26 @@ data class MobilePalette(
     val darkPrimary: Color,
     val darkContainer: Color,
     val darkOnContainer: Color,
+    val lightSecondary: AccentPair? = null,
+    val darkSecondary: AccentPair? = null,
+    val lightBase: ColorScheme = LightBase,
+    val darkBase: ColorScheme = DarkBase,
 ) {
     fun colorScheme(dark: Boolean): ColorScheme {
         val primary = if (dark) darkPrimary else lightPrimary
         val container = if (dark) darkContainer else lightContainer
         val onContainer = if (dark) darkOnContainer else lightOnContainer
         val onPrimary = if (dark) lightOnContainer else Color.White
-        return (if (dark) DarkBase else LightBase).copy(
+        val secondary = (if (dark) darkSecondary else lightSecondary) ?: AccentPair(container, onContainer)
+        return (if (dark) darkBase else lightBase).copy(
             primary = primary,
             onPrimary = onPrimary,
             primaryContainer = container,
             onPrimaryContainer = onContainer,
             secondary = primary,
             onSecondary = onPrimary,
-            secondaryContainer = container,
-            onSecondaryContainer = onContainer,
+            secondaryContainer = secondary.container,
+            onSecondaryContainer = secondary.onContainer,
             tertiary = primary,
             onTertiary = onPrimary,
             tertiaryContainer = container,
@@ -89,7 +142,17 @@ data class MobilePalette(
 
     companion object {
         val All = listOf(
-            // 与 Wear OS 的 WatchPalette 共用同一组 M3 tonal palette，避免两端同名主题颜色不同。
+            // 默认“清新”：深青强调、薄荷容器、晴空蓝次要容器，底色换成雾白与浅薄荷。
+            MobilePalette(
+                "fresh", "清新",
+                Color(0xFF276B5C), Color(0xFFBBE5D3), Color(0xFF1F3B33),
+                Color(0xFFA9DCCB), Color(0xFF2B4A40), Color(0xFFE4F1EB),
+                lightSecondary = AccentPair(Color(0xFFE1EEFB), Color(0xFF2F5A85)),
+                darkSecondary = AccentPair(Color(0xFF1E2E40), Color(0xFFA9C8EA)),
+                lightBase = FreshLightBase,
+                darkBase = FreshDarkBase,
+            ),
+            // 以下与 Wear OS 的 WatchPalette 共用同一组 M3 tonal palette，避免两端同名主题颜色不同。
             MobilePalette("lavender", "淡紫", Color(0xFF6750A4), Color(0xFFD8D4FF), Color(0xFF4A4459), Color(0xFFD8D4FF), Color(0xFFE8DEF8), Color(0xFF4A4459)),
             MobilePalette("purple", "经典紫", Color(0xFF6750A4), Color(0xFFEADDFF), Color(0xFF4F378B), Color(0xFFEADDFF), Color(0xFFE8DEF8), Color(0xFF4F378B)),
             MobilePalette("blue", "蓝色", Color(0xFF4660D9), Color(0xFFD8E2FF), Color(0xFF000E62), Color(0xFFD8E2FF), Color(0xFFE0E0FF), Color(0xFF000E62)),
@@ -113,7 +176,7 @@ fun AppearanceMode.resolve(systemDark: Boolean): Boolean = when (this) {
 @Composable
 fun RemoteCiTheme(
     appearanceMode: AppearanceMode = AppearanceMode.System,
-    palette: MobilePalette = MobilePalette.fromId("lavender"),
+    palette: MobilePalette = MobilePalette.fromId("fresh"),
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
@@ -136,7 +199,7 @@ fun RemoteCiTheme(
             }
         }
     }
-    MaterialTheme(colorScheme = scheme) {
+    MaterialTheme(colorScheme = scheme, shapes = FreshShapes) {
         Surface(modifier = Modifier.fillMaxSize(), color = scheme.background, content = content)
     }
 }

@@ -12,7 +12,7 @@
 .profile-search { display: grid; gap: 5px; margin-bottom: 12px; font-size: 12px; color: var(--muted); }
 .profile-search input { width: 100%; min-width: 0; }
 .profile-record-list { display: grid; gap: 5px; margin-top: 10px; }
-.profile-record { display: flex; align-items: center; border-radius: 8px; border: 1px solid transparent; }
+.profile-record { display: flex; align-items: center; border-radius: var(--radius-item, 8px); border: 1px solid transparent; }
 .profile-record.active { border-color: var(--line-strong); background: var(--accent-faint); }
 .profile-record-select { padding: 9px 0 9px 9px; }
 .profile-record > button { display: grid; flex: 1; min-width: 0; justify-content: start; justify-items: start; gap: 3px; padding: 10px; border: 0; background: transparent; text-align: left; }
@@ -40,7 +40,7 @@
 .profile-table th, .profile-table td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
 .profile-table thead th { color: var(--muted); font-size: 12px; font-weight: 600; background: var(--surface-soft); }
 .profile-table tbody tr:hover { background: var(--accent-faint); }
-.profile-table input:not([type="checkbox"]), .profile-table select { width: 100%; min-width: 105px; min-height: 38px; padding: 7px; border-radius: 6px; }
+.profile-table input:not([type="checkbox"]), .profile-table select { width: 100%; min-width: 105px; min-height: 38px; padding: 7px; border-radius: var(--radius-small, 6px); }
 .profile-table .check { white-space: nowrap; margin: 0; font-size: 12px; }
 .profile-time-table { min-width: 900px; }
 .profile-time-table td:first-child input, .profile-time-table td:nth-child(2) input { min-width: 118px; }
@@ -49,8 +49,8 @@
 .profile-help { margin-top: 14px; font-size: 12px; }
 .profile-savebar { margin-top: 24px; padding-top: 17px; border-top: 1px solid var(--line); }
 .profile-savebar > span { font-size: 12px; }
-.profile-batchbar { margin-top: 14px; padding: 13px 14px; border-radius: 8px; background: var(--surface-soft); font-size: 12px; }
-.profile-validation { margin-top: 14px; padding: 12px 14px; border-radius: 8px; background: var(--warning-soft); color: var(--warning); font-size: 12px; }
+.profile-batchbar { margin-top: 14px; padding: 13px 14px; border-radius: var(--radius-item, 8px); background: var(--surface-soft); font-size: 12px; }
+.profile-validation { margin-top: 14px; padding: 12px 14px; border-radius: var(--radius-item, 8px); background: var(--warning-soft); color: var(--warning); font-size: 12px; }
 .profile-validation ul { margin: 8px 0 0; padding-left: 20px; }
 .profile-section-empty, .profile-list-empty { padding: 20px 4px; font-size: 13px; }
 .profile-preview-counts { display: grid; grid-template-columns: repeat(3, 1fr); margin: 16px 0; border-block: 1px solid var(--line); }
@@ -62,7 +62,7 @@
 .profile-choice-list .check { align-items: flex-start; }
 .profile-choice-list input { margin-top: 2px; }
 .profile-apply-sections { display: flex; flex-wrap: wrap; gap: 18px; }
-.profile-dialog fieldset { padding: 14px; border: 1px solid var(--line); border-radius: 8px; }
+.profile-dialog fieldset { padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-item, 8px); }
 .profile-dialog legend { padding: 0 6px; font-size: 13px; font-weight: 650; }
 .profile-dialog details summary { cursor: pointer; padding: 10px 0; font-size: 13px; font-weight: 650; }
 .profile-device-targets { display: grid; gap: 12px; padding: 10px 0; }

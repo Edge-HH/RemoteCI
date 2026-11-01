@@ -3,6 +3,7 @@ package com.remoteci.mobile.ui
 import android.os.SystemClock
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -32,6 +33,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -70,6 +72,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryScrollableTabRow
@@ -493,7 +496,11 @@ fun HomeShell(
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+            // 底栏上沿大圆角；选中指示器用主色容器（清新配色下是薄荷），与 WebUI 底栏一致。
+            NavigationBar(
+                modifier = Modifier.clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)),
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            ) {
                 data class Item(val tab: HomeTab, val label: String, val icon: ImageVector)
                 listOf(
                     Item(HomeTab.Today, "今天", Icons.Rounded.Today),
@@ -514,6 +521,7 @@ fun HomeShell(
                             }
                         },
                         label = { Text(item.label, style = MaterialTheme.typography.labelMedium) },
+                        colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.primaryContainer),
                     )
                 }
             }
@@ -599,8 +607,19 @@ fun TodayScreen(snackbar: SnackbarHostState, onOpen: (Screen) -> Unit, onTab: (H
             },
             modifier = Modifier.fillMaxWidth().height(168.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(32.dp),
         ) {
+            // 右上角两枚低透明度圆点装饰，只做点缀，不参与布局。
+            Box(Modifier.fillMaxSize()) {
+                Box(
+                    Modifier.align(Alignment.TopEnd).offset(x = 54.dp, y = (-64).dp).size(176.dp)
+                        .clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                )
+                Box(
+                    Modifier.align(Alignment.TopEnd).offset(x = (-118).dp, y = 72.dp).size(28.dp)
+                        .clip(CircleShape).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)),
+                )
+            }
             Box(Modifier.fillMaxSize().padding(20.dp)) {
                 Column {
                     Text(stateTitle, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -951,7 +970,7 @@ fun SwapScreen(date: String?, index: Int?, onBack: () -> Unit, snackbar: Snackba
             Card(
                 modifier = Modifier.fillMaxWidth().height(136.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
             ) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("当前选择 · ${source?.label ?: "未选择"} ${source?.subject ?: ""}", style = MaterialTheme.typography.titleMedium)

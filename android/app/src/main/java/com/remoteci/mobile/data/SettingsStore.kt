@@ -17,8 +17,8 @@ data class WatchSettings(
     val selectedClassId: String = "",
     /** 老师与班主任上课时自动切换到正在任教的班级；默认关闭。 */
     val autoFollowTeachingClass: Boolean = false,
-    /** 默认动态取色；Android 12 以下回退到首个预设配色。 */
-    val themeId: String = "dynamic",
+    /** 默认“清新”配色；已保存过的选择（包括动态取色）保持不变。 */
+    val themeId: String = "fresh",
     val updateChannel: UpdateChannel = UpdateChannel.STABLE,
     val forceUpdateEnabled: Boolean = false,
     /** 启动时自动检查 App 更新并弹窗提示；默认开启。 */
@@ -52,7 +52,7 @@ class SettingsStore(context: Context) {
         lanClassId = prefs.getString(KEY_LAN_CLASS_ID, "") ?: "",
         selectedClassId = prefs.getString(KEY_SELECTED_CLASS_ID, "") ?: "",
         autoFollowTeachingClass = prefs.getBoolean(KEY_AUTO_FOLLOW_TEACHING_CLASS, false),
-        themeId = prefs.getString(KEY_THEME_ID, "dynamic") ?: "dynamic",
+        themeId = loadThemeId(),
         updateChannel = runCatching {
             UpdateChannel.valueOf(prefs.getString(KEY_UPDATE_CHANNEL, UpdateChannel.STABLE.name)!!)
         }.getOrDefault(UpdateChannel.STABLE),
@@ -99,6 +99,18 @@ class SettingsStore(context: Context) {
             .apply()
     }
 
+    /**
+     * 旧版默认“动态取色”，大多数账号保存的 dynamic 只是当时的默认值。升级后只迁移一次：
+     * dynamic 改为新的默认“清新”；之后用户再选动态取色就保持不变。
+     */
+    private fun loadThemeId(): String {
+        val saved = prefs.getString(KEY_THEME_ID, null)
+        if (prefs.getBoolean(KEY_THEME_FRESH_MIGRATED, false)) return saved ?: "fresh"
+        val themeId = if (saved == null || saved == "dynamic") "fresh" else saved
+        prefs.edit().putString(KEY_THEME_ID, themeId).putBoolean(KEY_THEME_FRESH_MIGRATED, true).apply()
+        return themeId
+    }
+
     private companion object {
         const val KEY_USERNAME = "username"
         const val KEY_CLOUD_CONNECTION_ENABLED = "cloudConnectionEnabled"
@@ -111,6 +123,7 @@ class SettingsStore(context: Context) {
         const val KEY_SELECTED_CLASS_ID = "selectedClassId"
         const val KEY_AUTO_FOLLOW_TEACHING_CLASS = "autoFollowTeachingClass"
         const val KEY_THEME_ID = "themeId"
+        const val KEY_THEME_FRESH_MIGRATED = "themeFreshMigrated"
         const val KEY_UPDATE_CHANNEL = "updateChannel"
         const val KEY_FORCE_UPDATE = "forceUpdateEnabled"
         const val KEY_AUTO_UPDATE_CHECK = "autoUpdateCheck"
