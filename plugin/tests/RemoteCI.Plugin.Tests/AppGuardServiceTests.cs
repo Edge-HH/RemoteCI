@@ -31,6 +31,13 @@ public sealed class AppGuardServiceTests : IDisposable
         return (store, new AppGuardService(store, _host, NullLogger<AppGuardService>.Instance, GuardDirectory));
     }
 
+    // 等启动时的后台初始部署跑完，避免它与测试随后的策略变更交错执行。
+    private static void Start(AppGuardService service)
+    {
+        service.Start();
+        service.InitialApply.Wait();
+    }
+
     private static AppGuardPolicy Enabled() => new()
     {
         Enabled = true, RestartAfterExit = true, RestartAfterExitDelayMinutes = 40, RestartOnCrash = true, PreventDeletion = true,
@@ -41,7 +48,7 @@ public sealed class AppGuardServiceTests : IDisposable
     public void EnabledPolicy_DeploysGuardExecutable_ConfigRunKeyAndStartsIt()
     {
         var (store, service) = Create();
-        service.Start();
+        Start(service);
 
         store.Apply(Enabled());
 
@@ -64,7 +71,7 @@ public sealed class AppGuardServiceTests : IDisposable
     public void NewBundledGuard_ReplacesRunningCopy()
     {
         var (store, service) = Create();
-        service.Start();
+        Start(service);
         store.Apply(Enabled());
         File.WriteAllText(_host.BundledGuardPath, "guard-v2");
 
@@ -138,7 +145,7 @@ public sealed class AppGuardServiceTests : IDisposable
     public void DisabledPolicy_StopsGuardRemovesRunKeyAndDeletesBackups()
     {
         var (store, service) = Create();
-        service.Start();
+        Start(service);
         store.Apply(Enabled());
         Directory.CreateDirectory(Path.Combine(GuardDirectory, "backup", "current"));
 
@@ -154,7 +161,7 @@ public sealed class AppGuardServiceTests : IDisposable
     public void RemoteClose_StopsGuardWithoutDeletingInstallation()
     {
         var (store, service) = Create();
-        service.Start();
+        Start(service);
         var enabled = Enabled();
         enabled.EnhancedMode = true;
         store.Apply(enabled);
@@ -185,7 +192,7 @@ public sealed class AppGuardServiceTests : IDisposable
     {
         var (_, service) = Create();
 
-        service.Start();
+        Start(service);
 
         Assert.False(Directory.Exists(GuardDirectory));
         Assert.Equal("untouched", _host.RunKey);
@@ -196,7 +203,7 @@ public sealed class AppGuardServiceTests : IDisposable
     public void MarkExiting_DoesNotOverwriteRecentUpdatingMarker()
     {
         var (store, service) = Create();
-        service.Start();
+        Start(service);
         store.Apply(Enabled());
         var statePath = Path.Combine(GuardDirectory, GuardFiles.State);
 
@@ -217,7 +224,7 @@ public sealed class AppGuardServiceTests : IDisposable
         Directory.CreateDirectory(GuardDirectory);
         GuardJson.WriteFile(Path.Combine(GuardDirectory, GuardFiles.PendingNotice), new GuardNotice { AtUnixMs = 1 });
 
-        service.Start();
+        Start(service);
         service.ShowPendingNotice();
 
         var notice = Assert.Single(_host.Notices);
@@ -361,7 +368,7 @@ public sealed class AppGuardServiceTests : IDisposable
         _host.EnhancedResult = false;
         var (store, service) = Create();
         service.ConnectionInfoProvider = () => (true, "https://example.test", token);
-        service.Start();
+        Start(service);
 
         var policy = Enabled();
         policy.EnhancedMode = true;
@@ -419,7 +426,7 @@ public sealed class AppGuardServiceTests : IDisposable
     public void ProcessRename_DeploysOutsideClassIsland_StopsOldGuardAndUpdatesRunKey()
     {
         var (store, service) = Create();
-        service.Start();
+        Start(service);
         store.Apply(Enabled());
         var previous = service.GuardExecutablePath;
 
@@ -440,7 +447,7 @@ public sealed class AppGuardServiceTests : IDisposable
     public void ProcessRename_UpdatesEnhancedAgentPath()
     {
         var (store, service) = Create();
-        service.Start();
+        Start(service);
         var enhanced = Enabled();
         enhanced.EnhancedMode = true;
         store.Apply(enhanced);

@@ -45,10 +45,13 @@ public sealed class AppGuardService : IDisposable
     internal static string ExecutablePath(string directory, string? processName) =>
         Path.Combine(directory, GuardFiles.ExecutableNameFor(processName));
 
+    /// <summary>启动时后台执行的初始部署；测试需等它完成，否则它会与随后的策略变更交错执行。</summary>
+    internal Task InitialApply { get; private set; } = Task.CompletedTask;
+
     public void Start()
     {
         _store.Changed += Apply;
-        _ = Task.Run(() =>
+        InitialApply = Task.Run(() =>
         {
             try { Apply(); }
             catch (Exception ex) { _logger.LogError(ex, "应用守护初始部署失败"); }
