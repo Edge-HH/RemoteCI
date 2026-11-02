@@ -905,6 +905,9 @@ fun ScheduleScreen(
         if (swapMode) {
             SwapRequestsScreen(snackbar = snackbar, showTopBar = false)
         } else if (mineMode && tableMode) {
+            PersonalCoursesButton(personalCourses.size) {
+                if (personalCourses.isEmpty()) { editingCourse = null; showCourseEditor = true } else showCourseList = true
+            }
             val week = myWeek?.takeIf { it.from == myWeekStart.toString() }
             ScheduleWeekPane(
                 weekStart = myWeekStart,
@@ -942,15 +945,8 @@ fun ScheduleScreen(
             )
         } else if (mineMode) {
             // 单双周课程本周可能不出现在日程里，统一从列表查看、修改和删除；列表里也能新增。
-            TextButton(
-                onClick = {
-                    if (personalCourses.isEmpty()) { editingCourse = null; showCourseEditor = true } else showCourseList = true
-                },
-                modifier = Modifier.padding(horizontal = 8.dp),
-            ) {
-                Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.size(8.dp))
-                Text(if (personalCourses.isEmpty()) "添加自定义课程" else "自定义课程（${personalCourses.size}）")
+            PersonalCoursesButton(personalCourses.size) {
+                if (personalCourses.isEmpty()) { editingCourse = null; showCourseEditor = true } else showCourseList = true
             }
             CalendarSyncRow(snackbar, myScheduleRefresh, CalendarFeed.Personal)
             when {
@@ -1105,6 +1101,16 @@ fun ScheduleScreen(
             }
         }
         }
+    }
+}
+
+/** “我的日程”的自定义课程入口：没有课程时直接新增，否则打开课程列表查看、修改与新增。 */
+@Composable
+private fun PersonalCoursesButton(count: Int, onClick: () -> Unit) {
+    TextButton(onClick = onClick, modifier = Modifier.padding(horizontal = 8.dp)) {
+        Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.size(8.dp))
+        Text(if (count == 0) "添加自定义课程" else "自定义课程（$count）")
     }
 }
 

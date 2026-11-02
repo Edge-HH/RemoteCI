@@ -66,7 +66,7 @@ data class ScheduleGridDisplay(
 )
 
 private val PeriodWidth = 40.dp
-private val HeaderHeight = 46.dp
+private val HeaderHeight = 58.dp
 private val BaseRowHeight = 66.dp
 private val GapHeight = 12.dp
 private val DividerHeight = 9.dp
@@ -205,16 +205,16 @@ fun ScheduleWeekGrid(
 private fun DayHeader(column: GridColumn, width: Dp) {
     val today = column.isToday
     Column(
-        Modifier.width(width).fillMaxSize().padding(vertical = 4.dp),
+        Modifier.width(width).fillMaxSize().padding(vertical = 3.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
     ) {
         val color = if (today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-        Text(WeekNames[column.date.dayOfWeek.value % 7], fontSize = 12.sp, fontWeight = if (today) FontWeight.ExtraBold else FontWeight.SemiBold, color = color)
-        Text("%02d/%02d".format(java.util.Locale.ROOT, column.date.monthValue, column.date.dayOfMonth), fontSize = 10.sp,
+        Text(WeekNames[column.date.dayOfWeek.value % 7], fontSize = 12.sp, lineHeight = 14.sp, fontWeight = if (today) FontWeight.ExtraBold else FontWeight.SemiBold, color = color)
+        Text("%02d/%02d".format(java.util.Locale.ROOT, column.date.monthValue, column.date.dayOfMonth), fontSize = 10.sp, lineHeight = 12.sp,
             color = if (today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
         if (column.dayKind == Protocol.DAY_KIND_MAKEUP) {
-            Text("调休", fontSize = 9.sp, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold)
+            Text("调休", fontSize = 9.sp, lineHeight = 11.sp, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Bold)
         }
     }
 }
