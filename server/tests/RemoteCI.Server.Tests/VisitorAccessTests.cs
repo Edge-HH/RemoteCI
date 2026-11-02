@@ -1,8 +1,11 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using RemoteCI.Server.Data;
 using RemoteCI.Server.Pages;
 using RemoteCI.Server.Services;
@@ -197,6 +200,11 @@ public sealed class VisitorAccessTests
         var loginHtml = WebUtility.HtmlDecode(await browser.GetStringAsync("/Login"));
         Assert.Contains("name=\"Input.RememberMe\"", loginHtml);
         Assert.Contains("保持登录", loginHtml);
+
+        var cookieOptions = factory.Services.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(IdentityConstants.ApplicationScheme);
+        Assert.Equal(TimeSpan.FromDays(30), cookieOptions.ExpireTimeSpan);
+        Assert.True(cookieOptions.SlidingExpiration);
 
         var token = Regex.Match(
             loginHtml,

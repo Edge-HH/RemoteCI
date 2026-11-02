@@ -71,7 +71,8 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.Cookie.HttpOnly = true;
     options.Cookie.SameSite = SameSiteMode.Strict;
     options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
-    options.ExpireTimeSpan = TimeSpan.FromHours(8);
+    // 网页端会话有效期 30 天：勾选“保持登录”后关闭浏览器仍有效，持续访问时滑动续期。
+    options.ExpireTimeSpan = TimeSpan.FromDays(30);
     options.SlidingExpiration = true;
     options.LoginPath = "/Login";
     options.AccessDeniedPath = "/Denied";
