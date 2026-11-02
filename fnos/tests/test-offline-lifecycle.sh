@@ -13,7 +13,20 @@ ARM_FPK="$(realpath "$3")"
 VERSION="$4"
 IMAGE_TAG="ghcr.io/edge-hh/remoteci:$VERSION"
 WORK="$(mktemp -d)"
-trap 'docker image rm "$IMAGE_TAG" >/dev/null 2>&1 || true; rm -rf "$WORK"' EXIT
+cleanup() {
+  local status=$?
+  # 导入脚本只把原因写进日志文件；失败时打印出来，否则 CI 里只剩一个退出码。
+  if [ "$status" -ne 0 ]; then
+    for log in "$WORK"/*.log; do
+      [ -f "$log" ] || continue
+      echo "===== $(basename "$log") =====" >&2
+      cat "$log" >&2
+    done
+  fi
+  docker image rm "$IMAGE_TAG" >/dev/null 2>&1 || true
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
 
 extract_fpk() {
   local package="$1"

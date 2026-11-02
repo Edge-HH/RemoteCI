@@ -1,12 +1,21 @@
 # 多阶段构建：SDK 阶段编译，运行时阶段仅带 aspnet 运行时，适合 NAS/轻量服务器。
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+# SDK 阶段固定在构建机架构上运行并交叉编译到目标架构：多架构发布时不必用 QEMU 模拟 arm64 跑 dotnet，
+# 否则单次镜像构建要十几分钟。
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG REMOTECI_VERSION
+ARG TARGETARCH
 WORKDIR /src
 
 COPY shared/RemoteCI.Shared/ shared/RemoteCI.Shared/
 COPY server/RemoteCI.Server/ server/RemoteCI.Server/
 RUN if [ -n "$REMOTECI_VERSION" ]; then version_arg="-p:Version=$REMOTECI_VERSION"; else version_arg=""; fi; \
-    dotnet publish server/RemoteCI.Server/RemoteCI.Server.csproj -c Release $version_arg -o /app/publish
+    case "${TARGETARCH:-amd64}" in \
+      amd64) arch=x64 ;; \
+      arm64) arch=arm64 ;; \
+      *) echo "不支持的目标架构：$TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    dotnet publish server/RemoteCI.Server/RemoteCI.Server.csproj -c Release -a "$arch" --self-contained false \
+      -p:UseAppHost=false $version_arg -o /app/publish
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 ARG REMOTECI_VERSION

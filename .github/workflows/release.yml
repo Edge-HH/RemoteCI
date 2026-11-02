@@ -15,18 +15,20 @@ permissions:
 
 jobs:
   build-server:
-    name: 服务端 (linux-x64 / win-x64)
+    name: 服务端 (linux-x64 / linux-arm64 / win-x64)
     runs-on: ubuntu-latest
     strategy:
       matrix:
         # linux-arm64 供 ARM 设备（含 ARM fnOS 容器）在 WebUI 中自更新。
         rid: [linux-x64, linux-arm64, win-x64]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v6
+      - name: 📥 检出代码
+        uses: actions/checkout@v7
+      - name: 🧰 安装 .NET SDK
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
-      - name: Publish 服务端压缩包
+      - name: 🖥️ 发布服务端压缩包
         run: |
           source .github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
           grep -Fq 'public const int Version = 3;' shared/RemoteCI.Shared/Protocol.cs
@@ -40,7 +42,8 @@ jobs:
           cd ..
           # 同名校验和文件随包发布；服务端更新前按此校验完整性。
           sha256sum "RemoteCI.Server-${version}-${{ matrix.rid }}.zip" > "RemoteCI.Server-${version}-${{ matrix.rid }}.zip.sha256"
-      - uses: actions/upload-artifact@v7
+      - name: ⬆️ 上传服务端产物
+        uses: actions/upload-artifact@v7
         with:
           name: server-${{ matrix.rid }}
           path: |
@@ -51,11 +54,13 @@ jobs:
     name: 插件 CIPX
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v6
+      - name: 📥 检出代码
+        uses: actions/checkout@v7
+      - name: 🧰 安装 .NET SDK
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
-      - name: 打包 CIPX
+      - name: 🧩 打包插件 CIPX
         run: |
           source .github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
           grep -Fq 'public const int Version = 3;' shared/RemoteCI.Shared/Protocol.cs
@@ -76,7 +81,8 @@ jobs:
               -ChecksumPath checksums.md \
               -ExpectedVersion "$version"
           fi
-      - uses: actions/upload-artifact@v7
+      - name: ⬆️ 上传插件产物
+        uses: actions/upload-artifact@v7
         with:
           name: plugin-cipx
           path: |
@@ -88,12 +94,15 @@ jobs:
     name: 手表 APK
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - name: 📥 检出代码
+        uses: actions/checkout@v7
+      - name: ☕ 安装 JDK 并启用 Gradle 缓存
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
-      - name: 配置签名密钥
+          cache: gradle
+      - name: 🔑 配置签名密钥
         env:
           ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -114,7 +123,7 @@ jobs:
             echo "keyAlias=$ANDROID_KEY_ALIAS"
             echo "keyPassword=$ANDROID_KEY_PASSWORD"
           } > wearos/keystore.properties
-      - name: 构建 Release APK
+      - name: ⌚ 构建手表 Release APK
         working-directory: wearos
         run: |
           source ../.github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
@@ -122,7 +131,7 @@ jobs:
           chmod +x gradlew
           ./gradlew :app:assembleRelease -PreleaseVersion="$version" --console=plain
           grep -Fq "\"versionName\": \"$version\"" app/build/outputs/apk/release/output-metadata.json
-      - name: 按版本重命名 APK
+      - name: ✍️ 重命名手表 APK 并校验签名延续
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -160,22 +169,26 @@ jobs:
             echo "::error::当前 APK 与上一正式版签名证书不一致，拒绝发布"
             exit 1
           }
-      - uses: actions/upload-artifact@v7
+      - name: ⬆️ 上传手表 APK
+        uses: actions/upload-artifact@v7
         with:
           name: watch-apk
           path: RemoteCI.Watch-*.apk
 
 
   build-android:
-    name: Phone APK
+    name: 手机 APK
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - name: 📥 检出代码
+        uses: actions/checkout@v7
+      - name: ☕ 安装 JDK 并启用 Gradle 缓存
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
-      - name: Prepare signing key
+          cache: gradle
+      - name: 🔑 配置签名密钥
         env:
           ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -184,7 +197,7 @@ jobs:
         run: |
           for name in ANDROID_KEYSTORE_B64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
             if [ -z "${!name}" ]; then
-              echo "::error::missing $name"
+              echo "::error::未配置 $name，拒绝发布无法覆盖正式版的 APK"
               exit 1
             fi
           done
@@ -196,7 +209,7 @@ jobs:
             echo "keyAlias=$ANDROID_KEY_ALIAS"
             echo "keyPassword=$ANDROID_KEY_PASSWORD"
           } > android/keystore.properties
-      - name: Build Release APK
+      - name: 📱 构建手机 Release APK
         working-directory: android
         run: |
           source ../.github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
@@ -204,26 +217,29 @@ jobs:
           chmod +x gradlew
           ./gradlew :app:assembleRelease -PreleaseVersion="$version" --console=plain
           grep -Fq "\"versionName\": \"$version\"" app/build/outputs/apk/release/output-metadata.json
-      - name: Rename APK
+      - name: ✍️ 重命名手机 APK 并校验签名
         run: |
           source .github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
           cp android/app/build/outputs/apk/release/app-release.apk "RemoteCI.Mobile-${version}.apk"
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           "$apksigner" verify --print-certs "RemoteCI.Mobile-${version}.apk"
-      - uses: actions/upload-artifact@v7
+      - name: ⬆️ 上传手机 APK
+        uses: actions/upload-artifact@v7
         with:
           name: mobile-apk
           path: RemoteCI.Mobile-*.apk
 
   build-fnos:
     name: fnOS 应用 (镜像 + fpk)
-    runs-on: ubuntu-latest
+    # ubuntu-latest 已切到 26.04，其 Docker 环境下离线镜像导入校验不通过；固定 24.04。
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       packages: write
     steps:
-      - uses: actions/checkout@v7
-      - name: 提取版本号
+      - name: 📥 检出代码
+        uses: actions/checkout@v7
+      - name: 🏷️ 解析版本号
         id: meta
         run: |
           source .github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
@@ -231,15 +247,17 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - name: 登录 GHCR
+      - name: 🧰 安装 QEMU
+        uses: docker/setup-qemu-action@v4
+      - name: 🧰 安装 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: 🔐 登录 GHCR
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: 构建并推送多架构镜像
+      - name: 🐳 构建并推送多架构镜像
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -255,7 +273,7 @@ jobs:
           tags: |
             ghcr.io/edge-hh/remoteci:${{ steps.meta.outputs.version }}
             ghcr.io/edge-hh/remoteci:latest
-      - name: 确保 GHCR 镜像包公开
+      - name: 🌐 确认 GHCR 镜像可匿名拉取
         run: |
           # 仓库 GITHUB_TOKEN 无权访问用户级 Packages API，不能据此读写可见性。
           # 改用匿名拉取令牌验证公开性；私有镜像取不到令牌或 manifest，发布会直接失败。
@@ -275,7 +293,7 @@ jobs:
               echo "::error::GHCR 镜像 $version 无法匿名拉取，fnOS 在线 FPK 将无法安装"
               exit 1
             }
-      - name: 验证两种架构镜像并导出离线归档
+      - name: 🩺 验证两种架构镜像并导出离线归档
         run: |
           set -euo pipefail
           version="${{ steps.meta.outputs.version }}"
@@ -318,7 +336,7 @@ jobs:
             gzip -t "artifacts/fnos-images/remoteci-${version}-${arch}.tar.gz"
             docker image rm "$image" >/dev/null
           done
-      - name: 下载 fnpack 并打包三种 fpk
+      - name: 📦 下载 fnpack 并打包三种 fpk
         run: |
           mkdir -p .tools
           curl -fsSL -o .tools/fnpack https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64
@@ -345,7 +363,8 @@ jobs:
             "artifacts/release/RemoteCI-${version}-fnos-x86_64-offline.fpk" \
             "artifacts/release/RemoteCI-${version}-fnos-arm64-offline.fpk" \
             "$version"
-      - uses: actions/upload-artifact@v7
+      - name: ⬆️ 上传 fnOS 应用
+        uses: actions/upload-artifact@v7
         with:
           name: fnos-fpk
           path: artifacts/release/RemoteCI-*.fpk
@@ -355,35 +374,19 @@ jobs:
     needs: [build-server, build-plugin, build-wearos, build-android, build-fnos]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - name: 📥 检出代码
+        uses: actions/checkout@v7
+      - name: 📥 下载全部构建产物
+        uses: actions/download-artifact@v8
         with:
-          name: server-linux-x64
-          path: artifacts/server-linux-x64
-      - uses: actions/download-artifact@v8
-        with:
-          name: server-win-x64
-          path: artifacts/server-win-x64
-      - uses: actions/download-artifact@v8
-        with:
-          name: plugin-cipx
-          path: artifacts/plugin-cipx
-      - uses: actions/download-artifact@v8
-        with:
-          name: watch-apk
-          path: artifacts/watch-apk
-      - uses: actions/download-artifact@v8
-        with:
-          name: mobile-apk
-          path: artifacts/mobile-apk
-      - uses: actions/download-artifact@v8
-        with:
-          name: fnos-fpk
-          path: artifacts/fnos-fpk
-      - name: 校验发布产物版本一致
+          # 按名称筛选：buildx 的 *.dockerbuild 构建记录也是 artifact，不能一并下载。
+          pattern: "{server-*,plugin-cipx,watch-apk,mobile-apk,fnos-fpk}"
+          path: artifacts
+      - name: 🔍 校验发布产物版本一致
         run: |
           source .github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
           test -f "artifacts/server-linux-x64/RemoteCI.Server-${version}-linux-x64.zip"
+          test -f "artifacts/server-linux-arm64/RemoteCI.Server-${version}-linux-arm64.zip"
           test -f "artifacts/server-win-x64/RemoteCI.Server-${version}-win-x64.zip"
           test -f artifacts/plugin-cipx/RemoteCI.Plugin.cipx
           test -f artifacts/plugin-cipx/checksums.md
@@ -394,7 +397,7 @@ jobs:
           test -f "artifacts/fnos-fpk/RemoteCI-${version}-fnos-x86_64-offline.fpk"
           test -f "artifacts/fnos-fpk/RemoteCI-${version}-fnos-arm64-offline.fpk"
           grep -Fq '<!-- CLASSISLAND_PKG_MD5 {"RemoteCI.Plugin.cipx":"' artifacts/plugin-cipx/checksums.md
-      - name: 组合发布说明
+      - name: 📝 组合发布说明
         run: |
           # docs/releases/<版本>.md 存在时作为更新日志放在最前；checksums.md 必须保留（ClassIsland 市场读取其中的 MD5）。
           source .github/scripts/resolve-release-version.sh "$GITHUB_REF_NAME" >/dev/null
@@ -404,11 +407,12 @@ jobs:
           else
             cp artifacts/plugin-cipx/checksums.md release-body.md
           fi
-      - name: 发布
+      - name: 🚀 发布 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             artifacts/server-linux-x64/**
+            artifacts/server-linux-arm64/**
             artifacts/server-win-x64/**
             artifacts/plugin-cipx/RemoteCI.Plugin.cipx
             artifacts/plugin-cipx/checksums.md
