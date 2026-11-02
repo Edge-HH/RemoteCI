@@ -1,0 +1,73 @@
+@model RemoteCI.Server.Pages.ScheduleGridView
+@using RemoteCI.Server.Pages
+@using RemoteCI.Shared.Models
+@*
+    WakeUp 式周课表：行是节次，列是周一到周日。显示老师/班级/地点、显示周末与自动合并连堂保存在浏览器本地
+    （_ScheduleDisplayPrefs 在页面渲染前写到 <html> 的 data-sg-* 属性上），这里把所有内容都渲染出来，由样式按属性隐藏。
+*@
+<div class="sg" data-schedule-grid data-has-weekend="@(Model.Merged.HasWeekendEntries ? "true" : "false")">
+    <div class="sg-scroll">
+        <div class="sg-sheet" style="--sg-rows:@Model.TrackTemplate">
+            <div class="sg-head">
+                <div class="sg-corner">@Model.MonthLabel</div>
+                @foreach (var column in Model.Columns)
+                {
+                    <div class="sg-day-head@(column.IsToday ? " sg-today" : "")@(column.IsWeekend ? " sg-weekend" : "")" aria-current="@(column.IsToday ? "date" : null)">
+                        <strong>@ScheduleGridView.WeekName(column.Date)</strong>
+                        <small>@ScheduleGridView.ShortDate(column.Date)</small>
+                        @if (column.DayKind == ScheduleDayKinds.Makeup) { <em class="sg-day-tag makeup">调休</em> }
+                    </div>
+                }
+            </div>
+            <div class="sg-body">
+                <div class="sg-col sg-periods" aria-hidden="true">
+                    @for (var i = 0; i < Model.Rows.Count; i++)
+                    {
+                        var row = Model.Rows[i];
+                        <div class="sg-period@(row.Extra ? " sg-period-extra" : "")" style="grid-row:@Model.Tracks[i]">
+                            @if (!row.Extra) { <strong>@row.Label</strong> }
+                            <small>@row.StartTime</small><small>@row.EndTime</small>
+                        </div>
+                    }
+                    @foreach (var track in Model.DividerTracks) { <div class="sg-divider" style="grid-row:@track"></div> }
+                </div>
+                @for (var c = 0; c < Model.Columns.Count; c++)
+                {
+                    var column = Model.Columns[c];
+                    var holiday = column.DayKind == ScheduleDayKinds.Holiday;
+                    <div class="sg-col@(column.IsToday ? " sg-today" : "")@(column.IsWeekend ? " sg-weekend" : "")@(holiday ? " sg-holiday-col" : "")@(column.HasData ? "" : " sg-nodata-col")">
+                        @foreach (var track in Model.DividerTracks) { <div class="sg-divider" style="grid-row:@track"></div> }
+                        @if (!column.HasData)
+                        {
+                            <div class="sg-overlay">暂无课表数据</div>
+                        }
+                        else if (holiday)
+                        {
+                            <div class="sg-overlay sg-holiday">放假@(string.IsNullOrWhiteSpace(column.HolidayName) ? "" : $" · {column.HolidayName}")</div>
+                        }
+                        @foreach (var (blocks, variant) in new[] { (column.Blocks, "sg-merged"), (Model.Unmerged.Columns[c].Blocks, "sg-unmerged") })
+                        {
+                            foreach (var block in blocks)
+                            {
+                                var course = block.Entry.Course;
+                                var classes = $"sg-block {variant}{(course.AdjustmentPending == true ? " sg-pending" : "")}";
+                                var title = string.Join(" · ", new[] { course.Subject, course.Location, Model.Mine ? block.Entry.ClassName : course.Teacher, $"{course.StartTime}–{course.EndTime}" }.Where(x => !string.IsNullOrWhiteSpace(x)));
+                                var link = Model.Mine && course.PersonalCourseId is { } personalId ? $"/MySchedule?edit={personalId}" : null;
+                                <a class="@classes" style="@Model.BlockStyle(block)" href="@link" title="@title" data-subject="@SubjectColors.Key(course.Subject)">
+                                    <span class="sg-subject">@course.Subject</span>
+                                    @if (!string.IsNullOrWhiteSpace(course.Location)) { <span class="sg-location">@course.Location</span> }
+                                    @if (Model.Mine)
+                                    {
+                                        if (!block.Entry.IsPersonal && !string.IsNullOrWhiteSpace(block.Entry.ClassName)) { <span class="sg-class">@block.Entry.ClassName</span> }
+                                    }
+                                    else if (!string.IsNullOrWhiteSpace(course.Teacher)) { <span class="sg-teacher">@course.Teacher</span> }
+                                    @if (course.AdjustmentId is not null) { <span class="sg-badge" title="已调课">换</span> }
+                                </a>
+                            }
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>

@@ -116,6 +116,7 @@ public sealed class CommandHandler
             {
                 CommandKind.ChangeSchedule => await HandleScheduleChangeAsync(command.ScheduleChange, command.RequestedBy),
                 CommandKind.SetSubjectTeacher => await HandleSetSubjectTeacherAsync(command.SubjectTeacher),
+                CommandKind.SetSubjectLocation => await HandleSetSubjectLocationAsync(command.SubjectLocation),
                 CommandKind.SendNotification => await HandleNotificationAsync(
                     command.Notification,
                     GetNotificationSenderName(command.RequestedBy)),
@@ -176,6 +177,18 @@ public sealed class CommandHandler
         var result = await Dispatcher.UIThread.InvokeAsync(() =>
             SubjectTeacherExecutor.Apply(request!, _profileOps,
                 ex => _logger.LogError(ex, "保存科目教师失败：{SubjectId}", request!.SubjectId)));
+        if (result.Success) ScheduleChanged?.Invoke();
+        return result;
+    }
+
+    private async Task<CommandResult> HandleSetSubjectLocationAsync(SubjectLocationRequest? request)
+    {
+        if (SubjectLocationExecutor.Validate(request) is { } validationError)
+            return validationError;
+
+        var result = await Dispatcher.UIThread.InvokeAsync(() =>
+            SubjectLocationExecutor.Apply(request!, _profileOps,
+                ex => _logger.LogError(ex, "保存科目地点失败：{SubjectId}", request!.SubjectId)));
         if (result.Success) ScheduleChanged?.Invoke();
         return result;
     }

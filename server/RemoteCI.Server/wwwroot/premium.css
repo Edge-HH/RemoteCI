@@ -1108,8 +1108,7 @@ textarea { resize: vertical; }
 }
 
 /* 数据表：固定行高、清晰表头和可扫描的悬停状态。 */
-.user-account-table-wrap,
-.schedule-table-wrap {
+.user-account-table-wrap {
     border-radius: var(--radius-card);
     scrollbar-gutter: stable;
 }
@@ -1133,22 +1132,6 @@ textarea { resize: vertical; }
 .user-account-table tbody tr:hover { background: color-mix(in srgb, var(--accent-faint) 58%, transparent); }
 .user-account-table code { color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
 .user-edit-button { min-height: 32px; padding: 5px 11px; }
-
-.schedule-table {
-    min-width: 1120px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-card);
-    background: var(--surface);
-}
-
-.schedule-table th,
-.schedule-table td { padding: 9px 10px; border-color: var(--line); }
-.schedule-table thead th { background: var(--surface-inset); }
-.schedule-table thead strong { font-size: 13px; font-weight: 650; }
-.schedule-table thead small { font-family: var(--font-mono); font-size: 10px; }
-.schedule-period-cell { background: var(--accent-faint); color: var(--accent-strong); }
-.schedule-course-name { font-size: 13px; font-weight: 650; }
-.schedule-course-time { font-family: var(--font-mono); font-size: 10px; }
 
 /* 对话框与危险区：边界清晰，危险操作不抢占主操作。 */
 .user-edit-dialog {
@@ -1538,7 +1521,6 @@ textarea { resize: vertical; }
     .class-menu-label { max-width: 70px; }
     button, .button { min-height: 44px; padding-inline: 14px; }
     .copy-button { width: 36px; min-height: 36px; }
-    .schedule-table { min-width: 980px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1959,6 +1959,28 @@ namespace RemoteCI.Server.Data.Migrations
                     b.ToTable("UserNotifications");
                 });
 
+            modelBuilder.Entity("RemoteCI.Server.Data.UserSubjectColor", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SubjectName")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Color")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("UserId", "SubjectName");
+
+                    b.ToTable("UserSubjectColors");
+                });
+
             modelBuilder.Entity("RemoteCI.Server.Data.WebLoginTicket", b =>
                 {
                     b.Property<string>("TokenHash")
@@ -2397,6 +2419,17 @@ namespace RemoteCI.Server.Data.Migrations
                 });
 
             modelBuilder.Entity("RemoteCI.Server.Data.UserNotification", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.AppUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.UserSubjectColor", b =>
                 {
                     b.HasOne("RemoteCI.Server.Data.AppUser", "User")
                         .WithMany()

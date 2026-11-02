@@ -17,6 +17,8 @@ namespace RemoteCI.Server.Tests;
 
 public sealed class VisitorAccessTests
 {
+    private static string Today => DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd");
+
     [Theory]
     [InlineData(null, null, true)]
     [InlineData(null, "/", true)]
@@ -63,12 +65,12 @@ public sealed class VisitorAccessTests
         {
             scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(TestWebApplicationFactory.DefaultClassId, new ScheduleBundle
             {
-                FromDate = "2026-09-13",
+                FromDate = Today,
                 Days =
                 [
                     new ScheduleDay
                     {
-                        Date = "2026-09-14",
+                        Date = Today,
                         Revision = "visitor-1",
                         Enabled = true,
                         Courses =
@@ -118,13 +120,13 @@ public sealed class VisitorAccessTests
             // 只给默认班级和“高二（2）班”注入可区分的课表。
             scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(TestWebApplicationFactory.DefaultClassId, new ScheduleBundle
             {
-                FromDate = "2026-09-13",
-                Days = [new ScheduleDay { Date = "2026-09-14", Revision = "v-a", Enabled = true, Courses = [new CourseEntry { Index = 0, Subject = "语文", StartTime = "08:00", EndTime = "08:45", Enabled = true }] }],
+                FromDate = Today,
+                Days = [new ScheduleDay { Date = Today, Revision = "v-a", Enabled = true, Courses = [new CourseEntry { Index = 0, Subject = "语文", StartTime = "08:00", EndTime = "08:45", Enabled = true }] }],
             });
             scope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(otherClassId, new ScheduleBundle
             {
-                FromDate = "2026-09-13",
-                Days = [new ScheduleDay { Date = "2026-09-14", Revision = "v-b", Enabled = true, Courses = [new CourseEntry { Index = 0, Subject = "化学", StartTime = "09:00", EndTime = "09:45", Enabled = true }] }],
+                FromDate = Today,
+                Days = [new ScheduleDay { Date = Today, Revision = "v-b", Enabled = true, Courses = [new CourseEntry { Index = 0, Subject = "化学", StartTime = "09:00", EndTime = "09:45", Enabled = true }] }],
             });
             // 未开放访客的班级不应出现在访客页。
             await classrooms.CreateAsync("高一（3）班");

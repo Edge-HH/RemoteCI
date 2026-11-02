@@ -14,7 +14,9 @@ public sealed class MyScheduleModel(
     UserManager<AppUser> users,
     PersonalScheduleService schedule,
     SemesterSettingsService semester,
-    LessonStatsService lessonStats) : WebPageModel(users)
+    LessonStatsService lessonStats,
+    ScheduleWeekService weeks,
+    SubjectColorService colors) : WebPageModel(users)
 {
     /// <summary>本人本月课时（按姓名匹配课时台账）；没有记录时为 null。</summary>
     public TeacherLessonStats? MonthLessons { get; private set; }
@@ -43,6 +45,16 @@ public sealed class MyScheduleModel(
     [BindProperty] public bool NotifyAtStart { get; set; } = true;
     public string? Error { get; private set; }
     public SemesterSettingsView Semester { get; private set; } = new();
+    /// <summary>表格视图：按周浏览，过去的日子来自课时台账。</summary>
+    public MyScheduleWeekResponse? Week { get; private set; }
+    public ScheduleGridView? Grid { get; private set; }
+    public SubjectColorsResponse ColorSettings { get; private set; } = new();
+    public string? PreviousWeek { get; private set; }
+    public string? NextWeek { get; private set; }
+    public bool IsCurrentWeek { get; private set; } = true;
+    public string WeekTitle => Week?.TeachingWeek is { } week ? $"第 {week} 周" : "本周";
+    public string WeekRange => Week is null ? string.Empty
+        : $"{SemesterWeeks.Parse(Week.From):M月d日} – {SemesterWeeks.Parse(Week.To):M月d日}";
 
     /// <summary>周次选项，与档案课表的 WeekCountDiv / WeekCountDivTotal 对应。</summary>
     public static readonly (string Value, string Label)[] RotationOptions =
@@ -62,11 +74,12 @@ public sealed class MyScheduleModel(
         return new JsonResult(new { revision = MobileRevision });
     }
 
-    public async Task<IActionResult> OnGetAsync(Guid? edit, bool add, CancellationToken ct)
+    public async Task<IActionResult> OnGetAsync(Guid? edit, bool add, string? week, CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
         AddRequested = add;
         await LoadAsync(ct);
+        await BuildWeekAsync(ScheduleDisplayHandler.WeekStart(week), ct);
         var (from, to) = OperationsEndpoints.LessonStatsRange(null, null);
         MonthLessons = (await lessonStats.GetAsync(null, from, to, teacher: CurrentUser.DisplayName, ct: ct)).Teachers
             .FirstOrDefault(x => TeacherBindingService.Matches(CurrentUser.DisplayName, x.Teacher));
@@ -112,6 +125,27 @@ public sealed class MyScheduleModel(
         try { await schedule.DeleteAsync(CurrentUser.Id, id, ct); }
         catch (IdentityOperationException ex) { Error = ex.Message; await LoadAsync(ct); return Page(); }
         return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostSubjectColorAsync(string? name, string? color, bool reset, CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        return await ScheduleDisplayHandler.SaveColorAsync(this, colors, CurrentUser.Id, name, color, reset, ct);
+    }
+
+    private async Task BuildWeekAsync(DateOnly? start, CancellationToken ct)
+    {
+        var boundName = AccountRole.HasPersonalSchedule(CurrentUser.RoleDefinitionId) ? CurrentUser.DisplayName : null;
+        Week = await weeks.BuildMineAsync(CurrentUser.Id, boundName, start, start?.AddDays(6), ct: ct);
+        Grid = ScheduleGridView.ForMine(Week, await colors.OverridesAsync(CurrentUser.Id, ct));
+        ColorSettings = await colors.ListAsync(new UserProfile { Id = CurrentUser.Id, Role = CurrentUser.Role }, boundName, ct);
+        var monday = SemesterWeeks.Parse(Week.From)!.Value;
+        var today = SemesterWeeks.Parse(Week.Today)!.Value;
+        var min = SemesterWeeks.Parse(Week.MinDate) ?? monday;
+        var max = SemesterWeeks.Parse(Week.MaxDate) ?? monday;
+        IsCurrentWeek = monday == SemesterWeeks.Monday(today);
+        PreviousWeek = monday.AddDays(-1) >= min ? SemesterWeeks.Format(monday.AddDays(-7)) : null;
+        NextWeek = monday.AddDays(7) <= max ? SemesterWeeks.Format(monday.AddDays(7)) : null;
     }
 
     public async Task<IActionResult> OnGetCoursesAsync(CancellationToken ct)

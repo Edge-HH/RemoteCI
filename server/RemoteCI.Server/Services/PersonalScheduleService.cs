@@ -68,16 +68,22 @@ public sealed class PersonalScheduleService(AppDbContext db, TeacherBindingServi
                 var date = SemesterWeeks.Format(occurrence.Date);
                 var day = result.Days.FirstOrDefault(x => x.Date == date);
                 if (day is null) result.Days.Add(day = new MyScheduleDay { Date = date });
-                day.Items.Add(new MyScheduleItem
-                {
-                    ClassName = ClassName(row), Source = Source, TimeZoneOffsetMinutes = row.TimeZoneOffsetMinutes,
-                    Courses = [ToEntry(row, occurrence)],
-                });
+                day.Items.Add(Item(row, occurrence));
             }
         }
         result.Days = result.Days.OrderBy(x => x.Date, StringComparer.Ordinal).ToList();
         if (result.Days.Count > 0) result.FromDate = result.Days[0].Date;
         return result;
+    }
+
+    /// <summary>用户的自定义课程在 [from, to]（各课程时区的本地日期）内的每一次，供按周浏览“我的日程”。</summary>
+    public async Task<List<(DateOnly Date, MyScheduleItem Item)>> OccurrenceItemsAsync(
+        Guid userId, DateOnly from, DateOnly to, CancellationToken ct = default)
+    {
+        var semesterStart = await semester.GetStartAsync(ct);
+        return (await RowsAsync(userId, ct))
+            .SelectMany(row => Occurrences(row, from, to, semesterStart).Select(occurrence => (occurrence.Date, Item(row, occurrence))))
+            .ToList();
     }
 
     public async Task<MyNextCourseResponse> NextAsync(Guid userId, string? teacherName, DateTimeOffset now, TimeSpan? offset = null, CancellationToken ct = default)
@@ -205,9 +211,16 @@ public sealed class PersonalScheduleService(AppDbContext db, TeacherBindingServi
 
     private static string ClassName(PersonalCourse row) => string.IsNullOrEmpty(row.Location) ? "自定义课程" : row.Location;
 
+    private static MyScheduleItem Item(PersonalCourse row, PersonalCourseOccurrence occurrence) => new()
+    {
+        ClassName = ClassName(row), Source = Source, TimeZoneOffsetMinutes = row.TimeZoneOffsetMinutes,
+        Courses = [ToEntry(row, occurrence)],
+    };
+
     private static CourseEntry ToEntry(PersonalCourse row, PersonalCourseOccurrence occurrence) => new()
     {
         PersonalCourseId = row.Id, Label = "自定义", Subject = row.Subject, Enabled = true,
+        Location = string.IsNullOrWhiteSpace(row.Location) ? null : row.Location,
         StartTime = FormatMinutes(row.StartMinutes), EndTime = FormatMinutes(row.EndMinutes),
         StartsAt = occurrence.StartsAt, EndsAt = occurrence.EndsAt,
         ReminderMinutes = row.ReminderMinutes, NotifyAtStart = row.NotifyAtStart,

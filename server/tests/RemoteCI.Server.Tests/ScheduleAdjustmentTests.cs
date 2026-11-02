@@ -171,6 +171,8 @@ public sealed class ScheduleAdjustmentTests : IDisposable
             new AdjustmentOverlayEntry(stale, ClassId, _today, 2, _math, _english, "英语", "某老师"),
         ]);
         var bundle = Bundle(dayKind: ScheduleDayKinds.Makeup, english0: true);
+        bundle.Subjects.Single(x => x.Id == _physics).Location = "实验室";
+        bundle.Days[0].DividerAfterIndexes = [1];
 
         var result = overlay.Apply(ClassId, bundle);
 
@@ -180,6 +182,9 @@ public sealed class ScheduleAdjustmentTests : IDisposable
         Assert.Null(day.Courses[0].AdjustmentPending);
         Assert.Equal(("物理", "赵老师", true), (day.Courses[1].Subject, day.Courses[1].Teacher, day.Courses[1].AdjustmentPending!.Value));
         Assert.Equal(_english, day.Courses[1].BaseSubjectId);
+        // 待生效的替换按新科目的地点显示；分割线随当天课表保留。
+        Assert.Equal("实验室", day.Courses[1].Location);
+        Assert.Equal([1], day.DividerAfterIndexes!);
         Assert.Equal("物理", day.Courses[2].Subject);
         Assert.Null(day.Courses[2].AdjustmentId);
     }

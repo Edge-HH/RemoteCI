@@ -140,6 +140,9 @@ public sealed class CalendarFeedService(AppDbContext db, ClassAccessService acce
             if (end <= start || end < now.AddDays(-30)) return;
             // 自定义课程每周重复，按课程与日期区分每一次。
             var uid = course.PersonalCourseId is { } id ? $"personal-{id:N}-{date}@remoteci" : $"class-{classId:N}-{date}-{course.Index}@remoteci";
+            // 班级课程的地点写“班级 · 科目地点”（老师要知道去哪个班），没有科目地点时只写班级；自定义课程的 location 已是它自己的地点。
+            if (course.PersonalCourseId is null && course.Location is { } place && place != location)
+                location = string.IsNullOrEmpty(location) ? place : $"{location} · {place}";
             var content = new List<string> { "DTSTART:" + Utc(start.Value), "DTEND:" + Utc(end.Value), "SUMMARY:" + Escape(course.Subject),
                 "LOCATION:" + Escape(location), "DESCRIPTION:" + Escape(source == ScheduleBundleSources.Profile ? "按班级档案推算，可能与教室端实际课程不同" : "由 RemoteCI 同步；请在 RemoteCI 修改课程") };
             var reminder = course.PersonalCourseId is not null ? course.ReminderMinutes : row.ReminderMinutes;

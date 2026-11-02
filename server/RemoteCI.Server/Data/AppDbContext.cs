@@ -19,6 +19,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ExtensionPolicy> ExtensionPolicies => Set<ExtensionPolicy>();
     public DbSet<ExtensionGroupPolicy> ExtensionGroupPolicies => Set<ExtensionGroupPolicy>();
     public DbSet<UserExtensionPreference> UserExtensionPreferences => Set<UserExtensionPreference>();
+    public DbSet<UserSubjectColor> UserSubjectColors => Set<UserSubjectColor>();
     public DbSet<PendingExtensionSetting> PendingExtensionSettings => Set<PendingExtensionSetting>();
     public DbSet<ClassStateCache> ClassStateCaches => Set<ClassStateCache>();
     public DbSet<Classroom> Classrooms => Set<Classroom>();
@@ -250,6 +251,13 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             entity.HasKey(x => new { x.UserId, x.ExtensionId });
             entity.Property(x => x.ExtensionId).HasMaxLength(ExtensionId.MaxLength);
+            entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<UserSubjectColor>(entity =>
+        {
+            entity.HasKey(x => new { x.UserId, x.SubjectName });
+            entity.Property(x => x.SubjectName).HasMaxLength(UserSubjectColor.MaxSubjectNameLength);
+            entity.Property(x => x.Color).HasMaxLength(7);
             entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<DeviceSession>(entity =>

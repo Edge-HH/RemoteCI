@@ -214,3 +214,18 @@ test("清理过期使用传入的教室端日期", () => {
     assert.equal(transform.cleanExpiredTempLayers(doc, "2026-10-11"), 1);
     assert.equal(doc.ClassPlans[layer], undefined);
 });
+
+test("科目地点读写科目附加数据并保留其他附加设置", () => {
+    const key = "5b7e2c1a-9d43-4f6e-a8b1-3c0d7e9f2a64";
+    const subject = { Name: "信息", AttachedObjects: { "other-plugin": { keep: true }, [key.toUpperCase()]: { Location: "旧机房" } } };
+    assert.equal(transform.subjectLocation(subject, key), "旧机房");
+    transform.setSubjectLocation(subject, key, "  机房 ");
+    assert.equal(transform.subjectLocation(subject, key), "机房");
+    assert.deepEqual([...Object.keys(subject.AttachedObjects)], ["other-plugin", key]);
+    transform.setSubjectLocation(subject, key, "");
+    assert.equal(transform.subjectLocation(subject, key), "");
+    assert.deepEqual(JSON.parse(JSON.stringify(subject.AttachedObjects)), { "other-plugin": { keep: true } });
+    const bare = { Name: "体育" };
+    transform.setSubjectLocation(bare, key, "操场");
+    assert.deepEqual(JSON.parse(JSON.stringify(bare.AttachedObjects)), { [key]: { Location: "操场" } });
+});

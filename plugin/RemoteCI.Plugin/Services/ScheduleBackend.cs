@@ -11,6 +11,9 @@ public interface IScheduleBackend
 {
     IReadOnlyDictionary<Guid, Subject> Subjects { get; }
     ClassPlan? GetClassPlan(DateTime date, out Guid? planId);
+
+    /// <summary>课表所用时间表各时间点的类型（0 上课、1 课间、2 分割线、3 行动），按时间顺序；读不到时返回 null。</summary>
+    IReadOnlyList<int>? GetTimeTypes(ClassPlan plan) => null;
 }
 
 public sealed class ScheduleBackendAdapter(ILessonsService lessons, IProfileService profiles) : IScheduleBackend
@@ -20,4 +23,17 @@ public sealed class ScheduleBackendAdapter(ILessonsService lessons, IProfileServ
     public IReadOnlyDictionary<Guid, Subject> Subjects =>
         HostApiCompat.ReadProperty<IReadOnlyDictionary<Guid, Subject>>(profiles.Profile, "Subjects");
     public ClassPlan? GetClassPlan(DateTime date, out Guid? planId) => lessons.GetClassPlanByDate(date, out planId);
+
+    public IReadOnlyList<int>? GetTimeTypes(ClassPlan plan)
+    {
+        try
+        {
+            return plan.TimeLayout?.Layouts.Select(item => item.TimeType).ToList();
+        }
+        catch (Exception)
+        {
+            // 时间表引用失效等宿主内部异常：不上报分割线，课表其余部分照常。
+            return null;
+        }
+    }
 }

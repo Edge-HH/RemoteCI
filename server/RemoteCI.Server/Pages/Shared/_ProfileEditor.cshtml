@@ -1,6 +1,6 @@
 @model string
 <link rel="stylesheet" href="~/profiles.css" asp-append-version="true" />
-<div data-profile-app>
+<div data-profile-app data-subject-location-key="@RemoteCI.Shared.Models.SubjectLocations.AttachedObjectId">
     @Html.AntiForgeryToken()
     @* InitialJson 使用默认 System.Text.Json HTML 安全编码；完整档案仅在脚本里解析，绝不作为 HTML 渲染。 *@
     <script type="application/json" data-profile-initial>@Html.Raw(Model)</script>

@@ -198,6 +198,13 @@ WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手
 
 插件上报的 `ScheduleDay` 新增可选字段 `dayKind`（`holiday` / `makeup`）和 `holidayName`，普通日期不输出。放假日 `enabled` 为 `false` 且不含课程，因此换课会被拒绝。
 
+课表上报（与服务端按档案推算的课表）还带出两项只用于显示、不参与修订号的可选字段：
+
+- `ScheduleDay.dividerAfterIndexes`：当天时间表中分割线（`TimeType` 2）的位置，值 `i` 表示第 `i` 节（零基）与第 `i+1` 节之间有分割线；第一节前、最后一节后的分割线不输出，没有分割线时省略。表格视图据此画一条不带名字的细线；相邻两节间隔不少于 30 分钟时只留空白。
+- `SubjectEntry.location` 与 `CourseEntry.location`：科目地点。ClassIsland 科目没有地点字段，RemoteCI 把它存在档案科目的附加数据中：`Subject.AttachedObjects["5b7e2c1a-9d43-4f6e-a8b1-3c0d7e9f2a64"] = {"Location": "机房"}`，随档案收集、下发与教室端保存原样保留，ClassIsland 自身不显示。空地点表示在本班教室上课，不输出。自定义课程的 `location` 为课程自己的地点。
+
+旧版插件不上报这两项，客户端按缺省处理。
+
 ## 学期
 
 系统管理员在 WebUI“学期与调休”页或 `PUT /api/settings/semester` 设置全局学期开始日期。学期开始日期所在周（周一起）为第 1 教学周，单周为第 1、3、5… 周；多周轮换按 `(教学周序号 − 1) mod 轮换周数 + 1` 得到轮换中的第几周，与 ClassIsland 课表 `TimeRule.WeekCountDiv / WeekCountDivTotal` 的含义一致。
@@ -454,6 +461,11 @@ WebUI 在“批量控制”与班级“控制”页的远程维护区开放这�
 - `GET /api/me/schedule/next`：返回 `MyNextCourseResponse { at, current?, next? }`，分别是指定时刻正在上的课与接下来的第一节课；每项含 `date`、`classId`、`className`、`course`、`startsAt`、`endsAt`。可选查询参数 `at`（ISO 8601）指定计算时刻，省略时取服务端当前时间。课程钟点是教室电脑本地时间，服务端依次按以下时区偏移换算为绝对时间：该班最近状态快照的 `timeZoneOffsetMinutes`；该班没有快照时（例如按档案推算课表、从未连接插件的班级）取任一班级最近上报的偏移；还没有任何班级快照时取可选查询参数 `timeZoneOffsetMinutes`（调用方本机的 UTC 偏移分钟数，-840～840，超出范围返回 400，手机 App 自动携带）；都没有时才退回服务端本地时区（Docker 容器默认是 UTC）。同时纳入本账号自定义课程（不限于班级课表七日窗口）；正在上的一次之外，同一课程的下一次（例如下周同一时间）也参与比较。没有当前或后续课程时对应字段省略。两个日程端点都接受 API Key。
 - `POST /api/me/display-name`：系统管理员修改显示名（即老师姓名），载荷 `{displayName}`（1-40 字），成功返回 204 并触发授权镜像同步；普通账号即使保留旧的 `ChangeDisplayName` 权限也会被拒绝。
 - 命令值 21 为 `SetSubjectTeacher`，要求 `ManageSchedule` 权限和能力 `schedule.subject-teacher`。载荷 `subjectTeacher` 包含 `subjectId` 与 `teacherName`（≤100 字，空表示清除）；插件在 UI 线程写入档案 `Subject.TeacherName` 并保存，保存失败回滚并返回 `SAVE_FAILED`，成功后立即重推课表。WebUI 课表页“科目教师”区由此为班级科目分配授课教师。
+- 命令值 35 为 `SetSubjectLocation`，要求 `ManageSchedule` 权限和能力 `schedule.subject-location`。载荷 `subjectLocation` 包含 `subjectId` 与 `location`（≤100 字，空表示清除）；插件在 UI 线程把地点写入档案科目的附加数据（格式见“调休”一节末尾的科目地点说明）并保存，保存失败回滚并返回 `SAVE_FAILED`，成功后立即重推课表。WebUI 课表页“课表设置 → 科目地点”由此设置；档案编辑器的科目表也有“地点”列，直接编辑服务端保存的档案。
+- `GET /api/schedule/week?classId=&from=&to=`：按周浏览班级课表，鉴权与 `GET /api/schedule` 相同。`from`、`to` 为 `yyyy-MM-dd`，省略 `from` 时为本周一、省略 `to` 时为 `from` 起 7 天，范围最多 42 天，格式错误或超出范围返回 400。返回 `ScheduleWeekResponse {classId, from, to, today, minDate, maxDate, teachingWeek?, source?, periods[], days[], subjects[]}`：已过去的日子来自课时台账（实际上过的课，含代课；地点按该班该学科当前的地点，生效过的调课带 `adjustmentId`），今天及以后来自插件课表或档案推算；可浏览范围为 `minDate`（学期开始所在周的周一，未设置学期时为本周一）到 `maxDate`（课表数据的最后一天），范围外的日期不出现在 `days` 中。`periods[]` 为 `{index, startTime?, endTime?, gapBefore, dividerBefore}`，取本周出现最多的时间表，其他天多出的节次按该节最常见的时间补在后面；`gapBefore` 表示与上一节相隔不少于 30 分钟。
+- `GET /api/me/schedule/week?from=&to=&timeZoneOffsetMinutes=`：按周浏览“我的日程”，参数规则同上。返回 `MyScheduleWeekResponse {from, to, today, minDate, maxDate, teachingWeek?, periods[], days[]}`，`days[]` 为 `MyScheduleDay`（新增可选 `dayKind`、`holidayName`），覆盖范围内每一天（可浏览范围外的除外）；过去的日子按课时台账的实际上课老师匹配，今天起最远到 30 天。班级条目带 `dividerAfterIndexes`；节次轴取这些课所在班级当天的完整时间表。
+- `GET /api/me/subject-colors`：学科颜色，按账号保存，手机与 WebUI 共用。返回 `{palette[], items[{name, color, custom}]}`：`palette` 是可选的 18 种基准色（`#RRGGBB`）；`items` 列出该账号能看到的班级课表、“我的日程”与自定义课程中的学科，以及改过颜色的学科，按拼音排序。未改过的学科用固定算法分配默认颜色（常见学科固定色，其余按学科名 FNV-1a 哈希落入色板），客户端可自行计算，与服务端结果一致。
+- `PUT /api/me/subject-colors`（`{name, color}`，颜色必须在色板中，否则 400）、`DELETE /api/me/subject-colors?name=`（恢复默认），均返回 204。学科名按去首尾空白后的名称对应，不区分班级。
 
 手机端老师登录后课表页默认展示“我的日程”（可切换“本班课表”）；班主任课表页默认展示“本班课表”，也可切换到“我的日程”，列表按天分组显示班级、科目、教师与节次时间。
 
@@ -544,7 +556,8 @@ WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebU
 - `POST /api/auth/web-qr/scan`、`POST /api/auth/web-qr/confirm`：网页扫码登录。WebUI 登录页生成 `remoteci://weblogin?server=…&code=…` 二维码，浏览器自己持有轮询令牌并每 2 秒查询状态；已登录的手机 App 用设备会话扫码（返回浏览器系统/类型与 IP 供确认）并确认后，只有持有轮询令牌的浏览器能换取网页会话。挑战只保存在内存中 3 分钟、只能兑换一次，确认必须由扫码的同一账号完成，API Key 返回 403。
 - `POST /api/auth/web-ticket`：客户端一键打开 WebUI。需设备会话 Bearer 令牌（API Key 返回 403），返回 `{ticket, path, expiresAt}`；用浏览器打开 `服务器地址 + path` 即以该账号登录 WebUI，可追加 `&returnUrl=`（仅接受本站相对路径，外部地址被忽略）与 `&classId=`（仅接受该账号可访问的班级）。票据有效期 1 分钟、只能成功兑换一次；同一账号签发新票据会作废旧票据。服务端只保存票据的 SHA-256 摘要，持久化在数据库中，服务重启或多实例共享数据库时仍可兑换，兑换按行原子删除，并发或跨实例重复兑换都会失败。签发后账号被停用、锁定、改密或安全戳变化，票据即失效。落地页返回 `Cache-Control: no-store` 与 `Referrer-Policy: no-referrer`；兑换成功后返回本站页面并由页面跳转（不使用 302），因为链接由 App 交给浏览器打开属于跨站导航，`SameSite=Strict` 的登录 Cookie 不会随跨站重定向发送。票据会出现在浏览器地址栏，生产环境必须使用 HTTPS；与手机端连接策略一致，服务端不拒绝 HTTP 部署，但 HTTP 下票据可能被同一网络中的攻击者截获并抢先兑换。
 - `GET /api/me`、`POST /api/me/password`、`POST /api/me/display-name`
-- `GET /api/me/schedule`、`GET /api/me/schedule/next`
+- `GET /api/me/schedule`、`GET /api/me/schedule/next`、`GET /api/me/schedule/week`
+- `GET/PUT/DELETE /api/me/subject-colors`
 - `GET /api/swap-requests/catalog`、`GET /api/swap-requests?box=incoming|outgoing|all&status=`、`GET /api/swap-requests/{id}`
 - `GET /api/swap-requests/catalog/day?classId=&date=`：换课选择器按天读取某班某天的课程 `SwapCatalogDay {date, courses[]}`（放假或没有课表时 `courses` 为空）。换课可选今天起 30 天内任意一天：`catalog` 的每个班带 `minDate`、`maxDate`（含；旧版插件只同步 7 天时为其最后一天）与 `myDates`（范围内本人有课的日期），`days` 只含今天起 7 天，更远的日期用本接口读取；超出范围或教室端未同步该日返回 400
 - `POST /api/swap-requests`、`POST /api/swap-requests/{id}/approve|reject|cancel|revoke|revert`（`{id}` 也接受 8 位 `shortId`；`revert` 仅相关班级班主任与系统管理员）
@@ -554,7 +567,7 @@ WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebU
 - `POST /api/swap-requests/seen`（`{ids}`，省略或为空表示全部）：强制换课看过即处理。被强制换课的老师看过后，对应的 `swap_forced` 通知标记已读，该申请不再计入“待我处理”（仍可撤回）；返回 `{pending}` 为剩余待处理数。`GET /api/swap-requests/{id}` 查看强制换课详情也会自动标记。列表项的 `needsAction` 表示是否计入“待我处理”（可审批，或强制换课尚未看过），客户端角标应按它计数，而不是 `canDecide || canRevoke`。
 - `GET /api/me/notifications?after=&unread=&limit=`、`POST /api/me/notifications/read`（`{ids}` 或 `{all:true}`）
 - `GET/DELETE /api/me/sessions`
-- `GET /api/state`、`GET /api/schedule`
+- `GET /api/state`、`GET /api/schedule`、`GET /api/schedule/week`
 - `POST /api/commands`
 - `POST /api/files?name=`、`POST /api/files/{id}/send`、`GET/DELETE /api/files/{id}`：文件中转分发；`GET /api/plugin/files/{id}` 供插件续传下载（见“远程终端与文件分发”）
 - `GET/POST/PUT/DELETE /api/users`、`/api/roles`、`/api/visitor`

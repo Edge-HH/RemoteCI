@@ -46,7 +46,7 @@
     const maxAgeMs = 60_000;
     const samePath = (a, b) => a.toLowerCase().replace(/\/+$/, "") === b.toLowerCase().replace(/\/+$/, "");
 
-    const scrollers = () => [document.scrollingElement, ...document.querySelectorAll("[data-sidebar] .side-nav, .user-edit-dialog-shell, .schedule-table-wrap, .schedule-grid, .user-account-table-wrap")]
+    const scrollers = () => [document.scrollingElement, ...document.querySelectorAll("[data-sidebar] .side-nav, .user-edit-dialog-shell, .sg-scroll, .user-account-table-wrap")]
         .filter(Boolean);
     const scrollerKey = (element, index) => element === document.scrollingElement ? "document" : `${element.className}#${index}`;
 

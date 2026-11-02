@@ -96,6 +96,11 @@ public sealed class CommandMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public SubjectTeacherRequest? SubjectTeacher { get; set; }
 
+    /// <summary>设置科目上课地点的参数；仅 SetSubjectLocation 命令使用。</summary>
+    [JsonPropertyName("subjectLocation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SubjectLocationRequest? SubjectLocation { get; set; }
+
     /// <summary>远程终端命令执行参数；仅 ExecuteTerminalCommand 命令使用。</summary>
     [JsonPropertyName("terminalCommand")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

@@ -1,0 +1,46 @@
+{
+  "name": "放假、调休、超出范围的日期与关闭连堂合并",
+  "today": "2026-11-18",
+  "merge": false,
+  "periods": [
+    { "index": 0, "startTime": "08:00", "endTime": "08:45" },
+    { "index": 1, "startTime": "08:55", "endTime": "09:40" }
+  ],
+  "days": [
+    { "date": "2026-11-16", "dayKind": "holiday", "holidayName": "测试假期", "entries": [] },
+    {
+      "date": "2026-11-17",
+      "dayKind": "makeup",
+      "holidayName": "测试假期",
+      "entries": [
+        { "index": 0, "subject": "语文" },
+        { "index": 1, "subject": "语文" }
+      ]
+    },
+    { "date": "2026-11-18", "entries": [] },
+    { "date": "2026-11-19", "entries": [] },
+    { "date": "2026-11-20", "entries": [] },
+    { "date": "2026-11-21", "hasData": false, "entries": [] },
+    { "date": "2026-11-22", "hasData": false, "entries": [] }
+  ],
+  "expected": {
+    "rows": [
+      "p0|1|08:00|08:45|-|-",
+      "p1|2|08:55|09:40|-|-"
+    ],
+    "columns": [
+      "2026-11-16|0|holiday|1",
+      "2026-11-17|0|makeup|1",
+      "2026-11-18|1|-|1",
+      "2026-11-19|0|-|1",
+      "2026-11-20|0|-|1",
+      "2026-11-21|0|-|0",
+      "2026-11-22|0|-|0"
+    ],
+    "blocks": [
+      "2026-11-17|0+1|0/1|语文|0",
+      "2026-11-17|1+1|0/1|语文|1"
+    ],
+    "hasWeekend": false
+  }
+}

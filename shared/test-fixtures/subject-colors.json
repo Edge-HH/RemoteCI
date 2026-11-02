@@ -1,0 +1,374 @@
+{
+  "palette": [
+    "#6F9FE0",
+    "#E58C8C",
+    "#9B8BDB",
+    "#66BFA0",
+    "#E9A55F",
+    "#5FB8CC",
+    "#DC8FC2",
+    "#9CC06A",
+    "#E3967A",
+    "#8297DA",
+    "#C59E76",
+    "#72B3E6",
+    "#B48AD8",
+    "#E2BC57",
+    "#78C495",
+    "#D9879E",
+    "#86A9B5",
+    "#C79BDF"
+  ],
+  "subjects": [
+    {
+      "name": "语文",
+      "swatch": 1,
+      "color": "#E58C8C"
+    },
+    {
+      "name": "数学",
+      "swatch": 0,
+      "color": "#6F9FE0"
+    },
+    {
+      "name": "英语",
+      "swatch": 2,
+      "color": "#9B8BDB"
+    },
+    {
+      "name": "物理",
+      "swatch": 4,
+      "color": "#E9A55F"
+    },
+    {
+      "name": "化学",
+      "swatch": 3,
+      "color": "#66BFA0"
+    },
+    {
+      "name": "生物",
+      "swatch": 7,
+      "color": "#9CC06A"
+    },
+    {
+      "name": "道德与法治",
+      "swatch": 15,
+      "color": "#D9879E"
+    },
+    {
+      "name": "政治",
+      "swatch": 15,
+      "color": "#D9879E"
+    },
+    {
+      "name": "思想政治",
+      "swatch": 15,
+      "color": "#D9879E"
+    },
+    {
+      "name": "历史",
+      "swatch": 10,
+      "color": "#C59E76"
+    },
+    {
+      "name": "地理",
+      "swatch": 5,
+      "color": "#5FB8CC"
+    },
+    {
+      "name": "信息技术",
+      "swatch": 11,
+      "color": "#72B3E6"
+    },
+    {
+      "name": "通用技术",
+      "swatch": 16,
+      "color": "#86A9B5"
+    },
+    {
+      "name": "体育与健康",
+      "swatch": 14,
+      "color": "#78C495"
+    },
+    {
+      "name": "体育",
+      "swatch": 14,
+      "color": "#78C495"
+    },
+    {
+      "name": "音乐",
+      "swatch": 6,
+      "color": "#DC8FC2"
+    },
+    {
+      "name": "美术",
+      "swatch": 8,
+      "color": "#E3967A"
+    },
+    {
+      "name": "心理健康",
+      "swatch": 17,
+      "color": "#C79BDF"
+    },
+    {
+      "name": "班会",
+      "swatch": 13,
+      "color": "#E2BC57"
+    },
+    {
+      "name": "自习",
+      "swatch": 9,
+      "color": "#8297DA"
+    },
+    {
+      "name": " 数学 ",
+      "swatch": 0,
+      "color": "#6F9FE0"
+    },
+    {
+      "name": "高中数学",
+      "swatch": 0,
+      "color": "#6F9FE0"
+    },
+    {
+      "name": "机器人",
+      "swatch": 17,
+      "color": "#C79BDF"
+    },
+    {
+      "name": "篮球社团",
+      "swatch": 14,
+      "color": "#78C495"
+    },
+    {
+      "name": "校本课程",
+      "swatch": 15,
+      "color": "#D9879E"
+    },
+    {
+      "name": "研学",
+      "swatch": 14,
+      "color": "#78C495"
+    },
+    {
+      "name": "Art",
+      "swatch": 2,
+      "color": "#9B8BDB"
+    },
+    {
+      "name": "",
+      "swatch": 7,
+      "color": "#9CC06A"
+    },
+    {
+      "name": "综合实践",
+      "swatch": 11,
+      "color": "#72B3E6"
+    },
+    {
+      "name": "电子竞技",
+      "swatch": 9,
+      "color": "#8297DA"
+    }
+  ],
+  "derived": [
+    {
+      "color": "#6F9FE0",
+      "light": {
+        "background": "#DFE9F6",
+        "foreground": "#264773"
+      },
+      "dark": {
+        "background": "#2B3B4F",
+        "foreground": "#C1D3EB"
+      }
+    },
+    {
+      "color": "#E58C8C",
+      "light": {
+        "background": "#F6DFDF",
+        "foreground": "#732626"
+      },
+      "dark": {
+        "background": "#4F2C2C",
+        "foreground": "#EBC2C2"
+      }
+    },
+    {
+      "color": "#9B8BDB",
+      "light": {
+        "background": "#E5E1F4",
+        "foreground": "#362673"
+      },
+      "dark": {
+        "background": "#352F4C",
+        "foreground": "#CCC5E7"
+      }
+    },
+    {
+      "color": "#66BFA0",
+      "light": {
+        "background": "#E3F2ED",
+        "foreground": "#2D6C56"
+      },
+      "dark": {
+        "background": "#324841",
+        "foreground": "#C9E4DA"
+      }
+    },
+    {
+      "color": "#E9A55F",
+      "light": {
+        "background": "#F9EBDD",
+        "foreground": "#734D26"
+      },
+      "dark": {
+        "background": "#523E28",
+        "foreground": "#EFD7BD"
+      }
+    },
+    {
+      "color": "#5FB8CC",
+      "light": {
+        "background": "#E1F1F4",
+        "foreground": "#266573"
+      },
+      "dark": {
+        "background": "#2F464B",
+        "foreground": "#C5E1E7"
+      }
+    },
+    {
+      "color": "#DC8FC2",
+      "light": {
+        "background": "#F4E1EE",
+        "foreground": "#732659"
+      },
+      "dark": {
+        "background": "#4C2F42",
+        "foreground": "#E7C5DC"
+      }
+    },
+    {
+      "color": "#9CC06A",
+      "light": {
+        "background": "#ECF2E3",
+        "foreground": "#526C2D"
+      },
+      "dark": {
+        "background": "#3F4832",
+        "foreground": "#D8E3C9"
+      }
+    },
+    {
+      "color": "#E3967A",
+      "light": {
+        "background": "#F7E5DF",
+        "foreground": "#733B26"
+      },
+      "dark": {
+        "background": "#4F352B",
+        "foreground": "#EBCCC1"
+      }
+    },
+    {
+      "color": "#8297DA",
+      "light": {
+        "background": "#E1E5F5",
+        "foreground": "#263973"
+      },
+      "dark": {
+        "background": "#2E354C",
+        "foreground": "#C4CDE8"
+      }
+    },
+    {
+      "color": "#C59E76",
+      "light": {
+        "background": "#F2EBE3",
+        "foreground": "#6B4D2E"
+      },
+      "dark": {
+        "background": "#483D32",
+        "foreground": "#E3D6C9"
+      }
+    },
+    {
+      "color": "#72B3E6",
+      "light": {
+        "background": "#DEECF7",
+        "foreground": "#265173"
+      },
+      "dark": {
+        "background": "#2A4050",
+        "foreground": "#BFD9ED"
+      }
+    },
+    {
+      "color": "#B48AD8",
+      "light": {
+        "background": "#EBE1F4",
+        "foreground": "#4F2673"
+      },
+      "dark": {
+        "background": "#3E2F4B",
+        "foreground": "#D7C6E7"
+      }
+    },
+    {
+      "color": "#E2BC57",
+      "light": {
+        "background": "#F8F0DE",
+        "foreground": "#735E26"
+      },
+      "dark": {
+        "background": "#51462A",
+        "foreground": "#EDE1BF"
+      }
+    },
+    {
+      "color": "#78C495",
+      "light": {
+        "background": "#E3F2E9",
+        "foreground": "#2F6A45"
+      },
+      "dark": {
+        "background": "#32483B",
+        "foreground": "#C9E3D3"
+      }
+    },
+    {
+      "color": "#D9879E",
+      "light": {
+        "background": "#F4E1E6",
+        "foreground": "#73263C"
+      },
+      "dark": {
+        "background": "#4B2F37",
+        "foreground": "#E7C5CF"
+      }
+    },
+    {
+      "color": "#86A9B5",
+      "light": {
+        "background": "#E6EDEF",
+        "foreground": "#3A565F"
+      },
+      "dark": {
+        "background": "#374044",
+        "foreground": "#CEDADE"
+      }
+    },
+    {
+      "color": "#C79BDF",
+      "light": {
+        "background": "#EDE1F4",
+        "foreground": "#582673"
+      },
+      "dark": {
+        "background": "#412F4B",
+        "foreground": "#DBC5E7"
+      }
+    }
+  ]
+}

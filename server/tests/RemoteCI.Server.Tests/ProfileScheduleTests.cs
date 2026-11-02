@@ -41,6 +41,36 @@ public sealed class ProfileScheduleTests
     }
 
     [Fact]
+    public void BuildSchedule_ReadsSubjectLocationAndDividersWithoutChangingRevision()
+    {
+        var plain = ProfileDocument.BuildSchedule(ProfileTestData.Json(), Monday).Bundle.Days[0];
+        var profile = ProfileDocument.Parse(ProfileTestData.Json());
+        SubjectLocations.Write(profile["Subjects"]![ProfileTestData.SubjectId]!.AsObject(), " 机房 ");
+        var layout = profile["TimeLayouts"]![ProfileTestData.LayoutId]!["Layouts"]!.AsArray();
+        layout.Add(new JsonObject { ["StartTime"] = "08:40:00", ["EndTime"] = "08:50:00", ["TimeType"] = 2 });
+        layout.Add(new JsonObject { ["StartTime"] = "08:50:00", ["EndTime"] = "09:30:00", ["TimeType"] = 0 });
+        profile["ClassPlans"]![ProfileTestData.PlanId]!["Classes"]!.AsArray().Add(new JsonObject { ["SubjectId"] = ProfileTestData.SubjectId });
+
+        var bundle = ProfileDocument.BuildSchedule(ProfileDocument.Serialize(profile), Monday).Bundle;
+        var monday = bundle.Days[0];
+
+        Assert.All(monday.Courses, course => Assert.Equal("机房", course.Location));
+        Assert.Equal([0], monday.DividerAfterIndexes!);
+        Assert.Equal("机房", Assert.Single(bundle.Subjects).Location);
+        Assert.Null(plain.DividerAfterIndexes);
+        Assert.Null(plain.Courses[0].Location);
+
+        // 地点与分割线只用于显示，不改变修订号：同一档案只改地点时修订号相同。
+        var relocated = ProfileDocument.Parse(ProfileDocument.Serialize(profile));
+        SubjectLocations.Write(relocated["Subjects"]![ProfileTestData.SubjectId]!.AsObject(), "操场");
+        Assert.Equal(monday.Revision, ProfileDocument.BuildSchedule(ProfileDocument.Serialize(relocated), Monday).Bundle.Days[0].Revision);
+        SubjectLocations.Write(relocated["Subjects"]![ProfileTestData.SubjectId]!.AsObject(), null);
+        Assert.Null(SubjectLocations.Read(relocated["Subjects"]![ProfileTestData.SubjectId]!.AsObject()));
+        Assert.Contains(ProfileDocument.Diff(ProfileDocument.Serialize(profile), ProfileDocument.Serialize(relocated)),
+            change => change.Text.Contains("科目地点 机房 → 未设置"));
+    }
+
+    [Fact]
     public void BuildSchedule_AppliesHolidayOffAndMakeupDays()
     {
         var calendar = new Dictionary<DateOnly, HolidayCalendarDay>

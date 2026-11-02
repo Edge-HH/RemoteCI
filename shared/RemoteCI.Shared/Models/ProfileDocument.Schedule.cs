@@ -36,7 +36,13 @@ public static partial class ProfileDocument
                 .Where(entry => Guid.TryParse(entry.Key, out _) && entry.Value is JsonObject)
                 .Select(entry => (Id: Guid.Parse(entry.Key), Subject: (JsonObject)entry.Value!))
                 .Where(item => Text(item.Subject, "Name") is { Length: > 0 } name && !string.IsNullOrWhiteSpace(name) && name != UnsetSubjectPlaceholder)
-                .Select(item => new SubjectEntry { Id = item.Id, Name = Text(item.Subject, "Name")!, Teacher = NormalizeTeacherName(Text(item.Subject, "TeacherName")) })
+                .Select(item => new SubjectEntry
+                {
+                    Id = item.Id,
+                    Name = Text(item.Subject, "Name")!,
+                    Teacher = NormalizeTeacherName(Text(item.Subject, "TeacherName")),
+                    Location = SubjectLocations.Read(item.Subject),
+                })
                 .OrderBy(x => x.Name, StringComparer.Ordinal)
                 .ToList(),
         };
@@ -65,6 +71,7 @@ public static partial class ProfileDocument
                 ClassPlanName = plan is null ? null : Text(plan, "Name"),
                 Enabled = plan is not null,
                 Courses = plan is null ? [] : Courses(profile, plan, subjects),
+                DividerAfterIndexes = plan is null ? null : Dividers(profile, plan),
                 DayKind = holiday?.Kind switch
                 {
                     HolidayDayKinds.Off => ScheduleDayKinds.Holiday,
@@ -135,11 +142,39 @@ public static partial class ProfileDocument
         return match.Plan is null ? (null, null) : (match.Plan, match.Id);
     }
 
-    private static List<CourseEntry> Courses(JsonObject profile, JsonObject plan, JsonObject subjects)
-    {
-        var layout = ReferenceGuid(plan, "TimeLayoutId") is { } layoutId
+    private static JsonObject? PlanLayout(JsonObject profile, JsonObject plan) =>
+        ReferenceGuid(plan, "TimeLayoutId") is { } layoutId
             ? FindByGuid(Dictionary(profile, "TimeLayouts"), layoutId.ToString()) as JsonObject
             : null;
+
+    /// <summary>
+    /// 时间表中分割线（TimeType 2）的位置，换算为“第 i 节之后”；第一节前与最后一节后的分割线不算，没有分割线时返回 null。
+    /// 插件 ScheduleCatalog 按同一规则从宿主时间表计算。
+    /// </summary>
+    public static List<int>? DividerAfterIndexes(IEnumerable<int> timeTypes)
+    {
+        var result = new List<int>();
+        var lessons = 0;
+        var pending = false;
+        foreach (var type in timeTypes)
+        {
+            if (type == 0)
+            {
+                if (pending && lessons > 0 && !result.Contains(lessons - 1)) result.Add(lessons - 1);
+                pending = false;
+                lessons++;
+            }
+            else if (type == 2) pending = true;
+        }
+        return result.Count == 0 ? null : result;
+    }
+
+    private static List<int>? Dividers(JsonObject profile, JsonObject plan) =>
+        PlanLayout(profile, plan) is { } layout ? DividerAfterIndexes(Points(layout).Select(point => Integer(point, "TimeType", 0))) : null;
+
+    private static List<CourseEntry> Courses(JsonObject profile, JsonObject plan, JsonObject subjects)
+    {
+        var layout = PlanLayout(profile, plan);
         var lessons = layout is null ? [] : Points(layout).Where(point => Integer(point, "TimeType", 0) == 0).ToList();
         var classes = (Get(plan, "Classes") as JsonArray ?? new JsonArray()).OfType<JsonObject>().ToList();
         return classes.Select((course, index) =>
@@ -157,6 +192,7 @@ public static partial class ProfileDocument
                 StartTime = point is not null && TryReadTime(point, true, out var start) ? start.ToString("hh\\:mm", CultureInfo.InvariantCulture) : null,
                 EndTime = point is not null && TryReadTime(point, false, out var end) ? end.ToString("hh\\:mm", CultureInfo.InvariantCulture) : null,
                 Teacher = subject is null ? null : NormalizeTeacherName(Text(subject, "TeacherName")),
+                Location = subject is null ? null : SubjectLocations.Read(subject),
                 Enabled = !(Get(course, "IsEnabled") is JsonValue value && value.TryGetValue<bool>(out var enabled) && !enabled),
             };
         }).ToList();

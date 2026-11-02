@@ -3,12 +3,20 @@
     ViewData["Title"] = "我的日程";
 }
 
+<partial name="_ScheduleDisplayPrefs" />
 @if (MobileUi.IsMobile(Context)) { <div class="mobile-segments"><a href="/Mobile/Schedule">班级课表</a><a href="/Mobile/MySchedule" class="active">我的日程</a></div><a class="button ghost" href="/Mobile/Calendar">订阅系统日历</a> }
 <div class="page-head">
     <div>
         <p class="eyebrow">个人安排</p>
         <h1>我的日程</h1>
         <p class="muted">任教课程和仅自己可见的自定义课程，自动同步到此账号的所有设备。</p>
+    </div>
+    <div class="schedule-head-actions">
+        <div class="schedule-view-switch" role="group" aria-label="视图">
+            <button type="button" data-my-view-button="table" aria-pressed="true">表格</button>
+            <button type="button" data-my-view-button="list" aria-pressed="false">列表</button>
+        </div>
+        <button type="button" class="ghost" data-user-edit-open="schedule-display-dialog" aria-controls="schedule-display-dialog">显示设置</button>
     </div>
 </div>
 
@@ -69,6 +77,21 @@
     </div>
 </dialog>
 
+@if (Model.Grid is { } grid)
+{
+    <section data-my-view-panel="table">
+        <div class="panel-heading">
+            <div><h2>@Model.WeekTitle</h2><p class="muted">@Model.WeekRange</p></div>
+            <nav class="schedule-week-nav" aria-label="切换周">
+                <a class="button ghost" asp-page="/MySchedule" asp-route-week="@Model.PreviousWeek" aria-disabled="@(Model.PreviousWeek is null ? "true" : null)">上一周</a>
+                @if (!Model.IsCurrentWeek) { <a class="button ghost" asp-page="/MySchedule">回到本周</a> }
+                <a class="button ghost" asp-page="/MySchedule" asp-route-week="@Model.NextWeek" aria-disabled="@(Model.NextWeek is null ? "true" : null)">下一周</a>
+            </nav>
+        </div>
+        <partial name="_ScheduleGrid" model="grid" />
+    </section>
+}
+<div data-my-view-panel="list">
 @if (Model.Schedule.Days.Count == 0)
 {
     <div class="notice warning">
@@ -96,14 +119,14 @@ else
                     @foreach (var item in day.Items)
                     {
                         <article class="my-schedule-class">
-                            <h3>@item.ClassName @if (item.Source == RemoteCI.Shared.Models.ScheduleBundleSources.Profile) { <span class="role-badge muted">按档案推算</span> }</h3>
+                            <h3><span class="@(item.Source == RemoteCI.Server.Services.PersonalScheduleService.Source ? "" : "sg-class")">@item.ClassName</span> @if (item.Source == RemoteCI.Shared.Models.ScheduleBundleSources.Profile) { <span class="role-badge muted">按档案推算</span> }</h3>
                             <div class="my-schedule-courses">
                                 @foreach (var course in item.Courses)
                                 {
                                     <div class="my-schedule-course">
                                         <span class="my-schedule-course-index">@course.Label</span>
                                         <strong>@course.Subject</strong>
-                                        <span class="my-schedule-course-time">@(course.StartTime ?? "—")–@(course.EndTime ?? "—")</span>
+                                        <span class="my-schedule-course-time">@(course.StartTime ?? "—")–@(course.EndTime ?? "—")@if (!string.IsNullOrWhiteSpace(course.Location) && course.PersonalCourseId is null) { <span class="sg-location"> · @course.Location</span> }</span>
                                         @if (course.PersonalCourseId is { } personalId) { <a asp-page="/MySchedule" asp-route-edit="@personalId">修改</a> }
                                     </div>
                                 }
@@ -115,4 +138,6 @@ else
         }
     </div>
 }
+</div>
+<partial name="_ScheduleDisplaySettings" model="Model.ColorSettings" />
 <script src="~/js/personal-schedule.js" asp-append-version="true" defer></script>

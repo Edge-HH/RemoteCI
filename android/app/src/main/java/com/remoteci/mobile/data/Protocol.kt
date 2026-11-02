@@ -84,6 +84,9 @@ object Protocol {
 
     /** 课表/“我的日程”条目来源：插件从未同步过课表，按服务端班级档案推算。 */
     const val BUNDLE_SOURCE_PROFILE = "profile"
+    /** ScheduleDay.dayKind：放假日与调休上学日。 */
+    const val DAY_KIND_HOLIDAY = "holiday"
+    const val DAY_KIND_MAKEUP = "makeup"
     const val PERMISSION_VIEW_CURRENT = 1
     const val PERMISSION_ACCESS_WEB_UI = 2
     const val PERMISSION_MANAGE_USERS = 4
@@ -299,10 +302,15 @@ data class ScheduleBundle(
 @Serializable
 data class ScheduleDay(
     val date: String,
-    val revision: String,
+    val revision: String = "",
     @SerialName("classPlanName") val classPlanName: String? = null,
     val enabled: Boolean = false,
     val courses: List<CourseEntry> = emptyList(),
+    /** "holiday" 放假日、"makeup" 调休上学日；普通日为 null。 */
+    @SerialName("dayKind") val dayKind: String? = null,
+    @SerialName("holidayName") val holidayName: String? = null,
+    /** 时间表分割线的位置：值 i 表示第 i 节（零基）与第 i+1 节之间有分割线；旧服务端不下发。 */
+    @SerialName("dividerAfterIndexes") val dividerAfterIndexes: List<Int>? = null,
 )
 
 @Serializable
@@ -315,7 +323,13 @@ data class CourseEntry(
     @SerialName("endTime") val endTime: String? = null,
     /** 授课教师名，来自教室端 ClassIsland 档案；旧版服务端不下发。 */
     val teacher: String? = null,
+    /** 科目地点或自定义课程的地点；没有时为 null。 */
+    val location: String? = null,
     val enabled: Boolean = true,
+    /** 生效于该节的调课记录；表格中显示“换”角标。 */
+    val adjustmentId: String? = null,
+    /** 服务端已记录、教室端尚未生效的调课。 */
+    val adjustmentPending: Boolean? = null,
     val personalCourseId: String? = null,
     val startsAt: String? = null,
     val endsAt: String? = null,
@@ -324,7 +338,7 @@ data class CourseEntry(
 )
 
 @Serializable
-data class SubjectEntry(val id: String, val name: String, val teacher: String? = null)
+data class SubjectEntry(val id: String, val name: String, val teacher: String? = null, val location: String? = null)
 
 /** “我的日程”：当前老师账号按显示名绑定课表后跨班级聚合的个人课表。 */
 @Serializable
@@ -335,7 +349,12 @@ data class MyScheduleResponse(
 )
 
 @Serializable
-data class MyScheduleDay(val date: String, val items: List<MyScheduleItem> = emptyList())
+data class MyScheduleDay(
+    val date: String,
+    val items: List<MyScheduleItem> = emptyList(),
+    @SerialName("dayKind") val dayKind: String? = null,
+    @SerialName("holidayName") val holidayName: String? = null,
+)
 
 @Serializable
 data class MyScheduleItem(
@@ -346,7 +365,63 @@ data class MyScheduleItem(
     val source: String? = null,
     /** 课程钟点所在班级的 UTC 偏移；旧服务端缺省时使用本机时区。 */
     val timeZoneOffsetMinutes: Int? = null,
+    @SerialName("dividerAfterIndexes") val dividerAfterIndexes: List<Int>? = null,
+) {
+    /** 自定义课程的 classId 为全零 GUID。 */
+    val isPersonal: Boolean get() = source == "personal"
+}
+
+/** 按周浏览课表时的一个节次行，左侧时间取本周出现最多的时间表。 */
+@Serializable
+data class SchedulePeriod(
+    val index: Int,
+    @SerialName("startTime") val startTime: String? = null,
+    @SerialName("endTime") val endTime: String? = null,
+    @SerialName("gapBefore") val gapBefore: Boolean = false,
+    @SerialName("dividerBefore") val dividerBefore: Boolean = false,
 )
+
+/** GET /api/schedule/week：某班一周的生效课表（已过去的日子来自课时台账）。 */
+@Serializable
+data class ScheduleWeekResponse(
+    @SerialName("classId") val classId: String = "",
+    val from: String = "",
+    val to: String = "",
+    val today: String = "",
+    @SerialName("minDate") val minDate: String = "",
+    @SerialName("maxDate") val maxDate: String = "",
+    @SerialName("teachingWeek") val teachingWeek: Int? = null,
+    val source: String? = null,
+    val periods: List<SchedulePeriod> = emptyList(),
+    val days: List<ScheduleDay> = emptyList(),
+    val subjects: List<SubjectEntry> = emptyList(),
+)
+
+/** GET /api/me/schedule/week：“我的日程”一周的课。 */
+@Serializable
+data class MyScheduleWeekResponse(
+    val from: String = "",
+    val to: String = "",
+    val today: String = "",
+    @SerialName("minDate") val minDate: String = "",
+    @SerialName("maxDate") val maxDate: String = "",
+    @SerialName("teachingWeek") val teachingWeek: Int? = null,
+    val periods: List<SchedulePeriod> = emptyList(),
+    val days: List<MyScheduleDay> = emptyList(),
+)
+
+/** GET /api/me/subject-colors：色板与可见学科的颜色（按账号保存，与 WebUI 同步）。 */
+@Serializable
+data class SubjectColorsResponse(
+    val palette: List<String> = emptyList(),
+    val items: List<SubjectColorItem> = emptyList(),
+)
+
+@Serializable
+data class SubjectColorItem(val name: String, val color: String, val custom: Boolean = false)
+
+@Serializable
+data class SubjectColorRequest(val name: String, val color: String)
 
 /** “我的日程”当前/下一节课，时间已经由服务端按班级时区换算为绝对时间。 */
 @Serializable

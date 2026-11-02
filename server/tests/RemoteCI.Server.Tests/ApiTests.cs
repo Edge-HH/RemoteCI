@@ -667,16 +667,17 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
     public async Task RazorWebUi_SchedulePageExposesManualPullAndIntervalOptions()
     {
         var subjectId = Guid.NewGuid();
+        var today = DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd");
         using (var setupScope = _factory.Services.CreateScope())
         {
             setupScope.ServiceProvider.GetRequiredService<IStateStore>().SaveSchedule(TestWebApplicationFactory.DefaultClassId, new ScheduleBundle
             {
-                FromDate = "2026-08-17",
+                FromDate = today,
                 Days =
                 [
                     new ScheduleDay
                     {
-                        Date = "2026-08-17",
+                        Date = today,
                         Revision = "revision-1",
                         ClassPlanName = "测试课表",
                         Enabled = true,
@@ -720,17 +721,23 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         Assert.Contains("<span>课表</span>", scheduleHtml);
         Assert.Contains("覆盖服务端缓存", scheduleHtml);
         Assert.Contains("data-schedule-pull-progress", scheduleHtml);
-        Assert.Contains("""class="schedule-table""", scheduleHtml);
-        Assert.Contains("""class="schedule-period-heading">节次""", scheduleHtml);
+        Assert.Contains("data-schedule-grid", scheduleHtml);
         Assert.Contains("<strong>周一</strong>", scheduleHtml);
-        var scheduleTableStart = scheduleHtml.IndexOf("""<table class="schedule-table">""", StringComparison.Ordinal);
-        var scheduleTableEnd = scheduleHtml.IndexOf("</table>", scheduleTableStart, StringComparison.Ordinal);
-        Assert.True(scheduleTableStart >= 0 && scheduleTableEnd > scheduleTableStart);
-        var scheduleTableHtml = scheduleHtml[scheduleTableStart..scheduleTableEnd];
-        Assert.Single(Regex.Matches(scheduleTableHtml, "第一节").OfType<Match>());
-        Assert.Contains("""class="schedule-course-name""", scheduleTableHtml);
-        Assert.Contains("信息技术实践课程", scheduleTableHtml);
-        Assert.Contains("08:00–08:45", scheduleTableHtml);
+        var gridStart = scheduleHtml.IndexOf("data-schedule-grid", StringComparison.Ordinal);
+        var gridEnd = scheduleHtml.IndexOf("<section class=\"panel\" aria-labelledby=\"schedule-settings-title\"", gridStart, StringComparison.Ordinal);
+        Assert.True(gridStart >= 0 && gridEnd > gridStart);
+        var gridHtml = scheduleHtml[gridStart..gridEnd];
+        // 表格每节一行：左侧是节次号与起止时间，色块显示科目；连堂合并与不合并两种排法都渲染，由本机显示设置选择。
+        Assert.Contains("<strong>1</strong>", gridHtml);
+        Assert.Contains("<small>08:00</small><small>08:45</small>", gridHtml);
+        Assert.Contains("""<span class="sg-subject">信息技术实践课程</span>""", gridHtml);
+        Assert.Contains("class=\"sg-block sg-merged\"", gridHtml);
+        Assert.Contains("class=\"sg-block sg-unmerged\"", gridHtml);
+        Assert.Contains("信息技术实践课程 · 08:00–08:45", gridHtml);
+        Assert.Contains("data-user-edit-open=\"schedule-display-dialog\"", scheduleHtml);
+        Assert.Contains("<dialog id=\"schedule-display-dialog\"", scheduleHtml);
+        Assert.Contains("data-user-edit-open=\"subject-location-dialog\"", scheduleHtml);
+        Assert.Contains("<dialog id=\"subject-location-dialog\"", scheduleHtml);
         // 自动拉取间隔是全局设置，在系统设置的“插件与课表同步”中修改，课表页只保留立即拉取。
         Assert.DoesNotContain("name=\"PullInterval\"", scheduleHtml);
         var intervalHtml = WebUtility.HtmlDecode(await browser.GetStringAsync("/PluginAccess"));
@@ -785,7 +792,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             refreshedHtml,
             new Dictionary<string, string>
             {
-                ["Input.Date"] = "2026-08-17",
+                ["Input.Date"] = today,
                 ["Input.ExpectedRevision"] = "revision-1",
                 ["Input.SourceIndex"] = "0",
                 ["Input.Mode"] = "Exchange",
@@ -802,7 +809,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
             validHtml,
             new Dictionary<string, string>
             {
-                ["Input.Date"] = "2026-08-17",
+                ["Input.Date"] = today,
                 ["Input.ExpectedRevision"] = "revision-1",
                 ["Input.SourceIndex"] = "0",
                 ["Input.Mode"] = "Exchange",
@@ -820,9 +827,11 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var css = await browser.GetStringAsync("/app.css");
 
         Assert.Contains(".schedule-pull-progress[hidden]", css);
-        Assert.Contains(".schedule-table { width: 100%; min-width: 1120px; table-layout: fixed", css);
-        Assert.Contains(".schedule-period-heading, .schedule-period-cell { width: 90px; white-space: nowrap; }", css);
-        Assert.Contains(".schedule-course-name, .schedule-course-time { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }", css);
+        Assert.Contains(".sg-col { display: grid; position: relative; flex: 1 1 0; min-width: var(--sg-col-min); grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--sg-rows);", css);
+        Assert.Contains(":root[data-theme=\"dark\"] .sg-block { background: var(--sc-bg-d); color: var(--sc-fg-d); }", css);
+        Assert.Contains(":root[data-sg-merge=\"off\"] .sg-unmerged { display: flex; }", css);
+        Assert.Contains(":root:not([data-sg-weekend=\"always\"]) .sg[data-has-weekend=\"false\"] .sg-weekend { display: none; }", css);
+        Assert.DoesNotContain(".schedule-table", css);
         Assert.Contains(".schedule-pull-layout { display: grid; grid-template-columns: minmax(0,1fr) auto", css);
         Assert.Contains(".schedule-pull-button { width: auto; min-width: 240px; justify-self: end; }", css);
         Assert.Contains(".schedule-change-form .schedule-submit-button { grid-column: 3; width: 100%; }", css);
@@ -1773,7 +1782,7 @@ public sealed class ApiTests : IClassFixture<TestWebApplicationFactory>
         var schedule = await browser.GetAsync("/Schedule");
         Assert.Equal(HttpStatusCode.OK, schedule.StatusCode);
         var scheduleHtml = WebUtility.HtmlDecode(await schedule.Content.ReadAsStringAsync());
-        Assert.Contains("未来七日课表", scheduleHtml);
+        Assert.Contains("显示设置", scheduleHtml);
         Assert.DoesNotContain("立即拉取课表", scheduleHtml);
         Assert.DoesNotContain("提交换课", scheduleHtml);
         Assert.DoesNotContain("自动拉取课表", scheduleHtml);

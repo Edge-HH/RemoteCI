@@ -138,6 +138,9 @@ fun AppListItem(
     leading: ImageVector,
     trailing: ImageVector? = null,
     trailingText: String? = null,
+    /** 图标底色与图标颜色；课表列表用学科颜色，省略时为主题色。 */
+    leadingContainerColor: Color? = null,
+    leadingContentColor: Color? = null,
     switchChecked: Boolean? = null,
     onSwitch: ((Boolean) -> Unit)? = null,
     index: Int = 0,
@@ -155,10 +158,10 @@ fun AppListItem(
         supportingContent = supporting?.let { { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
         leadingContent = {
             Box(
-                Modifier.size(44.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.primaryContainer),
+                Modifier.size(44.dp).clip(RoundedCornerShape(16.dp)).background(leadingContainerColor ?: MaterialTheme.colorScheme.primaryContainer),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(leading, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(24.dp))
+                Icon(leading, contentDescription = null, tint = leadingContentColor ?: MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(24.dp))
             }
         },
         trailingContent = {

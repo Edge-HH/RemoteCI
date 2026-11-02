@@ -117,6 +117,8 @@ fun SecondaryHost(
         Screen.NotificationSettings -> NotificationSettingsScreen(settings, onBack, onPersist)
         Screen.CalendarSync -> CalendarSyncScreen(onBack, snackbar)
         Screen.ScheduleSettings -> ScheduleSettingsScreen(onBack)
+        Screen.ScheduleDisplay -> ScheduleDisplayScreen(settings, onBack, onPersist, onOpen)
+        Screen.SubjectColors -> SubjectColorsScreen(onBack, snackbar)
         Screen.Appearance -> AppearanceScreen(settings, onBack, onPersist)
         Screen.Updates -> UpdatesScreen(settings, onBack, onPersist)
         Screen.System -> SystemScreen(onBack, snackbar)

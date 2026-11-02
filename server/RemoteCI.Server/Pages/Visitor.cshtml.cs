@@ -13,9 +13,13 @@ public sealed class VisitorModel(
     VisitorAccessSettings visitorAccess,
     ClassroomService classrooms,
     IStateStore state,
-    ScheduleViewService scheduleViews) : PageModel
+    ScheduleViewService scheduleViews,
+    ScheduleWeekService weeks) : PageModel
 {
     public ScheduleBundle? Bundle { get; private set; }
+
+    /// <summary>本周课表表格；访客没有账号，全部用默认学科颜色。</summary>
+    public ScheduleGridView? Grid { get; private set; }
 
     /// <summary>插件从未同步过课表，课表按班级档案推算，页面提示可能与教室端不同。</summary>
     public bool FromProfile { get; private set; }
@@ -59,6 +63,8 @@ public sealed class VisitorModel(
         Bundle = view?.Bundle;
         FromProfile = view?.Source == ScheduleViewSource.Profile;
         ViewData["ScheduleToday"] = ClassClock.Today(state, CurrentClassId).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        if (Bundle is not null)
+            Grid = ScheduleGridView.ForClass(await weeks.BuildClassAsync(CurrentClassId, ct: ct), new Dictionary<string, string>());
         return Page();
     }
 

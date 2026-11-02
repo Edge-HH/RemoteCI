@@ -1,0 +1,56 @@
+@model RemoteCI.Shared.Models.SubjectColorsResponse
+@using RemoteCI.Server.Pages
+@using RemoteCI.Shared.Models
+@*
+    课表与日程共用的“显示设置”弹窗。显示开关只保存在这台设备的浏览器里（与手机端各自独立）；
+    学科颜色按账号保存在服务端，与手机端同步。打开按钮由页面自己放置（data-user-edit-open="schedule-display-dialog"）。
+*@
+<dialog id="schedule-display-dialog" class="user-edit-dialog schedule-display-dialog" data-user-edit-dialog aria-labelledby="schedule-display-dialog-title">
+    <div class="user-edit-dialog-shell">
+        <header class="user-edit-dialog-header"><div><p class="eyebrow">课表与日程</p><h2 id="schedule-display-dialog-title">显示设置</h2></div><button type="button" class="ghost dialog-close-button" data-user-edit-close aria-label="关闭显示设置"><i class="icon icon-close" aria-hidden="true"></i></button></header>
+        <div class="user-edit-form">
+            <section>
+                <h3>显示</h3>
+                <div class="schedule-display-toggles" data-sg-prefs>
+                    <label class="check"><input type="checkbox" data-sg-pref="teacher" checked /> 显示老师（课表）</label>
+                    <label class="check"><input type="checkbox" data-sg-pref="cls" checked /> 显示班级（日程）</label>
+                    <label class="check"><input type="checkbox" data-sg-pref="location" checked /> 显示地点</label>
+                    <label class="check"><input type="checkbox" data-sg-pref="merge" checked /> 自动合并连堂</label>
+                    <label>显示周末
+                        <select data-sg-pref="weekend">
+                            <option value="auto">自动（本周周末有课时显示）</option>
+                            <option value="always">始终显示</option>
+                            <option value="never">始终隐藏</option>
+                        </select>
+                    </label>
+                </div>
+                <p class="muted">以上设置只保存在这台设备的浏览器中。</p>
+            </section>
+            <section>
+                <h3>学科颜色</h3>
+                <p class="muted">按账号保存，手机端打开课表时同步显示。</p>
+                @if (Model.Items.Count == 0)
+                {
+                    <p class="muted">还没有可设置颜色的学科。</p>
+                }
+                @foreach (var item in Model.Items)
+                {
+                    var light = SubjectColors.Derive(item.Color, dark: false);
+                    var dark = SubjectColors.Derive(item.Color, dark: true);
+                    <form method="post" asp-page-handler="SubjectColor" class="sg-color-row" data-sg-color-form>
+                        <input type="hidden" name="name" value="@item.Name" />
+                        <span class="sg-color-name" data-subject="@item.Name" style="--sc-bg:@light.Background;--sc-fg:@light.Foreground;--sc-bg-d:@dark.Background;--sc-fg-d:@dark.Foreground">@item.Name<small data-sg-custom @(item.Custom ? "" : "hidden")>已自定义</small></span>
+                        <div class="sg-swatches" role="group" aria-label="@item.Name 的颜色">
+                            @foreach (var color in Model.Palette)
+                            {
+                                <button type="submit" name="color" value="@color" class="sg-swatch" style="--swatch:@color" aria-pressed="@(color == item.Color ? "true" : "false")" aria-label="@color" title="@color"></button>
+                            }
+                        </div>
+                        <button type="submit" name="reset" value="true" class="ghost" data-sg-reset disabled="@(!item.Custom)">恢复默认</button>
+                    </form>
+                }
+            </section>
+        </div>
+    </div>
+</dialog>
+<script src="~/js/schedule-grid.js" asp-append-version="true" defer></script>

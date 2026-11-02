@@ -114,6 +114,8 @@ builder.Services.AddHostedService<PersonalCourseReminderWorker>();
 builder.Services.AddScoped<ClassAccessService>();
 builder.Services.AddScoped<ProfileLibraryService>();
 builder.Services.AddScoped<ScheduleViewService>();
+builder.Services.AddScoped<ScheduleWeekService>();
+builder.Services.AddScoped<SubjectColorService>();
 builder.Services.AddScoped<ProfileDispatchService>();
 builder.Services.AddScoped<ClassBroadcastService>();
  builder.Services.AddScoped<DeviceInventoryService>();
@@ -530,6 +532,41 @@ app.MapDelete("/api/me/schedule/courses/{id:guid}", async (Guid id, HttpContext 
     catch (IdentityOperationException ex) { return OperationError(ex); }
 });
 
+// 按周浏览“我的日程”：from 省略为本周一、to 省略为 from 起 7 天，最多 42 天；过去的日子取课时台账。
+app.MapGet("/api/me/schedule/week", async (
+    HttpContext ctx, string? from, string? to, int? timeZoneOffsetMinutes, IdentityCoordinator identities, ScheduleWeekService weeks, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (InvalidTimeZoneOffset(timeZoneOffsetMinutes) is { } bad) return bad;
+    if (ScheduleWeekService.Validate(from, to, out var fromDate, out var toDate) is { } error)
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, error));
+    return Results.Ok(await weeks.BuildMineAsync(principal.User.Id, HasPersonalSchedule(principal) ? principal.User.DisplayName : null,
+        fromDate, toDate, ClassClock.Valid(timeZoneOffsetMinutes), ct));
+});
+
+// 学科颜色：按账号保存，手机与 WebUI 共用；只能从色板中选择，DELETE 恢复默认颜色。
+app.MapGet("/api/me/subject-colors", async (HttpContext ctx, IdentityCoordinator identities, SubjectColorService colors, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    return Results.Ok(await colors.ListAsync(principal.User, HasPersonalSchedule(principal) ? principal.User.DisplayName : null, ct));
+});
+app.MapPut("/api/me/subject-colors", async (HttpContext ctx, SubjectColorRequest body, IdentityCoordinator identities, SubjectColorService colors, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    try { await colors.SetAsync(principal.User.Id, body.Name, body.Color, ct); return Results.NoContent(); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+app.MapDelete("/api/me/subject-colors", async (HttpContext ctx, string? name, IdentityCoordinator identities, SubjectColorService colors, CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    try { await colors.ResetAsync(principal.User.Id, name, ct); return Results.NoContent(); }
+    catch (IdentityOperationException ex) { return OperationError(ex); }
+});
+
 // ---------- 换课申请：老师发起、对方老师审批；强制换课立即生效、对方可撤回 ----------
 
 app.MapGet("/api/swap-requests/catalog", async (
@@ -701,6 +738,19 @@ app.MapGet("/api/schedule", async (
     return await schedules.GetAsync(target, ct) is { } view
         ? Results.Ok(view.Bundle)
         : Results.Json(Error(ApiErrorCodes.NotFound, "尚无课表"), statusCode: StatusCodes.Status404NotFound);
+});
+
+// 按周浏览班级课表：鉴权与 /api/schedule 相同；from 省略为本周一、to 省略为 from 起 7 天，最多 42 天。
+app.MapGet("/api/schedule/week", async (
+    HttpContext ctx, Guid? classId, string? from, string? to, IdentityCoordinator identities, ClassAccessService access, ScheduleWeekService weeks,
+    CancellationToken ct) =>
+{
+    var principal = await AuthorizeAsync(ctx, identities, ct);
+    if (principal?.User is null) return Unauthorized();
+    if (await ResolveClassAsync(principal, classId, access, ct) is not { } target) return Forbidden();
+    if (ScheduleWeekService.Validate(from, to, out var fromDate, out var toDate) is { } error)
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, error));
+    return Results.Ok(await weeks.BuildClassAsync(target, fromDate, toDate, ct));
 });
 
 app.MapPost("/api/commands", async (
