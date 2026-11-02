@@ -13,7 +13,7 @@ RemoteCI 是面向 **ClassIsland 2.1 及以上**的课堂联动与集控系统�
 [📦 下载发布版](https://github.com/Edge-HH/RemoteCI/releases/latest) · [📖 使用文档](https://edge-hh.github.io/RemoteCI-Docs/) · [🚀 部署指南](docs/deployment.md) · [💬 问题反馈](https://github.com/Edge-HH/RemoteCI/issues)
 
 > [!NOTE]
-> 当前开发重点是 WebUI 与集控系统，Android、Wear OS 的功能更新可能稍晚。不同端的入口与能力以实际版本为准。
+> 我的个人精力有限，目前 Wear OS 端的功能更新可能目前缺失。不同端的入口与能力以实际发布版本为准。
 
 ## 📸 界面预览
 
