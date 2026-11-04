@@ -50,6 +50,13 @@
             },
             ready: () => selectedFile !== null,
         },
+        // ClassIsland 设置：JSON 体只包含修改过的设置项，由弹窗脚本（classisland-settings.js）收集。
+        SetClassIslandSettings: {
+            handler: () => (singleControl ? "SingleApplyClassIslandSettings" : "ApplyClassIslandSettings"),
+            buildBody: () => JSON.stringify(currentSettingsDialog?.cisCollect?.() ?? { values: {} }),
+            ready: () => (currentSettingsDialog?.cisModifiedCount?.() ?? 0) > 0,
+            notReadyMessage: () => "还没有修改任何设置项，请先在上方修改需要下发的设置。",
+        },
     };
 
     const renderRemoteResults = results => {
@@ -100,9 +107,10 @@
             const feedback = singleControl
                 ? currentSettingsDialog?.querySelector("[data-single-control-feedback]")
                 : targetFeedback;
-            feedback.textContent = operation === "SendFile"
-                ? "请先返回上一步选择要分发的文件。"
-                : "参数不完整，请返回上一步检查。";
+            feedback.textContent = op.notReadyMessage?.()
+                ?? (operation === "SendFile"
+                    ? "请先返回上一步选择要分发的文件。"
+                    : "参数不完整，请返回上一步检查。");
             return;
         }
         const action = new URL(location.pathname, window.location.origin);
@@ -125,6 +133,9 @@
                 : await postRemote(action, token, op.buildBody());
             feedback.textContent = result.message || "";
             renderRemoteResults(result.results || []);
+            // 单班设置下发成功后重新读取，预填回到设备已生效的最新值。
+            if (operation === "SetClassIslandSettings" && singleControl && result.success)
+                currentSettingsDialog?.cisReread?.();
             if (operation === "SendFile" && result.transfer && !result.finished)
                 pollTransfer(result.transfer.id, feedback);
         } catch (error) {
@@ -256,6 +267,8 @@
         if (!currentSettingsDialog) return;
         currentSettingsDialog.querySelectorAll("input, select, textarea").forEach(field => {
             if (!field.name || field.disabled || field.type === "file") return;
+            // 策略开关的 false 占位字段只服务于无脚本表单提交，这里按 data-batch-bool 统一取值。
+            if (field.dataset.batchSkip !== undefined) return;
             if (field.type === "checkbox") {
                 if (field.dataset.batchBool !== undefined) {
                     addHidden(field.name, field.checked ? "true" : "false");

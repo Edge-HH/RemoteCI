@@ -39,6 +39,8 @@ public static class Protocol
     public const string MessageTypeAppGuardEvent = "app_guard_event";
     /// <summary>服务端发给插件的调课集合（schedule.adjustments 能力），插件据此生成托管临时层；回执随 schedule_sync 上报。</summary>
     public const string MessageTypeScheduleAdjustments = "schedule_adjustments";
+    /// <summary>服务端发给某个班级全部插件的班级策略（class.policy 能力）；插件持久化并应用到 ClassIsland。</summary>
+    public const string MessageTypeClassPolicy = "class_policy";
 
     public const int LanDiscoveryPort = 48765;
     public const string LanDiscoveryRequest = "REMOTECI_DISCOVER_V3";
@@ -318,6 +320,12 @@ public enum CommandKind
     UpdateAppGuard = 34,
     /// <summary>设置班级某科目的上课地点，写入 ClassIsland 档案科目的附加数据并随课表推送生效。</summary>
     SetSubjectLocation = 35,
+    /// <summary>设置班级策略（限制教室端编辑、调试与退出入口）；仅服务端班级管理/批量控制入口可以发起。</summary>
+    SetClassPolicy = 36,
+    /// <summary>读取设备当前 ClassIsland 设置（仅目录白名单内的项）；仅服务端控制入口可以发起。</summary>
+    ReadClassIslandSettings = 37,
+    /// <summary>部分更新 ClassIsland 设置（只写入载荷中给出的项，其余保持设备当前值）；仅服务端控制入口可以发起。</summary>
+    SetClassIslandSettings = 38,
 }
 
 public enum PowerActionKind
@@ -337,7 +345,8 @@ public static class CommandPermissions
     public static bool IsServerOnly(CommandKind command) =>
         command is CommandKind.ApplyExtensionSettings or CommandKind.ApplyProfile or CommandKind.ReadProfile or
             CommandKind.CaptureScreen or CommandKind.InstallPluginPackages or CommandKind.StopAppGuard or CommandKind.UninstallAppGuard or
-            CommandKind.UpdateAppGuard;
+            CommandKind.UpdateAppGuard or CommandKind.SetClassPolicy or
+            CommandKind.ReadClassIslandSettings or CommandKind.SetClassIslandSettings;
 
     public static UserPermissions Required(CommandKind command) => command switch
     {
@@ -362,7 +371,8 @@ public static class CommandPermissions
         CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
         CommandKind.InstallPluginPackages or CommandKind.SetPluginManagementPolicy
             => UserPermissions.ManagePlugins,
-        CommandKind.RestartClassIsland or CommandKind.LaunchClassIsland or CommandKind.JoinManagement
+        CommandKind.RestartClassIsland or CommandKind.LaunchClassIsland or CommandKind.JoinManagement or
+        CommandKind.SetClassPolicy or CommandKind.ReadClassIslandSettings or CommandKind.SetClassIslandSettings
             => UserPermissions.ControlClassIsland,
         CommandKind.StopAppGuard or CommandKind.UninstallAppGuard or CommandKind.UpdateAppGuard
             => UserPermissions.ManageDeviceGuard,
@@ -471,6 +481,12 @@ public static class RemoteCiCapabilities
     public const string PluginPackageInstall = "plugin.package-install";
     /// <summary>课表插件立即用随附版本覆盖并重启本机守护。</summary>
     public const string AppGuardUpdate = "host.app-guard-update";
+    /// <summary>接收班级策略并应用到 ClassIsland 的编辑、调试与退出入口；服务端在连接时与变更后下发。</summary>
+    public const string ClassPolicy = "class.policy";
+    /// <summary>读取设备当前 ClassIsland 设置（目录白名单内的项）。</summary>
+    public const string HostSettingsRead = "host.settings.read";
+    /// <summary>部分更新设备上的 ClassIsland 设置（只写入给出的项）。</summary>
+    public const string HostSettingsWrite = "host.settings.write";
 
     /// <summary>没有上报能力列表的旧 V3 端自动获得的基础能力。</summary>
     public static IReadOnlyList<string> Baseline { get; } =
@@ -495,7 +511,7 @@ public static class RemoteCiCapabilities
             ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings, ProfileApply, HolidayCalendar,
             ProfileRead, ProfileTempLayer, Semester, FileTransfer, AppGuard, ScheduleChangePermanent, ScheduleAdjustments,
             ScreenCapture, AppGuardLaunch, AppGuardManage, MainWindowLayoutApply, MainWindowLayoutRead, PluginPackageInstall,
-            AppGuardUpdate, ScheduleSubjectLocation];
+            AppGuardUpdate, ScheduleSubjectLocation, ClassPolicy, HostSettingsRead, HostSettingsWrite];
 
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
@@ -543,6 +559,9 @@ public static class RemoteCiCapabilities
         MainWindowLayoutRead => "获取主界面文件",
         PluginPackageInstall => "从服务端安装插件包",
         AppGuardUpdate => "立即更新守护",
+        ClassPolicy => "班级策略",
+        HostSettingsRead => "读取 ClassIsland 设置",
+        HostSettingsWrite => "修改 ClassIsland 设置",
         _ => "未知能力",
     };
 
@@ -581,6 +600,9 @@ public static class RemoteCiCapabilities
         CommandKind.ReadMainWindowLayout => MainWindowLayoutRead,
         CommandKind.InstallPluginPackages => PluginPackageInstall,
         CommandKind.UpdateAppGuard => AppGuardUpdate,
+        CommandKind.SetClassPolicy => ClassPolicy,
+        CommandKind.ReadClassIslandSettings => HostSettingsRead,
+        CommandKind.SetClassIslandSettings => HostSettingsWrite,
         _ => null,
     };
 }

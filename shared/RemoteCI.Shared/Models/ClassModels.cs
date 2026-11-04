@@ -79,6 +79,11 @@ public sealed class ClassDetail
     [JsonPropertyName("hasPairingCode")]
     public bool HasPairingCode { get; set; }
 
+    /// <summary>该班级的策略；旧服务端不返回，按默认（不限制）处理。</summary>
+    [JsonPropertyName("policy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ClassPolicy? Policy { get; set; }
+
     [JsonPropertyName("createdAt")]
     public DateTimeOffset CreatedAt { get; set; }
 }

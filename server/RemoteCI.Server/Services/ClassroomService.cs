@@ -36,6 +36,7 @@ public sealed class ClassroomService(AppDbContext db)
             GroupNames = x.GroupAssignments.Select(a => a.Group.Name).ToList(),
             HasAvatar = x.Avatar != null,
             HasPairingCode = classIdsWithPairCode.Contains(x.Id),
+            Policy = ClassPolicy.FromJson(x.PolicyJson),
             CreatedAt = x.CreatedAt,
         }).ToList();
     }

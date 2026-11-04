@@ -22,7 +22,8 @@ public sealed class ControlModel(
     ClassroomService classesService,
     ExtensionGroupService extensionGroups,
     ScreenshotDispatcher screenshotDispatcher,
-    ScreenshotService screenshots) : BatchControlModel(users, classrooms, devices, identities)
+    ScreenshotService screenshots,
+    ClassPolicyService classPolicy) : BatchControlModel(users, classrooms, devices, classPolicy, identities)
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(15);
 
@@ -103,6 +104,11 @@ public sealed class ControlModel(
     public bool CanCaptureScreen => ClassPermissions.HasFlag(UserPermissions.CaptureScreen) && Supports(RemoteCiCapabilities.ScreenCapture);
     public bool CanUploadMainWindowLayout => ClassPermissions.HasFlag(UserPermissions.MainWindowLayout) && Supports(RemoteCiCapabilities.MainWindowLayoutApply);
     public bool CanReadMainWindowLayout => ClassPermissions.HasFlag(UserPermissions.MainWindowLayout) && Supports(RemoteCiCapabilities.MainWindowLayoutRead);
+    /// <summary>远程读写 ClassIsland 设置：本班“ClassIsland 控制”权限 + 插件声明对应能力。</summary>
+    public bool CanReadClassIslandSettings => ClassPermissions.HasFlag(UserPermissions.ControlClassIsland) &&
+        Supports(RemoteCiCapabilities.HostSettingsRead);
+    public bool CanWriteClassIslandSettings => ClassPermissions.HasFlag(UserPermissions.ControlClassIsland) &&
+        Supports(RemoteCiCapabilities.HostSettingsWrite);
     public override bool IsSingleControl => true;
 
     public override async Task<IActionResult> OnGetAsync(CancellationToken ct)
@@ -154,8 +160,7 @@ public sealed class ControlModel(
 
     /// <summary>网页端截图信息：图片走控制页的 Cookie 鉴权处理器，设备状态页共用。</summary>
     internal static object ScreenshotPageView(IUrlHelper url, ScreenshotRecord record) => new
-    {
-        id = record.Id,
+    {        id = record.Id,
         deviceName = record.DeviceName,
         requestedBy = record.RequestedByName,
         width = record.Width,
@@ -496,6 +501,38 @@ public sealed class ControlModel(
         return RedirectToPage();
     }
 
+    /// <summary>读取当前班级设备正在使用的 ClassIsland 设置（仅目录内的项），供设置弹窗预填。</summary>
+    public async Task<IActionResult> OnGetReadClassIslandSettingsAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (!ClassPermissions.HasFlag(UserPermissions.ControlClassIsland))
+            return ClassIslandSettingsJson(CommandResult.Failure(CommandResultCodes.Forbidden, "没有本班的 ClassIsland 控制权限"));
+        if (!PluginOnline)
+            return ClassIslandSettingsJson(CommandResult.Failure(CommandResultCodes.PluginOffline, "设备离线，无法读取设置"));
+        if (!peers.PrimaryPluginSupports(CurrentClassId, RemoteCiCapabilities.HostSettingsRead))
+            return ClassIslandSettingsJson(CommandResult.Failure(CommandResultCodes.CapabilityUnsupported,
+                "教室端插件版本过旧，请先升级 RemoteCI 插件"));
+        var result = await SendAsync(new CommandMessage { Command = CommandKind.ReadClassIslandSettings }, ct);
+        if (!result.Success) return ClassIslandSettingsJson(result);
+        try
+        {
+            var snapshot = System.Text.Json.JsonSerializer.Deserialize<ClassIslandSettingsSnapshot>(
+                result.Data ?? "{}", JsonDefaults.Options);
+            return new JsonResult(new { success = true, message = result.Message, values = snapshot?.Values });
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return ClassIslandSettingsJson(CommandResult.Failure(CommandResultCodes.InternalError, "设备返回的设置数据无效"));
+        }
+    }
+
+    private IActionResult ClassIslandSettingsJson(CommandResult result) => new JsonResult(new
+    {
+        success = result.Success,
+        message = result.Message,
+        values = (IDictionary<string, System.Text.Json.JsonElement>?)null,
+    });
+
     private async Task<IActionResult?> LoadAsync(CancellationToken ct)
     {
         if (await RequireAsync() is { } denied) return denied;
@@ -513,7 +550,8 @@ public sealed class ControlModel(
         EditableExtensionGroupIds = await extensionGroups.ListClassAdminEditableAsync(
             CurrentUser.Id, CurrentUser.Role, CurrentClassId, ct);
         return !MobileUi.IsMobile(HttpContext) && !CanTeacherComing && !CanSendNotifications && !CanSendVoiceMessages && !CanClearNotifications && !CanControlMainMenu &&
-            !CanControlPower && !CanControlVolume && !CanUseExtensions && !HasMaintenanceOperations
+            !CanControlPower && !CanControlVolume && !CanUseExtensions && !HasMaintenanceOperations &&
+            !CanWriteClassIslandSettings
             ? RedirectToPage("/Denied")
             : null;
     }

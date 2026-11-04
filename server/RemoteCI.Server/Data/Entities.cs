@@ -260,6 +260,12 @@ public sealed class Classroom
     /// <summary>启用后未登录访客可只读查看本班课表。</summary>
     public bool VisitorAccessEnabled { get; set; }
 
+    /// <summary>
+    /// 班级策略 JSON（限制教室端编辑、调试与退出入口）；null 表示默认策略（不限制）。
+    /// 使用 JSON 列便于与协议模型保持一致并在后续追加开关。
+    /// </summary>
+    public string? PolicyJson { get; set; }
+
     /// <summary>班级头像（小尺寸图片，≤256KB）；null 表示未设置。</summary>
     public byte[]? Avatar { get; set; }
     public string? AvatarContentType { get; set; }

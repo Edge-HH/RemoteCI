@@ -2669,3 +2669,161 @@ input[type="range"]:disabled { cursor: not-allowed; opacity: .5; }
     .permission-checklist-head { flex-direction: column; }
     .permission-group-title { flex-direction: column; align-items: flex-start; gap: 3px; }
 }
+
+/* ===== ClassIsland 设置（远程修改，结构与条目还原 ClassIsland 设置页） ===== */
+
+.cis-layout {
+    display: grid;
+    grid-template-columns: 132px minmax(0, 1fr);
+    gap: 16px;
+    min-height: 320px;
+    max-height: min(52vh, 520px);
+}
+
+.cis-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-self: start;
+    padding-right: 10px;
+    border-right: 1px solid var(--line);
+    overflow-y: auto;
+    max-height: inherit;
+}
+
+.cis-nav-item {
+    padding: 7px 11px;
+    border: none;
+    border-radius: var(--radius-item);
+    background: transparent;
+    color: var(--muted);
+    font-size: 12.5px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.cis-nav-item:hover { background: var(--surface-soft); color: var(--text); }
+.cis-nav-item.active {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-weight: 700;
+}
+
+.cis-pages { overflow-y: auto; padding-right: 2px; }
+.cis-page { display: grid; gap: 12px; }
+
+.cis-card {
+    padding: 2px 14px 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-item);
+    background: var(--surface-inset);
+}
+
+.cis-card-title {
+    margin: 10px 0 2px;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    color: var(--muted);
+}
+
+.cis-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.cis-row:last-child { border-bottom: none; }
+.cis-row.cis-unavailable { opacity: .45; }
+.cis-row.cis-dirty {
+    margin: 0 -14px;
+    padding-left: 14px;
+    padding-right: 14px;
+    background: color-mix(in srgb, var(--accent-faint) 72%, transparent);
+    border-bottom-color: transparent;
+    border-radius: var(--radius-item);
+}
+
+.cis-copy { display: grid; gap: 2px; min-width: 0; }
+.cis-label { font-size: 13px; font-weight: 500; }
+.cis-row.cis-dirty .cis-label::after {
+    content: "已修改";
+    display: inline-block;
+    margin-left: 7px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-size: 10px;
+    font-weight: 700;
+    vertical-align: 1px;
+}
+
+.cis-desc { color: var(--muted); font-size: 11.5px; }
+.cis-control { display: flex; align-items: center; gap: 6px; flex: none; }
+
+.cis-input,
+.cis-list {
+    min-width: 0;
+    padding: 6px 9px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-input);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 12.5px;
+}
+
+.cis-number { width: 96px; }
+.cis-list { width: 210px; resize: vertical; }
+.cis-color-text { width: 108px; font-family: var(--font-mono); }
+.cis-unit { color: var(--muted); font-size: 11px; }
+
+.cis-switch { position: relative; display: inline-block; width: 38px; height: 22px; }
+.cis-switch input {
+    appearance: none;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--muted) 38%, transparent);
+    cursor: pointer;
+    transition: background .15s ease;
+}
+.cis-switch input:checked { background: var(--accent-strong); }
+.cis-switch span {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, .3);
+    pointer-events: none;
+    transition: transform .15s ease;
+}
+.cis-switch input:checked + span { transform: translateX(16px); }
+
+/* 单班模式显示 ClassIsland 原生样式的开关与颜色选择器；批量模式显示三态下拉与文本框。 */
+.cis-dialog.cis-single [data-cis-variant="batch"] { display: none; }
+.cis-dialog:not(.cis-single) [data-cis-variant="single"] { display: none; }
+.cis-dialog.cis-single .cis-untouched-option { display: none; }
+
+.cis-status { margin: 0; font-size: 12px; }
+
+@media (max-width: 720px) {
+    .cis-layout { grid-template-columns: 1fr; max-height: none; }
+    .cis-nav {
+        flex-direction: row;
+        flex-wrap: wrap;
+        padding-right: 0;
+        border-right: none;
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 8px;
+    }
+    .cis-row { flex-direction: column; align-items: stretch; }
+    .cis-control { justify-content: flex-end; }
+}

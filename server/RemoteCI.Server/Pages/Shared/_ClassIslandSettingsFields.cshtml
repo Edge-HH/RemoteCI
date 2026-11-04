@@ -1,0 +1,92 @@
+@using RemoteCI.Shared.Models
+@*
+    远程修改 ClassIsland 设置的表单内容：分组、卡片与条目名称按 ClassIslandSettingsCatalog
+    还原 ClassIsland 设置页的结构。字段不带 name 属性，不参与普通表单提交；
+    由 classisland-settings.js 负责读取预填、修改标记与“只提交修改过的项”。
+*@
+<div class="cis-layout" data-cis-root>
+    <nav class="cis-nav" data-cis-nav aria-label="设置分组">
+        @foreach (var settingsPage in ClassIslandSettingsCatalog.Pages.OrderBy(page => page.Order))
+        {
+            <button type="button" class="cis-nav-item" data-cis-nav-item="@settingsPage.Id">@settingsPage.Name</button>
+        }
+    </nav>
+    <div class="cis-pages" data-cis-pages>
+        @foreach (var settingsPage in ClassIslandSettingsCatalog.Pages.OrderBy(page => page.Order))
+        {
+            <section class="cis-page" data-cis-page="@settingsPage.Id" hidden="@(settingsPage.Order != 1)">
+                @foreach (var card in ClassIslandSettingsCatalog.ItemsForPage(settingsPage.Id).GroupBy(item => item.Card ?? "其他"))
+                {
+                    <div class="cis-card">
+                        <h4 class="cis-card-title">@card.Key</h4>
+                        @foreach (var item in card)
+                        {
+                            <div class="cis-row" data-cis-row="@item.Key">
+                                <div class="cis-copy">
+                                    <span class="cis-label">@item.Label</span>
+                                    @if (!string.IsNullOrWhiteSpace(item.Description))
+                                    {
+                                        <small class="cis-desc">@item.Description</small>
+                                    }
+                                </div>
+                                <div class="cis-control">
+                                    @switch (item.Type)
+                                    {
+                                        case ClassIslandSettingType.Boolean:
+                                            @* 单班模式用开关还原 ClassIsland 外观；批量模式用三态下拉区分“不修改”。 *@
+                                            <label class="cis-switch">
+                                                <input type="checkbox" data-cis-key="@item.Key" data-cis-type="boolean" data-cis-variant="single" />
+                                                <span></span>
+                                            </label>
+                                            <select class="cis-input" data-cis-key="@item.Key" data-cis-type="boolean" data-cis-variant="batch">
+                                                <option value="">（不修改）</option>
+                                                <option value="true">开启</option>
+                                                <option value="false">关闭</option>
+                                            </select>
+                                            break;
+                                        case ClassIslandSettingType.Enum:
+                                            <select class="cis-input" data-cis-key="@item.Key" data-cis-type="enum">
+                                                <option value="" class="cis-untouched-option">（不修改）</option>
+                                                @foreach (var option in item.Options ?? [])
+                                                {
+                                                    <option value="@option.Value">@option.Label</option>
+                                                }
+                                            </select>
+                                            break;
+                                        case ClassIslandSettingType.Integer:
+                                            <input type="number" class="cis-input cis-number" data-cis-key="@item.Key" data-cis-type="integer"
+                                                   min="@item.Min" max="@item.Max" step="1" />
+                                            break;
+                                        case ClassIslandSettingType.Double:
+                                            <input type="number" class="cis-input cis-number" data-cis-key="@item.Key" data-cis-type="double"
+                                                   min="@item.Min" max="@item.Max" step="@(item.Step ?? 0.1)" />
+                                            break;
+                                        case ClassIslandSettingType.Color:
+                                            <input type="color" data-cis-key="@item.Key" data-cis-type="color" data-cis-variant="single" />
+                                            <input type="text" class="cis-input cis-color-text" data-cis-key="@item.Key" data-cis-type="color"
+                                                   data-cis-variant="batch" placeholder="#RRGGBB" maxlength="9" />
+                                            break;
+                                        case ClassIslandSettingType.Date:
+                                            <input type="date" class="cis-input" data-cis-key="@item.Key" data-cis-type="date" />
+                                            break;
+                                        case ClassIslandSettingType.StringList:
+                                            <textarea class="cis-input cis-list" rows="2" data-cis-key="@item.Key" data-cis-type="stringList"
+                                                      placeholder="每行一项"></textarea>
+                                            break;
+                                        default:
+                                            <input type="text" class="cis-input" data-cis-key="@item.Key" data-cis-type="string" />
+                                            break;
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(item.Unit))
+                                    {
+                                        <span class="cis-unit">@item.Unit</span>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </section>
+        }
+    </div>
+</div>

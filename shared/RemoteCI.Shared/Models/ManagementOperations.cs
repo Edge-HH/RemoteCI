@@ -28,6 +28,10 @@ public enum BatchOperationKind
     SendFile = 51,
     /// <summary>批量执行某个已注册的扩展功能。</summary>
     RunExtension = 60,
+    /// <summary>把班级策略保存到服务端并下发到目标班级（限制教室端编辑、调试与退出入口）。</summary>
+    SetClassPolicy = 70,
+    /// <summary>部分更新目标设备的 ClassIsland 设置（只写入本页修改过的项）。</summary>
+    SetClassIslandSettings = 71,
 }
 
 public enum PluginActionKind

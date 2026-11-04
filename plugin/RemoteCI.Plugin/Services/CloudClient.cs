@@ -56,6 +56,9 @@ public sealed class CloudClient : IDisposable, IFileTransferChannel, IScreenshot
     /// <summary>收到服务端下发的调课集合时触发（在接收线程上）。</summary>
     public event Action<ScheduleAdjustmentSet>? ScheduleAdjustmentsReceived;
 
+    /// <summary>收到服务端下发的班级策略时触发（在接收线程上）。</summary>
+    public event Action<ClassPolicy>? ClassPolicyReceived;
+
     public CloudConnectionStatus CurrentStatus => Volatile.Read(ref _currentStatus);
 
     internal CloudClient(
@@ -431,6 +434,12 @@ public sealed class CloudClient : IDisposable, IFileTransferChannel, IScreenshot
         if (AppGuardPolicyMessage.TryRead(envelope, out var appGuardPolicy))
         {
             AppGuardPolicyReceived?.Invoke(appGuardPolicy);
+            return;
+        }
+
+        if (ClassPolicyMessage.TryRead(envelope, out var classPolicy))
+        {
+            ClassPolicyReceived?.Invoke(classPolicy);
             return;
         }
 

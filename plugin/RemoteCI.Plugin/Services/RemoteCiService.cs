@@ -27,6 +27,7 @@ public sealed class RemoteCiService : IDisposable
     private readonly SemesterApplier _semesterApplier;
     private readonly ScheduleOverlayService _overlays;
     private readonly AppGuardService _appGuard;
+    private readonly ClassPolicyService _classPolicy;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<RemoteCiService> _logger;
     private LanServer? _lanServer;
@@ -53,10 +54,12 @@ public sealed class RemoteCiService : IDisposable
         SemesterApplier semesterApplier,
         ScheduleOverlayService overlays,
         AppGuardService appGuard,
+        ClassPolicyService classPolicy,
         ILoggerFactory loggerFactory)
     {
         _overlays = overlays;
         _appGuard = appGuard;
+        _classPolicy = classPolicy;
         _semesterApplier = semesterApplier;
         _holidayCalendar = holidayCalendar;
         _holidayApplier = holidayApplier;
@@ -138,6 +141,7 @@ public sealed class RemoteCiService : IDisposable
         _cloudClient.SemesterReceived += OnSemesterReceived;
         _cloudClient.ScheduleAdjustmentsReceived += OnScheduleAdjustmentsReceived;
         _cloudClient.AppGuardPolicyReceived += _appGuard.ApplyPolicy;
+        _cloudClient.ClassPolicyReceived += OnClassPolicyReceived;
         _softwareInventory.ClassIslandUpdateRestarting += _appGuard.MarkUpdating;
         var cloudForGuard = _cloudClient;
         _appGuard.EventSender = batch => cloudForGuard.SendAppGuardEventsAsync(batch);
@@ -145,6 +149,8 @@ public sealed class RemoteCiService : IDisposable
         _ = _cloudClient.StartAsync(_cts.Token);
         try { _appGuard.Start(); }
         catch (Exception ex) { _logger.LogError(ex, "应用守护启动失败，云端连接继续运行"); }
+        // 启动时先应用缓存策略：ClassIsland 离线运行也保持限制；云端同步到达后会覆盖。
+        _classPolicy.ApplyStored();
         _holidayCalendar.Changed += RunHolidayApply;
         // 每分钟检查一次本地日期，跨天后（含睡眠唤醒）重新应用；启动时立即应用一次缓存的日历。
         _holidayTimer = new Timer(_ => { if (DateTime.Today != _holidayAppliedDate) RunHolidayApply(); },
@@ -167,6 +173,7 @@ public sealed class RemoteCiService : IDisposable
             _cloudClient.SemesterReceived -= OnSemesterReceived;
             _cloudClient.ScheduleAdjustmentsReceived -= OnScheduleAdjustmentsReceived;
             _cloudClient.AppGuardPolicyReceived -= _appGuard.ApplyPolicy;
+            _cloudClient.ClassPolicyReceived -= OnClassPolicyReceived;
         }
         _softwareInventory.ClassIslandUpdateRestarting -= _appGuard.MarkUpdating;
         _appGuard.EventSender = null;
@@ -304,6 +311,9 @@ public sealed class RemoteCiService : IDisposable
             _logger.LogError(ex, "同步学期开始日期失败");
         }
     });
+
+    /// <summary>服务端班级策略：保存到本地缓存并立即应用到 ClassIsland（内部切到 UI 线程）。</summary>
+    private void OnClassPolicyReceived(ClassPolicy policy) => _ = _classPolicy.ApplyAsync(policy);
 
     /// <summary>服务端调课集合：生成托管临时层后上报课表（带回执）；课表没变时不发“课表已更新”事件。</summary>
     private void OnScheduleAdjustmentsReceived(ScheduleAdjustmentSet set) => Dispatcher.UIThread.Post(() =>

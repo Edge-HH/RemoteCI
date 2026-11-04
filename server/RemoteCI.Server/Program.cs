@@ -163,8 +163,7 @@ builder.Services.AddScoped(sp =>
     service.OnlinePluginCounter = classId => registry.GetOnlinePluginConnections().Count(x => x.ClassId == classId);
     return service;
 });
-builder.Services.AddSingleton<ScheduleAdjustmentOverlay>();
-builder.Services.AddSingleton(sp => new StateStore(sp.GetRequiredService<ScheduleAdjustmentOverlay>()));
+builder.Services.AddSingleton<ScheduleAdjustmentOverlay>();builder.Services.AddSingleton(sp => new StateStore(sp.GetRequiredService<ScheduleAdjustmentOverlay>()));
 // 课表与扩展声明落库：服务端重启后插件尚未重连时，换课、日程与扩展设置仍有最近一次同步的数据。
 builder.Services.AddSingleton<ClassStateCacheService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ClassStateCacheService>());
@@ -191,6 +190,8 @@ builder.Services.AddScoped<LessonStatsService>();
 builder.Services.AddScoped<ActionLinkService>();
 builder.Services.AddScoped<ClassBoardService>();
 builder.Services.AddSingleton<PeerRegistry>();
+// 班级策略：按班级保存，连接时与变更后下发；插件缓存后离线启动也生效。
+builder.Services.AddSingleton<ClassPolicyService>();
 builder.Services.AddSingleton<ScheduleSyncTaskTracker>();
 builder.Services.AddSingleton<ScheduleSyncService>();
 builder.Services.AddSingleton(TimeProvider.System);
@@ -760,14 +761,19 @@ app.MapPost("/api/commands", async (
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
     if (await ResolveClassAsync(principal, command.ClassId ?? classId, access, ct) is not { } target) return Forbidden();
-    // 档案与扩展设置只能经各自的专用入口复核班级身份、自治策略与修订号，不能通过通用命令 API 绕过；
+    // 档案、扩展设置与班级策略只能经各自的专用入口复核班级身份、自治策略与修订号，不能通过通用命令 API 绕过；
     // 先确认班级访问权，无权班级与其他命令一样返回 403，有权时指出对应的专用接口。
     if (CommandPermissions.IsServerOnly(command.Command))
-        return command.Command == CommandKind.ApplyExtensionSettings
-            ? Results.BadRequest(Error(ApiErrorCodes.InvalidRequest,
-                "请使用 PUT /api/classes/{classId}/extension-groups/{groupId}/settings 修改扩展设置"))
-            : Results.Json(Error(ApiErrorCodes.Forbidden,
-                "请通过档案库页面、POST /api/profiles/collect 或 POST /api/profiles/apply 收集与下发档案"), statusCode: StatusCodes.Status403Forbidden);
+        return command.Command switch
+        {
+            CommandKind.ApplyExtensionSettings => Results.BadRequest(Error(ApiErrorCodes.InvalidRequest,
+                "请使用 PUT /api/classes/{classId}/extension-groups/{groupId}/settings 修改扩展设置")),
+            CommandKind.SetClassPolicy => Results.Json(Error(ApiErrorCodes.Forbidden,
+                "请在 WebUI 班级管理或批量控制中设置班级策略"), statusCode: StatusCodes.Status403Forbidden),
+            _ => Results.Json(Error(ApiErrorCodes.Forbidden,
+                "请通过档案库页面、POST /api/profiles/collect 或 POST /api/profiles/apply 收集与下发档案"),
+                statusCode: StatusCodes.Status403Forbidden),
+        };
     // 通用命令接口只保留旧的内联文件分发（仅系统管理员）；大文件中转必须走 /api/files 以登记目标设备与下载凭据。
     if (command.Command == CommandKind.SendFile && command.FileDistribution?.IsTransfer == true)
         return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest,

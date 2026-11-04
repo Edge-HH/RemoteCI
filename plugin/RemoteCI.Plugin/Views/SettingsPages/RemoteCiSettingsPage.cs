@@ -21,6 +21,7 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
 {
     private readonly PluginSettings _settings;
     private readonly RemoteCiService? _service;
+    private readonly ClassPolicyStore? _policies;
     private readonly TextBox _portBox;
     private readonly TextBox _cloudUrlBox;
     private readonly TextBox _pairCodeBox;
@@ -32,12 +33,14 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
     private readonly TextBlock _connectionError;
     private readonly TextBlock _connectionTestHint;
     private readonly TextBlock _hint;
+    private readonly TextBlock _policyNotice;
     private readonly ToggleSwitch _showDeveloperSettingsToggle;
 
-    public RemoteCiSettingsPage(PluginSettings settings, RemoteCiService? service = null)
+    public RemoteCiSettingsPage(PluginSettings settings, RemoteCiService? service = null, ClassPolicyStore? policies = null)
     {
         _settings = settings;
         _service = service;
+        _policies = policies;
 
         _portBox = new TextBox { Text = settings.LanServerPort.ToString(), Watermark = "端口（默认 8765）" };
         _cloudUrlBox = new TextBox { Text = settings.CloudServerUrl, Watermark = "云端地址，如 https://nas:8080" };
@@ -90,6 +93,13 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
             TextWrapping = Avalonia.Media.TextWrapping.Wrap,
         };
         _hint = new TextBlock { Text = string.Empty, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+        _policyNotice = new TextBlock
+        {
+            Text = string.Empty,
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+            Foreground = Avalonia.Media.Brushes.OrangeRed,
+            IsVisible = false,
+        };
 
         var panel = new StackPanel
         {
@@ -99,6 +109,7 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
             {
                 new TextBlock { Text = "RemoteCI 课表手表联动", FontSize = 20, FontWeight = Avalonia.Media.FontWeight.Bold },
                 new TextBlock { Text = "把当前状态和课表推送到 Wear OS，支持按权限换课与发送通知。", TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                _policyNotice,
                 new StackPanel
                 {
                     Spacing = 6,
@@ -176,6 +187,23 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };
 
+        // 班级策略：管理员可关闭整个设置页，或只锁定连接信息（服务器地址、端口、连接码）。
+        var policy = _policies?.Current ?? new ClassPolicy();
+        if (!policy.AllowPluginSettings)
+        {
+            Content = BuildRestrictedPanel();
+            return;
+        }
+        if (!policy.AllowChangeConnection)
+        {
+            _portBox.IsEnabled = false;
+            _cloudUrlBox.IsEnabled = false;
+            _pairCodeBox.IsEnabled = false;
+            _classNameRemarkBox.IsEnabled = false;
+            _policyNotice.Text = "管理员已锁定 RemoteCI 连接信息：服务器地址、端口与连接码不能在本机修改。";
+            _policyNotice.IsVisible = true;
+        }
+
         if (_service is not null)
         {
             _service.ScheduleSyncStatusChanged += OnScheduleSyncStatusChanged;
@@ -184,6 +212,31 @@ public sealed class RemoteCiSettingsPage : SettingsPageBase
             ApplyCloudConnectionStatus(_service.CurrentCloudConnectionStatus);
         }
     }
+
+    /// <summary>策略禁止打开设置页时的只读提示。</summary>
+    private static Control BuildRestrictedPanel() => new ScrollViewer
+    {
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        Content = new StackPanel
+        {
+            Spacing = 10,
+            Margin = new Avalonia.Thickness(16),
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = "RemoteCI 设置已被管理员限制",
+                    FontSize = 20,
+                    FontWeight = Avalonia.Media.FontWeight.Bold,
+                },
+                new TextBlock
+                {
+                    Text = "本班策略不允许在此设备上打开 RemoteCI 设置页。如需修改连接信息或开发者选项，请联系管理员。",
+                    TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                },
+            },
+        },
+    };
 
     /// <summary>端口必须在 1-65535；云端地址留空或为合法 http/https URI 才有效。</summary>
     internal static (bool PortValid, bool UrlValid) ValidateInput(string? portText, string? urlText)

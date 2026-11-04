@@ -41,7 +41,7 @@
 </section>
 }
 
-@if (Model.CanUseOperation(BatchOperationKind.JoinManagement))
+@if (Model.CanUseOperation(BatchOperationKind.JoinManagement) || Model.CanUseOperation(BatchOperationKind.SetClassPolicy))
 {
 <section class="panel batch-section">
     <div class="panel-heading">
@@ -55,6 +55,20 @@
             <button type="button" class="batch-action-card" data-batch-open="JoinManagement" data-batch-title="加入集控" data-batch-risk="true">
                 <span class="batch-action-icon danger"><i class="icon icon-account-tree" aria-hidden="true"></i></span>
                 <span class="batch-action-copy"><strong>加入集控</strong><small>让设备加入 ClassIsland 内置集控服务器。</small></span>
+            </button>
+        }
+        @if (Model.CanUseOperation(BatchOperationKind.SetClassPolicy))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="SetClassPolicy" data-batch-title="班级策略" data-batch-risk="false">
+                <span class="batch-action-icon"><i class="icon icon-lock" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>班级策略</strong><small>限制教室端编辑、调试与退出入口。</small></span>
+            </button>
+        }
+        @if (Model.CanUseOperation(BatchOperationKind.SetClassIslandSettings))
+        {
+            <button type="button" class="batch-action-card" data-batch-open="SetClassIslandSettings" data-batch-title="ClassIsland 设置" data-batch-risk="false">
+                <span class="batch-action-icon"><i class="icon icon-tune" aria-hidden="true"></i></span>
+                <span class="batch-action-copy"><strong>ClassIsland 设置</strong><small>远程修改教室端 ClassIsland 的软件设置，只写入修改过的项。</small></span>
             </button>
         }
     </div>
@@ -545,6 +559,66 @@ foreach (var extension in Model.BatchExtensionGroups.SelectMany(group => group.E
         </footer>
     </div>
 </dialog>
+}
+
+@if (Model.CanUseOperation(BatchOperationKind.SetClassPolicy))
+{
+<dialog id="batch-settings-class-policy" class="batch-dialog batch-dialog-wide" data-batch-settings="SetClassPolicy" data-batch-title="班级策略" data-batch-risk="false">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div>
+                <span class="batch-step">第 1 步 / 共 2 步</span>
+                <h2>班级策略</h2>
+                <p class="muted">策略会保存到所选班级并立即下发；设备离线时在下次上线后生效。将覆盖这些班级原有的策略。</p>
+            </div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <partial name="_ClassPolicyFields" model="Model.Policy"
+                     view-data="@(new ViewDataDictionary(ViewData) { ["PolicyPrefix"] = "Policy." })" />
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+}
+
+@if (Model.CanUseOperation(BatchOperationKind.SetClassIslandSettings))
+{
+<dialog id="batch-settings-classisland-settings" class="batch-dialog batch-dialog-wide cis-dialog"
+        data-batch-settings="SetClassIslandSettings" data-batch-title="ClassIsland 设置" data-batch-risk="false"
+        data-cis-dialog data-cis-read-url="@(Model.IsSingleControl ? Url.Page("/Control", "ReadClassIslandSettings") : null)">
+    <div class="batch-dialog-shell">
+        <header class="batch-dialog-header">
+            <div>
+                <span class="batch-step">第 1 步 / 共 2 步</span>
+                <h2>ClassIsland 设置</h2>
+                <p class="muted">
+                    @(Model.IsSingleControl
+                        ? "打开时自动读取当前班级正在使用的设置；只有修改过的设置项会被提交。"
+                        : "从 ClassIsland 默认值开始修改；只把本页修改过的设置项下发到所选设备，未修改的设置保持各设备当前值。")
+                </p>
+            </div>
+            <button type="button" class="dialog-close-button ghost" data-batch-close aria-label="关闭">×</button>
+        </header>
+        <div class="batch-dialog-body stack">
+            <partial name="_ClassIslandSettingsFields" />
+            <p class="cis-status muted" data-cis-status aria-live="polite"></p>
+        </div>
+        <footer class="batch-dialog-actions">
+            <button type="button" class="ghost" data-cis-reset>重置修改</button>
+            @if (Model.IsSingleControl)
+            {
+                <button type="button" class="ghost" data-cis-reread>重新读取</button>
+            }
+            <button type="button" class="ghost" data-batch-close>取消</button>
+            <button type="button" data-batch-next>下一步：选择设备</button>
+        </footer>
+    </div>
+</dialog>
+<script src="~/classisland-settings.js" asp-append-version="true" defer></script>
 }
 
 @if (Model.CanUseMaintenanceOperation(BatchOperationKind.ExecuteTerminalCommand))

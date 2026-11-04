@@ -111,7 +111,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | `extensions_sync` | 插件 → 服务端/手表 | 扩展功能清单（id、displayName、icon、requiredPermission、parameters，可选 description、groupId） |
 | `extension_groups_sync` | 插件 → 服务端 | 扩展分组（通常对应一个 ClassIsland 插件）：id、displayName、description、icon、设置字段 `settings` 与设备当前值 `values`；仅供 WebUI，手表与局域网不使用 |
 | `event_notify` | 插件 → 服务端/手表 | 上课、下课、放学、课表变更、自定义消息、ClassIsland 自动化或第三方插件通知 |
-| `command` | 手表/服务端 → 插件 | 结构化换课、通知、主界面、音量、电源、软件升级、插件管理、档案分发、时间表、远程终端、文件分发与集控命令 |
+| `command` | 手表/服务端 → 插件 | 结构化换课、通知、主界面、音量、电源、软件升级、插件管理、档案分发、时间表、远程终端、文件分发、ClassIsland 设置与集控命令 |
 | `command_result` | 插件 → 发起者 | 真实成功、失败码、消息和可选新修订号 |
 | `settings_sync` | 服务端 → 手表 | 全局通知设置快照（目前含 `forceSenderInTitle`） |
 | `plugin_network_info` | 插件 → 服务端 → 手表 | 插件局域网直连地址与端口（每次云端重连时重新发现网卡） |
@@ -123,6 +123,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | `file_transfer_progress` | 插件 → 服务端 | 中转文件的下载进度与最终结果，见下文“文件分发（中转方式）” |
 | `app_guard_policy` | 服务端 → 插件 | 该设备的应用守护生效策略 `AppGuardPolicy`，见下文“应用守护”；只发给声明了 `host.app-guard` 能力的插件 |
 | `app_guard_event` | 插件 → 服务端 | 守护进程记录的事件 `AppGuardEventBatch {events:[{kind, atUnixMs, detail?}]}`，未分配班级的设备也会上报 |
+| `class_policy` | 服务端 → 插件 | 该班班级策略 `ClassPolicy`，见下文“班级策略”；只发给声明了 `class.policy` 能力的班级插件，连接后与策略变更时下发 |
 
 ## 局域网设备发现
 
@@ -144,7 +145,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 ## 能力协商
 
-V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings`、`schedule.holiday-calendar`、`profile.read`、`profile.temp-layer`、`schedule.semester`、`file.transfer`、`host.app-guard`、`host.app-guard-launch`、`host.app-guard-manage`、`schedule.change-permanent`、`schedule.adjustments`、`screen.capture`、`plugin.package-install` 和 `host.app-guard-update` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
+V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings`、`schedule.holiday-calendar`、`profile.read`、`profile.temp-layer`、`schedule.semester`、`file.transfer`、`host.app-guard`、`host.app-guard-launch`、`host.app-guard-manage`、`schedule.change-permanent`、`schedule.adjustments`、`screen.capture`、`plugin.package-install`、`host.app-guard-update`、`class.policy`、`host.settings.read` 和 `host.settings.write` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
 
 WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手机的有效能力是“本地 ∩ 服务端 ∩ 当前班级主插件”。服务端在 `capabilities_sync.classPlugins` 中按接收方可访问的班级逐个下发主插件能力，客户端切换班级时按新班级重算；没有对应条目表示该班插件离线。旧服务端没有该字段时客户端退回 `plugin`。多插件时，当前主插件仍是最早接入的健康插件；主插件切换、断开或能力更新后，服务端重新广播能力快照。界面应隐藏缺失能力的入口，服务端转发命令前仍需按统一映射复核主插件能力，缺少能力时返回 `CAPABILITY_UNSUPPORTED`。能力声明不能绕过账号权限或扩展策略检查。
 
@@ -342,6 +343,45 @@ RemoteCI 插件在云端连接建立后通过 `software_inventory` 上报设备�
 - `SetPluginManagementPolicy` 只约束 RemoteCI 后续发起的远程插件安装或卸载。ClassIsland 当前没有公开的宿主级“禁止本地安装/卸载插件”策略 API，因此该策略不阻止用户在 ClassIsland 本地设置页操作。
 
 WebUI 批量控制页把功能参数和目标设备分成两步：先填写参数，再选择班级、分组或具体设备。班级级选择只投递到该班最早接入的在线设备；具体设备选择按插件连接逐台投递。命令下发成功只表示设备端已接受任务，下载、部署、重启或档案拉取的最终结果由后续 `software_inventory`、连接状态或用户再次查看时体现。
+
+### 班级策略
+
+班级策略把原版 ClassIsland 集控服务器的限制下发到教室端：服务端按班级保存一份 `ClassPolicy`，插件把它写入 ClassIsland 的 `ManagementPolicy`，宿主据此禁用档案编辑、设置、调试等入口。
+
+命令值 36 为 `SetClassPolicy`，要求 `ControlClassIsland`（`1<<22`）权限并需要插件声明 `class.policy` 能力。该命令只能由服务端管理入口（班级管理页“班级策略”、批量控制页“班级策略”）构造：通用 `POST /api/commands`、手机/手表命令通道与插件局域网直连一律拒绝；插件未声明能力时批量控制返回 `CAPABILITY_UNSUPPORTED`，需升级插件。
+
+载荷 `classPolicy` 为以下布尔值（字段名与 ClassIsland `ManagementPolicy` 一致）：
+
+| 字段 | 默认 | 为真时的效果 |
+| --- | --- | --- |
+| `disableProfileClassPlanEditing` | `false` | 不能创建、删除、编辑课表，也不能从 Excel 导入；临时换课与临时课表不受影响 |
+| `disableProfileTimeLayoutEditing` | `false` | 不能创建、删除、编辑时间表，也不能从 Excel 导入 |
+| `disableProfileSubjectsEditing` | `false` | 不能创建、删除、编辑科目 |
+| `disableProfileEditing` | `false` | 不能编辑档案内所有内容，也不能从 Excel 导入；临时换课与临时课表不受影响 |
+| `disableSettingsEditing` | `false` | 不能调整 ClassIsland 设置；先前调整过的设置不受影响 |
+| `disableSplashCustomize` | `false` | 不能自定义启动加载界面；先前设置过的启动界面会被清除 |
+| `disableDebugMenu` | `false` | 不能进入调试页面 |
+| `allowExitManagement` | `true` | 关闭后用户不能自行退出 ClassIsland 内置集控 |
+| `allowChangeConnection` | `true` | 关闭后 RemoteCI 插件设置页不能修改服务器地址、局域网端口与连接码 |
+| `allowPluginSettings` | `true` | 关闭后 RemoteCI 插件设置页只显示受限提示，不提供任何可操作控件 |
+
+服务端在插件上报 `class.policy` 能力后补发 `class_policy`，策略保存后向该班**全部**在线插件广播（同班多台设备都要生效，不只主插件）；离线设备下次连接时补发。插件把最近一次策略保存到本地（`ClassPolicy.json`），ClassIsland 离线启动时继续应用，因此策略是期望状态、可重复下发。
+
+`disable*` 与 `allowExitManagement` 直接映射到 ClassIsland 的 `ManagementService.Policy`，宿主各界面实时读取该对象。设备同时加入 ClassIsland 内置集控时，RemoteCI 只加严不放松：限制类取并集、允许类取交集，避免 RemoteCI 的默认值覆盖集控服务器的限制；解除 RemoteCI 自身的限制仍可正常下发。`allowChangeConnection` 与 `allowPluginSettings` 由 RemoteCI 插件自己执行，不属于 ClassIsland 集控。
+
+`GET /api/classes` 等返回的 `ClassDetail` 新增可选字段 `policy`（结构同上）；旧服务端不返回时客户端按默认值（不限制）处理。班级管理页与批量控制页都可以修改策略，批量控制会把策略保存到所选班级后逐台下发。
+
+## ClassIsland 设置
+
+命令值 37 为 `ReadClassIslandSettings`、38 为 `SetClassIslandSettings`，都要求 `ControlClassIsland`（`1<<22`）权限，并分别需要插件声明 `host.settings.read` 与 `host.settings.write` 能力。两条命令都是 `serverOnly` 命令：仅由服务端 WebUI 控制入口（班级控制页、批量控制页）构造并定向发送；通用 `POST /api/commands`、手机/手表命令通道与插件局域网直连一律拒绝。
+
+可远程读写的设置项由共享目录 `ClassIslandSettingsCatalog` 约束，服务端与插件使用同一份白名单：键为 ClassIsland `Settings` 的属性名（即 `Settings.json` 的 JSON 键），按 ClassIsland 设置页分组为基本、外观、窗口、提醒、天气、更新、自动化、存储、隐私、插件市场、主界面（组件方案）与调试共 12 页约 120 项常用设置；目录同时定义每项的类型（布尔、整数、小数、文本、枚举下标、颜色、日期、字符串列表）、可选范围与界面文案。开机自启、注册 Url 协议等有副作用的项，以及课表档案与主界面文件内容（分别由档案管理与“主界面文件”功能负责）不在目录内。服务端与插件按同一目录校验：未知键、类型不符或超出范围的值直接拒绝，枚举值必须是该条目声明的下标之一。
+
+- 读取（37）无载荷。成功时 `command_result.data` 为 JSON `{"values": {...}}`，只包含目录内、设备上实际存在的项；宿主缺失的属性省略。颜色输出为 `#RRGGBB`（不透明）或 `#AARRGGBB` 字符串，日期输出为 `yyyy-MM-dd`，其余按布尔、数字、文本或字符串数组输出。
+- 写入（38）载荷 `classIslandSettings` 为 `{"values": {...}}`，**只包含本次要修改的项**：未出现的设置保持设备当前值，绝不整体覆盖。插件在 UI 线程逐项写入宿主 `Settings`（字符串列表原地改写现有集合），全部处理完后调用一次 `SaveSettings` 落盘；单项写入失败会跳过并在回执消息中列出，全部失败返回 `INVALID_REQUEST`，宿主不支持时返回 `CAPABILITY_UNSUPPORTED`。
+- 部分设置写入后需重启 ClassIsland 才完全生效（如组件配置方案、课表档案文件选择），由 WebUI 条目说明标注。
+
+WebUI 在班级控制页与批量控制页的“集控与管理策略”区提供“ClassIsland 设置”弹窗，表单按上述目录还原 ClassIsland 设置页的分组、卡片与条目。班级控制页打开弹窗时自动读取当前班级设备正在使用的设置并预填，只提交相对当前值修改过的项；批量控制页从空白表单开始，只提交明确填写过的项，未修改的设置保持各设备当前值。目标选择与其他批量操作一致，逐台返回结果；需要 `ControlClassIsland` 权限，插件缺少对应能力时提示升级。
 
 ## 服务端档案库与档案应用
 

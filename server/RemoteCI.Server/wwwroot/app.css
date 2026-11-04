@@ -115,6 +115,7 @@ button:disabled { opacity: .48; cursor: not-allowed; transform: none; }
 .status-pill { display: inline-flex; min-height: 30px; align-items: center; padding: 3px 11px; border-radius: var(--radius-card, 15px); background: var(--surface-soft); color: var(--text); font-size: 11px; font-weight: 700; }
 .status-pill.online, .inline-status.online { background: var(--success-soft); color: var(--success); }
 .status-pill.offline, .inline-status.offline { background: var(--danger-soft); color: var(--danger); }
+.status-pill.warning, .inline-status.warning { background: var(--warning-soft); color: var(--warning); }
 .course-spotlight { display: flex; min-height: 156px; align-items: center; gap: 22px; padding: 24px; border: 1px solid var(--line); border-radius: var(--radius-item, 12px); background: var(--accent-faint); }
 .course-icon { display: grid; width: 68px; height: 68px; flex: 0 0 68px; place-items: center; border-radius: var(--radius-card, 16px); background: var(--accent); color: #fff; }
 .course-icon i { font-size: 28px; }

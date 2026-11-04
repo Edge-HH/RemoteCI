@@ -23,7 +23,7 @@ public sealed class RemoteCiDeveloperSettingsPage : SettingsPageBase
     private readonly Button _testVoiceButton;
     private readonly CommandHandler? _commandHandler;
 
-    public RemoteCiDeveloperSettingsPage(PluginSettings settings, CommandHandler? commandHandler = null)
+    public RemoteCiDeveloperSettingsPage(PluginSettings settings, CommandHandler? commandHandler = null, ClassPolicyStore? policies = null)
     {
         _settings = settings;
         _commandHandler = commandHandler;
@@ -88,6 +88,34 @@ public sealed class RemoteCiDeveloperSettingsPage : SettingsPageBase
                 },
             },
         };
+
+        // 与普通设置页同一口径：策略禁止打开插件设置时，开发者页也不可用。
+        if (policies is { Current.AllowPluginSettings: false })
+        {
+            Content = new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = new StackPanel
+                {
+                    Spacing = 10,
+                    Margin = new Avalonia.Thickness(16),
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = "RemoteCI 设置已被管理员限制",
+                            FontSize = 20,
+                            FontWeight = Avalonia.Media.FontWeight.Bold,
+                        },
+                        new TextBlock
+                        {
+                            Text = "本班策略不允许在此设备上打开 RemoteCI 设置页。",
+                            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                        },
+                    },
+                },
+            };
+        }
     }
 
     private void OnSaveClick(object? sender, RoutedEventArgs e)

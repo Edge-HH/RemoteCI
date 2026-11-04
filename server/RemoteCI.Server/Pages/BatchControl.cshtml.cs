@@ -21,6 +21,7 @@ public class BatchControlModel(
     UserManager<AppUser> users,
     ClassroomService classrooms,
     DeviceInventoryService devices,
+    ClassPolicyService classPolicy,
     IdentityCoordinator identities) : WebPageModel(users)
 {
     private const string ResultsKey = "BatchControlResults";
@@ -122,6 +123,10 @@ public class BatchControlModel(
     [BindProperty]
     public string? ManagementPresetJson { get; set; }
 
+    /// <summary>班级策略表单：字段名以 <c>Policy.</c> 开头。</summary>
+    [BindProperty]
+    public ClassPolicy Policy { get; set; } = new();
+
     [BindProperty]
     public bool Force { get; set; }
 
@@ -191,7 +196,9 @@ public class BatchControlModel(
     public bool HasProfileOperations =>
         CanUseOperation(BatchOperationKind.UpdateTimeLayout) ||
         CanUseOperation(BatchOperationKind.DistributeProfile) ||
-        CanUseOperation(BatchOperationKind.JoinManagement);
+        CanUseOperation(BatchOperationKind.JoinManagement) ||
+        CanUseOperation(BatchOperationKind.SetClassPolicy) ||
+        CanUseOperation(BatchOperationKind.SetClassIslandSettings);
 
     public bool HasSoftwareOperations =>
         CanUseOperation(BatchOperationKind.InstallPlugins) ||
@@ -231,6 +238,8 @@ public class BatchControlModel(
         BatchOperationKind.UpgradeClassIsland => CommandKind.UpgradeClassIsland,
         BatchOperationKind.RestartClassIsland => CommandKind.RestartClassIsland,
         BatchOperationKind.JoinManagement => CommandKind.JoinManagement,
+        BatchOperationKind.SetClassPolicy => CommandKind.SetClassPolicy,
+        BatchOperationKind.SetClassIslandSettings => CommandKind.SetClassIslandSettings,
         BatchOperationKind.ExecuteTerminalCommand => CommandKind.ExecuteTerminalCommand,
         BatchOperationKind.SendFile => CommandKind.SendFile,
         BatchOperationKind.RunExtension => CommandKind.RunExtension,
@@ -260,6 +269,7 @@ public class BatchControlModel(
             if (plan.Targets.Count == 0 && plan.Failures.Count == 0)
                 return Back("没有找到可用的在线设备。");
 
+            await PersistPolicyAsync(plan, ct);
             var commandFactory = await BuildCommandFactoryAsync(ct);
             var dispatchResults = await DevicesService.DispatchAsync(
                 plan.Targets,
@@ -298,6 +308,7 @@ public class BatchControlModel(
             var plan = await DevicesService.ResolveAsync([CurrentClassId], [], [], ct);
             if (plan.Targets.Count == 0 && plan.Failures.Count == 0)
                 return SingleBack("当前班级没有在线设备。");
+            await PersistPolicyAsync(plan, ct);
             var results = plan.Failures
                 .Select(ToItemResult)
                 .Concat((await DevicesService.DispatchAsync(
@@ -320,6 +331,21 @@ public class BatchControlModel(
     /// <summary>单班执行前复核：与卡片可见性使用同一权限口径，防止绕过前端直接提交。</summary>
     private bool CanExecuteInCurrentClass(BatchOperationKind operation) =>
         IsSingleControl && CanUseOperation(operation);
+
+    /// <summary>
+    /// 策略类操作先把期望状态保存到服务端：即使设备离线，下次连接也会收到，班级页也会显示最新值。
+    /// 其余操作不落库。
+    /// </summary>
+    private async Task PersistPolicyAsync(DeviceDispatchPlan plan, CancellationToken ct)
+    {
+        if (Operation != BatchOperationKind.SetClassPolicy) return;
+        var classIds = plan.Targets.Select(x => x.ClassId)
+            .Concat(plan.Failures.Select(x => x.ClassId))
+            .Where(x => x != Guid.Empty)
+            .Distinct()
+            .ToList();
+        await classPolicy.SaveAsync(classIds, Policy, ct);
+    }
 
     private IActionResult SingleBack(string message)
     {
@@ -532,6 +558,66 @@ public class BatchControlModel(
             : RemoteOpJson(false, "文件不存在或已过期。", []);
     }
 
+    // ---------- ClassIsland 设置（AJAX：只提交本页修改过的设置项，绝不覆盖其他设置） ----------
+
+    /// <summary>批量修改 ClassIsland 设置：目标复用共享弹窗的查询参数。</summary>
+    public async Task<IActionResult> OnPostApplyClassIslandSettingsAsync(CancellationToken ct)
+    {
+        if (await RequireAdminAsync() is { } denied) return denied;
+        if (!CanUseOperation(BatchOperationKind.SetClassIslandSettings)) return RemoteOpDenied();
+        return await ApplyClassIslandSettingsCoreAsync(
+            ParseGuidQuery("classIds"), ParseGuidQuery("groupIds"), ParseGuidQuery("connectionIds"), ct);
+    }
+
+    /// <summary>单班修改 ClassIsland 设置：目标固定为当前班级，需要本班“ClassIsland 控制”权限。</summary>
+    public async Task<IActionResult> OnPostSingleApplyClassIslandSettingsAsync(CancellationToken ct)
+    {
+        if (await RequireAsync() is { } denied) return denied;
+        if (!IsSingleControl || !CanUseOperation(BatchOperationKind.SetClassIslandSettings)) return RemoteOpDenied();
+        return await ApplyClassIslandSettingsCoreAsync([CurrentClassId], [], [], ct);
+    }
+
+    private async Task<IActionResult> ApplyClassIslandSettingsCoreAsync(
+        IReadOnlyCollection<Guid> classIds,
+        IReadOnlyCollection<Guid> groupIds,
+        IReadOnlyCollection<Guid> connectionIds,
+        CancellationToken ct)
+    {
+        ClassIslandSettingsRequest? request;
+        try
+        {
+            request = await JsonSerializer.DeserializeAsync<ClassIslandSettingsRequest>(Request.Body, JsonDefaults.Options, ct);
+        }
+        catch (JsonException)
+        {
+            return RemoteOpJson(false, "设置数据格式无效。", []);
+        }
+        var values = request?.Values;
+        if (values is null || values.Count == 0)
+            return RemoteOpJson(false, "没有修改任何设置项。", []);
+        // 与插件执行端同一套目录校验：未知键与越界值在这里直接拒绝。
+        if (ClassIslandSettingsCatalog.ValidatePatch(values) is { } invalid)
+            return RemoteOpJson(false, invalid, []);
+
+        var plan = await DevicesService.ResolveAsync(classIds, groupIds, connectionIds, ct);
+        if (plan.Targets.Count == 0 && plan.Failures.Count == 0)
+            return RemoteOpJson(false, "没有找到可用的在线设备。", []);
+        var profile = await Identities.GetProfileAsync(CurrentUser.Id, ct);
+        var dispatch = await DevicesService.DispatchAsync(
+            plan.Targets,
+            _ => new CommandMessage
+            {
+                Command = CommandKind.SetClassIslandSettings,
+                ClassIslandSettings = new ClassIslandSettingsRequest { Values = values },
+                RequestedBy = profile,
+            },
+            "ClassIsland 设置",
+            BatchCommandTimeout,
+            ct);
+        return RemoteOpResultsJson(
+            plan.Failures.Select(ToItemResult).Concat(dispatch.Select(ToItemResult)).ToList());
+    }
+
     private static IActionResult FileTransferJson(FileTransferView view)
     {
         var done = view.Deliveries.Count(x => x.State == FileTransferState.Completed);
@@ -691,6 +777,12 @@ public class BatchControlModel(
             {
                 Command = CommandKind.JoinManagement,
                 ManagementJoin = BuildManagementJoinRequest(device),
+                RequestedBy = profile,
+            },
+            BatchOperationKind.SetClassPolicy => _ => new CommandMessage
+            {
+                Command = CommandKind.SetClassPolicy,
+                ClassPolicy = Policy.Clone(),
                 RequestedBy = profile,
             },
             BatchOperationKind.RunExtension => BuildExtensionCommandFactory(profile),
@@ -1114,6 +1206,7 @@ public class BatchControlModel(
         BatchOperationKind.UpgradeClassIsland => "ClassIsland 升级",
         BatchOperationKind.RestartClassIsland => "重启 ClassIsland",
         BatchOperationKind.JoinManagement => "加入集控",
+        BatchOperationKind.SetClassPolicy => "班级策略",
         BatchOperationKind.ExecuteTerminalCommand => "远程终端",
         BatchOperationKind.SendFile => "文件分发",
         BatchOperationKind.RunExtension => "扩展功能",

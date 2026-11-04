@@ -94,6 +94,9 @@ public sealed class Envelope
     public static Envelope AppGuardEvents(AppGuardEventBatch payload) =>
         New(Protocol.MessageTypeAppGuardEvent, payload);
 
+    public static Envelope ClassPolicy(ClassPolicy payload) =>
+        New(Protocol.MessageTypeClassPolicy, payload);
+
     public static Envelope FileTransferProgress(FileTransferProgress payload) =>
         New(Protocol.MessageTypeFileTransferProgress, payload);
 

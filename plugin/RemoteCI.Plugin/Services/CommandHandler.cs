@@ -20,6 +20,8 @@ public sealed class CommandHandler
     private readonly PluginManagementService _pluginManagement;
     private readonly ProfileManagementService _profileManagement;
     private readonly ManagementJoinService _managementJoin;
+    private readonly ClassPolicyService _classPolicy;
+    private readonly ClassIslandSettingsService? _classIslandSettings;
     private readonly TerminalCommandService _terminal;
     private readonly FileReceiveService _files;
     private readonly ScreenCaptureService _screenshots;
@@ -40,6 +42,7 @@ public sealed class CommandHandler
         PluginManagementService pluginManagement,
         ProfileManagementService profileManagement,
         ManagementJoinService managementJoin,
+        ClassPolicyService classPolicy,
         IEnumerable<IHostedService> hostedServices,
         IRemoteCiExtensionRegistry extensions,
         ILoggerFactory loggerFactory,
@@ -50,10 +53,12 @@ public sealed class CommandHandler
         ScreenCaptureService? screenshots = null,
         MainWindowLayoutService? mainWindowLayouts = null,
         PluginPackageInstallService? pluginPackages = null,
-        AppGuardService? appGuard = null)
+        AppGuardService? appGuard = null,
+        ClassIslandSettingsService? classIslandSettings = null)
     {
         _appGuard = appGuard;
         _overlays = overlays;
+        _classIslandSettings = classIslandSettings;
         _schedules = schedules;
         _scheduleBackend = scheduleBackend;
         _profileOps = profileOps;
@@ -62,6 +67,7 @@ public sealed class CommandHandler
         _pluginManagement = pluginManagement;
         _profileManagement = profileManagement;
         _managementJoin = managementJoin;
+        _classPolicy = classPolicy;
         _notifications = hostedServices.OfType<RemoteNotificationProvider>().Single();
         _terminal = terminal ?? new TerminalCommandService(loggerFactory.CreateLogger<TerminalCommandService>());
         _files = files ?? new FileReceiveService(loggerFactory.CreateLogger<FileReceiveService>());
@@ -143,6 +149,13 @@ public sealed class CommandHandler
                 CommandKind.ApplyProfile => await HandleApplyProfileAsync(command.ProfileApply),
                 CommandKind.ReadProfile => await _profileManagement.ReadProfileAsync(),
                 CommandKind.JoinManagement => await _managementJoin.JoinAsync(command.ManagementJoin),
+                CommandKind.SetClassPolicy => await _classPolicy.ApplyAsync(command.ClassPolicy),
+                CommandKind.ReadClassIslandSettings => _classIslandSettings is null
+                    ? CommandResult.Failure(CommandResultCodes.CapabilityUnsupported, "插件版本过旧，不支持读写 ClassIsland 设置")
+                    : await _classIslandSettings.ReadAsync(),
+                CommandKind.SetClassIslandSettings => _classIslandSettings is null
+                    ? CommandResult.Failure(CommandResultCodes.CapabilityUnsupported, "插件版本过旧，不支持读写 ClassIsland 设置")
+                    : await _classIslandSettings.ApplyAsync(command.ClassIslandSettings),
                 CommandKind.RestartClassIsland => HandleClassIslandRestart(),
                 CommandKind.ExecuteTerminalCommand => await _terminal.ExecuteAsync(command.TerminalCommand),
                 CommandKind.SendFile => await _files.SaveAsync(command.FileDistribution),

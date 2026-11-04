@@ -1,0 +1,53 @@
+@model RemoteCI.Shared.Models.ClassPolicy
+@{
+    // 只负责渲染开关本身；调用方通过 PolicyPrefix 指定绑定前缀（如 PolicyInput. 或 Policy.）。
+    var prefix = ViewData["PolicyPrefix"] as string ?? string.Empty;
+    var fields = new (string Name, string Label, string Description, bool Value)[]
+    {
+        (nameof(ClassPolicy.DisableProfileClassPlanEditing), "禁止编辑课表",
+            "不能创建、删除和编辑课表，也不能从 Excel 导入；临时换课与临时课表不受影响。",
+            Model.DisableProfileClassPlanEditing),
+        (nameof(ClassPolicy.DisableProfileTimeLayoutEditing), "禁止编辑时间表",
+            "不能创建、删除和编辑时间表，也不能从 Excel 导入。",
+            Model.DisableProfileTimeLayoutEditing),
+        (nameof(ClassPolicy.DisableProfileSubjectsEditing), "禁止编辑科目",
+            "不能创建、删除和编辑科目。",
+            Model.DisableProfileSubjectsEditing),
+        (nameof(ClassPolicy.DisableProfileEditing), "禁止编辑档案",
+            "不能编辑档案内所有内容，也不能从 Excel 导入；临时换课与临时课表不受影响。",
+            Model.DisableProfileEditing),
+        (nameof(ClassPolicy.DisableSettingsEditing), "禁止编辑应用设置",
+            "不能调整 ClassIsland 的设置；先前调整过的设置不受影响。",
+            Model.DisableSettingsEditing),
+        (nameof(ClassPolicy.DisableSplashCustomize), "禁止自定义启动界面",
+            "不能自定义启动加载界面；先前设置过的启动界面会被清除。",
+            Model.DisableSplashCustomize),
+        (nameof(ClassPolicy.DisableDebugMenu), "禁用调试菜单",
+            "不能进入调试页面。",
+            Model.DisableDebugMenu),
+        (nameof(ClassPolicy.AllowExitManagement), "允许退出集控",
+            "关闭后用户不能自行退出 ClassIsland 内置集控。",
+            Model.AllowExitManagement),
+        (nameof(ClassPolicy.AllowChangeConnection), "允许修改 RemoteCI 连接信息",
+            "关闭后插件设置页不能修改服务器地址、局域网端口与连接码。",
+            Model.AllowChangeConnection),
+        (nameof(ClassPolicy.AllowPluginSettings), "允许打开 RemoteCI 设置页",
+            "关闭后 RemoteCI 插件设置页只显示受限提示。",
+            Model.AllowPluginSettings),
+    };
+}
+<div class="policy-fields">
+    @foreach (var field in fields)
+    {
+        <label class="check policy-field">
+            @* 复选框在前、隐藏 false 在后：表单直接提交时按 MVC 约定取第一个值；批量弹窗由脚本统一复制。 *@
+            <input type="checkbox" name="@(prefix)@field.Name" value="true" data-batch-bool
+                   checked="@(field.Value ? "checked" : null)" />
+            <input type="hidden" name="@(prefix)@field.Name" value="false" data-batch-skip />
+            <span>
+                <strong>@field.Label</strong>
+                <small>@field.Description</small>
+            </span>
+        </label>
+    }
+</div>

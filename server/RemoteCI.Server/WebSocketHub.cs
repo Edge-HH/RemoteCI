@@ -319,6 +319,14 @@ public static class WebSocketHub
                 if (session.Principal.IsPlugin && session.Principal.ClassId is { } adjustmentClassId)
                     await SendScheduleAdjustmentsAsync(session, adjustmentClassId,
                         capabilities.Capabilities.Contains(RemoteCiCapabilities.ScheduleAdjustments, StringComparer.Ordinal));
+                // 班级策略在连接后补发；未分配班级的设备没有策略，等待分配后再发。
+                if (session.Principal.IsPlugin && session.Principal.ClassId is { } policyClassId &&
+                    capabilities.Capabilities.Contains(RemoteCiCapabilities.ClassPolicy, StringComparer.Ordinal))
+                {
+                    await using var scope = session.Context.RequestServices.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
+                    await scope.ServiceProvider.GetRequiredService<ClassPolicyService>()
+                        .SendToConnectionAsync(session.ConnectionId, policyClassId, session.CancellationToken);
+                }
             }
             return;
         }
@@ -712,7 +720,7 @@ public static class WebSocketHub
     {
         // 档案和扩展设置由独立 WebUI 入口复核班级身份，通用设备命令通道不提供这些操作。
         if (CommandPermissions.IsServerOnly(command.Command))
-            return new CommandError(CommandResultCodes.Forbidden, "档案的收集、下发和扩展设置只能通过各自的服务端管理入口进行");
+            return new CommandError(CommandResultCodes.Forbidden, "该命令只能通过对应的服务端管理入口进行");
         if (command.Command == CommandKind.RunExtension)
             return GetExtensionValidationError(command, classPermissions, allowedExtensionIds, store, classId);
 

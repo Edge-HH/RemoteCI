@@ -305,6 +305,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.Property(x => x.Name).HasMaxLength(40);
             entity.HasIndex(x => x.Name).IsUnique();
             entity.Property(x => x.AvatarContentType).HasMaxLength(64);
+            entity.Property(x => x.PolicyJson).HasMaxLength(2048);
         });
         builder.Entity<ClassGroup>(entity =>
         {

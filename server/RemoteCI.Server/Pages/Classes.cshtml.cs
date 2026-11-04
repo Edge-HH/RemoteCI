@@ -18,6 +18,7 @@ public sealed class ClassesModel(
     AuthorizationSyncService authorizationSync,
     VisitorAccessSettings visitorAccess,
     ClassExcelService classExcel,
+    ClassPolicyService classPolicy,
     IMemoryCache reportCache,
     PeerRegistry peers)
     : WebPageModel(users)
@@ -43,6 +44,10 @@ public sealed class ClassesModel(
     /// <summary>把未分配设备指派到目标班级时提交的班级 Id。</summary>
     [BindProperty]
     public Guid AssignDeviceClassId { get; set; }
+
+    /// <summary>班级策略表单：字段名以 <c>PolicyInput.</c> 开头。</summary>
+    [BindProperty]
+    public ClassPolicy PolicyInput { get; set; } = new();
 
     [BindProperty]
     public List<Guid> SelectedClassIds { get; set; } = [];
@@ -242,6 +247,22 @@ public sealed class ClassesModel(
             TempData["Message"] = enabled ? "已开启该班级的访客功能。" : "已关闭该班级的访客功能。";
         }
         catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
+        return RedirectToClasses();
+    }
+
+    /// <summary>保存班级策略；在线设备立即收到，离线设备在下次连接时补发。</summary>
+    public async Task<IActionResult> OnPostSavePolicyAsync(Guid id, Guid? groupId, CancellationToken ct)
+    {
+        if (await RequireManagementAsync(ManagementPermissions.ManageClasses) is { } denied) return denied;
+        try
+        {
+            await classPolicy.SaveAsync([id], PolicyInput, ct);
+            TempData["Message"] = PolicyInput.IsDefault
+                ? "已恢复该班级的默认策略。"
+                : "班级策略已保存并下发到在线设备。";
+        }
+        catch (IdentityOperationException ex) { TempData["Error"] = ex.Message; }
+        SelectedGroupId = groupId;
         return RedirectToClasses();
     }
 

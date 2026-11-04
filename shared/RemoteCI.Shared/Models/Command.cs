@@ -101,6 +101,16 @@ public sealed class CommandMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public SubjectLocationRequest? SubjectLocation { get; set; }
 
+    /// <summary>班级策略；仅 SetClassPolicy 命令使用。</summary>
+    [JsonPropertyName("classPolicy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ClassPolicy? ClassPolicy { get; set; }
+
+    /// <summary>ClassIsland 设置部分更新；仅 SetClassIslandSettings 命令使用，由服务端控制入口构造。</summary>
+    [JsonPropertyName("classIslandSettings")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ClassIslandSettingsRequest? ClassIslandSettings { get; set; }
+
     /// <summary>远程终端命令执行参数；仅 ExecuteTerminalCommand 命令使用。</summary>
     [JsonPropertyName("terminalCommand")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

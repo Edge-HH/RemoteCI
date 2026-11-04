@@ -839,6 +839,10 @@ namespace RemoteCI.Server.Data.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PolicyJson")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
 

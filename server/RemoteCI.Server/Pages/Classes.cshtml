@@ -154,6 +154,7 @@
                                 <th scope="col">成员</th>
                                 <th scope="col">插件</th>
                                 <th scope="col">访客</th>
+                                <th scope="col">策略</th>
                                 <th scope="col"><span class="visually-hidden">操作</span></th>
                             </tr>
                         </thead>
@@ -201,6 +202,12 @@
                                 <td data-label="访客">
                                     <span class="status-pill @(classroom.VisitorEnabled ? "online" : "offline")">@(classroom.VisitorEnabled ? "已开启" : "已关闭")</span>
                                 </td>
+                                <td data-label="策略">
+                                    @{
+                                        var policy = classroom.Policy ?? new ClassPolicy();
+                                    }
+                                    <span class="status-pill @(policy.IsDefault ? string.Empty : "warning")">@(policy.IsDefault ? "默认" : "已限制")</span>
+                                </td>
                                 <td data-label="操作">
                                     <details class="row-menu">
                                         <summary aria-label="管理 @classroom.Name"><i class="icon icon-more-horiz" aria-hidden="true"></i></summary>
@@ -217,6 +224,9 @@
                                                 <input type="hidden" name="enabled" value="@(classroom.VisitorEnabled ? "false" : "true")" />
                                                 <button type="submit" class="ghost">@(classroom.VisitorEnabled ? "关闭访客" : "开启访客")</button>
                                             </form>
+                                            <div class="row-menu-form">
+                                                <button type="button" class="ghost" data-class-policy-open="class-policy-@classroom.Id">班级策略…</button>
+                                            </div>
                                             <form method="post" asp-page="/Classes" asp-page-handler="SetClassPairCode" class="row-menu-form">
                                                 <input type="hidden" name="id" value="@classroom.Id" />
                                                 <input type="hidden" name="groupId" value="@Model.SelectedGroupId" />
@@ -238,7 +248,7 @@
                             </tr>
                             <tr class="member-row">
                                 <td></td>
-                                <td colspan="6">
+                                <td colspan="7">
                                     <details class="member-details">
                                         <summary>成员（@members.Count）</summary>
                                         <ul class="member-list">
@@ -290,6 +300,33 @@
         }
     </section>
 </div>
+
+@* 班级策略：每个班一个弹窗，保存后写入服务端并立即下发到该班在线设备。 *@
+@foreach (var classroom in Model.VisibleClasses)
+{
+    <dialog id="class-policy-@classroom.Id" class="batch-dialog batch-dialog-wide" data-class-policy-dialog>
+        <form method="post" asp-page="/Classes" asp-page-handler="SavePolicy" class="batch-dialog-shell">
+            <header class="batch-dialog-header">
+                <div>
+                    <span class="batch-step">@classroom.Name</span>
+                    <h2>班级策略</h2>
+                    <p class="muted">限制教室端 ClassIsland 与 RemoteCI 的编辑、调试和退出入口。保存后立即下发到该班在线设备，离线设备下次上线时生效。</p>
+                </div>
+                <button type="button" class="dialog-close-button ghost" data-class-policy-close aria-label="关闭">×</button>
+            </header>
+            <div class="batch-dialog-body stack">
+                <input type="hidden" name="id" value="@classroom.Id" />
+                <input type="hidden" name="groupId" value="@Model.SelectedGroupId" />
+                <partial name="_ClassPolicyFields" model="classroom.Policy ?? new ClassPolicy()"
+                         view-data="@(new ViewDataDictionary(ViewData) { ["PolicyPrefix"] = "PolicyInput." })" />
+            </div>
+            <footer class="batch-dialog-actions">
+                <button type="button" class="ghost" data-class-policy-close>取消</button>
+                <button type="submit">保存策略</button>
+            </footer>
+        </form>
+    </dialog>
+}
 
 
 @if (Model.HasManagement(ManagementPermissions.ManageClasses))

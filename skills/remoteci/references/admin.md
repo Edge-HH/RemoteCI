@@ -140,6 +140,25 @@ ID,用户名,班级,角色,密码
 
 班主任就是 `roleId` 为班主任的成员；一个账号可以在不同班级担任不同角色。
 
+## 班级策略
+
+每个班可保存一份策略，限制教室端 ClassIsland 的编辑、调试与退出入口；插件把它写入宿主的 `ManagementPolicy`，连接后与策略变更时由服务端下发。`GET /api/classes` 返回的班级对象带可选字段 `policy`，字段（默认值）：
+
+| 字段 | 默认 | 为真时 |
+| --- | --- | --- |
+| `disableProfileClassPlanEditing` | `false` | 禁止编辑课表（含 Excel 导入；临时换课不受影响） |
+| `disableProfileTimeLayoutEditing` | `false` | 禁止编辑时间表 |
+| `disableProfileSubjectsEditing` | `false` | 禁止编辑科目 |
+| `disableProfileEditing` | `false` | 禁止编辑档案 |
+| `disableSettingsEditing` | `false` | 禁止编辑 ClassIsland 设置 |
+| `disableSplashCustomize` | `false` | 禁止自定义启动界面 |
+| `disableDebugMenu` | `false` | 禁用调试菜单 |
+| `allowExitManagement` | `true` | 是否允许退出 ClassIsland 内置集控 |
+| `allowChangeConnection` | `true` | 是否允许在插件设置页修改服务器地址、端口与连接码 |
+| `allowPluginSettings` | `true` | 是否允许打开 RemoteCI 插件设置页 |
+
+没有 REST 写接口：只能由系统管理员在 WebUI“管理 › 班级”的“班级策略”或“批量控制 › 班级策略”中修改。服务端会把策略保存到该班并下发命令 `36 SetClassPolicy`（能力 `class.policy`）到该班全部在线设备；离线设备下次上线时补发。命令 36 属于 `serverOnly`，`POST /api/commands`、广播、手机/手表通道和局域网直连都会被拒绝。设备同时加入 ClassIsland 内置集控时，两边策略取并集（只加严不放松）。
+
 ## 教室电脑接入
 
 | 操作 | 请求 |

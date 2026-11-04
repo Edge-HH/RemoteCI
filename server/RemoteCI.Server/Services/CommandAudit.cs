@@ -287,6 +287,7 @@ public static class CommandAuditSummary
         CommandKind.StopAppGuard => "关闭守护",
         CommandKind.UninstallAppGuard => "卸载守护",
         CommandKind.UpdateAppGuard => "更新守护",
+        CommandKind.SetClassPolicy => "班级策略",
         _ => $"命令 {(int)kind}",
     };
 
@@ -359,10 +360,29 @@ public static class CommandAuditSummary
                     _ => "应用档案",
                 }}{(apply.Mode == ProfileApplyMode.TempLayers ? string.Empty : "，" + DescribeSections(apply.Sections))}" +
                 (string.IsNullOrWhiteSpace(apply.ImportProfileName) ? string.Empty : $"，{Clip(apply.ImportProfileName, 40)}"),
+            CommandKind.SetClassPolicy => DescribeClassPolicy(command.ClassPolicy),
             _ => null,
         };
         var text = string.IsNullOrWhiteSpace(detail) ? Label(command.Command) : $"{Label(command.Command)}：{detail}";
         return CommandAuditLog.Truncate(text, CommandAuditLog.MaxTextLength);
+    }
+
+    private static string DescribeClassPolicy(ClassPolicy? policy)
+    {
+        if (policy is null) return "缺少策略";
+        if (policy.IsDefault) return "恢复默认（不限制）";
+        var active = new List<string>();
+        if (policy.DisableProfileClassPlanEditing) active.Add("禁改课表");
+        if (policy.DisableProfileTimeLayoutEditing) active.Add("禁改时间表");
+        if (policy.DisableProfileSubjectsEditing) active.Add("禁改科目");
+        if (policy.DisableProfileEditing) active.Add("禁改档案");
+        if (policy.DisableSettingsEditing) active.Add("禁改应用设置");
+        if (policy.DisableSplashCustomize) active.Add("禁改启动界面");
+        if (policy.DisableDebugMenu) active.Add("禁用调试菜单");
+        if (!policy.AllowExitManagement) active.Add("禁止退出集控");
+        if (!policy.AllowChangeConnection) active.Add("禁止修改连接信息");
+        if (!policy.AllowPluginSettings) active.Add("禁止打开插件设置");
+        return string.Join("、", active);
     }
 
     private static string DescribeChange(ScheduleChangeRequest change)

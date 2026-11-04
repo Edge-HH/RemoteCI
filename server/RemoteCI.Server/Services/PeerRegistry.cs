@@ -547,6 +547,24 @@ public sealed class PeerRegistry(
     }
 
     /// <summary>
+    /// 向指定班级声明了某能力的全部在线插件发送。班级策略必须在同班每台设备上各自生效，
+    /// 因此不像命令那样只投递给班级主插件。
+    /// </summary>
+    public async Task<int> BroadcastToClassPluginsAsync(
+        Guid classId, string capability, Envelope envelope, CancellationToken ct = default)
+    {
+        var sent = 0;
+        foreach (var peer in PluginPeersFor(classId).Where(x => !x.IsGuard).ToList())
+        {
+            if (!IsLocallyAuthorized(peer)) continue;
+            if (!EffectiveCapabilities(peer).Contains(capability, StringComparer.Ordinal)) continue;
+            if (await TrySendAsync(peer, envelope, ct)) sent++;
+            else await UnregisterAsync(peer.Id, WebSocketCloseStatus.PolicyViolation);
+        }
+        return sent;
+    }
+
+    /// <summary>
     /// 向指定班级在线的插件发送：命令与只读请求只投递给该班最早接入的健康插件，
     /// 避免同一命令被多个 ClassIsland 实例重复执行（换课/关机/通知各执行一次以上）。
     /// </summary>

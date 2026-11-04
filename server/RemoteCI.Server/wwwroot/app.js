@@ -192,6 +192,28 @@ function handleDialogClick(event) {
         return true;
     }
 
+    // 班级策略弹窗：行菜单按钮打开对应班级的对话框。
+    const policyOpenButton = event.target.closest("[data-class-policy-open]");
+    if (policyOpenButton) {
+        const dialog = document.getElementById(policyOpenButton.dataset.classPolicyOpen);
+        if (dialog) {
+            if (typeof dialog.showModal === "function") dialog.showModal();
+            else dialog.setAttribute("open", "");
+        }
+        return true;
+    }
+
+    const policyCloseButton = event.target.closest("[data-class-policy-close]");
+    if (policyCloseButton) {
+        closeEditDialog(policyCloseButton.closest("[data-class-policy-dialog]"));
+        return true;
+    }
+
+    if (event.target.matches("[data-class-policy-dialog]")) {
+        closeEditDialog(event.target);
+        return true;
+    }
+
     if (!event.target.matches("[data-user-edit-dialog]")) return false;
     closeEditDialog(event.target);
     return true;

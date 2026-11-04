@@ -72,6 +72,7 @@ curl -fsS -X POST "$REMOTECI_BASE_URL/api/commands?classId=$CLASS_ID" \
 | 19 | 加入 ClassIsland 集控 | `managementJoin`：`{"presetJson":"<ManagementPreset.json 内容>"}` |
 | 22 | 远程终端 | `terminalCommand`：`{"command":"hostname","workingDirectory":null,"timeoutSeconds":10}`，等同 `cmd /d /c`，结果在 `data` 里 |
 | 23 | 文件分发（旧的内联方式，仅系统管理员） | `fileDistribution`：`{"fileName":"a.pdf","contentBase64":"…","targetFolder":1 桌面 \| 2 下载 \| 3 文档,"overwrite":false}`，文件最大 10 MB。新代码请用下面的“文件分发”接口 |
+| 36 | 设置班级策略 | 只能在 WebUI“班级管理”或“批量控制”发起，`/api/commands` 会拒绝；`classPolicy` 字段见 [admin.md](admin.md#班级策略) |
 
 `profileDistribution` 的字段：
 
