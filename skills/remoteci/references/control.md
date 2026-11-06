@@ -73,6 +73,7 @@ curl -fsS -X POST "$REMOTECI_BASE_URL/api/commands?classId=$CLASS_ID" \
 | 22 | 远程终端 | `terminalCommand`：`{"command":"hostname","workingDirectory":null,"timeoutSeconds":10}`，等同 `cmd /d /c`，结果在 `data` 里 |
 | 23 | 文件分发（旧的内联方式，仅系统管理员） | `fileDistribution`：`{"fileName":"a.pdf","contentBase64":"…","targetFolder":1 桌面 \| 2 下载 \| 3 文档,"overwrite":false}`，文件最大 10 MB。新代码请用下面的“文件分发”接口 |
 | 36 | 设置班级策略 | 只能在 WebUI“班级管理”或“批量控制”发起，`/api/commands` 会拒绝；`classPolicy` 字段见 [admin.md](admin.md#班级策略) |
+| 37 / 38 | 读取 / 修改 ClassIsland 设置 | 只能经下面的“ClassIsland 设置”接口发起，`/api/commands` 会拒绝；需要能力 `host.settings.read` / `host.settings.write` |
 
 `profileDistribution` 的字段：
 
@@ -108,6 +109,16 @@ curl -fsS -X POST "$REMOTECI_BASE_URL/api/commands?classId=$CLASS_ID" \
 **开放或收回（需要“插件控制”权限）**：`PUT /api/extension-groups/{groupId}/class-admin-access`，请求体 `{"allowClassAdmin":true}`；对全部班级生效，插件尚未上报时也可以先设置。开放后，本班有“修改本班插件设置”权限（8388608，班主任默认拥有）的账号在 WebUI “班级管理”中看到“插件”子页面，只列出已开放的插件，且只修改当前班级。系统管理员在“管理 › 插件控制”中按班级、分组或具体设备统一下发。
 
 **多个班级**：没有批量接口，按班循环调用上面的 `PUT`，并逐班汇报结果；某班返回“没有上报该扩展分组”表示那台教室电脑没装这个插件。
+
+## ClassIsland 设置
+
+远程读取与修改教室端 ClassIsland 软件本身的设置（ClassIsland 设置窗口里的内容：基本、外观、窗口、提醒、天气、更新、自动化、存储、隐私、插件市场、主界面组件方案与调试，约 120 项）。需要本班“ClassIsland 控制”权限（4194304）与教室端插件能力 `host.settings.read` / `host.settings.write`；修改立即写入教室端，部分项（组件配置方案、课表档案文件选择）需重启 ClassIsland 才完全生效。
+
+1. `GET /api/classisland-settings/catalog`：设置项目录 `{pages, items}`。每项含 `key`（ClassIsland Settings 属性名，即 Settings.json 的键）、`type`（`1` 开关、`2` 整数、`3` 数字、`4` 文本、`5` 选项、`6` 颜色、`7` 日期、`8` 字符串列表）、`label`（ClassIsland 设置页中的名称）、`page` 与 `card`（分组）、`options`（选项的值与显示名）、`min`/`max`/`step`/`unit` 与 `description`。不确定键名时先按用户的关键词在这里检索（匹配 `label` 或 `key`）。
+2. `GET /api/classes/{classId}/classisland-settings`：读取该班教室电脑当前设置，返回 `{classId, values}`；`values` 只包含目录内、设备上实际存在的项。颜色是 `#RRGGBB`（不透明）或 `#AARRGGBB` 字符串，日期是 `yyyy-MM-dd`。
+3. `PUT /api/classes/{classId}/classisland-settings`，请求体 `{"values":{"Theme":1,"ClassPrepareNotifySeconds":90}}`：**只包含要修改的项**，未提及的设置保持设备当前值，绝不整体覆盖。服务端先按目录校验类型与范围（400 返回 `message` 说明原因），设备端失败按 503/409/504/422 返回 `CommandResult`。
+
+修改前向用户复述班级与设置项；用户问“有哪些可以改”时按 `pages` 分组介绍而不是整表倾倒。批量控制页的批量下发没有公开 API，按班循环调用 `PUT` 并逐班汇报。
 
 ## 多个班级或分组：`POST /api/commands/broadcast`
 

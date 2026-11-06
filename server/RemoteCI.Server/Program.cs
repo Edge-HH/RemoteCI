@@ -1604,6 +1604,7 @@ app.MapProfileEndpoints();
 app.MapOperationsEndpoints();
 app.MapFileTransferEndpoints();
 app.MapScreenshotEndpoints();
+app.MapClassIslandSettingsEndpoints();
 app.Run();
 
 static async Task<AuthPrincipal?> AuthorizeAsync(HttpContext ctx, IdentityCoordinator identities, CancellationToken ct)
