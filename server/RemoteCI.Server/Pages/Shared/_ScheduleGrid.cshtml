@@ -2,7 +2,7 @@
 @using RemoteCI.Server.Pages
 @using RemoteCI.Shared.Models
 @*
-    WakeUp 式周课表：行是节次，列是周一到周日。显示老师/班级/地点、显示周末与自动合并连堂保存在浏览器本地
+    多彩课程表：行是节次，列是周一到周日。显示老师/班级/地点、显示周末与自动合并连堂保存在浏览器本地
     （_ScheduleDisplayPrefs 在页面渲染前写到 <html> 的 data-sg-* 属性上），这里把所有内容都渲染出来，由样式按属性隐藏。
 *@
 <div class="sg" data-schedule-grid data-has-weekend="@(Model.Merged.HasWeekendEntries ? "true" : "false")">

@@ -49,7 +49,7 @@ data class GridColumn(
 data class GridResult(val rows: List<GridRow>, val columns: List<GridColumn>, val hasWeekendEntries: Boolean)
 
 /**
- * WakeUp 式周课表的排布，是服务端 RemoteCI.Shared.Models.ScheduleGrid 的逐行移植（两端共用 shared/test-fixtures/schedule-grid 校验）：
+ * 多彩课程表的排布，是服务端 RemoteCI.Shared.Models.ScheduleGrid 的逐行移植（两端共用 shared/test-fixtures/schedule-grid 校验）：
  * 班级课程按节次放，自定义课程占据与它时间重叠的所有节次行，不与任何节次重叠的按开始时间单独成行；
  * 相邻节次学科、老师、地点、班级都相同且中间没有空白或分割线时合并为连堂；同格撞课左右分道。
  */

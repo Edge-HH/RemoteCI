@@ -457,7 +457,7 @@ textarea { resize: vertical; }
     .backup-list .row-actions, .backup-list .row-actions form { width: auto; align-items: center; flex-direction: row; }
 }
 
-/* 周课表（WakeUp 式）：行是节次，列是日期；低饱和学科色块，颜色变量由服务端按学科颜色写在每个色块上。 */
+/* 多彩课程表：行是节次，列是日期；低饱和学科色块，颜色变量由服务端按学科颜色写在每个色块上。 */
 .sg { --sg-row: 74px; --sg-gap: 14px; --sg-divider: 11px; --sg-period: 54px; --sg-col-min: 96px; margin-bottom: 16px; border: 1px solid var(--line); border-radius: var(--radius-card, 20px); background: var(--surface); overflow: hidden; }
 .sg-scroll { overflow-x: auto; }
 .sg-sheet { width: max-content; min-width: 100%; }

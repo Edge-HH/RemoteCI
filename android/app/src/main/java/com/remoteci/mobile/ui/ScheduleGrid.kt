@@ -73,7 +73,7 @@ private val DividerHeight = 9.dp
 private const val MaxZoom = 2.5f
 
 /**
- * WakeUp 式周课表：行是节次、列是周一到周日，低饱和学科色块。双指缩放（下限一屏放下全部节次，上限 2.5 倍），
+ * 多彩课程表：行是节次、列是周一到周日，低饱和学科色块。双指缩放（下限一屏放下全部节次，上限 2.5 倍），
  * 放大后单指平移；未放大时左右滑动切换上一周/下一周。缩放结束时经 [onZoomCommit] 保存比例。
  */
 @Composable
