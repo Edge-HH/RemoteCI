@@ -15,29 +15,25 @@ RemoteCI 是面向 **ClassIsland 2.1 及以上**的课堂联动与集控系统�
 > [!NOTE]
 > 我的个人精力有限，目前 Wear OS 端的功能更新可能目前缺失。不同端的入口与能力以实际发布版本为准。
 
-## 📸 界面预览
+## 📸 预览
 
-以下截图采集自当前仓库源码运行的 WebUI，班级、教师、课程与设备状态均为本地演示数据。手机截图展示的是**手机 WebUI / PWA**，原生 Android 与 Wear OS 应用另行安装。
 
-### 🖥️ 课堂控制总览
 
-当前课程、插件连接、课表同步与连接能力诊断集中展示；支持班级切换、页面搜索和深浅色主题。
+### 首页
+![RemoteCI 课堂控制总览](docs/images/PixPin_2026-11-08_15-13-11.png)
 
-![深色主题下的 RemoteCI 课堂控制总览](docs/images/web-overview.jpg)
+### 🗓️ 课表
 
-### 🗓️ 七日课表
+查看课程
 
-查看未来七天的课程、时间与任课教师，从在线插件拉取最新课表，并按权限交换、替换课程或进行永久换课。
+![RemoteCI 课表](docs/images/PixPin_2026-11-08_15-16-14.png)
 
-![浅色主题下的 RemoteCI 七日课表](docs/images/web-schedule.jpg)
+### 📱 安卓版
 
-### 📱 手机 WebUI 与 PWA
 
-在手机浏览器中使用今天、课表、换课、控制和管理入口，也可添加到主屏幕。复杂的档案编辑、分组与批量操作可切换到电脑版完成。
-
-| 今天：课程与倒计时 | 课表：按日查看课程 | 控制：课堂常用操作 |
+| 课程查看、快捷操作 | 课表与日程 | 控制：课堂常用操作 |
 | --- | --- | --- |
-| <img src="docs/images/mobile-web-today.jpg" alt="手机 WebUI 今天页" width="250"> | <img src="docs/images/mobile-web-schedule.jpg" alt="手机 WebUI 课表页" width="250"> | <img src="docs/images/mobile-web-control.jpg" alt="手机 WebUI 控制页" width="250"> |
+| <img src="docs/images/PixPin_2026-11-08_15-18-40.png" alt="今天页" width="250"> | <img src="docs/images/PixPin_2026-11-08_15-20-51.png" alt="手机 WebUI 课表页" width="250"> | <img src="docs/images/PixPin_2026-11-08_15-21-49.png" alt="手机 WebUI 控制页" width="250"> |
 
 ### 🗂️ 档案与集控工作台
 
@@ -46,7 +42,7 @@ RemoteCI 是面向 **ClassIsland 2.1 及以上**的课堂联动与集控系统�
 <details>
 <summary>🗂️ 查看档案管理界面</summary>
 
-![RemoteCI 档案管理与时间表编辑器](docs/images/web-profiles.jpg)
+![RemoteCI 档案管理与时间表编辑器](docs/images/PixPin_2026-11-08_15-22-27.png)
 
 </details>
 
@@ -55,16 +51,16 @@ RemoteCI 是面向 **ClassIsland 2.1 及以上**的课堂联动与集控系统�
 
 通知广播、语音消息、电源控制、插件管理、软件升级、远程终端与文件分发统一进入操作工作台，再选择目标班级、分组或设备。
 
-![RemoteCI 批量控制工作台](docs/images/web-batch-control.jpg)
+![RemoteCI 批量控制工作台](docs/images/PixPin_2026-11-08_15-23-05.png)
 
 </details>
 
 <details>
-<summary>⚙️ 查看自动化界面</summary>
+<summary>⚙️ 查看用户管理面板</summary>
 
-按时间、课堂事件或设备上线触发规则。图中两条音量规则为演示配置，处于停用状态。
+完整的角色和用户管理与权限控制系统
 
-![RemoteCI 自动化模板与规则列表](docs/images/web-automation.jpg)
+![RemoteCI 自动化模板与规则列表](docs/images/PixPin_2026-11-08_15-23-36.png)
 
 </details>
 
