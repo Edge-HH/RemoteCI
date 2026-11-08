@@ -36,6 +36,7 @@ public sealed class ClassPolicyTests : IClassFixture<TestWebApplicationFactory>
         Assert.False(new ClassPolicy { AllowExitManagement = false }.IsDefault);
         Assert.False(new ClassPolicy { AllowChangeConnection = false }.IsDefault);
         Assert.False(new ClassPolicy { AllowPluginSettings = false }.IsDefault);
+        Assert.False(new ClassPolicy { DisablePluginsSettings = true }.IsDefault);
     }
 
     [Theory]
@@ -56,12 +57,14 @@ public sealed class ClassPolicyTests : IClassFixture<TestWebApplicationFactory>
             DisableSettingsEditing = true,
             AllowExitManagement = false,
             AllowPluginSettings = false,
+            DisablePluginsSettings = true,
         };
         var parsed = ClassPolicy.FromJson(System.Text.Json.JsonSerializer.Serialize(policy, JsonDefaults.Options));
         Assert.True(parsed.DisableProfileClassPlanEditing);
         Assert.True(parsed.DisableSettingsEditing);
         Assert.False(parsed.AllowExitManagement);
         Assert.False(parsed.AllowPluginSettings);
+        Assert.True(parsed.DisablePluginsSettings);
         Assert.False(parsed.IsDefault);
     }
 
@@ -119,6 +122,7 @@ public sealed class ClassPolicyTests : IClassFixture<TestWebApplicationFactory>
         Assert.Contains("班级策略", html);
         Assert.Contains("name=\"PolicyInput.DisableProfileEditing\"", html);
         Assert.Contains("name=\"PolicyInput.AllowPluginSettings\"", html);
+        Assert.Contains("name=\"PolicyInput.DisablePluginsSettings\"", html);
 
         var batch = WebUtility.HtmlDecode(await browser.GetStringAsync("/BatchControl"));
         Assert.Contains("data-batch-settings=\"SetClassPolicy\"", batch);

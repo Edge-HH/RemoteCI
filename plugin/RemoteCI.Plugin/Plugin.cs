@@ -97,6 +97,7 @@ public class Plugin : PluginBase
         services.AddSingleton<ManagementJoinService>();
         // 班级策略：服务端下发的限制（编辑、调试、退出入口），本地缓存后离线启动也生效。
         services.AddSingleton(new ClassPolicyStore(Path.Combine(PluginConfigFolder, "ClassPolicy.json")));
+        services.AddSingleton<PluginsSettingsPageGuard>();
         services.AddSingleton<ClassPolicyService>();
         // 远程读写 ClassIsland 设置（目录白名单内的项）。
         services.AddSingleton<ClassIslandSettingsService>();

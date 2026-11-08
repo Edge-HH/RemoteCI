@@ -153,6 +153,7 @@ ID,用户名,班级,角色,密码
 | `disableSettingsEditing` | `false` | 禁止编辑 ClassIsland 设置 |
 | `disableSplashCustomize` | `false` | 禁止自定义启动界面 |
 | `disableDebugMenu` | `false` | 禁用调试菜单 |
+| `disablePluginsSettings` | `false` | 设置界面不显示 ClassIsland 自带的“插件”页（RemoteCI 自己执行，不属于集控） |
 | `allowExitManagement` | `true` | 是否允许退出 ClassIsland 内置集控 |
 | `allowChangeConnection` | `true` | 是否允许在插件设置页修改服务器地址、端口与连接码 |
 | `allowPluginSettings` | `true` | 是否允许打开 RemoteCI 插件设置页 |

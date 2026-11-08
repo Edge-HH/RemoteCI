@@ -9,13 +9,24 @@ namespace RemoteCI.Plugin.Services;
 
 /// <summary>
 /// 把服务端下发的班级策略写入 ClassIsland 的 ManagementPolicy，宿主各界面据此禁用编辑、调试与退出入口。
-/// 设备同时加入 ClassIsland 内置集控时只加严不放松：在插件启动时的策略基础上取并集，
-/// 避免 RemoteCI 的“允许”覆盖集控服务器已有的限制。
+/// 设备同时加入 ClassIsland 内置集控时只加严不放松：以集控自己的策略为下限取并集，
+/// 避免 RemoteCI 的“允许”覆盖集控服务器已有的限制；集控重载策略后自动重新应用。
 /// </summary>
-public sealed class ClassPolicyService(ClassPolicyStore store, ILogger<ClassPolicyService> logger)
+public sealed class ClassPolicyService(
+    ClassPolicyStore store,
+    PluginsSettingsPageGuard pluginsPage,
+    ILogger<ClassPolicyService> logger)
 {
+    /// <summary>内置集控重载后宿主会换一个新的策略对象；按此间隔检查并重新应用缓存的班级策略。</summary>
+    private static readonly TimeSpan HostPolicyWatchInterval = TimeSpan.FromSeconds(30);
+
+    /// <summary>上次写入的宿主策略对象；宿主换成新对象时据此识别并重新取下限。</summary>
+    private ManagementPolicy? _target;
+
+    /// <summary><see cref="_target"/> 在 RemoteCI 首次写入前的取值，即内置集控自己的限制。</summary>
     private ManagementPolicy? _baseline;
-    private bool _baselineIsManaged;
+
+    private DispatcherTimer? _hostWatch;
 
     public ClassPolicy? Current => store.Current;
 
@@ -45,19 +56,56 @@ public sealed class ClassPolicyService(ClassPolicyStore store, ILogger<ClassPoli
 
     private CommandResult ApplyToHost(ClassPolicy policy)
     {
+        // “禁止插件设置”不属于 ClassIsland 集控，由插件自己执行，不依赖 IManagementService。
+        pluginsPage.Apply(policy.DisablePluginsSettings);
+
         var management = IAppHost.TryGetService<IManagementService>();
         if (management is null)
             return CommandResult.Failure(CommandResultCodes.CapabilityUnsupported, "当前 ClassIsland 版本不支持集控策略");
 
-        var target = management.Policy;
-        // 内置集控启用时，以插件启动时宿主已有的策略为下限，只允许 RemoteCI 继续加严。
-        if (_baseline is null || _baselineIsManaged != management.IsManagementEnabled)
-        {
-            _baseline = Snapshot(target);
-            _baselineIsManaged = management.IsManagementEnabled;
-        }
-        ApplyTo(target, management.IsManagementEnabled ? _baseline : null, policy);
+        ApplyToPolicy(management.Policy, management.IsManagementEnabled, policy);
+        EnsureHostWatch();
         return Success(policy.IsDefault ? "已恢复默认策略" : "班级策略已生效");
+    }
+
+    /// <summary>
+    /// 写入宿主当前的策略对象。下限只在第一次见到某个对象时取：同一对象已被 RemoteCI 改过，
+    /// 再取会把 RemoteCI 自己的限制当成集控的限制，之后就再也解除不了。
+    /// 内置集控收到 DataUpdated 后会从文件重新加载出新对象，新对象只含集控自己的值，此时重新取下限。
+    /// </summary>
+    internal void ApplyToPolicy(ManagementPolicy target, bool managementEnabled, ClassPolicy policy)
+    {
+        if (!ReferenceEquals(target, _target))
+        {
+            _target = target;
+            _baseline = Snapshot(target);
+        }
+        ApplyTo(target, managementEnabled ? _baseline : null, policy);
+    }
+
+    /// <summary>宿主替换策略对象时没有事件，只能定时比对引用；只在已应用过策略后启动。</summary>
+    private void EnsureHostWatch()
+    {
+        if (_hostWatch is not null) return;
+        _hostWatch = new DispatcherTimer { Interval = HostPolicyWatchInterval };
+        _hostWatch.Tick += (_, _) => ReapplyIfHostPolicyReplaced();
+        _hostWatch.Start();
+    }
+
+    private void ReapplyIfHostPolicyReplaced()
+    {
+        try
+        {
+            if (store.Current is not { } policy) return;
+            if (IAppHost.TryGetService<IManagementService>() is not { } management) return;
+            if (ReferenceEquals(management.Policy, _target)) return;
+            logger.LogInformation("ClassIsland 集控策略已重新加载，重新应用班级策略");
+            ApplyToPolicy(management.Policy, management.IsManagementEnabled, policy);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "重新应用班级策略失败");
+        }
     }
 
     /// <summary>

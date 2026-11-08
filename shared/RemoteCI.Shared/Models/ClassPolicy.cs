@@ -37,6 +37,13 @@ public sealed class ClassPolicy
     [JsonPropertyName("disableDebugMenu")]
     public bool DisableDebugMenu { get; set; }
 
+    /// <summary>
+    /// 禁止插件设置：ClassIsland 设置界面不显示自带的“插件”页，不能安装、卸载、启用或禁用插件。
+    /// ClassIsland 集控没有此项，由 RemoteCI 插件自己执行；已安装插件各自的设置页不受影响。
+    /// </summary>
+    [JsonPropertyName("disablePluginsSettings")]
+    public bool DisablePluginsSettings { get; set; }
+
     /// <summary>允许退出 ClassIsland 内置集控；关闭后用户不能自行退出。</summary>
     [JsonPropertyName("allowExitManagement")]
     public bool AllowExitManagement { get; set; } = true;
@@ -59,6 +66,7 @@ public sealed class ClassPolicy
         !DisableSettingsEditing &&
         !DisableSplashCustomize &&
         !DisableDebugMenu &&
+        !DisablePluginsSettings &&
         AllowExitManagement &&
         AllowChangeConnection &&
         AllowPluginSettings;

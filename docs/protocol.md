@@ -361,13 +361,14 @@ WebUI 批量控制页把功能参数和目标设备分成两步：先填写参�
 | `disableSettingsEditing` | `false` | 不能调整 ClassIsland 设置；先前调整过的设置不受影响 |
 | `disableSplashCustomize` | `false` | 不能自定义启动加载界面；先前设置过的启动界面会被清除 |
 | `disableDebugMenu` | `false` | 不能进入调试页面 |
+| `disablePluginsSettings` | `false` | ClassIsland 设置界面不显示自带的“插件”页（`classisland.plugins`），不能安装、卸载、启用或禁用插件；各插件自己的设置页不受影响 |
 | `allowExitManagement` | `true` | 关闭后用户不能自行退出 ClassIsland 内置集控 |
 | `allowChangeConnection` | `true` | 关闭后 RemoteCI 插件设置页不能修改服务器地址、局域网端口与连接码 |
 | `allowPluginSettings` | `true` | 关闭后 RemoteCI 插件设置页只显示受限提示，不提供任何可操作控件 |
 
 服务端在插件上报 `class.policy` 能力后补发 `class_policy`，策略保存后向该班**全部**在线插件广播（同班多台设备都要生效，不只主插件）；离线设备下次连接时补发。插件把最近一次策略保存到本地（`ClassPolicy.json`），ClassIsland 离线启动时继续应用，因此策略是期望状态、可重复下发。
 
-`disable*` 与 `allowExitManagement` 直接映射到 ClassIsland 的 `ManagementService.Policy`，宿主各界面实时读取该对象。设备同时加入 ClassIsland 内置集控时，RemoteCI 只加严不放松：限制类取并集、允许类取交集，避免 RemoteCI 的默认值覆盖集控服务器的限制；解除 RemoteCI 自身的限制仍可正常下发。`allowChangeConnection` 与 `allowPluginSettings` 由 RemoteCI 插件自己执行，不属于 ClassIsland 集控。
+除 `disablePluginsSettings` 外，`disable*` 与 `allowExitManagement` 直接映射到 ClassIsland 的 `ManagementService.Policy`，宿主各界面实时读取该对象。设备同时加入 ClassIsland 内置集控时，RemoteCI 只加严不放松：限制类取并集、允许类取交集，避免 RemoteCI 的默认值覆盖集控服务器的限制；解除 RemoteCI 自身的限制仍可正常下发。内置集控重新加载策略（如收到 `DataUpdated`）时宿主会换成新的策略对象，插件约每 30 秒检查一次，发现后以新对象为下限重新应用缓存的班级策略。`disablePluginsSettings`、`allowChangeConnection` 与 `allowPluginSettings` 由 RemoteCI 插件自己执行，不属于 ClassIsland 集控：`disablePluginsSettings` 把插件页从宿主设置页注册表中移除（菜单与 `classisland://app/settings/classisland.plugins` 都打不开），解除后放回原位。
 
 `GET /api/classes` 等返回的 `ClassDetail` 新增可选字段 `policy`（结构同上）；旧服务端不返回时客户端按默认值（不限制）处理。班级管理页与批量控制页都可以修改策略，批量控制会把策略保存到所选班级后逐台下发。
 

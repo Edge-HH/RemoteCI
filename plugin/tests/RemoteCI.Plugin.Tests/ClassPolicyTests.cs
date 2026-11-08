@@ -83,6 +83,79 @@ public sealed class ClassPolicyTests : IDisposable
         Assert.False(target.AllowExitManagement);
     }
 
+    private ClassPolicyService NewService() => new(
+        new ClassPolicyStore(Path.Combine(_root, "ClassPolicy.json")),
+        new PluginsSettingsPageGuard(new System.Collections.ObjectModel.ObservableCollection<ClassIsland.Core.Attributes.SettingsPageInfo>()),
+        Microsoft.Extensions.Logging.Abstractions.NullLogger<ClassPolicyService>.Instance);
+
+    [Fact]
+    public void ApplyToPolicy_RepeatedApplyOnSameObjectCanStillUnlockRemoteCiRestrictions()
+    {
+        var service = NewService();
+        var host = new ManagementPolicy { DisableSettingsEditing = true };
+
+        service.ApplyToPolicy(host, managementEnabled: true, new ClassPolicy { DisableDebugMenu = true, AllowExitManagement = false });
+        Assert.True(host.DisableDebugMenu);
+        Assert.False(host.AllowExitManagement);
+
+        // 同一对象再次应用：下限仍是集控原值，RemoteCI 自己加的限制可以解除。
+        service.ApplyToPolicy(host, managementEnabled: true, new ClassPolicy());
+        Assert.False(host.DisableDebugMenu);
+        Assert.True(host.AllowExitManagement);
+        Assert.True(host.DisableSettingsEditing);
+    }
+
+    [Fact]
+    public void ApplyToPolicy_ReloadedHostPolicyTakesNewBaseline()
+    {
+        var service = NewService();
+        var policy = new ClassPolicy { DisableDebugMenu = true };
+        service.ApplyToPolicy(new ManagementPolicy { DisableSettingsEditing = true }, managementEnabled: true, policy);
+
+        // 集控重载：新对象放开了设置编辑、改为禁止退出；应以新对象为下限，而不是沿用旧下限。
+        var reloaded = new ManagementPolicy { AllowExitManagement = false };
+        service.ApplyToPolicy(reloaded, managementEnabled: true, policy);
+
+        Assert.False(reloaded.DisableSettingsEditing);
+        Assert.False(reloaded.AllowExitManagement);
+        Assert.True(reloaded.DisableDebugMenu);
+    }
+
+    [Fact]
+    public void PluginsPageGuard_HidesBuiltinPluginsPageAndRestoresItInPlace()
+    {
+        var registry = new System.Collections.ObjectModel.ObservableCollection<ClassIsland.Core.Attributes.SettingsPageInfo>
+        {
+            new("general", "基本"),
+            new(PluginsSettingsPageGuard.PluginsPageId, "插件"),
+            new("classisland.themes", "主题"),
+        };
+        var guard = new PluginsSettingsPageGuard(registry);
+
+        Assert.True(guard.Apply(hide: true));
+        Assert.DoesNotContain(registry, x => x.Id == PluginsSettingsPageGuard.PluginsPageId);
+        // 重复下发同一策略不再改动注册表。
+        Assert.False(guard.Apply(hide: true));
+
+        Assert.True(guard.Apply(hide: false));
+        Assert.Equal(["general", PluginsSettingsPageGuard.PluginsPageId, "classisland.themes"], registry.Select(x => x.Id));
+        Assert.False(guard.Apply(hide: false));
+    }
+
+    [Fact]
+    public void PluginsPageGuard_DoesNothingWhenHostHasNoPluginsPage()
+    {
+        var registry = new System.Collections.ObjectModel.ObservableCollection<ClassIsland.Core.Attributes.SettingsPageInfo>
+        {
+            new("general", "基本"),
+        };
+        var guard = new PluginsSettingsPageGuard(registry);
+
+        Assert.False(guard.Apply(hide: true));
+        Assert.False(guard.Apply(hide: false));
+        Assert.Single(registry);
+    }
+
     [Fact]
     public void SettingsPage_IsLockedWhenPolicyForbidsOpeningIt()
     {

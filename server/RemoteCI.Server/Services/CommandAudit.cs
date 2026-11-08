@@ -379,9 +379,10 @@ public static class CommandAuditSummary
         if (policy.DisableSettingsEditing) active.Add("禁改应用设置");
         if (policy.DisableSplashCustomize) active.Add("禁改启动界面");
         if (policy.DisableDebugMenu) active.Add("禁用调试菜单");
+        if (policy.DisablePluginsSettings) active.Add("禁止插件设置");
         if (!policy.AllowExitManagement) active.Add("禁止退出集控");
         if (!policy.AllowChangeConnection) active.Add("禁止修改连接信息");
-        if (!policy.AllowPluginSettings) active.Add("禁止打开插件设置");
+        if (!policy.AllowPluginSettings) active.Add("禁止打开 RemoteCI 设置页");
         return string.Join("、", active);
     }
 
