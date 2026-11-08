@@ -168,7 +168,7 @@ jobs:
         uses: actions/checkout@v7
       - name: 📦 下载 fnpack 并打包三种 fpk
         run: |
-          version="0.0.0-fpk-ci"
+          version="0.0.0.1"
           image="ghcr.io/edge-hh/remoteci:${version}"
           mkdir -p .tools
           curl -fsSL -o .tools/fnpack https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64
