@@ -46,7 +46,8 @@ def main() -> None:
             for key, _, value in [separator]
         }
         assert manifest["appname"] == "remoteci"
-        assert manifest["version"] == version
+        major, minor, patch, build = version.split(".")
+        assert manifest["version"] == f"{major}.{minor}.{patch}-{build}"
         assert manifest["platform"] == expected_platform
         assert "cmd/arch_compat" in package_names
         privilege = json.loads(read_member(package, "config/privilege"))

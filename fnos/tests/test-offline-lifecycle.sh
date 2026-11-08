@@ -45,7 +45,7 @@ run_loader() {
   TMPDIR="/proc/remoteci-missing-system-temp" \
   TRIM_TEMP_LOGFILE="$log_file" \
   TRIM_SYS_ARCH="$system_arch" \
-  TRIM_APPVER="$VERSION" \
+  TRIM_APPVER="${VERSION%.*}-${VERSION##*.}" \
     bash "$package_root/cmd/load_offline_image"
 }
 

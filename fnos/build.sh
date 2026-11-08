@@ -18,6 +18,12 @@ LOCAL_FALLBACK="$(sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' \
   "$ROOT/server/RemoteCI.Server/RemoteCI.Server.csproj" | head -n 1)"
 VERSION="${1:-${REMOTECI_VERSION:-$(git -C "$ROOT" describe --tags --abbrev=0 2>/dev/null || echo "${LOCAL_FALLBACK:-0.0.0}")}}"
 VERSION="${VERSION#v}"
+# 飞牛要求 manifest 版本为 x.y.z 或 x.y.z-m；镜像 tag 与文件名仍用四段版本。
+if ! [[ "$VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\.([0-9]+)$ ]]; then
+  echo "版本必须是四段数字 x.y.z.m：$VERSION" >&2
+  exit 1
+fi
+MANIFEST_VERSION="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}"
 FNPACK="${2:-${FNPACK:-$ROOT/.tools/fnpack}}"
 FPK_MODE="${REMOTECI_FPK_MODE:-online}"
 FPK_ARCH="${REMOTECI_FPK_ARCH:-}"
@@ -74,9 +80,8 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
 cp -R "$FNOS_DIR/." "$STAGE/"
-sed -i "s/__REMOTECI_VERSION__/$VERSION/g" \
-  "$STAGE/manifest" \
-  "$STAGE/app/docker/docker-compose.yaml"
+sed -i "s/__REMOTECI_VERSION__/$MANIFEST_VERSION/g" "$STAGE/manifest"
+sed -i "s/__REMOTECI_VERSION__/$VERSION/g" "$STAGE/app/docker/docker-compose.yaml"
 sed -i "s/^platform=all$/platform=$FPK_PLATFORM/" "$STAGE/manifest"
 
 if [ "$FPK_MODE" = "offline" ]; then
@@ -129,7 +134,7 @@ EOF
 fi
 
 # 在交给 fnpack 前验证包清单与镜像标签都来自同一个 release 版本。
-grep -Fxq "version=$VERSION" "$STAGE/manifest"
+grep -Fxq "version=$MANIFEST_VERSION" "$STAGE/manifest"
 grep -Fxq "platform=$FPK_PLATFORM" "$STAGE/manifest"
 grep -Fq "image: $IMAGE_TAG" "$STAGE/app/docker/docker-compose.yaml"
 if [ "$FPK_MODE" = "offline" ]; then

@@ -80,8 +80,12 @@ printf '%s\n' "$IMAGE_ID" | grep -Eq '^sha256:[0-9a-f]{64}$' \
   || fail "镜像 ID 格式无效"
 printf '%s\n' "$IMAGE_ARCHIVE_SHA256" | grep -Eq '^[0-9a-f]{64}$' \
   || fail "镜像归档 SHA-256 格式无效"
-if [ -n "${TRIM_APPVER:-}" ] && [ "$IMAGE_TAG" != "ghcr.io/edge-hh/remoteci:$TRIM_APPVER" ]; then
-  fail "镜像版本与应用版本 $TRIM_APPVER 不一致"
+if [ -n "${TRIM_APPVER:-}" ]; then
+  # manifest 版本为 x.y.z-m，镜像标签使用四段版本 x.y.z.m。
+  APP_IMAGE_VERSION="${TRIM_APPVER/-/.}"
+  if [ "$IMAGE_TAG" != "ghcr.io/edge-hh/remoteci:$APP_IMAGE_VERSION" ]; then
+    fail "镜像版本与应用版本 $TRIM_APPVER 不一致"
+  fi
 fi
 
 # shellcheck source=fnos/cmd/arch_compat
