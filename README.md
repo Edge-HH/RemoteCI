@@ -4,11 +4,11 @@
 [![Release](https://img.shields.io/github/v/release/Edge-HH/RemoteCI)](https://github.com/Edge-HH/RemoteCI/releases/latest)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 
-**让 ClassIsland 的课堂状态、课表与控制，从教室延伸到浏览器、手机和手表。**
+**集控，教务，日程为一体的ClassIsland插件**
 
 RemoteCI 是面向 **ClassIsland 2.1 及以上**的课堂联动与集控系统。你可以随时查看课程、发送通知、申请换课，也可以集中维护全校的班级档案、教室电脑与插件，让日常管理按课表自动执行。
 
-系统由 ClassIsland 插件、ASP.NET Core 服务端、桌面与手机 WebUI、Android 和 Wear OS 应用组成，支持 Windows、Linux、Docker 与飞牛 fnOS 部署。各组件通过 **V3 协议**协商能力，具体操作取决于账号权限与教室端支持情况。
+系统由 ClassIsland 插件、ASP.NET Core 服务端、桌面与手机 WebUI、Android 和 Wear OS 应用组成，支持 Windows、Linux、Docker 与飞牛 fnOS 部署。
 
 [📦 下载发布版](https://github.com/Edge-HH/RemoteCI/releases/latest) · [📖 使用文档](https://edge-hh.github.io/RemoteCI-Docs/) · [🚀 部署指南](docs/deployment.md) · [💬 问题反馈](https://github.com/Edge-HH/RemoteCI/issues)
 
