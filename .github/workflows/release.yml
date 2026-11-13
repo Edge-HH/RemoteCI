@@ -340,6 +340,8 @@ jobs:
         run: |
           mkdir -p .tools
           curl -fsSL -o .tools/fnpack https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64
+          # 版本已钉住（1.2.3-linux-amd64）；执行前校验 SHA-256，工件被篡改时立即终止发布。
+          echo "54b97fa7b70968c4d05c79840f5daeff508957d0bb2062fdb0376d00d9615c93  .tools/fnpack" | sha256sum -c -
           chmod +x .tools/fnpack
           version="${{ steps.meta.outputs.version }}"
           REMOTECI_VERSION="$version" bash fnos/build.sh

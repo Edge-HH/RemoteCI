@@ -33,7 +33,7 @@ public sealed class MemberExcelTests
             ["bad id!", "非法 ID", "Excel 导入班", "学生", ""]);
         using var stream = Save(workbook);
 
-        var result = await service.ImportAsync(stream);
+        var result = await service.ImportAsync(stream, PermissionDelegation.Unrestricted);
 
         Assert.Equal(1, result.CreatedUsers);
         Assert.Equal(3, result.Failures.Count);
@@ -105,7 +105,7 @@ public sealed class MemberExcelTests
         edit.Cell(newRow, 4).Value = "学生";
         using var overwriteStream = Save(workbook);
 
-        var result = await service.OverwriteAsync(overwriteStream);
+        var result = await service.OverwriteAsync(overwriteStream, PermissionDelegation.Unrestricted);
 
         Assert.False(result.HasFailures);
         Assert.Equal(1, result.CreatedUsers);
@@ -165,7 +165,7 @@ public sealed class MemberExcelTests
         row.Cell(2).Value = string.Empty;
         using var stream = Save(workbook);
 
-        var result = await service.OverwriteAsync(stream);
+        var result = await service.OverwriteAsync(stream, PermissionDelegation.Unrestricted);
 
         Assert.True(result.HasFailures);
         Assert.Equal("保持原名", (await db.Users.SingleAsync(x => x.Id == user.Id)).DisplayName);
@@ -203,7 +203,7 @@ public sealed class MemberExcelTests
                    ["已占用的名字", "用户名当 ID", "Excel 重名班", "学生", ""]))
         using (var stream = Save(workbook))
         {
-            var imported = await service.ImportAsync(stream);
+            var imported = await service.ImportAsync(stream, PermissionDelegation.Unrestricted);
             Assert.Equal(0, imported.CreatedUsers);
             Assert.Equal(3, imported.Failures.Count);
         }
@@ -218,11 +218,79 @@ public sealed class MemberExcelTests
         sheet.Cell(newRow, 4).Value = "学生";
         using var overwriteStream = Save(overwrite);
 
-        var result = await service.OverwriteAsync(overwriteStream);
+        var result = await service.OverwriteAsync(overwriteStream, PermissionDelegation.Unrestricted);
 
         Assert.True(result.HasFailures);
         Assert.Contains(result.Failures, x => x.Username == "excel.overwrite.new" && x.Message.Contains("用户名已被其他账号用作 ID 或用户名"));
         Assert.False(await db.Users.AnyAsync(x => x.UserName == "excel.overwrite.new"));
+    }
+
+    [Fact]
+    public async Task Import_NonAdminDelegation_RejectsAdministratorRole()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        await factory.LoginAsync();
+
+        using var scope = factory.Services.CreateAsyncScope();
+        var service = scope.ServiceProvider.GetRequiredService<MemberExcelService>();
+        var classrooms = scope.ServiceProvider.GetRequiredService<ClassroomService>();
+        await classrooms.CreateAsync("Excel 权限班");
+
+        using var workbook = CreateWorkbook(
+            ["excel.guard.admin", "试图创建管理员", "Excel 权限班", "管理员", ""]);
+        using var stream = Save(workbook);
+
+        var delegation = new PermissionDelegation(UserRole.User, UserPermissions.None, ManagementPermissions.ImportUsers);
+        var result = await service.ImportAsync(stream, delegation);
+
+        Assert.Equal(0, result.CreatedUsers);
+        Assert.Contains(result.Failures, x => x.Message.Contains("仅系统管理员"));
+    }
+
+    [Fact]
+    public async Task Overwrite_NonAdminDelegation_RejectsAdminCreationAndMutation()
+    {
+        await using var factory = new TestWebApplicationFactory();
+        await factory.LoginAsync();
+
+        using var scope = factory.Services.CreateAsyncScope();
+        var service = scope.ServiceProvider.GetRequiredService<MemberExcelService>();
+        var classrooms = scope.ServiceProvider.GetRequiredService<ClassroomService>();
+        var identities = scope.ServiceProvider.GetRequiredService<IdentityCoordinator>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var classroom = await classrooms.CreateAsync("Excel 权限覆盖班");
+
+        // 模拟历史遗留状态：管理员账号带有班级成员关系，因而出现在导出清单中。
+        var admin = await identities.CreateUserAsync(new CreateUserRequest
+        {
+            Username = "excel.guard.existing",
+            DisplayName = "既有管理员",
+            Password = "Excel-Guard-Password-2026",
+            RoleId = AccountRole.AdministratorId,
+        });
+        db.ClassMemberships.Add(new ClassMembership
+        {
+            UserId = admin.Id, ClassroomId = classroom.Id, RoleDefinitionId = AccountRole.StudentId,
+        });
+        await db.SaveChangesAsync();
+
+        var export = await service.ExportAsync(null);
+        using var workbook = new XLWorkbook(new MemoryStream(export.Content));
+        var sheet = workbook.Worksheet("成员");
+        var newRow = sheet.RowsUsed().Max(x => x.RowNumber()) + 1;
+        sheet.Cell(newRow, 1).Value = "excel.guard.new";
+        sheet.Cell(newRow, 2).Value = "试图新建管理员";
+        sheet.Cell(newRow, 3).Value = "Excel 权限覆盖班";
+        sheet.Cell(newRow, 4).Value = "管理员";
+        using var stream = Save(workbook);
+
+        var delegation = new PermissionDelegation(UserRole.User, UserPermissions.None, ManagementPermissions.ImportUsers);
+        var result = await service.OverwriteAsync(stream, delegation);
+
+        Assert.True(result.HasFailures);
+        Assert.Contains(result.Failures, x => x.Username == "excel.guard.new" && x.Message.Contains("仅系统管理员可导入管理员账号"));
+        Assert.Contains(result.Failures, x => x.Username == "excel.guard.existing" && x.Message.Contains("仅系统管理员可修改管理员账号"));
+        Assert.False(await db.Users.AnyAsync(x => x.UserName == "excel.guard.new"));
     }
 
     [Fact]

@@ -24,37 +24,57 @@ public sealed class UserNotificationService(
         var recipients = userIds.Distinct().ToList();
         if (recipients.Count == 0) return;
         var now = DateTimeOffset.UtcNow;
-        var rows = recipients.Select(userId => new UserNotification
+        List<UserNotification> rows = [];
+        if (db.Database.CurrentTransaction is not null)
         {
-            Id = Guid.NewGuid(),
-            UserId = userId,
-            Kind = kind,
-            Title = Truncate(title, 120),
-            Body = Truncate(body, 1000),
-            SwapRequestId = swapRequestId,
-            CreatedAt = now,
-            ClassId = classId,
-            Link = link,
-        }).ToList();
-        await using var transaction = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
-        db.UserNotifications.AddRange(rows);
-        var subscriptions = await db.WebPushSubscriptions.AsNoTracking().Where(x => recipients.Contains(x.UserId)).ToListAsync(ct);
-        foreach (var row in rows)
-        {
-            var view = ToView(row);
-            foreach (var subscription in subscriptions.Where(x => x.UserId == row.UserId))
-                queue.Add(subscription, "personal:" + row.Id, new { title = view.Title, body = view.Body,
-                    kind = view.Kind, id = view.Id, url = view.Link ?? (view.Kind.StartsWith("personal_course_", StringComparison.Ordinal) ? "/MySchedule" : "/SwapRequests") },
-                    expiresAt ?? (view.Kind.StartsWith("personal_course_", StringComparison.Ordinal) ? now.AddMinutes(5) : now.AddHours(24)), notificationId: row.Id);
+            // 加入调用方事务：重试与跟踪实体清理由外层执行策略负责。
+            await WriteAsync();
         }
-        await db.SaveChangesAsync(ct);
-        if (transaction is not null) await transaction.CommitAsync(ct);
+        else
+        {
+            await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+            {
+                // 重试只丢弃本服务上一次尝试新增的通知行，绝不能 Clear 整个跟踪器：
+                // 调用方（如设备告警）可能在同一作用域里跟踪着尚未保存的实体，Clear 会令其变更丢失。
+                foreach (var stale in rows) db.Entry(stale).State = EntityState.Detached;
+                await WriteAsync();
+            });
+        }
         foreach (var row in rows)
         {
             try { await peers.SendToUserAsync(row.UserId, Envelope.UserNotify(ToView(row)), ct); }
             catch (Exception ex) { logger.LogWarning(ex, "向用户在线连接推送个人通知失败"); }
         }
         await TrimAsync(recipients, ct);
+
+        async Task WriteAsync()
+        {
+            rows = recipients.Select(userId => new UserNotification
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                Kind = kind,
+                Title = Truncate(title, 120),
+                Body = Truncate(body, 1000),
+                SwapRequestId = swapRequestId,
+                CreatedAt = now,
+                ClassId = classId,
+                Link = link,
+            }).ToList();
+            await using var transaction = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
+            db.UserNotifications.AddRange(rows);
+            var subscriptions = await db.WebPushSubscriptions.AsNoTracking().Where(x => recipients.Contains(x.UserId)).ToListAsync(ct);
+            foreach (var row in rows)
+            {
+                var view = ToView(row);
+                foreach (var subscription in subscriptions.Where(x => x.UserId == row.UserId))
+                    queue.Add(subscription, "personal:" + row.Id, new { title = view.Title, body = view.Body,
+                        kind = view.Kind, id = view.Id, url = view.Link ?? (view.Kind.StartsWith("personal_course_", StringComparison.Ordinal) ? "/MySchedule" : "/SwapRequests") },
+                        expiresAt ?? (view.Kind.StartsWith("personal_course_", StringComparison.Ordinal) ? now.AddMinutes(5) : now.AddHours(24)), notificationId: row.Id);
+            }
+            await db.SaveChangesAsync(ct);
+            if (transaction is not null) await transaction.CommitAsync(ct);
+        }
     }
 
     public async Task<IReadOnlyList<UserNotificationView>> ListAsync(

@@ -12,6 +12,10 @@ internal sealed class LanDiscoveryResponder(
     PluginSettings settings,
     ILogger logger) : IDisposable
 {
+    private static readonly TimeSpan RebindDelayInitial = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan RebindDelayMax = TimeSpan.FromSeconds(30);
+
+    private readonly object _udpGate = new();
     private CancellationTokenSource? _cts;
     private UdpClient? _udp;
 
@@ -34,10 +38,36 @@ internal sealed class LanDiscoveryResponder(
     /// <summary>接收回包与中断后重建都在同一个循环内，避免递归调用随故障次数无限嵌套。</summary>
     private async Task RunAsync(CancellationToken ct)
     {
+        var rebindDelay = RebindDelayInitial;
         while (!ct.IsCancellationRequested)
         {
             var udp = _udp;
-            if (udp is null) return;
+            if (udp is null)
+            {
+                // 重绑失败后循环保持存活：按退避在后续 tick 再次尝试绑定，而不是永久停止响应。
+                if (!await DelayAsync(rebindDelay, ct)) return;
+                try
+                {
+                    udp = new UdpClient(new IPEndPoint(IPAddress.Any, Protocol.LanDiscoveryPort));
+                }
+                catch (SocketException ex)
+                {
+                    rebindDelay = TimeSpan.FromSeconds(Math.Min(rebindDelay.TotalSeconds * 2, RebindDelayMax.TotalSeconds));
+                    logger.LogWarning(ex, "局域网扫描端口重新绑定失败，{Delay} 秒后重试", rebindDelay.TotalSeconds);
+                    continue;
+                }
+                lock (_udpGate)
+                {
+                    if (ct.IsCancellationRequested)
+                    {
+                        udp.Dispose(); // 绑定期间收到停止请求，直接释放新套接字。
+                        return;
+                    }
+                    _udp = udp;
+                }
+                rebindDelay = RebindDelayInitial;
+                logger.LogInformation("局域网设备扫描已恢复：UDP {Port}", Protocol.LanDiscoveryPort);
+            }
             try
             {
                 while (!ct.IsCancellationRequested)
@@ -60,20 +90,10 @@ internal sealed class LanDiscoveryResponder(
             }
             catch (SocketException ex)
             {
-                // 网卡热插拔或瞬时故障会中断监听；退避后自动重启，而不是永久失效。
-                logger.LogWarning(ex, "局域网设备扫描监听已中断，10 秒后自动重启");
-                if (!await DelayAsync(TimeSpan.FromSeconds(10), ct)) return;
+                // 网卡热插拔或瞬时故障会中断监听；释放旧套接字后由循环按退避重新绑定。
+                logger.LogWarning(ex, "局域网设备扫描监听已中断，{Delay} 秒后自动重启", rebindDelay.TotalSeconds);
                 if (ReferenceEquals(_udp, udp)) _udp = null;
                 udp.Dispose();
-                try
-                {
-                    _udp = new UdpClient(new IPEndPoint(IPAddress.Any, Protocol.LanDiscoveryPort));
-                }
-                catch (SocketException rebindEx)
-                {
-                    logger.LogWarning(rebindEx, "局域网扫描端口重新绑定失败，10 秒后重试");
-                    if (!await DelayAsync(TimeSpan.FromSeconds(10), ct)) return;
-                }
             }
         }
     }
@@ -95,8 +115,12 @@ internal sealed class LanDiscoveryResponder(
     public void Dispose()
     {
         _cts?.Cancel();
-        _udp?.Dispose();
-        _udp = null;
+        // 与重绑路径互斥：停止后不能再把新绑定的套接字挂回 _udp，否则会泄漏。
+        lock (_udpGate)
+        {
+            _udp?.Dispose();
+            _udp = null;
+        }
         _cts?.Dispose();
         _cts = null;
     }

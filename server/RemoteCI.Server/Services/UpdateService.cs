@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging.Abstractions;
 using RemoteCI.Shared;
 
 namespace RemoteCI.Server.Services;
@@ -71,6 +72,7 @@ public sealed class UpdateService
 
     private static readonly HttpClient Http = CreateHttpClient();
     private readonly string[] _serverArguments;
+    private readonly ILogger<UpdateService> _logger;
     private readonly SemaphoreSlim _prepareGate = new(1, 1);
 
     /// <summary>稳定版使用 ClassIsland 要求的四段纯数字标签，Beta 保留 v3.x.x-beta.y 标签。</summary>
@@ -82,7 +84,11 @@ public sealed class UpdateService
         @"^v3\.[0-9]+\.[0-9]+-beta\.[1-9][0-9]*$",
         RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
 
-    public UpdateService(string[]? serverArguments = null) => _serverArguments = serverArguments ?? [];
+    public UpdateService(string[]? serverArguments = null, ILogger<UpdateService>? logger = null)
+    {
+        _serverArguments = serverArguments ?? [];
+        _logger = logger ?? NullLogger<UpdateService>.Instance;
+    }
 
     /// <summary>
     /// 是否运行在飞牛 fnOS 应用环境。fpk 的 docker-compose 会注入
@@ -300,6 +306,7 @@ public sealed class UpdateService
 
             var version = NormalizeVersion(release.Tag);
             ValidatePackageVersion(extracted, version);
+            _logger.LogInformation("更新包 {Tag} 已下载并通过校验，等待安装", release.Tag);
             return new PreparedUpdate(staging, extracted);
         }
         finally
@@ -359,6 +366,7 @@ public sealed class UpdateService
             var version = FileVersionInfo.GetVersionInfo(assembly).ProductVersion?.Split('+', 2)[0];
             if (string.IsNullOrWhiteSpace(version))
                 throw new InvalidDataException("无法读取更新包内服务端的版本号。");
+            _logger.LogInformation("已接收手动上传的服务端更新包，版本 {Version}", version);
             return (new PreparedUpdate(staging, extracted), version);
         }
         finally
@@ -376,12 +384,14 @@ public sealed class UpdateService
         var mode = CurrentApplyMode;
         if (mode == UpdateApplyMode.ManagedByPlatform)
             throw new InvalidOperationException(FnosManagedMessage);
+        _logger.LogInformation("开始应用服务端更新，方式 {Mode}，目标目录 {Directory}", mode, contentRoot);
 
         if (mode == UpdateApplyMode.PersistentOverlay)
         {
             EnsureRuntimeCompatible(update.ExtractedDirectory, Environment.Version);
             await ApplyOverlayAsync(update.ExtractedDirectory, contentRoot, CurrentOverlay!, ct);
             TryDeleteStaging(update.StagingDirectory);
+            _logger.LogInformation("服务端更新已写入数据卷，重启后生效");
             return mode;
         }
 
@@ -391,10 +401,12 @@ public sealed class UpdateService
             await UpdateInstaller.ApplyFilesAsync(update.ExtractedDirectory, contentRoot, ct);
             // 容器内就地覆盖成功后清理暂存目录，避免更新包长期占用数据卷空间。
             TryDeleteStaging(update.StagingDirectory);
+            _logger.LogInformation("服务端更新已就地覆盖，等待进程重启");
             return mode;
         }
 
         StartExternalInstaller(update, contentRoot);
+        _logger.LogInformation("外部更新器已启动，服务端退出后完成替换");
         return mode;
     }
 

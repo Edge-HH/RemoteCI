@@ -62,8 +62,12 @@ public sealed class ScheduleAdjustmentAckWaiter
         }
         catch (TimeoutException)
         {
-            lock (list) list.RemoveAll(x => ReferenceEquals(x.Source, source));
             return false;
+        }
+        finally
+        {
+            // 超时、取消都要摘掉等待者，否则取消的请求会永久滞留在等待列表里。
+            lock (list) list.RemoveAll(x => ReferenceEquals(x.Source, source));
         }
     }
 }

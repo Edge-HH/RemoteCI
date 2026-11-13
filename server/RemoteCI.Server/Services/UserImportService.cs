@@ -15,7 +15,7 @@ public sealed class UserImportService(
     AccountRoleService roleService)
 {
     public async Task<BatchImportResult> ImportAsync(
-        string? text, Guid? defaultClassId, Guid? defaultRoleId, CancellationToken ct = default)
+        string? text, Guid? defaultClassId, Guid? defaultRoleId, PermissionDelegation delegation, CancellationToken ct = default)
     {
         var separators = new[] { '\n', '\r' };
         var lines = (text ?? string.Empty).Split(separators)
@@ -61,13 +61,14 @@ public sealed class UserImportService(
                         ?? throw new IdentityOperationException(ApiErrorCodes.InvalidRequest, "行内缺少班级，且未提供默认班级");
                 }
 
-                var roleId = defaultRoleId ?? AccountRole.StudentId;
-                if (roleName is not null)
-                {
-                    var role = await roleService.FindByNameAsync(roleName, ct)
-                        ?? throw new IdentityOperationException(ApiErrorCodes.NotFound, $"角色“{roleName}”不存在");
-                    roleId = role.Id;
-                }
+                var role = roleName is not null
+                    ? await roleService.FindByNameAsync(roleName, ct)
+                        ?? throw new IdentityOperationException(ApiErrorCodes.NotFound, $"角色“{roleName}”不存在")
+                    : await roleService.FindByIdAsync(defaultRoleId ?? AccountRole.StudentId, ct)
+                        ?? throw new IdentityOperationException(ApiErrorCodes.NotFound, "默认角色不存在");
+                // 与直建账号端点一致：非管理员不能经导入路径创建管理员账号。
+                if (role.Kind == AccountRoleKind.Administrator && delegation.ActorRole != UserRole.Admin)
+                    throw new IdentityOperationException(ApiErrorCodes.Forbidden, "仅系统管理员可导入管理员账号。");
 
                 var createdUser = await identities.CreateUserAsync(new CreateUserRequest
                 {
@@ -75,10 +76,11 @@ public sealed class UserImportService(
                     DisplayName = displayName,
                     Password = password,
                     Role = UserRole.User,
-                    RoleId = roleId,
+                    RoleId = role.Id,
                     GrantedPermissions = UserPermissions.None,
-                }, ct);
-                await classrooms.AddMemberAsync(classId, createdUser.Id, roleId, ct);
+                }, ct, delegation);
+                if (role.Kind != AccountRoleKind.Administrator)
+                    await classrooms.AddMemberAsync(classId, createdUser.Id, role.Id, ct);
                 created++;
             }
             catch (IdentityOperationException ex)

@@ -132,7 +132,7 @@ public sealed partial class MemberExcelService(
             FileName = $"RemoteCI-成员导出-{suffix}-{DateTime.Now:yyyyMMdd-HHmm}.xlsx",
         };
     }
-    public async Task<MemberExcelImportResult> ImportAsync(Stream stream, CancellationToken ct = default)
+    public async Task<MemberExcelImportResult> ImportAsync(Stream stream, PermissionDelegation delegation, CancellationToken ct = default)
     {
         using var workbook = OpenWorkbook(stream);
         var sheet = RequireMemberSheet(workbook);
@@ -153,6 +153,9 @@ public sealed partial class MemberExcelService(
 
                 var role = await roleService.FindByNameAsync(row.RoleName, ct)
                     ?? throw new IdentityOperationException(ApiErrorCodes.NotFound, $"角色“{row.RoleName}”不存在。");
+                // 与直建账号端点一致：非管理员不能经导入路径创建管理员账号。
+                if (role.Kind == AccountRoleKind.Administrator && delegation.ActorRole != UserRole.Admin)
+                    throw new IdentityOperationException(ApiErrorCodes.Forbidden, "仅系统管理员可导入管理员账号。");
                 var classroom = await classrooms.EnsureClassByNameAsync(row.ClassName, ct);
                 var created = await identities.CreateUserAsync(new CreateUserRequest
                 {
@@ -162,8 +165,9 @@ public sealed partial class MemberExcelService(
                     Role = UserRole.User,
                     RoleId = role.Id,
                     GrantedPermissions = UserPermissions.None,
-                }, ct);
-                await classrooms.AddMemberAsync(classroom.Id, created.Id, role.Id, ct);
+                }, ct, delegation);
+                if (role.Kind != AccountRoleKind.Administrator)
+                    await classrooms.AddMemberAsync(classroom.Id, created.Id, role.Id, ct);
                 result.CreatedUsers++;
             }
             catch (IdentityOperationException ex)
@@ -181,7 +185,7 @@ public sealed partial class MemberExcelService(
         return result;
     }
 
-    public async Task<MemberExcelImportResult> OverwriteAsync(Stream stream, CancellationToken ct = default)
+    public async Task<MemberExcelImportResult> OverwriteAsync(Stream stream, PermissionDelegation delegation, CancellationToken ct = default)
     {
         using var workbook = OpenWorkbook(stream);
         var metadata = ReadExportMetadata(workbook);
@@ -239,11 +243,13 @@ public sealed partial class MemberExcelService(
             .ToDictionary(x => x.Key, x => x.Select(owner => owner.Id).ToHashSet(), StringComparer.OrdinalIgnoreCase);
 
         var plans = BuildOverwritePlans(
-            rows, scopeIds, classByName, roleByKey, allRoles, userById, userByName, loginNameOwners, result);
+            rows, scopeIds, classByName, roleByKey, allRoles, userById, userByName, loginNameOwners, delegation, result);
 
         if (result.Failures.Count > 0)
             return result;
+        // 系统管理员不建立班级成员关系（与新建账号路径一致）。
         var desiredKeys = plans
+            .Where(x => x.GlobalRole.Kind != AccountRoleKind.Administrator)
             .SelectMany(x => x.Memberships.Select(m => (x.UserId, m.ClassroomId)))
             .ToHashSet();
         var existingMemberships = await db.ClassMemberships
@@ -259,7 +265,7 @@ public sealed partial class MemberExcelService(
             .SelectMany(plan => plan.Memberships.Select(m => (plan.UserId, m.ClassroomId, m.RoleId)))
             .Count(x => existingByKey.TryGetValue((x.UserId, x.ClassroomId), out var existing) && existing.RoleDefinitionId != x.RoleId);
 
-        await ApplyOverwriteChangesAsync(plans, existingMemberships, existingByKey, desiredKeys, ct);
+        await ApplyOverwriteChangesAsync(plans, scopeIds, desiredKeys, ct);
 
         return result;
     }
@@ -273,6 +279,7 @@ public sealed partial class MemberExcelService(
         IReadOnlyDictionary<Guid, AppUser> userById,
         IReadOnlyDictionary<string, AppUser> userByName,
         IReadOnlyDictionary<string, HashSet<Guid>> loginNameOwners,
+        PermissionDelegation delegation,
         MemberExcelImportResult result)
     {
         var plans = new List<OverwritePlan>();
@@ -281,7 +288,7 @@ public sealed partial class MemberExcelService(
         var seenNewLoginNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var group in rows.GroupBy(x => string.IsNullOrWhiteSpace(x.SystemId) ? $"name:{x.UserId}" : $"id:{x.SystemId}", StringComparer.OrdinalIgnoreCase))
         {
-            var plan = BuildOverwritePlan(group, scopeIds, classByName, roleByKey, allRoles, userById, userByName, loginNameOwners, seenUserIds, seenLoginIds, seenNewLoginNames, result);
+            var plan = BuildOverwritePlan(group, scopeIds, classByName, roleByKey, allRoles, userById, userByName, loginNameOwners, seenUserIds, seenLoginIds, seenNewLoginNames, delegation, result);
             if (plan is not null)
                 plans.Add(plan);
         }
@@ -300,6 +307,7 @@ public sealed partial class MemberExcelService(
         ISet<Guid> seenUserIds,
         ISet<string> seenLoginIds,
         IDictionary<string, string> seenNewLoginNames,
+        PermissionDelegation delegation,
         MemberExcelImportResult result)
     {
         var first = group.First();
@@ -309,6 +317,15 @@ public sealed partial class MemberExcelService(
         ValidateOverwriteConflicts(first, existingUser, userByName, seenUserIds, seenLoginIds, failures);
         ValidateOverwriteLoginNames(first, existingUser, loginNameOwners, seenNewLoginNames, failures);
         var memberships = BuildMemberships(group, scopeIds, classByName, roleByKey, failures);
+        var globalRole = GetGlobalRole(memberships, allRoles);
+        // 与直建/编辑账号端点一致：非管理员不能经覆盖导入创建管理员，也不能改动既有管理员（含改名接管）。
+        if (delegation.ActorRole != UserRole.Admin)
+        {
+            if (globalRole.Kind == AccountRoleKind.Administrator)
+                failures.Add("仅系统管理员可导入管理员账号。");
+            if (existingUser?.Role == UserRole.Admin)
+                failures.Add("仅系统管理员可修改管理员账号。");
+        }
         if (failures.Count > 0)
         {
             foreach (var row in group)
@@ -316,7 +333,6 @@ public sealed partial class MemberExcelService(
             return null;
         }
 
-        var globalRole = GetGlobalRole(memberships, allRoles);
         return new OverwritePlan(existingUser, existingUser?.Id ?? Guid.NewGuid(), first.UserId.Trim(),
             first.DisplayName.Trim(), globalRole, memberships);
     }
@@ -440,33 +456,36 @@ public sealed partial class MemberExcelService(
 
     private async Task ApplyOverwriteChangesAsync(
         IReadOnlyList<OverwritePlan> plans,
-        IReadOnlyList<ClassMembership> existingMemberships,
-        IReadOnlyDictionary<(Guid UserId, Guid ClassroomId), ClassMembership> existingByKey,
+        IReadOnlySet<Guid> scopeIds,
         IReadOnlySet<(Guid UserId, Guid ClassroomId)> desiredKeys,
         CancellationToken ct)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        try
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
             var metadata = await db.SystemMetadata.SingleAsync(x => x.Id == 1, ct);
             metadata.AccountVersion++;
             var version = metadata.AccountVersion;
             var now = DateTimeOffset.UtcNow;
             foreach (var plan in plans)
                 await ApplyUserPlanAsync(plan, version, now, ct);
+            // Clear 后重新加载成员关系：更新必须落在被跟踪的实体上，重试时也拿到回滚后的最新状态。
+            var existingMemberships = await db.ClassMemberships
+                .Where(x => scopeIds.Contains(x.ClassroomId))
+                .ToListAsync(ct);
+            var existingByKey = existingMemberships.ToDictionary(x => (x.UserId, x.ClassroomId));
             foreach (var existing in existingMemberships.Where(x => !desiredKeys.Contains((x.UserId, x.ClassroomId))))
                 db.ClassMemberships.Remove(existing);
             foreach (var plan in plans)
+            {
+                if (plan.GlobalRole.Kind == AccountRoleKind.Administrator) continue;
                 foreach (var membership in plan.Memberships)
                     ApplyMembershipPlan(plan.UserId, membership, existingByKey);
+            }
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
-        }
-        catch
-        {
-            await transaction.RollbackAsync(ct);
-            throw;
-        }
+        });
     }
 
     private async Task ApplyUserPlanAsync(OverwritePlan plan, long version, DateTimeOffset now, CancellationToken ct)

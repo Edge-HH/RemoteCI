@@ -50,48 +50,88 @@ public sealed class ScheduleAdjustmentService(
     public async Task<AdjustmentWrite> AddAsync(IReadOnlyList<PlannedSlotChange> changes, ScheduleAdjustmentOrigin origin,
         Guid? swapRequestId, Guid? userId, string userName, CancellationToken ct = default)
     {
-        var rows = new List<ScheduleAdjustment>();
-        var versions = new Dictionary<Guid, long>();
+        AdjustmentWrite write;
         await Gate.WaitAsync(ct);
         try
         {
-            var now = time.GetUtcNow().ToUnixTimeMilliseconds();
-            foreach (var change in changes)
-            {
-                var sync = await SyncStateAsync(change.ClassId, ct);
-                var guard = await TopAsync(change.ClassId, change.Date, change.Index, ct);
-                var row = new ScheduleAdjustment
-                {
-                    Id = Guid.NewGuid(),
-                    ClassId = change.ClassId,
-                    Date = change.Date,
-                    Index = change.Index,
-                    Sequence = ++sync.AdjustmentSequence,
-                    FromSubjectId = guard?.FromSubjectId ?? change.BaseSubjectId,
-                    FromSubject = guard?.FromSubject ?? change.BaseSubject,
-                    ToSubjectId = change.ToSubjectId,
-                    ToSubject = change.ToSubject,
-                    TeacherName = string.IsNullOrWhiteSpace(change.TeacherName) ? null : change.TeacherName.Trim(),
-                    Origin = origin,
-                    SwapRequestId = swapRequestId,
-                    CreatedByUserId = userId,
-                    CreatedByName = Limit(userName, 100),
-                    CreatedAtUnixMs = now,
-                    Status = ScheduleAdjustmentStatus.Active,
-                    Delivery = ScheduleAdjustmentDelivery.Pending,
-                };
-                db.ScheduleAdjustments.Add(row);
-                rows.Add(row);
-                if (!versions.ContainsKey(change.ClassId)) versions[change.ClassId] = ++sync.AdjustmentVersion;
-            }
-            await db.SaveChangesAsync(ct);
-            await RefreshOverlayAsync(versions.Keys, ct);
+            write = await WriteCoreAsync(changes, origin, swapRequestId, userId, userName, ct);
+            await RefreshOverlayAsync(write.Versions.Keys, ct);
         }
         finally
         {
             Gate.Release();
         }
-        foreach (var classId in versions.Keys) await PushAsync(classId, ct);
+        foreach (var classId in write.Versions.Keys) await PushAsync(classId, ct);
+        return write;
+    }
+
+    /// <summary>
+    /// 换课专用写入：申请行与调课记录在同一事务提交，申请行保存失败时不会留下无法撤回的孤儿调课。
+    /// 提交后才刷新叠加表并下发：回执处理在其他连接上进行，必须能读到已提交的记录。
+    /// </summary>
+    public async Task<AdjustmentWrite> AddForSwapAsync(IReadOnlyList<PlannedSlotChange> changes,
+        ScheduleSwapRequest swap, bool insertSwap, Guid? userId, string userName, CancellationToken ct = default)
+    {
+        AdjustmentWrite write = null!;
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            // 重试时丢弃上一次尝试的跟踪实体，避免重复插入调课记录或重复递增版本号。
+            db.ChangeTracker.Clear();
+            await Gate.WaitAsync(ct);
+            try
+            {
+                await using var transaction = await db.Database.BeginTransactionAsync(ct);
+                write = await WriteCoreAsync(changes, ScheduleAdjustmentOrigin.SwapRequest, swap.Id, userId, userName, ct);
+                if (insertSwap) db.ScheduleSwapRequests.Add(swap);
+                else db.Entry(swap).State = EntityState.Modified;
+                await db.SaveChangesAsync(ct);
+                await transaction.CommitAsync(ct);
+                await RefreshOverlayAsync(write.Versions.Keys, ct);
+            }
+            finally
+            {
+                Gate.Release();
+            }
+        });
+        foreach (var classId in write.Versions.Keys) await PushAsync(classId, ct);
+        return write;
+    }
+
+    private async Task<AdjustmentWrite> WriteCoreAsync(IReadOnlyList<PlannedSlotChange> changes, ScheduleAdjustmentOrigin origin,
+        Guid? swapRequestId, Guid? userId, string userName, CancellationToken ct)
+    {
+        var rows = new List<ScheduleAdjustment>();
+        var versions = new Dictionary<Guid, long>();
+        var now = time.GetUtcNow().ToUnixTimeMilliseconds();
+        foreach (var change in changes)
+        {
+            var sync = await SyncStateAsync(change.ClassId, ct);
+            var guard = await TopAsync(change.ClassId, change.Date, change.Index, ct);
+            var row = new ScheduleAdjustment
+            {
+                Id = Guid.NewGuid(),
+                ClassId = change.ClassId,
+                Date = change.Date,
+                Index = change.Index,
+                Sequence = ++sync.AdjustmentSequence,
+                FromSubjectId = guard?.FromSubjectId ?? change.BaseSubjectId,
+                FromSubject = guard?.FromSubject ?? change.BaseSubject,
+                ToSubjectId = change.ToSubjectId,
+                ToSubject = change.ToSubject,
+                TeacherName = string.IsNullOrWhiteSpace(change.TeacherName) ? null : change.TeacherName.Trim(),
+                Origin = origin,
+                SwapRequestId = swapRequestId,
+                CreatedByUserId = userId,
+                CreatedByName = Limit(userName, 100),
+                CreatedAtUnixMs = now,
+                Status = ScheduleAdjustmentStatus.Active,
+                Delivery = ScheduleAdjustmentDelivery.Pending,
+            };
+            db.ScheduleAdjustments.Add(row);
+            rows.Add(row);
+            if (!versions.ContainsKey(change.ClassId)) versions[change.ClassId] = ++sync.AdjustmentVersion;
+        }
+        await db.SaveChangesAsync(ct);
         return new AdjustmentWrite(rows, versions);
     }
 
@@ -328,12 +368,13 @@ public sealed class ScheduleAdjustmentService(
     /// <summary>日期已过的有效调课标记为过期。</summary>
     public async Task SweepAsync(CancellationToken ct = default)
     {
-        var active = await db.ScheduleAdjustments.Where(x => x.Status == ScheduleAdjustmentStatus.Active).ToListAsync(ct);
-        var stale = active.Where(x => string.CompareOrdinal(x.Date, DateKey(ClassClock.Today(state, x.ClassId))) < 0).ToList();
-        if (stale.Count == 0) return;
+        // 读取与判定必须在闸门内：闸门外加载的快照可能覆盖并发的调课改动。
         await Gate.WaitAsync(ct);
         try
         {
+            var active = await db.ScheduleAdjustments.Where(x => x.Status == ScheduleAdjustmentStatus.Active).ToListAsync(ct);
+            var stale = active.Where(x => string.CompareOrdinal(x.Date, DateKey(ClassClock.Today(state, x.ClassId))) < 0).ToList();
+            if (stale.Count == 0) return;
             var now = time.GetUtcNow().ToUnixTimeMilliseconds();
             foreach (var row in stale) Close(row, ScheduleAdjustmentStatus.Expired, null, "日期已过", now);
             await db.SaveChangesAsync(ct);

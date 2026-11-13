@@ -48,7 +48,26 @@ public static class OperationsEndpoints
             try { return Results.Ok(await services.GetRequiredService<ActionLinkService>().CreateAsync(actor.Id, body, baseUrl, ct)); }
             catch (SwapOperationException ex) { return ApiAuth.Error(ex.Code, ex.Message, ex.Status); }
         }));
+
+        // 聊天机器人管理高危操作（删班级/改用户/改用户账密/删用户/加用户）：签发一次性网页授权链接，
+        // 用户在网页输入账号密码或一次性验证码授权后，服务端才执行。签发时即校验权限与目标守卫。
+        app.MapPost("/api/me/operation-approvals", (OperationApprovalRequest body, HttpContext ctx, CancellationToken ct) => RunAsync(ctx, ct, async (actor, services) =>
+        {
+            var baseUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}{ctx.Request.PathBase}";
+            try { return Results.Ok(await services.GetRequiredService<OperationApprovalService>().CreateAsync(actor, body, baseUrl, ct)); }
+            catch (IdentityOperationException ex) { return ApiAuth.Error(ex.Code, ex.Message, IdentityErrorStatus(ex.Code)); }
+        }));
     }
+
+    /// <summary>IdentityOperationException 的错误码到 HTTP 状态码映射，与 Program.cs 的 OperationError 一致。</summary>
+    private static int IdentityErrorStatus(string code) => code switch
+    {
+        ApiErrorCodes.Unauthorized => StatusCodes.Status401Unauthorized,
+        ApiErrorCodes.Forbidden => StatusCodes.Status403Forbidden,
+        ApiErrorCodes.NotFound => StatusCodes.Status404NotFound,
+        ApiErrorCodes.UsernameExists or ApiErrorCodes.DisplayNameExists or ApiErrorCodes.LastAdmin => StatusCodes.Status409Conflict,
+        _ => StatusCodes.Status400BadRequest,
+    };
 
     private static void MapLessonStatsEndpoints(WebApplication app)
     {

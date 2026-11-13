@@ -29,15 +29,21 @@ public sealed class CalendarFeedService(AppDbContext db, ClassAccessService acce
         if (reminder is not (null or 0 or 5 or 10 or 15 or 30) || ClassClock.Valid(offset) is null)
             throw new ArgumentException("请选择有效的提醒时间和时区");
         if (!await AllowedAsync(user, classId, ct)) throw new UnauthorizedAccessException();
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        // Re-creating the same calendar rotates its URL; independent class and personal feeds remain intact.
-        await db.CalendarSubscriptions.Where(x => x.UserId == user.Id && x.ClassId == classId).ExecuteDeleteAsync(ct);
-        var token = WebPushSender.Base64Url(RandomNumberGenerator.GetBytes(32));
-        var row = new CalendarSubscription { UserId = user.Id, ClassId = classId, TokenHash = Hash(token), ReminderMinutes = reminder, OffsetMinutes = offset };
-        db.CalendarSubscriptions.Add(row);
-        await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
-        return (row, token);
+        (CalendarSubscription Subscription, string Token) result = default;
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            // Re-creating the same calendar rotates its URL; independent class and personal feeds remain intact.
+            await db.CalendarSubscriptions.Where(x => x.UserId == user.Id && x.ClassId == classId).ExecuteDeleteAsync(ct);
+            var token = WebPushSender.Base64Url(RandomNumberGenerator.GetBytes(32));
+            var row = new CalendarSubscription { UserId = user.Id, ClassId = classId, TokenHash = Hash(token), ReminderMinutes = reminder, OffsetMinutes = offset };
+            db.CalendarSubscriptions.Add(row);
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            result = (row, token);
+        });
+        return result;
     }
 
     public async Task<string?> ReadAsync(string token, CancellationToken ct)

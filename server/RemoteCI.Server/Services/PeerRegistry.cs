@@ -521,7 +521,11 @@ public sealed class PeerRegistry(
     public async Task<bool> SendToPluginConnectionAsync(Guid connectionId, Envelope envelope, CancellationToken ct = default)
     {
         if (!_pluginPeers.TryGetValue(connectionId, out var peer) || !IsLocallyAuthorized(peer)) return false;
-        if (await TrySendAsync(peer, envelope, ct)) return true;
+        if (await TrySendAsync(peer, envelope, ct))
+        {
+            BindPendingCommand(envelope.MessageId, peer.Id);
+            return true;
+        }
         await UnregisterAsync(peer.Id, WebSocketCloseStatus.PolicyViolation);
         return false;
     }
@@ -574,11 +578,21 @@ public sealed class PeerRegistry(
         foreach (var peer in PluginPeersFor(classId))
         {
             if (IsLocallyAuthorized(peer) && await TrySendAsync(peer, envelope, ct))
+            {
+                BindPendingCommand(envelope.MessageId, peer.Id);
                 return true;
+            }
             // 发送失败说明注册表中的连接已经失效，清理后由插件自身的重连循环重新接入。
             await UnregisterAsync(peer.Id, WebSocketCloseStatus.PolicyViolation);
         }
         return false;
+    }
+
+    /// <summary>命令实际送达后记录接收连接，回执到达时据此核对来源。</summary>
+    private void BindPendingCommand(string messageId, Guid connectionId)
+    {
+        if (_pendingCommands.TryGetValue(messageId, out var pending))
+            pending.PluginConnectionId = connectionId;
     }
 
     /// <summary>请求指定班级最早接入的在线插件立即重新生成课表；返回是否成功发送。</summary>
@@ -616,7 +630,12 @@ public sealed class PeerRegistry(
             : new CommandAuditOrigin(CommandAuditSource.Watch);
         var plugin = PluginPeersFor(classId).FirstOrDefault();
         var auditId = audit.Start(command, messageId, classId, plugin?.Id, DeviceNameOf(plugin), origin);
-        _pendingCommands[messageId] = new PendingCommand(connectionId, null, auditId);
+        // messageId 由客户端提供：重复登记不能覆盖其他连接挂起的命令。
+        if (!_pendingCommands.TryAdd(messageId, new PendingCommand(connectionId, null, auditId)))
+        {
+            audit.Complete(auditId, CommandResult.Failure(CommandResultCodes.InvalidRequest, "命令消息 ID 重复，未登记"));
+            return;
+        }
         _ = ExpireWatchCommandAsync(messageId, connectionId);
     }
 
@@ -754,10 +773,16 @@ public sealed class PeerRegistry(
             return CommandResult.Failure(CommandResultCodes.Timeout, "等待插件回执超时，操作结果未知");
         }
     }
-    public async Task<bool> CompleteCommandAsync(Envelope envelope, CommandResult result, CancellationToken ct = default)
+    /// <summary>处理插件回执；fromConnectionId 为回执来源连接，与实际接收命令的连接不符时拒绝。
+    /// 服务端自生的失败结果（如发送失败）传 null，不做来源核对。</summary>
+    public async Task<bool> CompleteCommandAsync(Envelope envelope, CommandResult result, Guid? fromConnectionId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(envelope.ReplyToMessageId) ||
-            !_pendingCommands.TryRemove(envelope.ReplyToMessageId, out var pending))
+            !_pendingCommands.TryGetValue(envelope.ReplyToMessageId, out var pending))
+            return false;
+        if (fromConnectionId is not null && pending.PluginConnectionId is { } expected && fromConnectionId != expected)
+            return false;
+        if (!_pendingCommands.TryRemove(envelope.ReplyToMessageId, out pending))
             return false;
 
         pending.Completion?.TrySetResult(result);
@@ -1019,10 +1044,17 @@ public sealed class PeerRegistry(
     private static string? DeviceNameOf(WsPeer? peer) =>
         peer is null ? null : peer.SoftwareInventory?.DeviceName is { Length: > 0 } name ? name : "ClassIsland 插件";
 
-    private sealed record PendingCommand(
-        Guid? WatchConnectionId,
-        TaskCompletionSource<CommandResult>? Completion,
-        Guid? AuditId = null);
+    private sealed class PendingCommand(
+        Guid? watchConnectionId,
+        TaskCompletionSource<CommandResult>? completion,
+        Guid? auditId = null)
+    {
+        public Guid? WatchConnectionId { get; } = watchConnectionId;
+        public TaskCompletionSource<CommandResult>? Completion { get; } = completion;
+        public Guid? AuditId { get; } = auditId;
+        /// <summary>实际收到命令的插件连接；回执必须来自该连接，防止同班其他设备冒领。</summary>
+        public Guid? PluginConnectionId { get; set; }
+    }
 
     private sealed class WsPeer(Guid id, string token, AuthPrincipal principal, WebSocket socket, bool isGuard)
     {

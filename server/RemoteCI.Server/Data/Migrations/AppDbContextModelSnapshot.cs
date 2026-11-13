@@ -1211,6 +1211,53 @@ namespace RemoteCI.Server.Data.Migrations
                     b.ToTable("LessonTeacherOverrides");
                 });
 
+            modelBuilder.Entity("RemoteCI.Server.Data.OperationApproval", b =>
+                {
+                    b.Property<string>("TokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ExpiresAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ProtectedPayload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SecurityStamp")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TargetId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("UsedAtUnixMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TokenHash");
+
+                    b.HasIndex("ExpiresAtUnixMs");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("OperationApprovals");
+                });
+
             modelBuilder.Entity("RemoteCI.Server.Data.PendingExtensionSetting", b =>
                 {
                     b.Property<Guid>("ClassroomId")
@@ -2310,6 +2357,17 @@ namespace RemoteCI.Server.Data.Migrations
                 });
 
             modelBuilder.Entity("RemoteCI.Server.Data.DeviceSession", b =>
+                {
+                    b.HasOne("RemoteCI.Server.Data.AppUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("RemoteCI.Server.Data.OperationApproval", b =>
                 {
                     b.HasOne("RemoteCI.Server.Data.AppUser", "User")
                         .WithMany()

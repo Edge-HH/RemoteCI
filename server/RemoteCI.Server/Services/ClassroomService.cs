@@ -158,16 +158,20 @@ public sealed class ClassroomService(AppDbContext db)
         if (roleCount != roleIds.Distinct().Count())
             throw new IdentityOperationException(ApiErrorCodes.NotFound, "成员角色中包含不存在的角色");
 
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        await db.ClassMemberships.Where(x => x.ClassroomId == id).ExecuteDeleteAsync(ct);
-        db.ClassMemberships.AddRange(request.Members.Select(x => new ClassMembership
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
-            UserId = x.UserId,
-            ClassroomId = id,
-            RoleDefinitionId = x.RoleId,
-        }));
-        await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            await db.ClassMemberships.Where(x => x.ClassroomId == id).ExecuteDeleteAsync(ct);
+            db.ClassMemberships.AddRange(request.Members.Select(x => new ClassMembership
+            {
+                UserId = x.UserId,
+                ClassroomId = id,
+                RoleDefinitionId = x.RoleId,
+            }));
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        });
     }
 
     // ---------- 班级分组：层级 + 多归属 ----------
@@ -253,23 +257,27 @@ public sealed class ClassroomService(AppDbContext db)
         var found = await db.ClassGroups.Where(x => wanted.Contains(x.Id)).CountAsync(ct);
         if (found != wanted.Count)
             throw new IdentityOperationException(ApiErrorCodes.NotFound, "包含不存在的分组");
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        // 只增删差集，避免同一分组先删后加触发 EF 的键冲突，也减少无意义写入。
-        var existing = await db.ClassGroupAssignments
-            .Where(x => x.ClassroomId == classId)
-            .ToListAsync(ct);
-        var existingIds = existing.Select(x => x.GroupId).ToHashSet();
-        var wantedIds = wanted.ToHashSet();
-        db.ClassGroupAssignments.RemoveRange(existing.Where(x => !wantedIds.Contains(x.GroupId)));
-        db.ClassGroupAssignments.AddRange(wanted
-            .Where(groupId => !existingIds.Contains(groupId))
-            .Select(groupId => new ClassGroupAssignment
-            {
-                GroupId = groupId,
-                ClassroomId = classId,
-            }));
-        await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            // 只增删差集，避免同一分组先删后加触发 EF 的键冲突，也减少无意义写入。
+            var existing = await db.ClassGroupAssignments
+                .Where(x => x.ClassroomId == classId)
+                .ToListAsync(ct);
+            var existingIds = existing.Select(x => x.GroupId).ToHashSet();
+            var wantedIds = wanted.ToHashSet();
+            db.ClassGroupAssignments.RemoveRange(existing.Where(x => !wantedIds.Contains(x.GroupId)));
+            db.ClassGroupAssignments.AddRange(wanted
+                .Where(groupId => !existingIds.Contains(groupId))
+                .Select(groupId => new ClassGroupAssignment
+                {
+                    GroupId = groupId,
+                    ClassroomId = classId,
+                }));
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        });
     }
 
     /// <summary>整体替换一个分组包含的班级（仅直接归属；子分组的班级不受影响）。</summary>
@@ -280,15 +288,19 @@ public sealed class ClassroomService(AppDbContext db)
         var found = await db.Classrooms.Where(x => wanted.Contains(x.Id)).CountAsync(ct);
         if (found != wanted.Count)
             throw new IdentityOperationException(ApiErrorCodes.NotFound, "包含不存在的班级");
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        await db.ClassGroupAssignments.Where(x => x.GroupId == groupId).ExecuteDeleteAsync(ct);
-        db.ClassGroupAssignments.AddRange(wanted.Select(classId => new ClassGroupAssignment
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
-            GroupId = groupId,
-            ClassroomId = classId,
-        }));
-        await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            await db.ClassGroupAssignments.Where(x => x.GroupId == groupId).ExecuteDeleteAsync(ct);
+            db.ClassGroupAssignments.AddRange(wanted.Select(classId => new ClassGroupAssignment
+            {
+                GroupId = groupId,
+                ClassroomId = classId,
+            }));
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        });
     }
 
     /// <summary>

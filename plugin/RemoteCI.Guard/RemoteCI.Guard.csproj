@@ -14,7 +14,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>RemoteCI.Guard</RootNamespace>
     <AssemblyName>RemoteCI.Guard</AssemblyName>
-    <Version>3.2.1.4</Version>
+    <Version>3.3.2.1</Version>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>

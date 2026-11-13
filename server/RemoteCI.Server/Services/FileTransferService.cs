@@ -18,6 +18,9 @@ public sealed class FileTransferService
     private static readonly JsonSerializerOptions JsonOptions = new(JsonDefaults.Options) { WriteIndented = false };
 
     private readonly ConcurrentDictionary<string, FileTransferRecord> _records = new(StringComparer.Ordinal);
+    // 配额按“已提交 + 上传中预留”原子记账，避免并发上传各自读到旧用量后一起超额。
+    private readonly object _quotaLock = new();
+    private long _usedBytes;
     private readonly ServerOptions _options;
     private readonly TimeProvider _time;
     private readonly ILogger<FileTransferService> _logger;
@@ -59,9 +62,11 @@ public sealed class FileTransferService
         var fileName = FileDistributionRequest.SanitizeFileName(rawFileName)
             ?? throw new FileTransferException(ApiErrorCodes.InvalidRequest, "文件名无效");
         var quota = _options.FileTransferQuotaBytes;
-        var used = _records.Values.Sum(x => x.Size);
-        if (quota > 0 && used >= quota)
-            throw new FileTransferException(ApiErrorCodes.InvalidRequest, "服务端文件中转空间已满，请稍后再试或删除已完成的传输");
+        lock (_quotaLock)
+        {
+            if (quota > 0 && _usedBytes >= quota)
+                throw new FileTransferException(ApiErrorCodes.InvalidRequest, "服务端文件中转空间已满，请稍后再试或删除已完成的传输");
+        }
 
         var id = Guid.NewGuid().ToString("N");
         var partPath = Path.Combine(Directory, id + ".part");
@@ -76,11 +81,15 @@ public sealed class FileTransferService
                 int read;
                 while ((read = await body.ReadAsync(buffer, ct)) > 0)
                 {
-                    size += read;
-                    if (size > MaxFileBytes)
+                    if (size + read > MaxFileBytes)
                         throw new FileTransferException(ApiErrorCodes.InvalidRequest, $"文件不能超过 {FormatSize(MaxFileBytes)}");
-                    if (quota > 0 && used + size > quota)
-                        throw new FileTransferException(ApiErrorCodes.InvalidRequest, "服务端文件中转空间不足");
+                    lock (_quotaLock)
+                    {
+                        if (quota > 0 && _usedBytes + read > quota)
+                            throw new FileTransferException(ApiErrorCodes.InvalidRequest, "服务端文件中转空间不足");
+                        _usedBytes += read;
+                    }
+                    size += read;
                     hash.AppendData(buffer, 0, read);
                     await output.WriteAsync(buffer.AsMemory(0, read), ct);
                 }
@@ -91,6 +100,7 @@ public sealed class FileTransferService
         }
         catch
         {
+            lock (_quotaLock) _usedBytes -= size;
             TryDelete(partPath);
             throw;
         }
@@ -147,7 +157,9 @@ public sealed class FileTransferService
     public async Task<bool> ReportProgressAsync(Guid? credentialId, FileTransferProgress progress)
     {
         if (credentialId is not { } credential || Get(progress.TransferId) is not { } record) return false;
-        if (!record.Deliveries.Any(x => x.CredentialId == credential)) return false;
+        bool registered;
+        lock (record.Sync) registered = record.Deliveries.Any(x => x.CredentialId == credential);
+        if (!registered) return false;
         await UpdateDeliveryAsync(record, credential, delivery =>
         {
             if (delivery.State is FileTransferState.Completed or FileTransferState.Failed &&
@@ -179,7 +191,8 @@ public sealed class FileTransferService
 
     public void Delete(string id)
     {
-        _records.TryRemove(id, out _);
+        if (_records.TryRemove(id, out var removed))
+            lock (_quotaLock) _usedBytes -= removed.Size;
         TryDelete(ContentPath(id));
         TryDelete(MetadataPath(id));
     }
@@ -223,14 +236,16 @@ public sealed class FileTransferService
     {
         string json;
         lock (record.Sync) json = JsonSerializer.Serialize(record, JsonOptions);
+        // 每次写入用独立临时名：同一传输的并发进度上报不会争用同一个 .tmp 文件。
+        var temp = MetadataPath(record.Id) + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            var temp = MetadataPath(record.Id) + ".tmp";
             await File.WriteAllTextAsync(temp, json);
             File.Move(temp, MetadataPath(record.Id), overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            TryDelete(temp);
             _logger.LogWarning(ex, "文件中转元数据写入失败：{Id}", record.Id);
         }
     }
@@ -244,6 +259,7 @@ public sealed class FileTransferService
                 var record = JsonSerializer.Deserialize<FileTransferRecord>(File.ReadAllText(path), JsonOptions);
                 if (record is null || record.Id != Path.GetFileNameWithoutExtension(path)) continue;
                 _records[record.Id] = record;
+                _usedBytes += record.Size;
             }
             catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
             {

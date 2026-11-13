@@ -1,12 +1,12 @@
 # 贡献指南
 
-感谢帮助改进 RemoteCI。本仓库包含服务端、Wear OS 手表端与 ClassIsland 插件；
+感谢帮助改进 RemoteCI。本仓库包含服务端、Android 手机端、Wear OS 手表端与 ClassIsland 插件；
 用户文档位于独立的 [RemoteCI-Docs](https://github.com/Edge-HH/RemoteCI-Docs) 仓库。
 
 ## 开发环境
 
 - .NET SDK 10（服务端与共享库）
-- JDK 17 与 Android SDK（手表端，见 `wearos/dev.ps1`）
+- JDK 17 与 Android SDK（Android 手机端与手表端，见 `android/dev.ps1`、`wearos/dev.ps1`）
 - PowerShell 7（插件 CIPX 打包需要）
 
 ## 构建与测试
@@ -25,6 +25,19 @@ cd wearos
 dotnet build plugin/RemoteCI.Plugin -c Release -p:CreateCipx=true
 ```
 
+## Android 手机端
+
+源码在 `android/`（Kotlin / Jetpack Compose，minSdk 26），构建与测试方式与手表端相同：
+
+```powershell
+cd android
+.\gradlew.bat testDebugUnitTest assembleDebug
+```
+
+- Gradle 9.7，Java/Kotlin 目标 17；`android/gradle/gradle-daemon-jvm.properties` 把守护进程 JVM 固定为 JDK 25，本机缺失时按文件内地址自动下载。
+- Release 签名从 `android/keystore.properties` 或 CI 环境变量读取，密钥不入库；缺失时 release 产物不签名，仅用于本地调试。
+- 小组件、上课状态通知与小米 HyperOS 适配等平台细节见 [docs/platform-notes.md](docs/platform-notes.md)。
+
 详细说明见 [README.md](README.md) 与 `docs/` 目录。
 
 ## 提交流程
@@ -32,7 +45,7 @@ dotnet build plugin/RemoteCI.Plugin -c Release -p:CreateCipx=true
 1. 新建分支（建议 `feature/` 或 `fix/` 前缀），在分支上提交修改。
 2. 只修改本任务相关的问题，不夹带无关改动；代码保留必要注释并采用项目现有主流方案。
 3. 本地运行上述构建与测试命令，确保通过。
-4. 功能或用户可见行为变化必须在 RemoteCI-Docs 仓库同步更新文档，并在 PR 中互相添加链接。
+4. 功能或用户可见行为变化必须同步更新文档：主仓库的 `docs/`、README 等文档随行为变更在**同一 PR** 内更新，不得只改文档站而留下主仓文档过时；用户文档同时在 RemoteCI-Docs 仓库更新，并在 PR 中互相添加链接。
 5. 提交 Pull Request 到 `main`，填写模板中的检查清单，等待 CI 通过并完成审核。
 6. 发布稳定版本时由维护者推送四段纯数字标签（例如 `3.2.1.4`）；测试版本才使用 `v3.x.x-beta.y`。GitHub Actions 会自动构建并在同一个 Release 发布服务端、固定名插件包、手表 APK 与三种 fnOS FPK，其他标签会被拒绝。
 

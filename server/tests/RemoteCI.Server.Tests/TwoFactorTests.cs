@@ -173,7 +173,7 @@ public sealed class TwoFactorTests
         var qr = scope.ServiceProvider.GetRequiredService<WebQrLoginService>();
         var (code, poll, _) = qr.Create("test browser", "127.0.0.1");
         Assert.NotNull(qr.Scan(code, user.Id, user.DisplayName));
-        Assert.True(qr.Decide(code, user.Id, true));
+        Assert.True(qr.Decide(code, user.Id, true, user.SecurityStamp));
         using var browser = Browser(factory);
         var completed = await Post(browser, "/Login", "QrComplete", new() { ["code"] = code, ["pollToken"] = poll });
         completed.EnsureSuccessStatusCode();

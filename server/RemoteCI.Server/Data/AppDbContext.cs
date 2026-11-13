@@ -46,6 +46,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ProfileDriftReport> ProfileDriftReports => Set<ProfileDriftReport>();
     public DbSet<LessonLedgerEntry> LessonLedgerEntries => Set<LessonLedgerEntry>();
     public DbSet<ActionLinkToken> ActionLinkTokens => Set<ActionLinkToken>();
+    public DbSet<OperationApproval> OperationApprovals => Set<OperationApproval>();
     public DbSet<ClassBoard> ClassBoards => Set<ClassBoard>();
     public DbSet<AppGuardOverride> AppGuardOverrides => Set<AppGuardOverride>();
     public DbSet<AppGuardEventRecord> AppGuardEvents => Set<AppGuardEventRecord>();
@@ -80,6 +81,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.HasKey(x => x.TokenHash);
             entity.Property(x => x.TokenHash).HasMaxLength(64);
             entity.Property(x => x.Action).HasMaxLength(40);
+            entity.HasIndex(x => x.ExpiresAtUnixMs);
+            entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<OperationApproval>(entity =>
+        {
+            entity.HasKey(x => x.TokenHash);
+            entity.Property(x => x.TokenHash).HasMaxLength(64);
+            entity.Property(x => x.Action).HasMaxLength(40);
+            entity.Property(x => x.Summary).HasMaxLength(400);
             entity.HasIndex(x => x.ExpiresAtUnixMs);
             entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });

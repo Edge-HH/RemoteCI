@@ -48,10 +48,20 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
     {
         if (role == UserRole.Admin)
         {
-            // SQLite 不支持 DateTimeOffset 排序的 SQL 翻译；班级数量极少，取回后内存排序。
+            // 只投影需要的列：HasAvatar 在 SQL 里判空，避免把整张头像 BLOB 读进内存。
             var all = await db.Classrooms
-                .Include(x => x.GroupAssignments).ThenInclude(a => a.Group)
-                .AsNoTracking().ToListAsync(ct);
+                .AsNoTracking()
+                .Select(x => new
+                {
+                    x.Id,
+                    x.Name,
+                    x.CreatedAt,
+                    x.VisitorAccessEnabled,
+                    HasAvatar = x.Avatar != null,
+                    GroupNames = x.GroupAssignments.Select(a => a.Group.Name).ToList(),
+                })
+                .ToListAsync(ct);
+            // SQLite 不支持 DateTimeOffset 排序的 SQL 翻译；班级数量极少，取回后内存排序。
             return all.OrderBy(x => x.CreatedAt).Select(x => new ClassSummary
             {
                 Id = x.Id,
@@ -60,8 +70,8 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
                 RoleKind = (int)AccountRoleKind.Administrator,
                 Permissions = UserPermissions.All,
                 VisitorEnabled = x.VisitorAccessEnabled,
-                GroupNames = x.GroupAssignments.Select(a => a.Group.Name).ToList(),
-                HasAvatar = x.Avatar != null,
+                GroupNames = x.GroupNames,
+                HasAvatar = x.HasAvatar,
             }).ToList();
         }
 
@@ -75,7 +85,7 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
                     x.Classroom.Name,
                     x.Classroom.VisitorAccessEnabled,
                     x.Classroom.CreatedAt,
-                    x.Classroom.Avatar,
+                    HasAvatar = x.Classroom.Avatar != null,
                     GroupNames = x.Classroom.GroupAssignments.Select(a => a.Group.Name).ToList(),
                     RoleName = y.Name,
                     RoleKind = y.Kind,
@@ -92,7 +102,7 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
             Permissions = account.Adjustment.Apply(role, x.RoleDefaults),
             VisitorEnabled = x.VisitorAccessEnabled,
             GroupNames = x.GroupNames,
-            HasAvatar = x.Avatar != null,
+            HasAvatar = x.HasAvatar,
         }).ToList();
 
         // 老师按显示名绑定任教班级：成员班级合并任教权限，非成员的任教班级也进入班级列表。
@@ -129,7 +139,9 @@ public sealed class ClassAccessService(AppDbContext db, TeacherBindingService te
     {
         if (role == UserRole.Admin)
         {
-            var ids = await db.Classrooms.AsNoTracking().ToListAsync(ct);
+            var ids = await db.Classrooms.AsNoTracking()
+                .Select(x => new { x.Id, x.CreatedAt })
+                .ToListAsync(ct);
             return ids.OrderBy(x => x.CreatedAt).Select(x => x.Id).ToList();
         }
         var results = await db.ClassMemberships.AsNoTracking()

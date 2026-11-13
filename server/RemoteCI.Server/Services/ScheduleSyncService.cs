@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using RemoteCI.Server.Data;
 using RemoteCI.Shared;
 using RemoteCI.Shared.Models;
@@ -14,7 +15,7 @@ public sealed class ScheduleSyncService(
     ILogger<ScheduleSyncService> logger)
 {
     private static readonly TimeSpan TaskTimeout = TimeSpan.FromSeconds(15);
-    private readonly Dictionary<Guid, CancellationTokenSource> _timeouts = new();
+    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _timeouts = new();
 
     public ScheduleSyncStatus? Current(Guid classId) => tracker.Current(classId);
 
@@ -152,12 +153,16 @@ public sealed class ScheduleSyncService(
             {
                 // 任务已进入终态。
             }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "班级 {ClassId} 课表任务超时处理失败", classId);
+            }
         });
     }
 
     private void CancelTimeout(Guid classId)
     {
-        if (!_timeouts.Remove(classId, out var timeout)) return;
+        if (!_timeouts.TryRemove(classId, out var timeout)) return;
         timeout.Cancel();
         timeout.Dispose();
     }

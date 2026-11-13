@@ -36,6 +36,8 @@ public sealed class WebQrLoginService(TimeProvider clock)
         public WebQrLoginState State { get; set; } = WebQrLoginState.Pending;
         public Guid? UserId { get; set; }
         public string? DisplayName { get; set; }
+        /// <summary>确认时的账号安全戳；兑换时复查，确认后改密/重置凭据立即作废这次授权。</summary>
+        public string? SecurityStamp { get; set; }
     }
 
     private readonly ConcurrentDictionary<string, Challenge> _challenges = new(StringComparer.Ordinal);
@@ -74,14 +76,15 @@ public sealed class WebQrLoginService(TimeProvider clock)
         }
     }
 
-    /// <summary>扫码的同一账号确认或拒绝；返回是否生效。</summary>
-    public bool Decide(string code, Guid userId, bool approve)
+    /// <summary>扫码的同一账号确认或拒绝；返回是否生效。确认时记录安全戳，供兑换时复查。</summary>
+    public bool Decide(string code, Guid userId, bool approve, string? securityStamp)
     {
         if (!TryGetLive(code, out var challenge)) return false;
         lock (challenge)
         {
             if (challenge.State != WebQrLoginState.Scanned || challenge.UserId != userId) return false;
             challenge.State = approve ? WebQrLoginState.Approved : WebQrLoginState.Denied;
+            challenge.SecurityStamp = approve ? securityStamp : null;
             return true;
         }
     }
@@ -95,15 +98,16 @@ public sealed class WebQrLoginService(TimeProvider clock)
             return new WebQrLoginStatus(challenge.State, challenge.State == WebQrLoginState.Pending ? null : challenge.DisplayName);
     }
 
-    /// <summary>浏览器兑换已确认的挑战：成功返回确认账号的 Id，挑战随即作废。</summary>
-    public Guid? Consume(string code, string pollToken)
+    /// <summary>浏览器兑换已确认的挑战：成功返回确认账号的 Id 与确认时的安全戳，挑战随即作废。
+    /// 调用方必须用最新安全戳复查，确认后被改密/重置凭据的账号不能登录。</summary>
+    public (Guid UserId, string? SecurityStamp)? Consume(string code, string pollToken)
     {
         if (!TryGetLive(code, out var challenge) || !TokenEquals(challenge.PollToken, pollToken)) return null;
         lock (challenge)
         {
             if (challenge.State != WebQrLoginState.Approved || challenge.UserId is not { } userId) return null;
             _challenges.TryRemove(code, out _);
-            return userId;
+            return (userId, challenge.SecurityStamp);
         }
     }
 

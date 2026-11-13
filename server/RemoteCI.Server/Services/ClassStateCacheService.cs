@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using RemoteCI.Server.Data;
 using RemoteCI.Shared;
@@ -84,9 +85,9 @@ public sealed class ClassStateCacheService(
             row.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(ct);
         }
-        catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or ObjectDisposedException)
+        catch (Exception ex) when (ex is DbUpdateException or SqliteException or InvalidOperationException or ObjectDisposedException)
         {
-            // 班级刚被删除或数据库正在关闭：缓存只是加速恢复的副本，写入失败不影响实时数据。
+            // 班级刚被删除、数据库瞬时错误或正在关闭：缓存只是加速恢复的副本，写入失败不影响实时数据。
             logger.LogWarning(ex, "写入班级 {ClassId} 的课表与扩展缓存失败", classId);
         }
     }

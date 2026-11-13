@@ -18,12 +18,15 @@ public sealed class ServerOptions
     /// <summary>认证端点（登录/刷新/插件配对）每个来源 IP 每分钟的请求上限。</summary>
     public int AuthRateLimitPerMinute { get; set; } = 20;
 
+    /// <summary>REST 通用命令接口每个来源 IP 每 10 秒的请求上限，与 WS 单连接命令限速对称。</summary>
+    public int CommandRateLimitPerWindow { get; set; } = 20;
+
     /// <summary>
-    /// 首次启动自动生成管理员密码/插件配对码时是否写入日志。
-    /// 默认开启（容器无环境变量部署时这是唯一获取途径）；日志会被集中收集的生产环境建议关闭，
-    /// 改用 REMOTECI_ADMIN_PASSWORD / REMOTECI_PLUGIN_PAIR_CODE 环境变量。
+    /// 首次启动自动生成插件配对码时是否写入日志。默认关闭：日志常被集中收集，配对码不应默认进入日志。
+    /// 无环境变量部署可在 WebUI 重新生成配对码；确需从日志获取时显式开启，
+    /// 或改用 REMOTECI_PLUGIN_PAIR_CODE 环境变量注入。
     /// </summary>
-    public bool LogBootstrapSecrets { get; set; } = true;
+    public bool LogBootstrapSecrets { get; set; } = false;
 
     /// <summary>是否在后台定时拉取节假日数据；测试环境关闭以免访问外网。</summary>
     public bool HolidayAutoRefresh { get; set; } = true;

@@ -31,6 +31,9 @@ public sealed partial class IdentityCoordinator(
     /// <summary>首登设置密码令牌有效期：过期后需重新走一次空密码登录获取新令牌。</summary>
     private static readonly TimeSpan PasswordSetupTokenLifetime = TimeSpan.FromMinutes(15);
 
+    /// <summary>API Key 默认有效期：泄露的密钥不能永久可用，到期需重新创建。</summary>
+    private static readonly TimeSpan ApiKeyLifetime = TimeSpan.FromDays(90);
+
     /// <summary>
     /// 当前服务端进程实例标识，随授权镜像下发。服务端重启或数据库重建后变化，
     /// 供插件在镜像版本号回退时识别实例变化并强制覆盖，避免旧镜像永久滞留。
@@ -101,6 +104,8 @@ public sealed partial class IdentityCoordinator(
     public async Task BootstrapAsync(CancellationToken ct = default)
     {
         await db.Database.MigrateAsync(ct);
+        // WAL 让读写互不阻塞；journal_mode 持久化在库文件里，启动时执行一次即可。
+        await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", ct);
         // 显式列出全部列：不依赖数据库 schema 中的列默认值，INSERT OR IGNORE 才不会因
         // NOT NULL 约束被静默跳过。
         await db.Database.ExecuteSqlRawAsync(
@@ -191,7 +196,7 @@ public sealed partial class IdentityCoordinator(
             if (generatedCode && _options.LogBootstrapSecrets)
                 logger.LogWarning("首次启动插件一次性配对码：{PairCode}。该码使用后立即失效。", code);
             else if (generatedCode)
-                logger.LogWarning("首次启动插件一次性配对码已生成，按配置不写入日志。");
+                logger.LogWarning("首次启动插件一次性配对码已生成，按配置不写入日志；可在 WebUI 重新生成配对码，或设置 REMOTECI_PLUGIN_PAIR_CODE 后重启。");
             else
                 logger.LogInformation("首次启动已使用外部配置初始化插件一次性配对码。");
         }
@@ -560,6 +565,7 @@ public sealed partial class IdentityCoordinator(
             KeyHash = Hash(key),
             Prefix = key[..Math.Min(12, key.Length)],
             CreatedAt = now,
+            ExpiresAt = now.Add(ApiKeyLifetime),
         };
         db.UserApiKeys.Add(entity);
         await db.SaveChangesAsync(ct);
@@ -1122,6 +1128,9 @@ public sealed partial class IdentityCoordinator(
         var now = DateTimeOffset.UtcNow;
         await db.DeviceSessions.Where(x => x.UserId == userId && x.RevokedAt == null)
             .ExecuteUpdateAsync(x => x.SetProperty(s => s.RevokedAt, now), ct);
+        // 密码重置/修改、禁用账号时 API Key 一并失效，避免被盗账号改密后攻击者的 Key 仍长期可用。
+        await db.UserApiKeys.Where(x => x.UserId == userId && x.RevokedAt == null)
+            .ExecuteUpdateAsync(x => x.SetProperty(k => k.RevokedAt, now), ct);
     }
 
     /// <summary>读取全局“强制在标题显示发送人”设置，默认开启以保持既有行为。</summary>
@@ -1143,22 +1152,19 @@ public sealed partial class IdentityCoordinator(
     private async Task<long> NextVersionAsync(CancellationToken ct)
     {
         // 事务内原子自增：并发变更各自拿到不同的新版本号，避免读到旧值后各自写同一个 +1 导致丢递增。
-        await db.Database.BeginTransactionAsync(ct);
-        try
+        // 这里不清跟踪器：调用方在拿到版本号后还要继续保存自己跟踪的实体；委托内只有原生 SQL 与标量查询，重试安全。
+        long version = 0;
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
             await db.Database.ExecuteSqlRawAsync(
                 "UPDATE SystemMetadata SET AccountVersion = AccountVersion + 1 WHERE Id = 1;", ct);
-            var version = await db.SystemMetadata.Where(x => x.Id == 1)
+            version = await db.SystemMetadata.Where(x => x.Id == 1)
                 .Select(x => x.AccountVersion)
                 .SingleAsync(ct);
-            await db.Database.CommitTransactionAsync(ct);
-            return version;
-        }
-        catch
-        {
-            await db.Database.RollbackTransactionAsync(ct);
-            throw;
-        }
+            await transaction.CommitAsync(ct);
+        });
+        return version;
     }
 
     private async Task<UserProfile> ToProfileAsync(AppUser user, CancellationToken ct)

@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using QRCoder;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -51,6 +52,8 @@ public sealed class LoginModel(
         return path.Length == 0 || path.Equals("/Index", StringComparison.OrdinalIgnoreCase);
     }
 
+    // 与 REST 登录同一 IP 限流策略；二维码轮询（QrStatus）不限流，避免打断每 2 秒的轮询。
+    [EnableRateLimiting("auth")]
     public async Task<IActionResult> OnPostAsync(CancellationToken ct)
     {
         VisitorAccessEnabled = await visitorAccess.AnyVisitorClassEnabledAsync(ct);
@@ -139,10 +142,12 @@ public sealed class LoginModel(
 
     public async Task<IActionResult> OnPostQrCompleteAsync(string code, string pollToken, bool rememberMe, CancellationToken ct)
     {
-        if (qrLogin.Consume(code, pollToken) is not { } userId)
+        if (qrLogin.Consume(code, pollToken) is not { } consumed)
             return new JsonResult(new { error = "二维码已过期，请刷新后重新扫码" }) { StatusCode = StatusCodes.Status409Conflict };
-        var user = await users.FindByIdAsync(userId.ToString());
-        if (user is null || !user.Enabled || user.PasswordPending || await users.IsLockedOutAsync(user))
+        var user = await users.FindByIdAsync(consumed.UserId.ToString());
+        // 安全戳复查：手机确认后账号若改密/重置凭据，这次扫码授权作废。
+        if (user is null || !user.Enabled || user.PasswordPending || await users.IsLockedOutAsync(user) ||
+            !string.Equals(user.SecurityStamp, consumed.SecurityStamp, StringComparison.Ordinal))
             return new JsonResult(new { error = "该账号当前不能登录" }) { StatusCode = StatusCodes.Status403Forbidden };
         if (user.TwoFactorEnabled)
         {

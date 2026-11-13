@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.AspNetCore.RateLimiting;
 using RemoteCI.Server.Data;
 using RemoteCI.Server.Services;
 
@@ -21,6 +22,7 @@ public sealed class LoginSecondFactorModel(UserManager<AppUser> users, SignInMan
         return await PendingUserAsync() is null ? Expired() : Page();
     }
 
+    [EnableRateLimiting("auth")]
     public async Task<IActionResult> OnPostAsync(CancellationToken ct)
     {
         Response.Headers.CacheControl = "no-store";

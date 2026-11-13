@@ -8,35 +8,40 @@ public sealed class PersonalCourseReminderService(AppDbContext db, UserNotificat
     public async Task SendDueAsync(DateTimeOffset now, CancellationToken ct = default)
     {
         // 提醒标记与通知在同一事务保存：服务端重启后不会重复生成。标记记录那次课的开始时刻，每周的同一节课分别提醒。
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        var semesterStart = await semester.GetStartAsync(ct);
-        var rows = await db.PersonalCourses.Where(x => x.User.Enabled && (x.ReminderMinutes != null || x.NotifyAtStart)).ToListAsync(ct);
-        foreach (var row in rows)
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
-            var today = PersonalScheduleService.LocalDate(row, now);
-            // 提前提醒最长 7 天，向后多看一天即可覆盖。
-            var occurrences = PersonalScheduleService.Occurrences(row, today.AddDays(-1), today.AddDays(8), semesterStart).ToList();
-            foreach (var occurrence in occurrences)
+            // 重试时重新加载课程行，避免重复累加提醒标记或重复插入通知。
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            var semesterStart = await semester.GetStartAsync(ct);
+            var rows = await db.PersonalCourses.Where(x => x.User.Enabled && (x.ReminderMinutes != null || x.NotifyAtStart)).ToListAsync(ct);
+            foreach (var row in rows)
             {
-                var stamp = occurrence.StartsAt.ToUnixTimeMilliseconds();
-                var starting = row.NotifyAtStart && row.StartSentFor != stamp &&
-                    occurrence.StartsAt <= now && now - occurrence.StartsAt <= TimeSpan.FromMinutes(5);
-                var upcoming = row.ReminderMinutes is { } minutes && row.UpcomingSentFor != stamp &&
-                    now >= occurrence.StartsAt.AddMinutes(-minutes) && now < occurrence.StartsAt;
-                if (!starting && !upcoming) continue;
-                if (starting) row.StartSentFor = stamp;
-                if (upcoming) row.UpcomingSentFor = stamp;
-                var where = string.IsNullOrEmpty(row.Location) ? "" : $" · {row.Location}";
-                var local = occurrence.StartsAt;
-                await notifications.PublishAsync([row.UserId], starting ? "personal_course_start" : "personal_course_upcoming",
-                    starting ? $"上课提醒 · {row.Subject}" : $"即将上课 · {row.Subject}",
-                    $"{local:yyyy-MM-dd HH:mm}–{occurrence.EndsAt:HH:mm}{where}", null, ct,
-                    expiresAt: starting ? occurrence.EndsAt : occurrence.StartsAt);
-                break;
+                var today = PersonalScheduleService.LocalDate(row, now);
+                // 提前提醒最长 7 天，向后多看一天即可覆盖。
+                var occurrences = PersonalScheduleService.Occurrences(row, today.AddDays(-1), today.AddDays(8), semesterStart).ToList();
+                foreach (var occurrence in occurrences)
+                {
+                    var stamp = occurrence.StartsAt.ToUnixTimeMilliseconds();
+                    var starting = row.NotifyAtStart && row.StartSentFor != stamp &&
+                        occurrence.StartsAt <= now && now - occurrence.StartsAt <= TimeSpan.FromMinutes(5);
+                    var upcoming = row.ReminderMinutes is { } minutes && row.UpcomingSentFor != stamp &&
+                        now >= occurrence.StartsAt.AddMinutes(-minutes) && now < occurrence.StartsAt;
+                    if (!starting && !upcoming) continue;
+                    if (starting) row.StartSentFor = stamp;
+                    if (upcoming) row.UpcomingSentFor = stamp;
+                    var where = string.IsNullOrEmpty(row.Location) ? "" : $" · {row.Location}";
+                    var local = occurrence.StartsAt;
+                    await notifications.PublishAsync([row.UserId], starting ? "personal_course_start" : "personal_course_upcoming",
+                        starting ? $"上课提醒 · {row.Subject}" : $"即将上课 · {row.Subject}",
+                        $"{local:yyyy-MM-dd HH:mm}–{occurrence.EndsAt:HH:mm}{where}", null, ct,
+                        expiresAt: starting ? occurrence.EndsAt : occurrence.StartsAt);
+                    break;
+                }
             }
-        }
-        await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        });
     }
 }
 

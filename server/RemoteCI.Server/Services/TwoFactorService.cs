@@ -75,14 +75,17 @@ public sealed class TwoFactorService(AppDbContext db, UserManager<AppUser> users
             throw Invalid("验证码错误或已过期，请检查认证器时间后重试");
         }
         var codes = Enumerable.Range(0, 10).Select(_ => Convert.ToHexString(RandomNumberGenerator.GetBytes(8))).ToArray();
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
-        user.ProtectedTotpKey = ProtectKey(user.Id, setup.Secret);
-        user.LastTotpTimeStep = step;
-        user.TwoFactorRecoveryHashes = string.Join(',', codes.Select(RecoveryHash));
-        user.TwoFactorEnabled = true;
-        user.AccessFailedCount = 0;
-        await SaveSecurityChangeAsync(user, ct);
-        await tx.CommitAsync(ct);
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            user.ProtectedTotpKey = ProtectKey(user.Id, setup.Secret);
+            user.LastTotpTimeStep = step;
+            user.TwoFactorRecoveryHashes = string.Join(',', codes.Select(RecoveryHash));
+            user.TwoFactorEnabled = true;
+            user.AccessFailedCount = 0;
+            await SaveSecurityChangeAsync(user, ct);
+            await tx.CommitAsync(ct);
+        });
         return codes.Select(x => string.Join('-', Enumerable.Range(0, 4).Select(i => x.Substring(i * 4, 4)))).ToArray();
     }
 
@@ -91,14 +94,17 @@ public sealed class TwoFactorService(AppDbContext db, UserManager<AppUser> users
         await CheckPasswordAsync(user, password);
         if (!user.TwoFactorEnabled || !await VerifyAsync(user, code, recovery, ct))
             throw Invalid("验证码或恢复码无效");
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
-        user.TwoFactorEnabled = false;
-        user.ProtectedTotpKey = null;
-        user.LastTotpTimeStep = null;
-        user.TwoFactorRecoveryHashes = null;
-        user.AccessFailedCount = 0;
-        await SaveSecurityChangeAsync(user, ct);
-        await tx.CommitAsync(ct);
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            user.TwoFactorEnabled = false;
+            user.ProtectedTotpKey = null;
+            user.LastTotpTimeStep = null;
+            user.TwoFactorRecoveryHashes = null;
+            user.AccessFailedCount = 0;
+            await SaveSecurityChangeAsync(user, ct);
+            await tx.CommitAsync(ct);
+        });
     }
 
     private async Task SaveSecurityChangeAsync(AppUser user, CancellationToken ct)

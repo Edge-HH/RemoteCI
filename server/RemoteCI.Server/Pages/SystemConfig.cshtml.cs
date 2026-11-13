@@ -27,7 +27,9 @@ public sealed class SystemConfigModel(
     OperationsSettings operations,
     UpdateSettings updateSettings,
     UpdateAutomation updateAutomation,
-    AppGuardService appGuard) : WebPageModel(users)
+    AppGuardService appGuard,
+    CommandAuditLog audit,
+    ILogger<SystemConfigModel> logger) : WebPageModel(users)
 {
     [BindProperty] public OperationsInput OperationsOptions { get; set; } = new();
     [BindProperty] public UpdateInput UpdateOptions { get; set; } = new();
@@ -208,9 +210,11 @@ public sealed class SystemConfigModel(
                 ?? await updates.PrepareUpdateAsync(
                     LatestRelease, ServerAsset, ResolveDatabasePath(), environment.ContentRootPath, ct);
             await ApplyAndRestartAsync(prepared, latestVersion, ct);
+            AuditServerOperation(ServerAuditOperation.ApplyUpdate, $"在线更新到 {latestVersion}", success: true);
         }
         catch (Exception ex)
         {
+            AuditServerOperation(ServerAuditOperation.ApplyUpdate, "在线更新", success: false, result: ex.Message);
             CheckMessage = "更新失败：" + ex.Message;
         }
         return Page();
@@ -239,9 +243,11 @@ public sealed class SystemConfigModel(
             var (prepared, version) = await updates.PrepareUploadedUpdateAsync(
                 stream, ResolveDatabasePath(), environment.ContentRootPath, ct);
             await ApplyAndRestartAsync(prepared, version, ct);
+            AuditServerOperation(ServerAuditOperation.ApplyUpdate, $"手动上传更新包，版本 {version}", success: true);
         }
         catch (Exception ex)
         {
+            AuditServerOperation(ServerAuditOperation.ApplyUpdate, "手动上传更新包", success: false, result: ex.Message);
             CheckMessage = "手动更新失败：" + ex.Message;
         }
         return Page();
@@ -267,6 +273,11 @@ public sealed class SystemConfigModel(
             ? serverOptions.Value.DatabasePath
             : Path.Combine(environment.ContentRootPath, serverOptions.Value.DatabasePath);
 
+    private void AuditServerOperation(ServerAuditOperation operation, string summary, bool success, string? result = null) =>
+        audit.RecordServerOperation(operation, CurrentUser.Id,
+            string.IsNullOrWhiteSpace(CurrentUser.DisplayName) ? CurrentUser.UserName : CurrentUser.DisplayName,
+            summary, success, result);
+
     public async Task<IActionResult> OnPostSaveBackupSettingsAsync(CancellationToken ct)
     {
         if (await RequireAdminAsync() is { } denied) return denied;
@@ -286,7 +297,11 @@ public sealed class SystemConfigModel(
     {
         if (await RequireAdminAsync() is { } denied) return denied;
         try { await archives.CreateLocalBackupAsync("manual", ct); TempData["Message"] = "Backup created."; }
-        catch (Exception ex) { TempData["Error"] = ex.Message; }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "创建备份失败");
+            TempData["Error"] = "Backup failed. Please try again.";
+        }
         return RedirectToPage();
     }
 
@@ -300,8 +315,18 @@ public sealed class SystemConfigModel(
     public async Task<IActionResult> OnPostDeleteBackupAsync(string name)
     {
         if (await RequireAdminAsync() is { } denied) return denied;
-        try { archives.DeleteBackup(name); TempData["Message"] = "Backup deleted."; }
-        catch (Exception ex) { TempData["Error"] = ex.Message; }
+        try
+        {
+            archives.DeleteBackup(name);
+            AuditServerOperation(ServerAuditOperation.DeleteBackup, name, success: true);
+            TempData["Message"] = "Backup deleted.";
+        }
+        catch (Exception ex)
+        {
+            AuditServerOperation(ServerAuditOperation.DeleteBackup, name, success: false, result: ex.Message);
+            logger.LogError(ex, "删除备份 {Name} 失败", name);
+            TempData["Error"] = ex is FileNotFoundException ? "Backup not found." : "Delete failed. Please try again.";
+        }
         return RedirectToPage();
     }
 
@@ -314,9 +339,15 @@ public sealed class SystemConfigModel(
             await archives.ApplyAsync(archives.ParseLocalBackup(archives.ReadBackup(name)), ct);
             await peers.DisconnectAllAsync(ct);
             ScheduleRestart();
+            AuditServerOperation(ServerAuditOperation.RestoreBackup, name, success: true);
             TempData["Message"] = "Configuration restored; server is restarting.";
         }
-        catch (Exception ex) { TempData["Error"] = ex.Message; }
+        catch (Exception ex)
+        {
+            AuditServerOperation(ServerAuditOperation.RestoreBackup, name, success: false, result: ex.Message);
+            logger.LogError(ex, "恢复备份 {Name} 失败", name);
+            TempData["Error"] = ex is InvalidDataException or FileNotFoundException ? ex.Message : "Restore failed. Please try again.";
+        }
         return RedirectToPage();
     }
 
@@ -326,7 +357,12 @@ public sealed class SystemConfigModel(
         if (ExportOptions.Password != ExportOptions.ConfirmPassword || ExportOptions.Password.Length < 8)
         { TempData["Error"] = "Export passwords must match and contain at least 8 characters."; return RedirectToPage(); }
         try { return File(await archives.ExportEncryptedAsync(ExportOptions.Password, ct), "application/octet-stream", $"remoteci-config-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.rcicfg"); }
-        catch (Exception ex) { TempData["Error"] = ex.Message; return RedirectToPage(); }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "导出配置失败");
+            TempData["Error"] = ex is InvalidDataException ? ex.Message : "Export failed. Please try again.";
+            return RedirectToPage();
+        }
     }
 
     public async Task<IActionResult> OnPostImportConfigAsync(CancellationToken ct)
@@ -341,9 +377,15 @@ public sealed class SystemConfigModel(
             await archives.ApplyAsync(snapshot, ct);
             await peers.DisconnectAllAsync(ct);
             ScheduleRestart();
+            AuditServerOperation(ServerAuditOperation.ImportConfig, $"配置包 {ImportOptions.File.FileName}", success: true);
             TempData["Message"] = "Configuration imported; server is restarting.";
         }
-        catch (Exception ex) { TempData["Error"] = ex.Message; }
+        catch (Exception ex)
+        {
+            AuditServerOperation(ServerAuditOperation.ImportConfig, $"配置包 {ImportOptions.File?.FileName}", success: false, result: ex.Message);
+            logger.LogError(ex, "导入配置失败");
+            TempData["Error"] = ex is InvalidDataException ? ex.Message : "Import failed. Please try again.";
+        }
         return RedirectToPage();
     }
 

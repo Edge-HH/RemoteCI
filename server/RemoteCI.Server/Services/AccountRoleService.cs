@@ -109,6 +109,10 @@ public sealed class AccountRoleService(AppDbContext db)
             .SingleOrDefaultAsync(x => x.Name == trimmed || x.NormalizedName == normalized, ct);
     }
 
+    /// <summary>按 Id 查找角色（批量导入校验默认角色用）。</summary>
+    public async Task<AccountRole?> FindByIdAsync(Guid id, CancellationToken ct = default) =>
+        await db.AccountRoles.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+
     private static string NormalizeName(string value)
     {
         var trimmed = value?.Trim() ?? string.Empty;

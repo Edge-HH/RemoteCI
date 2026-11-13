@@ -1,6 +1,6 @@
 # RemoteCI 协议 V3
 
-协议版本和软件版本是两个概念。当前稳定版服务端、插件、手机和手表的软件发布版本统一为 `3.3.1.8`，但所有 WebSocket 信封都使用整数 `protocolVersion: 3`。稳定版使用四段纯数字版本，Beta 使用 `v3.x.x-beta.y`；软件版本只用于更新和诊断，不参与连接拒绝；只有协议号不是 `3` 时才返回 `PROTOCOL_VERSION_UNSUPPORTED`。
+协议版本和软件版本是两个概念。当前稳定版服务端、插件、手机和手表的软件发布版本统一为 `3.3.2.1`，但所有 WebSocket 信封都使用整数 `protocolVersion: 3`。稳定版使用四段纯数字版本，Beta 使用 `v3.x.x-beta.y`；软件版本只用于更新和诊断，不参与连接拒绝；只有协议号不是 `3` 时才返回 `PROTOCOL_VERSION_UNSUPPORTED`。
 
 V3 内只能增加可选字段、新消息和新能力，未知字段与未知能力标识必须安全忽略。删除字段、改变既有字段含义或改变既有命令语义属于破坏性变更，必须升级为 V4。
 
@@ -145,7 +145,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 ## 能力协商
 
-V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings`、`schedule.holiday-calendar`、`profile.read`、`profile.temp-layer`、`schedule.semester`、`file.transfer`、`host.app-guard`、`host.app-guard-launch`、`host.app-guard-manage`、`schedule.change-permanent`、`schedule.adjustments`、`screen.capture`、`plugin.package-install`、`host.app-guard-update`、`class.policy`、`host.settings.read` 和 `host.settings.write` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
+V3 的基础能力（自 3.1.0 引入）为 `class-state.read`、`schedule.read`、`schedule.pull`、`schedule.change`、`notification.send`、`notification.clear`、`teacher-coming`、`main-menu.visibility`、`power.control`、`volume.control` 和 `extensions.run`。其中 `teacher-coming` 仅为旧 V3 客户端兼容保留，当前版本各端不显示入口。后续新增的 `voice-message.send`、`software.inventory`、`software.upgrade-plugins`、`software.upgrade-classisland`、`plugin.install`、`plugin.uninstall`、`plugin.enable`、`plugin.management-policy`、`profile.distribute`、`profile.apply`、`schedule.time-layout`、`management.join`、`schedule.subject-teacher`、`terminal.execute`、`file.distribute`、`extensions.settings`、`schedule.holiday-calendar`、`profile.read`、`profile.temp-layer`、`schedule.semester`、`file.transfer`、`host.app-guard`、`host.app-guard-launch`、`host.app-guard-manage`、`main-window.layout-apply`、`main-window.layout-read`、`schedule.change-permanent`、`schedule.adjustments`、`screen.capture`、`plugin.package-install`、`host.app-guard-update`、`schedule.subject-location`、`class.policy`、`host.settings.read` 和 `host.settings.write` 只进入当前版本能力列表，不加入旧 V3 端默认获得的基础能力。插件和手表连接后通过 `peer_capabilities` 上报软件版本与能力；服务端通过 `capabilities_sync` 向手表发送自身和当前主插件的能力。未上报能力的旧 V3 端按上述基础能力处理，未知能力标识被忽略。
 
 WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手机的有效能力是“本地 ∩ 服务端 ∩ 当前班级主插件”。服务端在 `capabilities_sync.classPlugins` 中按接收方可访问的班级逐个下发主插件能力，客户端切换班级时按新班级重算；没有对应条目表示该班插件离线。旧服务端没有该字段时客户端退回 `plugin`。多插件时，当前主插件仍是最早接入的健康插件；主插件切换、断开或能力更新后，服务端重新广播能力快照。界面应隐藏缺失能力的入口，服务端转发命令前仍需按统一映射复核主插件能力，缺少能力时返回 `CAPABILITY_UNSUPPORTED`。能力声明不能绕过账号权限或扩展策略检查。
 
@@ -157,9 +157,11 @@ WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手
 
 控制命令值 3 为清除当前 ClassIsland 提醒，值 4 通过 `mainMenuVisible` 设置主界面显隐，值 5 通过 `powerAction` 选择关机、重启、睡眠或休眠。值 6 通过 `volume.level` 设置 Windows 默认播放设备的 0-100 主音量，或通过 `volume.muted` 设置静音状态；WebUI 在静音状态下向高调节时会在同一命令中同时发送 `level` 与 `muted: false`。休眠入口只在插件状态报告 Windows 已启用休眠时显示。
 
-主界面文件即 ClassIsland 设置中“主界面”的组件配置文件（`Config/ComponentLayouts/<名称>.json`，当前文件由 ClassIsland 设置 `CurrentComponentConfig` 选择）。命令值 29 `ApplyMainWindowLayout` 通过 `mainWindowLayout` 上传：`layoutJson` 为文件内容（必须是含 `Lines` 数组的 JSON 对象，UTF-8 不超过 2 MB）；`mode` 为 1 时覆盖设备当前使用的主界面文件并立即重新加载，为 2 时按 `name`（不含 `.json`，最长 64 字符，不能含路径或非法字符）新建文件，已存在同名文件时拒绝、绝不覆盖；`activate`（默认 `true`）只对新建生效，决定是否立即切换到新文件。覆盖后重新加载失败会恢复原文件，新建后切换失败会删除新文件并切回原主界面。命令值 30 `ReadMainWindowLayout` 读取当前主界面文件，成功时 `data` 是 JSON 字符串 `{"name","layoutJson","layouts","isManagementMode"}`：`name` 为当前文件名，`layouts` 为设备上全部主界面文件名。设备处于 ClassIsland 集控模式时主界面由集控管理，只能读取，上传返回 `INVALID_REQUEST`。两条命令都需要“主界面”权限（`MainMenuControl`，256），对应能力分别为 `main-window.layout-apply` 与 `main-window.layout-read`，可经 WebSocket 或 `POST /api/commands` 发送；WebUI 在控制页“当前班级 → 主界面文件”提供上传（覆盖 / 新建并使用）与获取（下载 JSON）。
+主界面文件即 ClassIsland 设置中“主界面”的组件配置文件（`Config/ComponentLayouts/<名称>.json`，当前文件由 ClassIsland 设置 `CurrentComponentConfig` 选择）。命令值 29 `ApplyMainWindowLayout` 通过 `mainWindowLayout` 上传：`layoutJson` 为文件内容（必须是含 `Lines` 数组的 JSON 对象，UTF-8 不超过 2 MB）；`mode` 为 1 时覆盖设备当前使用的主界面文件并立即重新加载，为 2 时按 `name`（不含 `.json`，最长 64 字符，不能含路径或非法字符）新建文件，已存在同名文件时拒绝、绝不覆盖；`activate`（默认 `true`）只对新建生效，决定是否立即切换到新文件。覆盖后重新加载失败会恢复原文件，新建后切换失败会删除新文件并切回原主界面。命令值 30 `ReadMainWindowLayout` 读取当前主界面文件，成功时 `data` 是 JSON 字符串 `{"name","layoutJson","layouts","isManagementMode"}`：`name` 为当前文件名，`layouts` 为设备上全部主界面文件名。设备处于 ClassIsland 集控模式时主界面由集控管理，只能读取，上传返回 `INVALID_REQUEST`。两条命令都需要 `MainWindowLayout` 权限（1048576，`1<<20`；旧插件仍认 `MainMenuControl`，256，服务端代发时会补上该位），对应能力分别为 `main-window.layout-apply` 与 `main-window.layout-read`，可经 WebSocket 或 `POST /api/commands` 发送；WebUI 在控制页“当前班级 → 主界面文件”提供上传（覆盖 / 新建并使用）与获取（下载 JSON）。
 
 `extensions_sync` 的载荷是其他 ClassIsland 插件通过 RemoteCI 注册的扩展功能列表；云端服务端和插件局域网服务都会缓存最近一次清单，并在手表完成认证后主动补发。命令值 7 为 `RunExtension`；命令值 8 的旧提醒指令仍由协议层兼容处理，但当前各端不提供入口。通过 `extensionId` 指定目标扩展，`extensionArgs` 携带参数字典（值统一为字符串）。扩展调用必须同时通过独立的 `RunExtensions` 权限和管理员为该扩展设置的启用/普通账号开放策略；`RequiredPermission` 只作为旧扩展兼容字段传输，不再关联通知、电源等权限。账号的 `allowedExtensionIds` 与 `visibleExtensionIds` 随认证状态和 `account_sync` 下发，后者只控制自己的手表入口。未注册、缺少必填参数或权限不足时分别返回 `INVALID_REQUEST` / `FORBIDDEN`，执行异常统一返回 `INTERNAL_ERROR`。
+
+插件每次云端 WebSocket 首次连接或重连成功后，都会重新发送当前 `extensions_sync` 快照。这保证其他 ClassIsland 插件在云端连接建立前已注册的扩展功能，也能进入服务端缓存并显示在 WebUI 控制页。服务端首次发现扩展时默认启用但不向非管理员开放；管理员可在控制页逐项编辑。策略和个人手表展示偏好持久化到 SQLite 并进入授权镜像，插件局域网服务据此向每个已认证手表发送对应清单。
 
 扩展参数与扩展设置字段共用 `ExtensionParameter` 结构：`key`、`label`（显示名称）、`type`（1=文本、2=数字、3=开关、4=选项、5=颜色）、`defaultValue`、`required`、`options`，以及可选的 `optionLabels`（与 `options` 按下标对应的选项显示名称）、`description`（字段说明）、`placeholder`、`multiline`（WebUI 多行文本）、`min` / `max`（数字范围）和 `step`（数字步长，仅影响输入控件）。服务端预检与插件执行端使用同一套校验：数字必须可解析且在范围内，开关只能是 `true` / `false`（规范化为小写），选项必须是 `options` 之一，颜色必须是 `#RGB` / `#ARGB` / `#RRGGBB` / `#AARRGGBB`；未声明的执行参数键原样透传以兼容旧扩展。旧手表忽略新增字段，选项按原值显示，颜色按文本处理。
 
@@ -259,7 +261,9 @@ WebUI 的有效能力是“服务端 ∩ 当前班级主插件”，手表与手
 - `exit-restarted`：退出后自启；
 - `crash-loop-paused`：频繁崩溃，暂停重启；
 - `backup-completed`：备份完成；
-- `backup-failed`：备份失败。
+- `backup-failed`：备份失败；
+- `enhanced-failed`：增强守护安装或卸载失败；
+- `remote-launched`：经守护通道远程打开 ClassIsland。
 
 服务端按插件凭据记录这些事件，保留 90 天。`restored` 与 `restore-failed` 另向全部系统管理员发送个人通知 `app_guard`，`link` 为 `/AppGuard`。
 
@@ -617,7 +621,7 @@ WebUI 和手机日程、手表自定义课程列表每 30 秒重新读取，WebU
 - `GET /api/state`、`GET /api/schedule`、`GET /api/schedule/week`
 - `POST /api/commands`
 - `POST /api/files?name=`、`POST /api/files/{id}/send`、`GET/DELETE /api/files/{id}`：文件中转分发；`GET /api/plugin/files/{id}` 供插件续传下载（见“远程终端与文件分发”）
-- `GET/POST/PUT/DELETE /api/users`、`/api/roles`、`/api/visitor`
+- `GET/POST/PUT/DELETE /api/users`
 - `POST /api/users/{id}/password`
 - `POST /api/plugin/pairing-code`
 - `GET /api/admin/status`
@@ -639,6 +643,3 @@ REST 手表请求使用 `Authorization: Bearer <accessToken>`。Razor WebUI 使�
 ## 自定义角色兼容
 
 服务端自定义角色在现有协议中仍以 `UserRole.User` 传输，并通过 `roleId`、`roleName` 可选字段提供管理信息。插件与旧版手表可以忽略新增字段，授权仍以 `effectivePermissions` 为准。
-
-
-插件每次云端 WebSocket 首次连接或重连成功后，都会重新发送当前 `extensions_sync` 快照。这保证其他 ClassIsland 插件在云端连接建立前已注册的扩展功能，也能进入服务端缓存并显示在 WebUI 控制页。服务端首次发现扩展时默认启用但不向非管理员开放；管理员可在控制页逐项编辑。策略和个人手表展示偏好持久化到 SQLite 并进入授权镜像，插件局域网服务据此向每个已认证手表发送对应清单。

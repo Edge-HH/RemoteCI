@@ -21,10 +21,15 @@ public sealed class AutomaticBackupWorker(IServiceScopeFactory scopes, TimeProvi
                 if (slot is null || settings.LastScheduledAt >= slot) continue;
                 settings.LastScheduledAt = slot;
                 try { await scope.ServiceProvider.GetRequiredService<ConfigurationArchiveService>().CreateLocalBackupAsync("automatic", stoppingToken); settings.LastSucceededAt=now; settings.LastError=null; }
-                catch(Exception ex) { settings.LastError=ex.Message[..Math.Min(ex.Message.Length,1000)]; logger.LogError(ex,"Automatic backup failed"); }
+                catch(Exception ex) when (ex is not OperationCanceledException) { settings.LastError=ex.Message[..Math.Min(ex.Message.Length,1000)]; logger.LogError(ex,"Automatic backup failed"); }
                 await db.SaveChangesAsync(stoppingToken);
             }
             catch(OperationCanceledException) when(stoppingToken.IsCancellationRequested) { break; }
+            catch(Exception ex)
+            {
+                // 数据库读写等瞬时失败不能放倒整个宿主；记录后等待下一个 tick 重试。
+                logger.LogError(ex, "自动备份任务执行失败");
+            }
         }
     }
 

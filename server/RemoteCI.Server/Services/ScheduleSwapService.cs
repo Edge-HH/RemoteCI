@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -41,6 +42,9 @@ public sealed class ScheduleSwapService(
 
     /// <summary>同一时间只执行一个换课：复核课位、写入调课与等待回执之间不能插入其他换课。</summary>
     private static readonly SemaphoreSlim ApplyGate = new(1, 1);
+
+    /// <summary>正在执行（申请行与调课已提交、等待回执）的换课；期间的冲突由 ApplyAsync 自己处理。</summary>
+    private static readonly ConcurrentDictionary<Guid, byte> Applying = new();
 
     /// <summary>遗留格式：旧版逐节命令下发的单节改动，只用于升级回填（见 ScheduleAdjustmentService.BackfillAsync）。</summary>
     public sealed record AppliedChange(
@@ -235,12 +239,10 @@ public sealed class ScheduleSwapService(
         // 两节都是自己的课不需要对方审批；强制换课直接生效。
         if (counterpart is null || request.Force)
         {
-            await ApplyAsync(row, actor, ct);
             row.Status = counterpart is null ? SwapRequestStatus.Approved : SwapRequestStatus.Forced;
             row.DecidedAt = DateTimeOffset.UtcNow;
             row.DecidedByUserId = counterpart is null ? userId : null;
-            db.ScheduleSwapRequests.Add(row);
-            await db.SaveChangesAsync(ct);
+            await ApplyAsync(row, actor, isNew: true, ct);
             if (row.Status == SwapRequestStatus.Forced)
             {
                 await notifications.PublishAsync(approvers, UserNotificationKinds.SwapForced,
@@ -369,12 +371,11 @@ public sealed class ScheduleSwapService(
         var found = await conflicts.CheckAsync(ToLessons(await PlanChangesAsync(row, actor, ct)), row.Id, ct);
         RequireAcknowledged(found, acknowledgeConflicts);
         row.AcknowledgedConflictsJson = SerializeAcknowledged(row.AcknowledgedConflictsJson, found);
-        await ApplyAsync(row, actor, ct);
         row.Status = SwapRequestStatus.Approved;
         row.DecidedByUserId = userId;
         row.DecidedAt = DateTimeOffset.UtcNow;
         row.DecisionNote = TrimNote(note);
-        await db.SaveChangesAsync(ct);
+        await ApplyAsync(row, actor, isNew: false, ct);
         foreach (var approver in Approvers(row)) await notifications.MarkSwapReadAsync(approver, row.Id, ct);
         await notifications.PublishAsync([row.RequesterUserId], UserNotificationKinds.SwapApproved,
             $"{actor.Name} 同意了你的换课申请",
@@ -466,8 +467,8 @@ public sealed class ScheduleSwapService(
         foreach (var (swapId, reason) in items.DistinctBy(x => x.SwapRequestId))
         {
             var row = await db.ScheduleSwapRequests.SingleOrDefaultAsync(x => x.Id == swapId, ct);
-            // 审批中的申请由审批流程自己处理冲突（保持待审批并提示），这里只处理已生效的。
-            if (row is null || row.Status is not (SwapRequestStatus.Approved or SwapRequestStatus.Forced)) continue;
+            // 执行中（等待回执）的换课由 ApplyAsync 自己处理冲突；审批中的由审批流程处理（保持待审批并提示）。
+            if (row is null || Applying.ContainsKey(swapId) || row.Status is not (SwapRequestStatus.Approved or SwapRequestStatus.Forced)) continue;
             await adjustments.InvalidateBySwapAsync(row.Id, null, reason, ct);
             row.Status = SwapRequestStatus.Invalidated;
             row.InvalidReason = TrimNote(reason);
@@ -517,12 +518,14 @@ public sealed class ScheduleSwapService(
     }
 
     /// <summary>
-    /// 写入调课记录并等待教室端回执：全部生效或教室端离线（待上线生效）都算成功；教室端报告冲突时撤掉这次的记录，
-    /// 申请保持原状并返回 409。教室端插件在线但不支持调课集合时拒绝，提示先升级插件。
+    /// 申请行与调课记录在同一事务提交，再等待教室端回执：全部生效或教室端离线（待上线生效）都算成功；
+    /// 教室端报告冲突时撤掉这次的记录并把申请恢复原状（新申请删除、审批中的回到待审批），返回 409。
+    /// 教室端插件在线但不支持调课集合时拒绝，提示先升级插件。
     /// </summary>
-    private async Task ApplyAsync(ScheduleSwapRequest row, Actor actor, CancellationToken ct)
+    private async Task ApplyAsync(ScheduleSwapRequest row, Actor actor, bool isNew, CancellationToken ct)
     {
         await ApplyGate.WaitAsync(ct);
+        Applying[row.Id] = 0;
         try
         {
             var changes = await PlanChangesAsync(row, actor, ct);
@@ -539,7 +542,7 @@ public sealed class ScheduleSwapService(
                 change.To.Id,
                 change.To.Name,
                 OverrideTeacher(change))).ToList();
-            var write = await adjustments.AddAsync(planned, ScheduleAdjustmentOrigin.SwapRequest, row.Id, actor.User.Id, actor.Name, ct);
+            var write = await adjustments.AddForSwapAsync(planned, row, isNew, actor.User.Id, actor.Name, ct);
             await adjustments.WaitForAcksAsync(write.Versions, ct);
             var ids = write.Rows.Select(x => x.Id).ToList();
             var failed = await db.ScheduleAdjustments.AsNoTracking()
@@ -547,6 +550,15 @@ public sealed class ScheduleSwapService(
             if (failed is not null)
             {
                 await adjustments.InvalidateBySwapAsync(row.Id, failed.ConflictCode, failed.StatusReason ?? "教室端无法应用", ct);
+                if (isNew) db.ScheduleSwapRequests.Remove(row);
+                else
+                {
+                    row.Status = SwapRequestStatus.Pending;
+                    row.DecidedAt = null;
+                    row.DecidedByUserId = null;
+                    row.DecisionNote = null;
+                }
+                await db.SaveChangesAsync(ct);
                 await PublishAsync(changes.Select(x => x.Slot.ClassId), ct);
                 throw new SwapOperationException(ApiErrorCodes.SwapSlotChanged,
                     $"教室端无法应用这次换课（{failed.StatusReason}），请刷新后重新申请", StatusCodes.Status409Conflict);
@@ -555,6 +567,7 @@ public sealed class ScheduleSwapService(
         }
         finally
         {
+            Applying.TryRemove(row.Id, out _);
             ApplyGate.Release();
         }
     }

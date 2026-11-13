@@ -1,0 +1,87 @@
+@page "{token}"
+@model ApproveModel
+@{
+    Layout = null;
+}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>RemoteCI · @Model.ActionLabel</title>
+    <style>
+        :root { color-scheme: light dark; --bg: #f8fafc; --surface: #fff; --line: #e3e8ef; --text: #101828; --muted: #74819a;
+            --accent: #4383ee; --danger: #ed3d32; --ok-bg: #eaf8ef; --ok: #21a55b; --bad-bg: #fff0ee; }
+        @@media (prefers-color-scheme: dark) {
+            :root { --bg: #0f1520; --surface: #171f2c; --line: #2a3545; --text: #f4f7fb; --muted: #9aa8bc; --ok-bg: #173426; --bad-bg: #3b2022; }
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100vh; padding: 24px 16px; background: var(--bg); color: var(--text);
+            font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+        main { max-width: 460px; margin: 0 auto; display: grid; gap: 14px; }
+        .card { padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+        h1 { margin: 0; font-size: 20px; }
+        .muted { color: var(--muted); font-size: 13px; }
+        .summary { margin: 0; font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
+        .status { padding: 12px 14px; border-radius: 12px; font-weight: 650; }
+        .status.ok { background: var(--ok-bg); color: var(--ok); }
+        .status.bad { background: var(--bad-bg); color: var(--danger); }
+        label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+        input[type=password], input[type=text] { width: 100%; min-height: 46px; padding: 10px; border: 1px solid var(--line);
+            border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; }
+        button { width: 100%; min-height: 48px; border: 0; border-radius: 11px; background: var(--accent); color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+        button.danger { background: var(--danger); }
+        form { display: grid; gap: 12px; margin: 0; }
+        .check { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; }
+        .or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+        .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+    </style>
+</head>
+<body>
+<main>
+    <div>
+        <h1>@Model.ActionLabel</h1>
+        <p class="muted">RemoteCI 一次性授权链接 · 需密码或验证码 · 只能使用一次</p>
+    </div>
+    @if (Model.Result is { } result)
+    {
+        <div class="status ok">已完成：@result</div>
+    }
+    else if (Model.Error is { } error)
+    {
+        <div class="status bad">@error</div>
+    }
+    else if (Model.State.Problem is { } problem)
+    {
+        <div class="status bad">@problem</div>
+    }
+    @if (Model.State.Token is { } token)
+    {
+        <section class="card">
+            <p class="muted">机器人请求执行以下操作，请核对后授权：</p>
+            <p class="summary">@token.Summary</p>
+        </section>
+    }
+    @if (Model.Result is null && Model.State.Problem is null && Model.State.Token is not null)
+    {
+        <form method="post">
+            <div>
+                <label for="password">账号密码</label>
+                <input id="password" type="password" name="Password" autocomplete="current-password" />
+            </div>
+            <div class="or">或</div>
+            <div>
+                <label for="code">一次性验证码（已开启二步验证时）</label>
+                <input id="code" type="text" name="Code" inputmode="numeric" autocomplete="one-time-code" />
+            </div>
+            <label class="check"><input type="checkbox" name="UseRecoveryCode" value="true" /> 我输入的是恢复码</label>
+            <button type="submit" class="@(Model.IsDestructive ? "danger" : "")">授权@(Model.ActionLabel)</button>
+            <p class="muted">填写账号密码，或二步验证的一次性验证码/恢复码，二者任选其一即可授权。新密码等敏感参数不会在此显示。</p>
+        </form>
+    }
+    <p class="muted">也可以直接在 RemoteCI 手机 App 或网页的“人员管理 / 班级管理”中完成该操作。</p>
+</main>
+</body>
+</html>

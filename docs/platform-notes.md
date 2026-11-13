@@ -6,9 +6,9 @@
 
 | 组件 | 位置/版本 | 说明 |
 | --- | --- | --- |
-| Android Studio | `E:\Android Studio`（含 JBR JDK 25） | IDE |
-| Android SDK | `C:\Users\YangTianming\AppData\Local\Android\Sdk` | 命令行工具已装 cmdline-tools |
-| JDK（Gradle 用） | `E:\Android Studio\jbr` | JetBrains Runtime 25，构建时设 `JAVA_HOME` |
+| Android Studio | `C:\Program Files\Android\Android Studio`（含 JBR JDK 25，示例路径） | IDE |
+| Android SDK | `%LOCALAPPDATA%\Android\Sdk` | 命令行工具已装 cmdline-tools |
+| JDK（Gradle 用） | `C:\Program Files\Android\Android Studio\jbr` | JetBrains Runtime 25，构建时设 `JAVA_HOME` |
 | Wear OS 模拟器 | AVD `PixelWatch2_API35` | Wear OS 5.1（API 35），450×450 圆屏，2GB RAM |
 | 模拟器硬件加速 | WHPX（Windows Hypervisor Platform） | `emulator-check accel` 确认可用 |
 
@@ -19,8 +19,8 @@
 ### 2.1 创建模拟器（如需重建）
 
 ```powershell
-$env:JAVA_HOME = 'E:\Android Studio\jbr'
-$env:ANDROID_HOME = 'C:\Users\YangTianming\AppData\Local\Android\Sdk'
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 
 # 首次需先安装系统镜像（已装，勿重复下载）
 # & "$env:ANDROID_HOME\cmdline-tools\latest\bin\sdkmanager.bat" "system-images;android-35-ext15;android-wear;x86_64"
@@ -47,7 +47,7 @@ $env:ANDROID_HOME = 'C:\Users\YangTianming\AppData\Local\Android\Sdk'
 
 ```powershell
 cd wearos
-$env:JAVA_HOME = 'E:\Android Studio\jbr'
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 .\gradlew.bat assembleDebug                       # 构建 APK
 & "$env:ANDROID_HOME\platform-tools\adb.exe" install -r app\build\outputs\apk\debug\app-debug.apk
 & "$env:ANDROID_HOME\platform-tools\adb.exe" shell am start -n com.remoteci.watch/.MainActivity
@@ -91,7 +91,7 @@ remoteci.buildDir=C:/Users/<用户名>/AppData/Local/RemoteCI/wearos-build
 ### 3.4 编译目标与 JDK
 
 - `compileSdk = 37`（本机已装 platform android-37.0）；`minSdk = 30`（Wear OS 3+）；`targetSdk = 37`。
-- Java/Kotlin 目标 17；构建用 Android Studio 自带 JBR（JDK 25）运行 Gradle 9.7。
+- Java/Kotlin 目标 17；运行 Gradle 9.7 需 JDK 17 及以上，手表端未固定守护进程 JVM 版本（CI 与本机验证均用 JDK 17，Android Studio 自带 JBR 亦可）。
 
 ### 3.5 手表端 M3 主题配色（设置 → 外观）
 
@@ -136,7 +136,9 @@ dotnet build RemoteCI.slnx
 # 服务端单元测试（覆盖配对认证 / 登录锁定 / REST / WebSocket 中转 / 自更新）
 dotnet test server/tests/RemoteCI.Server.Tests
 
-# 启动服务端（默认 0.0.0.0:8080；首次启动生成的一次性管理员密码与插件配对码写入控制台日志）
+# 启动服务端（默认 0.0.0.0:8080；不再随机生成管理员密码，首次打开 WebUI 由初始化向导创建，
+# 或用 REMOTECI_ADMIN_PASSWORD 预置；自动生成的一次性插件配对码默认不写日志、30 分钟有效、用后失效，
+# 可在 WebUI 重新生成，或用 REMOTECI_PLUGIN_PAIR_CODE 预置）
 dotnet run --project server/RemoteCI.Server --no-build
 
 # 插件打包 cipx（输出 plugin/RemoteCI.Plugin/cipx/RemoteCI.Plugin.cipx + checksums.md）
@@ -146,7 +148,7 @@ dotnet build plugin/RemoteCI.Plugin -p:CreateCipx=true
 ### 5.3 服务端 API 冒烟测试（PowerShell）
 
 ```powershell
-# 插件配对码在 WebUI“生成插件配对码”或首次启动的控制台日志中获取，只能被消费一次。
+# 插件配对码在 WebUI“生成插件配对码”获取，只能被消费一次；默认不写日志，仅当开启 Server:LogBootstrapSecrets 时才输出到首次启动日志。
 $body = @{ pairCode = '从 WebUI 获取的配对码'; role = 'plugin' } | ConvertTo-Json
 $r = Invoke-RestMethod -Uri 'http://127.0.0.1:8080/api/plugin/pair' -Method Post -ContentType 'application/json' -Body $body
 # $r.token 即插件长期凭据；手表登录走 /api/auth/login，后续请求用 Bearer accessToken
@@ -161,7 +163,7 @@ $r = Invoke-RestMethod -Uri 'http://127.0.0.1:8080/api/plugin/pair' -Method Post
 - 插件端依赖：`ClassIsland.PluginSdk` 2.1.0.1（LGPLv3，仅编译期，ExcludeAssets runtime/native；最后一个 .NET 8 SDK，对应 manifest `apiVersion: 2.1.0.0`，不再适配 ClassIsland 2.0.x）+ `Fleck`（MIT，局域网 WebSocket 服务器）。
 ## Wear OS 构建环境
 
-手表端固定使用 JDK 17。Windows 上应设置用户级 `JAVA_HOME`，并确保 `wearos/local.properties` 指向已安装的 Android SDK：
+手表端编译目标为 Java/Kotlin 17，运行 Gradle 9.7 需 JDK 17 及以上，未固定守护进程 JVM 版本（android 端则由 `android/gradle/gradle-daemon-jvm.properties` 固定为 JDK 25，本机缺失时按文件内地址自动下载）。Windows 上应设置用户级 `JAVA_HOME` 指向 JDK 17+，并确保 `wearos/local.properties` 指向已安装的 Android SDK：
 
 ```powershell
 $env:JAVA_HOME="C:\path\to\jdk-17"
@@ -187,9 +189,13 @@ cd wearos
 - 访客访问与自动进入访客页收纳在独立子页面，账号创建通过下拉列表选择服务端角色，配对码支持选择与复制。
 - 首页底栏的四个板块共享同一个页面动画容器，切换板块只替换正文，底栏不参与横向转场。
 - 手机端除“清新”外的六套固定主题与 Wear OS `WatchPalette` 使用相同色值，外观页采用 Material 3 `ListItem` 与单选控件；固定主题行只显示主题名称，动态取色单独显示壁纸取色说明。
+- 桌面小组件：当前时间状态、今日课表和 1×2 换课小组件，由最近一次有效快照驱动并按尺寸动态显示课程数量；使用标准 AppWidget/RemoteViews 兼容小米澎湃 OS。小米小部件标识默认关闭（`miuiWidget` 占位符），按小米规范审核通过后用 `-Premoteci.miuiWidget=true` 构建，此后不得再关闭（见 `android/app/build.gradle.kts`）。
+- “上课状态”持续通知：上学期间发布一条可更新通知，学生显示当前时间状态、这节课、剩余时间和下一节课（剩余时间由系统计时器倒数到本阶段结束时刻，超级岛右侧同样显示“距下课/上课”倒计时；正文第一行为本时段时间，第二行为“下一节：课程 时间”，上课时图标为日历、课间为勿扰月亮；课间超级岛显示“课间-下一节课名”，进入 ClassIsland 上课提醒设置的准备时长（室内/室外课分别生效，含科目/时间点附加设置）后切换为“即将上课-下一节课名”；上课期间“下一节”为当堂课结束后的第一节课）；放学或没有课程时自动撤销。
+- 老师账号使用“我的日程”跨班级接口计算当前课与下一节课，不会误用当前选中的班级；老师模式上课中倒计时到下课；下一节课开始前 10 分钟内显示“即将上课”并倒计时到上课（通知出现时提醒一次）；今天稍后还有课但未到这 10 分钟时首页显示“空闲”、通知收起，今天没有课了显示“放学”，不会因为下一节在明天或下周而整晚、整个周末显示“即将上课”。
+- 通知带有小米 HyperOS 焦点通知/超级岛及息屏（AOD）字段；Android 16+ 还会请求 Live Update promoted ongoing。在支持且已开启对应系统权限的设备上由系统显示；其他 Android 设备继续显示普通持续通知。小米 17 Pro、17 Pro Max、18 Pro、18 Pro Max 的原生 Smart Assistant 背屏卡片仍由 HyperOS 系统服务和设备白名单控制，正式上线还需要按小米平台要求提交场景审核和设备白名单联调。
 
 ```powershell
-$env:JAVA_HOME = 'E:\Android Studio\jbr'
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 cd android
 .\gradlew.bat :app:assembleRelease
 ```

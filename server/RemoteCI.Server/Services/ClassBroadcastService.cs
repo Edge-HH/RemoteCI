@@ -10,8 +10,9 @@ namespace RemoteCI.Server.Services;
 public sealed class ClassBroadcastService(
     IdentityCoordinator identities,
     ClassroomService classrooms,
-    ClassAccessService access,
-    PeerRegistry peers)
+    IServiceScopeFactory scopeFactory,
+    PeerRegistry peers,
+    ILogger<ClassBroadcastService> logger)
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(15);
 
@@ -54,8 +55,13 @@ public sealed class ClassBroadcastService(
         var user = sender.User!;
         try
         {
-            var classPermissions = await access.GetEffectivePermissionsAsync(
-                user.Id, user.Role, classId, ct);
+            // 并行广播时每个班级独享一个 DbContext 作用域，避免共享 scoped 上下文并发查询随机失败。
+            UserPermissions classPermissions;
+            using (var scope = scopeFactory.CreateScope())
+            {
+                var access = scope.ServiceProvider.GetRequiredService<ClassAccessService>();
+                classPermissions = await access.GetEffectivePermissionsAsync(user.Id, user.Role, classId, ct);
+            }
             if (!classPermissions.HasFlag(required))
                 return Fail(classId, "没有该班级的操作权限");
 
@@ -92,7 +98,8 @@ public sealed class ClassBroadcastService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return Fail(classId, ex.Message);
+            logger.LogWarning(ex, "广播命令 {Command} 到班级 {ClassId} 失败", request.Command, classId);
+            return Fail(classId, "服务端内部错误，请稍后重试");
         }
 
         BatchClassItemResult Fail(Guid id, string message) => new()

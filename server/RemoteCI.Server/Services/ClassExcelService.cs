@@ -611,9 +611,15 @@ public sealed class ClassExcelService(AppDbContext db, ClassroomService classroo
         CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        try
+        // 重试会重新执行整个委托：记下计数基线并在每次尝试前恢复，避免重复累加。
+        var (createdGroups, updatedGroups, createdClasses, updatedClasses) =
+            (result.CreatedGroups, result.UpdatedGroups, result.CreatedClasses, result.UpdatedClasses);
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
+            (result.CreatedGroups, result.UpdatedGroups, result.CreatedClasses, result.UpdatedClasses) =
+                (createdGroups, updatedGroups, createdClasses, updatedClasses);
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
             await ApplyNewGroupsAsync(groupPlans, parentById, now, result, ct);
             await ApplyExistingGroupsAsync(groupPlans, parentById, now, result, ct);
             await ApplyClassesAsync(classPlans, now, result, ct);
@@ -623,12 +629,7 @@ public sealed class ClassExcelService(AppDbContext db, ClassroomService classroo
             await ApplyGroupAssignmentsAsync(classPlans, ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
-        }
-        catch
-        {
-            await transaction.RollbackAsync(ct);
-            throw;
-        }
+        });
     }
 
     private async Task ApplyNewGroupsAsync(

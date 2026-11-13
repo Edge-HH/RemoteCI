@@ -15,6 +15,18 @@ public sealed record CommandAuditOrigin(
     Guid? ApiKeyId = null);
 
 /// <summary>
+/// 服务端自身高危操作的审计编号。负数保留段，不与协议 <see cref="CommandKind"/> 冲突；
+/// 这类记录没有班级，只有“查看全部操作记录”的账号可见。
+/// </summary>
+public enum ServerAuditOperation
+{
+    ApplyUpdate = -1,
+    RestoreBackup = -2,
+    DeleteBackup = -3,
+    ImportConfig = -4,
+}
+
+/// <summary>
 /// 审计来源的环境上下文。后台流程（自动化、换课执行、漂移检测）用 <see cref="Begin"/> 显式声明来源；
 /// REST 鉴权成功后把主体放进 HttpContext.Items，供同一请求内的命令识别 API Key 或设备会话。
 /// </summary>
@@ -119,6 +131,31 @@ public sealed class CommandAuditLog(
             Truncate(result.Message ?? string.Empty, MaxTextLength));
         if (!_queue.Writer.TryWrite(operation))
             logger.LogWarning("审计队列已满，丢弃命令结果 {AuditId}", auditId);
+    }
+
+    /// <summary>记录服务端自身的高危管理操作（自更新、备份恢复/删除、配置导入）。没有插件回执，直接带结果入队。</summary>
+    public void RecordServerOperation(
+        ServerAuditOperation operation, Guid? actorId, string? actorName, string summary, bool success, string? resultMessage = null)
+    {
+        var origin = ResolveOrigin();
+        var now = timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
+        var entry = new CommandAuditEntry
+        {
+            Id = Guid.NewGuid(),
+            MessageId = Guid.NewGuid().ToString("N"),
+            CreatedAtUnixMs = now,
+            CompletedAtUnixMs = now,
+            ActorUserId = actorId is { } id && id != Guid.Empty ? id : null,
+            ActorName = Truncate(string.IsNullOrWhiteSpace(actorName) ? "系统" : actorName, 100),
+            Source = origin.Source,
+            SourceDetail = origin.Detail is null ? null : Truncate(origin.Detail, 100),
+            Command = (int)operation,
+            Summary = Truncate(summary, MaxTextLength),
+            Success = success,
+            ResultMessage = resultMessage is null ? null : Truncate(resultMessage, MaxTextLength),
+        };
+        if (!_queue.Writer.TryWrite(new CommandAuditOperation.Insert(entry, origin.DeviceSessionId, origin.ApiKeyId)))
+            logger.LogWarning("审计队列已满，丢弃服务端操作记录 {Operation}", operation);
     }
 
     private CommandAuditOrigin ResolveOrigin()
@@ -253,6 +290,10 @@ public static class CommandAuditSummary
 {
     public static string Label(CommandKind kind) => kind switch
     {
+        (CommandKind)ServerAuditOperation.ApplyUpdate => "服务端自更新",
+        (CommandKind)ServerAuditOperation.RestoreBackup => "恢复备份",
+        (CommandKind)ServerAuditOperation.DeleteBackup => "删除备份",
+        (CommandKind)ServerAuditOperation.ImportConfig => "导入配置包",
         CommandKind.ChangeSchedule => "换课",
         CommandKind.SendNotification => "发送通知",
         CommandKind.ClearNotifications => "清除提醒",

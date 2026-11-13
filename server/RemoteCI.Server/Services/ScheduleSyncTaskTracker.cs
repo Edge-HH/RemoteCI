@@ -11,27 +11,13 @@ public sealed class ScheduleSyncTaskTracker
     private readonly ConcurrentDictionary<Guid, ScheduleSyncStatus> _current = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<ScheduleSyncStatus>> _waiters = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ScheduleSyncStatus> _terminal = new(StringComparer.Ordinal);
+    private readonly object _beginLock = new();
 
     public ScheduleSyncStatus? Current(Guid classId) =>
         _current.TryGetValue(classId, out var status) ? status : null;
 
     public ScheduleSyncStatus TryBegin(ScheduleSyncRequest request, Guid classId)
     {
-        if (_current.TryGetValue(classId, out var active) && active.State == ScheduleSyncTaskState.Running)
-        {
-            return new ScheduleSyncStatus
-            {
-                TaskId = request.TaskId,
-                Source = request.Source,
-                State = ScheduleSyncTaskState.Busy,
-                Message = $"已有{SourceName(active.Source)}课表任务正在执行，请稍候",
-                StartedAt = active.StartedAt,
-                FinishedAt = DateTimeOffset.UtcNow,
-                ActiveTaskId = active.TaskId,
-                ClassId = classId,
-            };
-        }
-
         var started = new ScheduleSyncStatus
         {
             TaskId = request.TaskId,
@@ -41,8 +27,27 @@ public sealed class ScheduleSyncTaskTracker
             StartedAt = DateTimeOffset.UtcNow,
             ClassId = classId,
         };
-        _current[classId] = started;
-        return started;
+        // 判定与写入按键原子：并发启动同一班级时只有一个 Running，其余得到 Busy。
+        // Busy 只是返回值，绝不写入 _current，否则会顶掉正在运行的任务、令其终态无法清理。
+        lock (_beginLock)
+        {
+            if (_current.TryGetValue(classId, out var active) && active.State == ScheduleSyncTaskState.Running)
+            {
+                return new ScheduleSyncStatus
+                {
+                    TaskId = request.TaskId,
+                    Source = request.Source,
+                    State = ScheduleSyncTaskState.Busy,
+                    Message = $"已有{SourceName(active.Source)}课表任务正在执行，请稍候",
+                    StartedAt = active.StartedAt,
+                    FinishedAt = DateTimeOffset.UtcNow,
+                    ActiveTaskId = active.TaskId,
+                    ClassId = classId,
+                };
+            }
+            _current[classId] = started;
+            return started;
+        }
     }
 
     public void Observe(ScheduleSyncStatus status)

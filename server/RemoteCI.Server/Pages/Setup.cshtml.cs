@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.AspNetCore.RateLimiting;
 using RemoteCI.Server.Data;
 using RemoteCI.Server.Services;
 using RemoteCI.Shared;
@@ -52,6 +53,7 @@ public sealed class SetupModel(
         return Page();
     }
 
+    [EnableRateLimiting("auth")]
     public async Task<IActionResult> OnPostAdminAsync(CancellationToken ct)
     {
         Step = SetupStep.SystemAdmin;

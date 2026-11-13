@@ -3,8 +3,10 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using System.Net;
+using System.Text.Json;
 using RemoteCI.Server;
 using RemoteCI.Server.Data;
 using RemoteCI.Server.Services;
@@ -26,7 +28,9 @@ builder.Services.AddDbContext<AppDbContext>((services, options) =>
     var environment = services.GetRequiredService<IHostEnvironment>();
     var path = Path.IsPathRooted(configured) ? configured : Path.Combine(environment.ContentRootPath, configured);
     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+    // SQLITE_BUSY 等瞬时并发失败自动重试；所有显式事务都必须包在 CreateExecutionStrategy 里。
     options.UseSqlite($"Data Source={path}");
+    options.ReplaceService<IExecutionStrategyFactory, SqliteRetryingExecutionStrategyFactory>();
 });
 builder.Services.AddIdentity<AppUser, IdentityRole<Guid>>(options =>
     {
@@ -64,6 +68,15 @@ builder.Services.AddRateLimiter(options =>
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0,
         }));
+    // REST 通用命令接口与 WS 单连接命令限速（20 条/10 秒）对称，按来源 IP 限流防止洪泛打爆插件。
+    options.AddPolicy("commands", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = Math.Max(1, context.RequestServices.GetRequiredService<Microsoft.Extensions.Options.IOptions<ServerOptions>>().Value.CommandRateLimitPerWindow),
+            Window = TimeSpan.FromSeconds(10),
+            QueueLimit = 0,
+        }));
 });
 builder.Services.ConfigureApplicationCookie(options =>
 {
@@ -89,6 +102,8 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AllowAnonymousToPage("/StatusCode");
     // 聊天卡片的一次性确认链接：凭令牌访问，不需要网页登录。
     options.Conventions.AllowAnonymousToPage("/Act");
+    // 管理高危操作的一次性网页授权链接：凭令牌访问，执行还需账号密码或一次性验证码。
+    options.Conventions.AllowAnonymousToPage("/Approve");
     // 电子班牌：凭私密链接匿名查看本班课表。
     options.Conventions.AllowAnonymousToPage("/Board");
 });
@@ -188,6 +203,7 @@ builder.Services.AddScoped<LessonLedgerRecorder>();
 builder.Services.AddHostedService<LessonLedgerWorker>();
 builder.Services.AddScoped<LessonStatsService>();
 builder.Services.AddScoped<ActionLinkService>();
+builder.Services.AddScoped<OperationApprovalService>();
 builder.Services.AddScoped<ClassBoardService>();
 builder.Services.AddSingleton<PeerRegistry>();
 // 班级策略：按班级保存，连接时与变更后下发；插件缓存后离线启动也生效。
@@ -207,7 +223,7 @@ builder.Services.AddHostedService<SchedulePullWorker>();
 builder.Services.AddHostedService<PeerAuthorizationRefreshWorker>();
 builder.Services.AddHostedService<AutomaticBackupWorker>();
 builder.Services.AddHostedService<ScheduleSwapSweepWorker>();
-builder.Services.AddSingleton(new UpdateService(args));
+builder.Services.AddSingleton(sp => new UpdateService(args, sp.GetRequiredService<ILogger<UpdateService>>()));
 builder.Services.AddScoped<UpdateSettings>();
 builder.Services.AddSingleton<UpdateAutomation>();
 builder.Services.AddHostedService<UpdateCheckWorker>();
@@ -248,6 +264,23 @@ if (!app.Environment.IsDevelopment())
 app.UseWhen(
     context => !context.Request.Path.StartsWithSegments("/api") && !context.Request.Path.StartsWithSegments("/ws") && !context.Request.Path.StartsWithSegments("/calendar"),
     branch => branch.UseStatusCodePagesWithReExecute("/status/{0}"));
+// 全局异常兜底：完整异常只进日志，客户端一律拿到通用错误，不泄露堆栈与内部路径。
+// 注册在状态页中间件之内：WebUI 路径留空响应，由外层状态页中间件渲染 /status/500。
+app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
+{
+    var feature = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerPathFeature>();
+    var logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("RemoteCI.Server");
+    logger.LogError(feature?.Error, "未处理异常 {Method} {Path}", context.Request.Method, feature?.Path ?? context.Request.Path.ToString());
+    if (context.Response.HasStarted) return;
+    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+    if (!context.Request.Path.StartsWithSegments("/api")) return;
+    context.Response.ContentType = "application/json; charset=utf-8";
+    await context.Response.WriteAsync(JsonSerializer.Serialize(new ApiError
+    {
+        Code = ApiErrorCodes.InternalError,
+        Message = "服务端内部错误，请稍后重试",
+    }));
+}));
 app.UseStaticFiles();
 app.Use(MobileUi.InvokeAsync);
 app.UseRouting();
@@ -373,13 +406,17 @@ app.MapPost("/api/auth/web-qr/scan", async (
 }).RequireRateLimiting("auth");
 
 app.MapPost("/api/auth/web-qr/confirm", async (
-    HttpContext ctx, WebQrLoginConfirmRequest request, IdentityCoordinator identities, WebQrLoginService qrLogin, CancellationToken ct) =>
+    HttpContext ctx, WebQrLoginConfirmRequest request, IdentityCoordinator identities, WebQrLoginService qrLogin,
+    UserManager<AppUser> users, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
     if (principal.IsApiKey) return Forbidden();
     if (MissingFields(request.Code) is { } bad) return bad;
-    return qrLogin.Decide(request.Code.Trim(), principal.User.Id, request.Approve)
+    // 记录确认时的安全戳：浏览器兑换前账号若改密/重置凭据，这次扫码授权立即作废。
+    var user = await users.FindByIdAsync(principal.User.Id.ToString());
+    if (user is null) return Unauthorized();
+    return qrLogin.Decide(request.Code.Trim(), principal.User.Id, request.Approve, user.SecurityStamp)
         ? Results.NoContent()
         : Results.Json(Error(ApiErrorCodes.NotFound, "二维码已过期，或不是由当前账号扫描"), statusCode: StatusCodes.Status404NotFound);
 }).RequireRateLimiting("auth");
@@ -800,13 +837,16 @@ app.MapPost("/api/commands", async (
         if (required == UserPermissions.None) return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, "未知命令"));
         if (!classPermissions.HasFlag(required)) return Forbidden();
     }
+    // 与 WS 路径共用同一套参数校验，REST 不能绕过语音、文件、终端等载荷检查。
+    if (CommandValidation.ValidateParameters(command) is { } invalid)
+        return Results.BadRequest(Error(invalid.Code, invalid.Message));
     // 与 WS 路径一致：署名标志由服务端全局设置决定，REST 客户端不能绕过。
     if (command.Notification is not null)
         command.Notification.ForceSenderInTitle = await identities.GetForceSenderInTitleAsync(ct);
     command.RequestedBy = principal.User.WithPermissions(classPermissions);
     var result = await peers.SendCommandAndWaitAsync(command, target, TimeSpan.FromSeconds(15), ct);
     return Results.Json(result, statusCode: CommandStatus(result));
-});
+}).RequireRateLimiting("commands");
 
 var usersApi = app.MapGroup("/api/users");
 usersApi.MapGet("/", async (HttpContext ctx, IdentityCoordinator identities, CancellationToken ct) =>
@@ -885,7 +925,7 @@ usersApi.MapPost("/batch-import", async (
     if (!HasManagement(principal, ManagementPermissions.ImportUsers)) return Forbidden();
     try
     {
-        var result = await importService.ImportAsync(request.Text, request.DefaultClassId, request.DefaultRoleId, ct);
+        var result = await importService.ImportAsync(request.Text, request.DefaultClassId, request.DefaultRoleId, Delegation(principal), ct);
         if (result.Created > 0) await authorizationSync.SyncAsync(ct);
         return Results.Ok(result);
     }
@@ -1525,7 +1565,7 @@ app.MapPost("/api/admin/updates/check", async (UpdateCheckBody body, HttpContext
 });
 // 调试用：请求体为当前平台的服务端发布包 zip，安装后服务端自动重启；不限制版本高低。
 app.MapPost("/api/admin/updates/upload", async (
-    HttpContext ctx, IdentityCoordinator identities, UpdateService updates,
+    HttpContext ctx, IdentityCoordinator identities, UpdateService updates, CommandAuditLog audit,
     Microsoft.Extensions.Options.IOptions<ServerOptions> serverOptions, IHostEnvironment environment,
     IHostApplicationLifetime lifetime, CancellationToken ct) =>
 {
@@ -1550,6 +1590,8 @@ app.MapPost("/api/admin/updates/upload", async (
             ctx.Request.Body, databasePath, environment.ContentRootPath, ct);
         var mode = await updates.BeginApplyAsync(
             prepared, UpdateService.ResolveInstallDirectory(AppContext.BaseDirectory), ct);
+        audit.RecordServerOperation(ServerAuditOperation.ApplyUpdate, principal.User.Id, principal.User.DisplayName,
+            $"手动上传更新包，版本 {version}，应用方式 {mode}", success: true);
         _ = Task.Run(async () =>
         {
             await Task.Delay(2000);
@@ -1559,7 +1601,11 @@ app.MapPost("/api/admin/updates/upload", async (
     }
     catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or IOException)
     {
-        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest, ex.Message));
+        audit.RecordServerOperation(ServerAuditOperation.ApplyUpdate, principal.User.Id, principal.User.DisplayName,
+            "手动上传更新包", success: false, resultMessage: ex.Message);
+        // IOException 消息可能含服务器路径，只回通用提示；其余异常消息是面向用户的校验说明。
+        return Results.BadRequest(Error(ApiErrorCodes.InvalidRequest,
+            ex is IOException ? "读取或写入更新包失败，请重试" : ex.Message));
     }
 });
 app.MapGet("/api/admin/backups", async (HttpContext ctx, IdentityCoordinator identities, ConfigurationArchiveService archives, CancellationToken ct) =>
@@ -1577,21 +1623,47 @@ app.MapPost("/api/admin/backups", async (HttpContext ctx, IdentityCoordinator id
     await archives.CreateLocalBackupAsync("manual", ct);
     return Results.NoContent();
 });
-app.MapDelete("/api/admin/backups/{name}", async (string name, HttpContext ctx, IdentityCoordinator identities, ConfigurationArchiveService archives, CancellationToken ct) =>
+app.MapDelete("/api/admin/backups/{name}", async (string name, HttpContext ctx, IdentityCoordinator identities, ConfigurationArchiveService archives, CommandAuditLog audit, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
     if (principal.User.Role != UserRole.Admin) return Forbidden();
-    try { archives.DeleteBackup(name); return Results.NoContent(); }
-    catch { return Results.Json(Error(ApiErrorCodes.NotFound, "备份不存在"), statusCode: 404); }
+    try
+    {
+        archives.DeleteBackup(name);
+    }
+    catch (FileNotFoundException)
+    {
+        audit.RecordServerOperation(ServerAuditOperation.DeleteBackup, principal.User.Id, principal.User.DisplayName,
+            name, success: false, resultMessage: "备份不存在");
+        return Results.Json(Error(ApiErrorCodes.NotFound, "备份不存在"), statusCode: 404);
+    }
+    catch (Exception ex)
+    {
+        audit.RecordServerOperation(ServerAuditOperation.DeleteBackup, principal.User.Id, principal.User.DisplayName,
+            name, success: false, resultMessage: ex.Message);
+        throw;
+    }
+    audit.RecordServerOperation(ServerAuditOperation.DeleteBackup, principal.User.Id, principal.User.DisplayName, name, success: true);
+    return Results.NoContent();
 });
-app.MapPost("/api/admin/backups/{name}/restore", async (string name, HttpContext ctx, IdentityCoordinator identities, ConfigurationArchiveService archives, PeerRegistry peers, IHostApplicationLifetime lifetime, IHostEnvironment environment, CancellationToken ct) =>
+app.MapPost("/api/admin/backups/{name}/restore", async (string name, HttpContext ctx, IdentityCoordinator identities, ConfigurationArchiveService archives, PeerRegistry peers, CommandAuditLog audit, IHostApplicationLifetime lifetime, IHostEnvironment environment, CancellationToken ct) =>
 {
     var principal = await AuthorizeAsync(ctx, identities, ct);
     if (principal?.User is null) return Unauthorized();
     if (principal.User.Role != UserRole.Admin) return Forbidden();
-    await archives.CreateLocalBackupAsync("preimport", ct);
-    await archives.ApplyAsync(archives.ParseLocalBackup(archives.ReadBackup(name)), ct);
+    try
+    {
+        await archives.CreateLocalBackupAsync("preimport", ct);
+        await archives.ApplyAsync(archives.ParseLocalBackup(archives.ReadBackup(name)), ct);
+    }
+    catch (Exception ex)
+    {
+        audit.RecordServerOperation(ServerAuditOperation.RestoreBackup, principal.User.Id, principal.User.DisplayName,
+            name, success: false, resultMessage: ex.Message);
+        throw;
+    }
+    audit.RecordServerOperation(ServerAuditOperation.RestoreBackup, principal.User.Id, principal.User.DisplayName, name, success: true);
     await peers.DisconnectAllAsync(ct);
     ApplicationRestartCoordinator.ScheduleRestart(lifetime, environment);
     return Results.NoContent();

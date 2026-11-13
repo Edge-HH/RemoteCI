@@ -3,6 +3,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using RemoteCI.Server.Data;
 
@@ -17,16 +18,18 @@ public sealed record WebPushTarget(Guid Id, string Endpoint, string P256dh, stri
 /// </summary>
 public sealed class WebPushSender(
     IHttpClientFactory httpClients,
-    Microsoft.Extensions.Options.IOptions<ServerOptions> options)
+    Microsoft.Extensions.Options.IOptions<ServerOptions> options,
+    IDataProtectionProvider dataProtection)
 {
     public const string HttpClientName = "webpush";
     private const int RecordSize = 4096;
     private static readonly SemaphoreSlim KeyGate = new(1, 1);
+    private readonly IDataProtector _protector = dataProtection.CreateProtector("RemoteCI.VapidPrivateKey");
     private VapidKeys? _keys;
 
     public sealed record VapidKeys(string PublicKey, string PrivateKey);
 
-    /// <summary>读取或首次生成 VAPID 密钥对；密钥存库以便随配置备份，更换后旧订阅需要重新开启通知。</summary>
+    /// <summary>读取或首次生成 VAPID 密钥对；私钥经 Data Protection 加密存库，更换后旧订阅需要重新开启通知。</summary>
     public async Task<VapidKeys> GetKeysAsync(AppDbContext db, CancellationToken ct = default)
     {
         if (_keys is { } cached) return cached;
@@ -39,15 +42,30 @@ public sealed class WebPushSender(
             {
                 var generated = GenerateKeys();
                 metadata.VapidPublicKey = generated.PublicKey;
-                metadata.VapidPrivateKey = generated.PrivateKey;
+                metadata.VapidPrivateKey = _protector.Protect(generated.PrivateKey);
+                await db.SaveChangesAsync(ct);
+                return _keys = generated;
+            }
+            var privateKey = TryUnprotect(metadata.VapidPrivateKey!);
+            if (privateKey is null)
+            {
+                // 旧库存的是明文私钥：原样读出并就地加密回写，不重新生成，保留已有浏览器订阅。
+                privateKey = metadata.VapidPrivateKey!;
+                metadata.VapidPrivateKey = _protector.Protect(privateKey);
                 await db.SaveChangesAsync(ct);
             }
-            return _keys = new VapidKeys(metadata.VapidPublicKey!, metadata.VapidPrivateKey!);
+            return _keys = new VapidKeys(metadata.VapidPublicKey!, privateKey);
         }
         finally
         {
             KeyGate.Release();
         }
+    }
+
+    private string? TryUnprotect(string value)
+    {
+        try { return _protector.Unprotect(value); }
+        catch (CryptographicException) { return null; }
     }
 
     public static VapidKeys GenerateKeys()

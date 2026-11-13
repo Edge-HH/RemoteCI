@@ -40,9 +40,11 @@ public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService ac
     {
         if (IsLibraryManager(actor)) return await ListAsync(actor, ct: ct);
         var rows = await db.StoredProfiles.AsNoTracking().Where(x => x.ClassId != null).ToListAsync(ct);
-        var allowed = new HashSet<Guid>();
-        foreach (var classId in rows.Select(x => x.ClassId!.Value).Distinct())
-            if (await CanManageClassAsync(actor, classId, ct)) allowed.Add(classId);
+        // 一次性取回可访问班级及其有效权限，避免逐班调用 CanManageClassAsync 造成 N+1 查询。
+        var allowed = (await access.GetAccessibleClassesAsync(actor.Id, actor.Role, ct))
+            .Where(x => (x.Permissions ?? UserPermissions.None).HasFlag(UserPermissions.ManageClassProfile))
+            .Select(x => x.Id)
+            .ToHashSet();
         return rows.Where(x => allowed.Contains(x.ClassId!.Value)).OrderBy(x => x.Name).Select(ToDto).ToList();
     }
 
@@ -84,10 +86,27 @@ public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService ac
             return (Name: name, Json: json);
         }).ToList();
 
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var saved = new List<StoredProfile>();
         try
         {
-            var saved = new List<StoredProfile>();
+            await db.Database.CreateExecutionStrategy().ExecuteAsync(SaveBatchAsync);
+            // 插件从未同步过课表的班级，手机/手表的课表按班级档案推算：保存后立即推送新课表。
+            await scheduleViews.PublishProfileSchedulesAsync(
+                saved.Where(x => x.ClassId is not null).Select(x => x.ClassId!.Value).ToList(), ct);
+            return saved.Select(ToDto).ToList();
+        }
+        catch
+        {
+            // 回滚数据库之外也清除失败批次的跟踪状态，避免同一作用域稍后保存时夹带旧变更。
+            db.ChangeTracker.Clear();
+            throw;
+        }
+
+        async Task SaveBatchAsync()
+        {
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            saved = new List<StoredProfile>();
             for (var index = 0; index < items.Count; index++)
             {
                 var item = items[index];
@@ -146,16 +165,6 @@ public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService ac
             await db.SaveChangesAsync(ct);
             await PruneVersionsAsync(saved.Select(x => x.Id).ToList(), ct);
             await transaction.CommitAsync(ct);
-            // 插件从未同步过课表的班级，手机/手表的课表按班级档案推算：保存后立即推送新课表。
-            await scheduleViews.PublishProfileSchedulesAsync(
-                saved.Where(x => x.ClassId is not null).Select(x => x.ClassId!.Value).ToList(), ct);
-            return saved.Select(ToDto).ToList();
-        }
-        catch
-        {
-            // 回滚数据库之外也清除失败批次的跟踪状态，避免同一作用域稍后保存时夹带旧变更。
-            db.ChangeTracker.Clear();
-            throw;
         }
     }
 
@@ -273,22 +282,27 @@ public sealed class ProfileLibraryService(AppDbContext db, ClassAccessService ac
     {
         var row = await FindAuthorizedAsync(actor, input.Id, onlyClass, ct);
         RequireRevision(row, input.Revision);
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        if (row.ClassId is null)
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
-            // 删除模板保留独立副本，同时递增副本修订号，让旧页面得到冲突提示而不是伪造来源错误。
-            var copies = await db.StoredProfiles.Where(x => x.SourceTemplateId == row.Id).ToListAsync(ct);
-            foreach (var copy in copies)
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            if (row.ClassId is null)
             {
-                copy.SourceTemplateId = null;
-                copy.Revision++;
-                copy.UpdatedAt = DateTimeOffset.UtcNow;
+                // 删除模板保留独立副本，同时递增副本修订号，让旧页面得到冲突提示而不是伪造来源错误。
+                var copies = await db.StoredProfiles.Where(x => x.SourceTemplateId == row.Id).ToListAsync(ct);
+                foreach (var copy in copies)
+                {
+                    copy.SourceTemplateId = null;
+                    copy.Revision++;
+                    copy.UpdatedAt = DateTimeOffset.UtcNow;
+                }
             }
-        }
-        db.StoredProfiles.Remove(row);
-        try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateConcurrencyException) { throw Conflict(); }
-        await transaction.CommitAsync(ct);
+            // Clear 后 row 已脱离跟踪：Remove 会按键重新附着并标记删除。
+            db.StoredProfiles.Remove(row);
+            try { await db.SaveChangesAsync(ct); }
+            catch (DbUpdateConcurrencyException) { throw Conflict(); }
+            await transaction.CommitAsync(ct);
+        });
     }
 
     private async Task<StoredProfile> FindAuthorizedAsync(AppUser actor, Guid id, Guid? onlyClass, CancellationToken ct)

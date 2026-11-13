@@ -34,6 +34,15 @@ public sealed class ConfigurationArchiveService(
 
     public async Task<ConfigurationSnapshot> CaptureAsync(CancellationToken ct = default)
     {
+        ConfigurationSnapshot snapshot = null!;
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () => snapshot = await CaptureCoreAsync(ct));
+        return snapshot;
+    }
+
+    // 只读事务：WAL 下从事务内第一条查询起获得一致快照，避免备份期间并发写入造成各表数据互相矛盾。
+    private async Task<ConfigurationSnapshot> CaptureCoreAsync(CancellationToken ct)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var roles = await db.AccountRoles.AsNoTracking().Select(x => new RoleSnapshot(x.Id, x.Name, x.Kind, x.DefaultPermissions, x.CreatedAt, x.UpdatedAt, x.DefaultManagementPermissions)).ToListAsync(ct);
         var users = await db.Users.AsNoTracking().Select(x => new UserSnapshot(
             x.Id, x.UserName!, x.NormalizedUserName!, x.DisplayName, x.PasswordHash!, x.SecurityStamp!, x.ConcurrencyStamp!,
@@ -185,6 +194,12 @@ public sealed class ConfigurationArchiveService(
     public async Task ApplyAsync(ConfigurationSnapshot snapshot, CancellationToken ct = default)
     {
         Validate(snapshot);
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(() => ApplySnapshotAsync(snapshot, ct));
+        if (snapshot.Schedule is not null && snapshot.Classrooms is null) state.SaveSchedule(Classroom.LegacyDefaultId, snapshot.Schedule);
+    }
+
+    private async Task ApplySnapshotAsync(ConfigurationSnapshot snapshot, CancellationToken ct)
+    {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         // 显式删除自引用对象，恢复前不遗留模板或班级副本；旧配置包恢复为空档案库。
         await db.WebPushJobs.ExecuteDeleteAsync(ct);
@@ -377,7 +392,6 @@ public sealed class ConfigurationArchiveService(
         db.StoredProfiles.AddRange(profiles.Where(x => x.ClassId is not null).Select(RestoreProfile));
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
-        if (snapshot.Schedule is not null && snapshot.Classrooms is null) state.SaveSchedule(Classroom.LegacyDefaultId, snapshot.Schedule);
     }
 
     public IReadOnlyList<BackupFileInfo> ListBackups() { Directory.CreateDirectory(_backupDirectory); return Directory.EnumerateFiles(_backupDirectory,"*.rcibak").Select(x=>ToInfo(new FileInfo(x))).OrderByDescending(x=>x.CreatedAt).ToList(); }

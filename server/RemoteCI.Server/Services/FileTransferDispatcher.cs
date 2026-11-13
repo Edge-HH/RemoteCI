@@ -8,7 +8,8 @@ namespace RemoteCI.Server.Services;
 /// 插件收到命令后立即回执并在后台下载，之后的进度经 file_transfer_progress 写回 <see cref="FileTransferService"/>。
 /// 不支持 file.transfer 的旧插件，在文件不超过 10 MB 且由系统管理员发起时改用内联方式。
 /// </summary>
-public sealed class FileTransferDispatcher(FileTransferService transfers, DeviceInventoryService devices, PeerRegistry peers)
+public sealed class FileTransferDispatcher(
+    FileTransferService transfers, DeviceInventoryService devices, PeerRegistry peers, ILogger<FileTransferDispatcher> logger)
 {
     public static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(15);
 
@@ -35,14 +36,30 @@ public sealed class FileTransferDispatcher(FileTransferService transfers, Device
                 Message = failure.Message,
                 UpdatedAt = DateTimeOffset.UtcNow,
             });
-        await Task.WhenAll(plan.Targets.Select(target =>
-            SendOneAsync(record, target, folder, overwrite, requestedBy(target), ct)));
+        await Task.WhenAll(plan.Targets.Select(async target =>
+        {
+            try
+            {
+                await SendOneAsync(record, target, folder, overwrite, requestedBy, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                // 单台设备失败只标记该设备，不影响其他目标的下发。
+                logger.LogWarning(ex, "向设备 {Device} 下发文件中转失败", target.DeviceName);
+                await transfers.UpdateDeliveryAsync(record, target.CredentialId, delivery =>
+                {
+                    delivery.State = FileTransferState.Failed;
+                    delivery.Message = "服务端下发失败，请稍后重试";
+                });
+            }
+        }));
         return transfers.ToView(record);
     }
 
     private async Task SendOneAsync(
         FileTransferRecord record, DeviceInventory target, FileTargetFolder folder, bool overwrite,
-        UserProfile requestedBy, CancellationToken ct)
+        Func<DeviceInventory, UserProfile> requestedBy, CancellationToken ct)
     {
         transfers.AddDelivery(record, new FileTransferDelivery
         {
@@ -52,6 +69,7 @@ public sealed class FileTransferDispatcher(FileTransferService transfers, Device
             State = FileTransferState.Pending,
             UpdatedAt = DateTimeOffset.UtcNow,
         });
+        var user = requestedBy(target);
         if (target.ConnectionId is not { } connectionId)
         {
             await Fail("设备已离线");
@@ -73,7 +91,7 @@ public sealed class FileTransferDispatcher(FileTransferService transfers, Device
                 Overwrite = overwrite,
             };
         }
-        else if (record.Size <= FileDistributionRequest.MaxFileBytes && requestedBy.Role == UserRole.Admin &&
+        else if (record.Size <= FileDistributionRequest.MaxFileBytes && user.Role == UserRole.Admin &&
                  target.Capabilities.Contains(RemoteCiCapabilities.FileDistribute, StringComparer.Ordinal))
         {
             request = new FileDistributionRequest
@@ -95,7 +113,7 @@ public sealed class FileTransferDispatcher(FileTransferService transfers, Device
             Command = CommandKind.SendFile,
             ClassId = target.ClassId,
             FileDistribution = request,
-            RequestedBy = requestedBy,
+            RequestedBy = user,
         }, connectionId, CommandTimeout, ct);
 
         await transfers.UpdateDeliveryAsync(record, target.CredentialId, delivery =>

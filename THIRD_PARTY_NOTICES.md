@@ -19,6 +19,9 @@
 | [Material Symbols Rounded](https://fonts.google.com/icons) | WebUI 导航与操作图标（按使用到的图标子集化，与安卓端 Material Rounded 图标同源） | Apache-2.0 | Copyright Google LLC；许可证原文位于 `server/RemoteCI.Server/wwwroot/vendor/material-symbols/LICENSE` |
 | [ClosedXML](https://github.com/ClosedXML/ClosedXML) | 服务端成员 Excel 导入、导出与覆盖导入 | MIT | Copyright (c) ClosedXML contributors；传递依赖包括 DocumentFormat.OpenXml（MIT）与 SixLabors.Fonts（Apache-2.0） |
 | [Markdig](https://github.com/xoofx/markdig) | WebUI 系统更新页渲染 GitHub Release 更新说明 | BSD-2-Clause | Copyright (c) Alexandre Mutel |
+| [QRCoder](https://github.com/codebude/QRCoder) | 服务端生成网页扫码登录、手机扫码登录、二步验证与电子班牌二维码 | MIT | NuGet 1.7.0；Copyright (c) QRCoder contributors |
+| [Tmds.DBus.Protocol](https://github.com/tmds/Tmds.DBus) | 插件编译期依赖：固定 ClassIsland SDK 经 Avalonia 传入的易受攻击版本 0.21.2（GHSA-xrw6-gwf8-vvr9），运行时由宿主提供、不随插件包分发 | MIT | NuGet 0.21.3；Copyright (c) Tom Deseyn |
+| [SQLitePCLRaw](https://github.com/ericsink/SQLitePCLRaw) | 服务端 SQLite 原生库捆绑（`bundle_e_sqlite3`，EF Core Sqlite 的底层提供程序）；显式引用以覆盖易受攻击的传递版本 2.1.11 | Apache-2.0 | NuGet 2.1.13（含同版本 core / provider.e_sqlite3 / lib.e_sqlite3）；Copyright (c) Eric Sink；SQLite 本身为 public domain |
 
 ## 合规约定
 

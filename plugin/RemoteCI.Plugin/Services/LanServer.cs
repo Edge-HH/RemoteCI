@@ -311,22 +311,34 @@ public sealed class LanServer : IDisposable
     {
         foreach (var client in AuthenticatedClients())
         {
-            var refreshed = _accounts.GetProfileForSession(client.User!.Id, client.SessionId);
-            if (refreshed is null)
+            // 与 Broadcast 相同的隔离原则：单个客户端刷新失败不能中断整轮授权刷新。
+            try
             {
-                Send(client.Socket, Envelope.AuthState(new AuthState
+                var refreshed = _accounts.GetProfileForSession(client.User!.Id, client.SessionId);
+                if (refreshed is null)
                 {
-                    Authenticated = false,
-                    ErrorCode = ApiErrorCodes.Unauthorized,
-                    Error = "账号或设备会话已失效",
-                }));
-                client.Socket.Close();
-                continue;
+                    Send(client.Socket, Envelope.AuthState(new AuthState
+                    {
+                        Authenticated = false,
+                        ErrorCode = ApiErrorCodes.Unauthorized,
+                        Error = "账号或设备会话已失效",
+                    }));
+                    client.Socket.Close();
+                    continue;
+                }
+                client.User = refreshed;
+                SendAuthenticatedState(client, refreshed);
+                SendCapabilities(client);
+                Send(client.Socket, Envelope.ExtensionsSync(VisibleExtensions(refreshed, Volatile.Read(ref _latestExtensions))));
             }
-            client.User = refreshed;
-            SendAuthenticatedState(client, refreshed);
-            SendCapabilities(client);
-            Send(client.Socket, Envelope.ExtensionsSync(VisibleExtensions(refreshed, Volatile.Read(ref _latestExtensions))));
+            catch (OperationCanceledException)
+            {
+                return; // 停机取消：正常退出整轮刷新，不作为单客户端失败吞掉。
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "刷新局域网客户端 {Id} 授权失败", client.Socket.ConnectionInfo.Id);
+            }
         }
     }
 

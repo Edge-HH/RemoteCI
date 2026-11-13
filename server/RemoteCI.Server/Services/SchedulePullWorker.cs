@@ -16,14 +16,22 @@ public sealed class SchedulePullWorker(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1), timeProvider);
-        try
+        while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            while (await timer.WaitForNextTickAsync(stoppingToken))
+            try
+            {
                 await CheckOnceAsync(timeProvider.GetUtcNow(), stoppingToken);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            // 主机关闭和调试停止都会取消等待；这是正常生命周期，不应作为用户未处理异常暴露给 VS。
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                // 主机关闭和调试停止都会取消等待；这是正常生命周期，不应作为用户未处理异常暴露给 VS。
+                break;
+            }
+            catch (Exception ex)
+            {
+                // 数据库读写等瞬时失败不能放倒整个宿主；记录后等待下一个 tick 重试。
+                logger.LogError(ex, "自动课表拉取任务执行失败");
+            }
         }
     }
 

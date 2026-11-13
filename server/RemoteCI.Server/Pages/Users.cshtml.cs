@@ -227,7 +227,7 @@ public sealed class UsersModel(
         if (await RequireManagementAsync(ManagementPermissions.ImportUsers) is { } denied) return denied;
         try
         {
-            var result = await importService.ImportAsync(ImportText, ImportClassId, ImportRoleId, ct);
+            var result = await importService.ImportAsync(ImportText, ImportClassId, ImportRoleId, Delegation, ct);
             await authorizationSync.SyncAsync(ct);
             TempData[result.Failures.Count == 0 ? "Message" : "Error"] = result.Failures.Count == 0
                 ? $"批量导入完成：创建 {result.Created} 个账号。"
@@ -270,7 +270,7 @@ public sealed class UsersModel(
         try
         {
             using var stream = new MemoryStream(bytes);
-            var result = await memberExcel.ImportAsync(stream, ct);
+            var result = await memberExcel.ImportAsync(stream, Delegation, ct);
             if (result.CreatedUsers > 0) await authorizationSync.SyncAsync(ct);
             StoreExcelResult(result);
         }
@@ -289,7 +289,7 @@ public sealed class UsersModel(
         try
         {
             using var stream = new MemoryStream(bytes);
-            var result = await memberExcel.OverwriteAsync(stream, ct);
+            var result = await memberExcel.OverwriteAsync(stream, Delegation, ct);
             if (!result.HasFailures) await authorizationSync.SyncAsync(ct);
             StoreExcelResult(result);
         }
