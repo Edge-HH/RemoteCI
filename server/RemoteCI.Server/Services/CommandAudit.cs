@@ -329,6 +329,8 @@ public static class CommandAuditSummary
         CommandKind.UninstallAppGuard => "卸载守护",
         CommandKind.UpdateAppGuard => "更新守护",
         CommandKind.SetClassPolicy => "班级策略",
+        CommandKind.InstallExamAware => "安装 ExamAware",
+        CommandKind.DistributeExam => "分发考试",
         _ => $"命令 {(int)kind}",
     };
 

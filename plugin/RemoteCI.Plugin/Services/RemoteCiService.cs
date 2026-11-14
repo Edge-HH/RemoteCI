@@ -28,6 +28,7 @@ public sealed class RemoteCiService : IDisposable
     private readonly ScheduleOverlayService _overlays;
     private readonly AppGuardService _appGuard;
     private readonly ClassPolicyService _classPolicy;
+    private readonly ExamConnectionPublisher _examConnection;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<RemoteCiService> _logger;
     private LanServer? _lanServer;
@@ -55,11 +56,13 @@ public sealed class RemoteCiService : IDisposable
         ScheduleOverlayService overlays,
         AppGuardService appGuard,
         ClassPolicyService classPolicy,
+        ExamConnectionPublisher examConnection,
         ILoggerFactory loggerFactory)
     {
         _overlays = overlays;
         _appGuard = appGuard;
         _classPolicy = classPolicy;
+        _examConnection = examConnection;
         _semesterApplier = semesterApplier;
         _holidayCalendar = holidayCalendar;
         _holidayApplier = holidayApplier;
@@ -97,6 +100,7 @@ public sealed class RemoteCiService : IDisposable
         _cts = new CancellationTokenSource();
         // ACL 收紧失败从此处记 Warning（静态防护类无法自行获取日志管道）。
         FileProtection.Logger = _loggerFactory.CreateLogger("RemoteCI.FileProtection");
+        _examConnection.Logger = _logger;
 
         _collector.SnapshotPushed += OnSnapshotPushed;
         _collector.SchedulePushed += OnSchedulePushed;
@@ -415,6 +419,7 @@ public sealed class RemoteCiService : IDisposable
         PublishGroups();
         PublishSoftwareInventory();
         Observe(_appGuard.FlushEventsAsync(), "应用守护事件");
+        Observe(_examConnection.RefreshTicketAsync(_cts?.Token ?? CancellationToken.None), "考试绑定票据");
     }
 
     private void OnSoftwareInventoryChanged() => PublishSoftwareInventory();

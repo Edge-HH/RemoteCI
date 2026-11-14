@@ -459,6 +459,23 @@ public sealed partial class IdentityCoordinator(
         return new PairResponse { Token = token, Role = "plugin", ExpiresAt = null };
     }
 
+    /// <summary>
+    /// 按仍可使用的班级配对码找到班级，不消费一次性配对码，也不创建插件凭据。
+    /// 统一连接码不对应具体班级，返回 null。
+    /// </summary>
+    public async Task<(Guid Id, string Name)?> FindClassByActivePairCodeAsync(string pairCode, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(pairCode)) return null;
+        var hash = Hash(pairCode.Trim());
+        var now = DateTimeOffset.UtcNow;
+        var candidates = await db.PluginPairingCodes.Where(x => x.CodeHash == hash).ToListAsync(ct);
+        var candidate = candidates.FirstOrDefault(x =>
+            x.ExpiresAt > now && x.ClassroomId is not null && !x.IsShared && (x.IsPersistent || x.UsedAt is null));
+        if (candidate?.ClassroomId is not { } classId) return null;
+        var classroom = await db.Classrooms.AsNoTracking().SingleOrDefaultAsync(x => x.Id == classId, ct);
+        return classroom is null ? null : (classroom.Id, classroom.Name);
+    }
+
     /// <summary>生成绑定班级的一次性配对码；插件使用后立即失效。</summary>
     public async Task<string> CreatePluginPairingCodeAsync(Guid classroomId, CancellationToken ct = default)
     {

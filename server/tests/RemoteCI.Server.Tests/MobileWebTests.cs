@@ -65,7 +65,7 @@ public sealed class MobileWebTests
         // 合并入口的子页面在页面内子菜单中切换，自动化编辑页也归到“自动化”。
         var devices = WebUtility.HtmlDecode(await desktop.GetStringAsync("/Devices"));
         Assert.Contains("class=\"hub-nav\" aria-label=\"管理\"", devices);
-        foreach (var label in new[] { "<span>设备状态</span>", "<span>批量控制</span>", "<span>自动化</span>", "<span>应用守护</span>", "<span>插件控制</span>", "<span>班级</span>", "<span>人员与角色</span>", "<span>档案库</span>", "<span>学期与调休</span>" })
+        foreach (var label in new[] { "<span>设备状态</span>", "<span>批量控制</span>", "<span>自动化</span>", "<span>应用守护</span>", "<span>考试</span>", "<span>插件控制</span>", "<span>班级</span>", "<span>人员与角色</span>", "<span>档案库</span>", "<span>学期与调休</span>" })
             Assert.Contains(label, devices);
         Assert.Contains("class=\"hub-nav-link active\" aria-current=\"page\" href=\"/Devices\"", devices);
         var records = WebUtility.HtmlDecode(await desktop.GetStringAsync("/AuditLog"));

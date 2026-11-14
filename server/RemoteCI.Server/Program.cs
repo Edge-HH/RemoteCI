@@ -135,6 +135,9 @@ builder.Services.AddScoped<ProfileDispatchService>();
 builder.Services.AddScoped<ClassBroadcastService>();
  builder.Services.AddScoped<DeviceInventoryService>();
 builder.Services.AddSingleton<FileTransferService>();
+builder.Services.AddSingleton<ExamRegistry>();
+builder.Services.AddSingleton<ExamReleaseService>();
+builder.Services.AddScoped<ExamDispatchService>();
 builder.Services.AddHostedService<FileTransferCleanupWorker>();
 builder.Services.AddScoped<FileTransferDispatcher>();
 builder.Services.AddSingleton<PluginMarketCatalog>();
@@ -807,6 +810,8 @@ app.MapPost("/api/commands", async (
                 "请使用 PUT /api/classes/{classId}/extension-groups/{groupId}/settings 修改扩展设置")),
             CommandKind.SetClassPolicy => Results.Json(Error(ApiErrorCodes.Forbidden,
                 "请在 WebUI 班级管理或批量控制中设置班级策略"), statusCode: StatusCodes.Status403Forbidden),
+            CommandKind.InstallExamAware or CommandKind.DistributeExam => Results.Json(Error(ApiErrorCodes.Forbidden,
+                "请在 WebUI 管理中的考试页安装 ExamAware 或分发考试"), statusCode: StatusCodes.Status403Forbidden),
             _ => Results.Json(Error(ApiErrorCodes.Forbidden,
                 "请通过档案库页面、POST /api/profiles/collect 或 POST /api/profiles/apply 收集与下发档案"),
                 statusCode: StatusCodes.Status403Forbidden),
@@ -1675,6 +1680,7 @@ app.MapHolidayEndpoints();
 app.MapProfileEndpoints();
 app.MapOperationsEndpoints();
 app.MapFileTransferEndpoints();
+app.MapExamEndpoints();
 app.MapScreenshotEndpoints();
 app.MapClassIslandSettingsEndpoints();
 app.Run();

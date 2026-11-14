@@ -51,13 +51,17 @@ public class Plugin : PluginBase
             ConfigureFileHelper.SaveConfig(settingsPath, Settings);
             FileProtection.RestrictToCurrentUser(settingsPath);
         }
+        var examConnection = new ExamConnectionPublisher(Settings);
         Settings.PropertyChanged += (_, _) =>
         {
             ConfigureFileHelper.SaveConfig(settingsPath, Settings);
             FileProtection.RestrictToCurrentUser(settingsPath);
+            examConnection.Publish();
         };
+        examConnection.Publish();
 
         services.AddSingleton(Settings);
+        services.AddSingleton(examConnection);
         services.AddSingleton(tokenStore);
         services.AddSingleton(new AccountMirror(Path.Combine(PluginConfigFolder, "Accounts.json")));
         // 调休：缓存服务端下发的日历；放假日关闭课表、调休上学日建立临时课表。
@@ -105,6 +109,7 @@ public class Plugin : PluginBase
         services.AddSingleton<TerminalCommandService>();
         services.AddSingleton<FileReceiveService>();
         services.AddSingleton<PluginPackageInstallService>();
+        services.AddSingleton<ExamClassroomService>();
         services.AddSingleton<CommandHandler>();
         services.AddSingleton<ClassIslandNotificationBridge>();
         services.AddSingleton<StateCollector>();

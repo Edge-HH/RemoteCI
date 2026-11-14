@@ -108,6 +108,7 @@ public static class PermissionCatalog
                 new("插件控制", "跨班级下发插件设置，管理扩展调用策略与插件的班级开放", Management: ManagementPermissions.ManageExtensionSettings),
                 new("登录页与访客", "登录页外观、扫码登录地址与访客自动进入", Management: ManagementPermissions.ManageLoginPage),
                 new("插件凭据与连接码", "生成配对码，吊销插件凭据，设置课表自动拉取间隔", Management: ManagementPermissions.ManagePluginAccess),
+                new("考试", "向选定班级分发考试，并批量安装 ExamAware", Management: ManagementPermissions.ManageExams),
             ]),
     ];
 

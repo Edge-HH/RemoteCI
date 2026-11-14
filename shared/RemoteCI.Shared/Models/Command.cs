@@ -111,6 +111,16 @@ public sealed class CommandMessage
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ClassIslandSettingsRequest? ClassIslandSettings { get; set; }
 
+    /// <summary>安装 ExamAware；仅 InstallExamAware 命令使用，由服务端考试页构造。</summary>
+    [JsonPropertyName("examInstall")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ExamInstallRequest? ExamInstall { get; set; }
+
+    /// <summary>分发考试档案；仅 DistributeExam 命令使用，由服务端考试页构造。</summary>
+    [JsonPropertyName("examDistribute")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ExamDistributeRequest? ExamDistribute { get; set; }
+
     /// <summary>远程终端命令执行参数；仅 ExecuteTerminalCommand 命令使用。</summary>
     [JsonPropertyName("terminalCommand")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

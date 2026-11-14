@@ -1,0 +1,132 @@
+@page
+@model ExamsModel
+@{
+    ViewData["Title"] = "考试";
+}
+<link rel="stylesheet" href="~/operations.css" asp-append-version="true" />
+<div class="page-head">
+    <div>
+        <p class="eyebrow">服务端管理</p>
+        <h1>考试</h1>
+    </div>
+</div>
+@if (!string.IsNullOrEmpty(Model.Notice))
+{
+    <p class="notice">@Model.Notice</p>
+}
+@if (!string.IsNullOrEmpty(Model.Error))
+{
+    <p class="notice warning">@Model.Error</p>
+}
+<section class="panel">
+    <h2>官方版本</h2>
+    <p class="muted">安装默认从 GitHub Release 获取最新文件：ExamAware 安装包来自 <code>ExamAware/ExamAware2</code>，考试插件来自 <code>Edge-HH/ExamAware-ClassHubConnctor</code>。服务端先把这两份文件下载好，再统一分发给所选班级。考试档案（.ea2）仍需上传。</p>
+    @if (Model.Releases?.Error is { } releaseError)
+    {
+        <p class="notice warning">@releaseError</p>
+    }
+    else if (Model.Releases is { } releases)
+    {
+        <p class="muted">最新应用：@(releases.App ?? "没有 Release")。最新插件：@(releases.Plugin ?? "没有 Release")。</p>
+    }
+    @if (Model.InstallerSource is not null || Model.PluginSource is not null)
+    {
+        <p class="muted">服务端已准备：@Model.InstallerSource @Model.PluginSource</p>
+    }
+    <div class="stack">
+        <form method="post" asp-page-handler="UploadInstaller" enctype="multipart/form-data" class="stack">
+            <label>ExamAware 安装程序 @if (Model.InstallerName is { } installer) { <small class="muted">当前：@installer</small> }
+                <input type="file" name="file" accept=".exe" required />
+            </label>
+            <button type="submit">上传安装程序（可选）</button>
+        </form>
+        <form method="post" asp-page-handler="UploadPlugin" enctype="multipart/form-data" class="stack">
+            <label>ExamAware 插件包 @if (Model.PluginName is { } plugin) { <small class="muted">当前：@plugin</small> }
+                <input type="file" name="file" accept=".ea2x,.zip" required />
+            </label>
+            <button type="submit">上传插件包（可选）</button>
+        </form>
+        <form method="post" asp-page-handler="UploadExam" enctype="multipart/form-data" class="stack">
+            <label>考试档案 @if (Model.ExamName is { } exam) { <small class="muted">当前：@exam</small> }
+                <input type="file" name="file" accept=".ea2" required />
+            </label>
+            <button type="submit">上传考试档案</button>
+        </form>
+    </div>
+</section>
+<section class="panel">
+    <h2>选择班级</h2>
+    @if (Model.Classes.Count == 0)
+    {
+        <p class="muted">还没有班级。</p>
+    }
+    else
+    {
+        <form method="post" class="stack">
+            <div class="ops-table-wrap">
+                <table class="user-account-table ops-table">
+                    <thead>
+                        <tr><th></th><th>班级</th><th>教室插件</th><th>考试端</th></tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var classroom in Model.Classes)
+                    {
+                        <tr>
+                            <td><input type="checkbox" name="ClassIds" value="@classroom.Id" /></td>
+                            <td>@classroom.Name</td>
+                            <td>@(classroom.PluginOnline ? "在线" : "离线")</td>
+                            <td>@(classroom.ExamBound ? "已绑定" : classroom.ExamSeenAt is { } seen ? $"最近 {seen.ToLocalTime():MM-dd HH:mm}" : "未绑定")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+            <label class="check"><input type="checkbox" name="InstallPlugin" value="true" checked="@Model.InstallPlugin" /> 同时安装最新的考试插件</label>
+            <input type="hidden" name="InstallPlugin" value="false" />
+            <label class="check"><input type="checkbox" name="LaunchAfter" value="true" checked="@Model.LaunchAfter" /> 安装完成后启动 ExamAware</label>
+            <input type="hidden" name="LaunchAfter" value="false" />
+            <label class="check"><input type="checkbox" name="UseUploadedPackages" value="true" checked="@Model.UseUploadedPackages" /> 改用下面手动上传的安装包和插件，不从 Release 下载</label>
+            <input type="hidden" name="UseUploadedPackages" value="false" />
+            <p class="muted">安装程序需要教室电脑的管理员权限。若弹出系统权限确认，请在那台电脑上允许。插件会装进当前用户的 ExamAware 插件目录，并读取本机 RemoteCI 连接信息完成绑定。</p>
+            <div class="ops-filter-actions">
+                <button type="submit" asp-page-handler="Install">下载最新版并安装到所选班级</button>
+                <button type="submit" asp-page-handler="Distribute" class="ghost">分发考试到所选班级</button>
+            </div>
+        </form>
+    }
+</section>
+<section class="panel">
+    <h2>最近的考试任务</h2>
+    @if (Model.Jobs.Count == 0)
+    {
+        <p class="muted">还没有分发过考试。</p>
+    }
+    else
+    {
+        <div class="ops-table-wrap">
+            <table class="user-account-table ops-table">
+                <thead><tr><th>时间</th><th>班级</th><th>档案</th><th>状态</th></tr></thead>
+                <tbody>
+                @foreach (var job in Model.Jobs)
+                {
+                    <tr>
+                        <td>@job.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm")</td>
+                        <td>@job.ClassName</td>
+                        <td>@job.FileName</td>
+                        <td>@JobState(job.State)@if (!string.IsNullOrEmpty(job.Message)) { <small class="muted"> @job.Message</small> }</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+@functions {
+    private static string JobState(string state) => state switch
+    {
+        "pending" => "等待放映",
+        "started" => "已放映",
+        "failed" => "失败",
+        _ => state,
+    };
+}

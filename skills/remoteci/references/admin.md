@@ -8,7 +8,7 @@
 - **拥有系统管理权限的账号**：按 `GET /api/me` 的 `managementPermissions` 各自开放对应功能（见下表）。
 - **本班有对应班级权限的账号**（内置班主任默认拥有）：修改本班班级名称、头像（“班级名称与头像”，134217728），手动拉取本班课表（“从教室刷新课表”，131072），修改本班已开放的扩展插件设置（8388608）。
 
-系统管理权限位（`managementPermissions`，系统管理员为 16383）：
+系统管理权限位（`managementPermissions`，系统管理员为 32767）：
 
 | 位 | 权限 | 对应接口 |
 | ---: | --- | --- |
@@ -26,6 +26,7 @@
 | 2048 | 插件凭据、配对码与课表自动拉取间隔 | `/api/plugin/pairing-code`、`/api/plugins/credentials`、`PUT /api/settings/schedule-pull` |
 | 4096 | 查看全部操作记录 | `GET /api/audit` |
 | 8192 | 查看全部课时统计 | `GET /api/lesson-stats` |
+| 16384 | 考试 | WebUI“管理 › 考试”；安装命令仍需“升级软件”，分发命令仍需“文件分发” |
 
 系统配置、服务端更新与备份，以及管理员账号本身，只有系统管理员可以操作。
 
@@ -173,6 +174,18 @@ ID,用户名,班级,角色,密码
 每个班的配对码只对应一台设备：新设备接入后，同班的旧连接会被断开。
 
 配对码填在教室电脑 ClassIsland 的“RemoteCI 设置”里，与服务器地址一起填写。
+
+## 考试
+
+需要“考试”（16384）。页面在 WebUI“管理 › 考试”。安装到教室还需要该账号的“升级软件”权限，分发考试档案还需要“文件分发”。系统管理员两者都有。
+
+1. 勾选班级后点“下载最新版并安装到所选班级”。服务端先从 `ExamAware/ExamAware2` 的最新 Release 下载 Windows 安装包（`*-setup.exe`），并从 `Edge-HH/ExamAware-ClassHubConnctor` 的最新 Release 下载考试插件（`.ea2x`），两份都下好后再统一分发给这些班级。同一版本会复用，不会每次重新下载。
+2. “同时安装最新的考试插件”默认勾选。只有在要改用手动上传的安装包或插件时，才勾选“改用已上传的文件”。
+3. 考试档案（`.ea2`）仍需上传，再点“分发考试到所选班级”。档案送到 `%LOCALAPPDATA%\RemoteCI\Exams`。
+
+ExamAware 插件（`examaware-plugin-remoteci`）启动后读取本机 `%LOCALAPPDATA%\RemoteCI\connection.json`（由 RemoteCI 插件在连上服务端后写出，含服务器地址和考试绑定票据）。它调用 `POST /api/exam/bind` 登记为本班考试端，然后轮询 `GET /api/exam/jobs`，档案到达后放映，并用 `POST /api/exam/jobs/{id}/ack` 回报。绑定不会新建插件凭据，也不会断开 ClassIsland 上的 RemoteCI。
+
+教室插件领取票据：`POST /api/exam/tickets`（插件 Bearer 令牌）。旧版插件没有 `exam.install` / `exam.distribute` 能力时，安装和分发会被拒绝并提示升级插件。
 
 ## 其他设置
 

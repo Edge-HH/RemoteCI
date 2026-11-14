@@ -52,7 +52,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 
 ### 系统管理权限
 
-`UserProfile.managementPermissions` 与 `UserListItem.effectiveManagementPermissions` 为以下位掩码；系统管理员固定拥有全部（16383）。旧版服务端不下发该字段时客户端按角色判断。
+`UserProfile.managementPermissions` 与 `UserListItem.effectiveManagementPermissions` 为以下位掩码；系统管理员固定拥有全部（32767）。旧版服务端不下发该字段时客户端按角色判断。
 
 | 值 | 权限 |
 | ---: | --- |
@@ -70,6 +70,7 @@ V3 内只能增加可选字段、新消息和新能力，未知字段与未知�
 | 2048 | `ManagePluginAccess`（插件凭据、配对码与课表自动拉取间隔） |
 | 4096 | `ViewAllAuditLogs`（全部班级的操作记录） |
 | 8192 | `ViewAllLessonStats`（全部班级的课时统计） |
+| 16384 | `ManageExams`（考试：向选定班级分发考试档案，并批量安装 ExamAware） |
 
 升级时原先拥有 `ManageUsers` 的角色与账号补齐 `ManageLoginPage` 与 `ManagePluginAccess`（这两个系统设置页原本对人员管理开放）。系统配置、服务端更新与备份，以及管理员账号本身，仍只有系统管理员可以操作。
 

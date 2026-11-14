@@ -170,9 +170,11 @@ public enum ManagementPermissions
     ViewAllAuditLogs = 1 << 12,
     // 查看全部班级的课时统计。
     ViewAllLessonStats = 1 << 13,
+    // 考试：向选定班级分发考试档案，并批量安装 ExamAware。
+    ManageExams = 1 << 14,
     All = ManageRoles | ImportUsers | ManageClasses | ManageProfileLibrary | ManageHolidays | ViewDevices |
           BatchControl | ManageAutomation | ManageAppGuard | ManageExtensionSettings | ManageLoginPage |
-          ManagePluginAccess | ViewAllAuditLogs | ViewAllLessonStats,
+          ManagePluginAccess | ViewAllAuditLogs | ViewAllLessonStats | ManageExams,
 }
 
 public static class RolePermissions
@@ -326,6 +328,10 @@ public enum CommandKind
     ReadClassIslandSettings = 37,
     /// <summary>部分更新 ClassIsland 设置（只写入载荷中给出的项，其余保持设备当前值）；仅服务端控制入口可以发起。</summary>
     SetClassIslandSettings = 38,
+    /// <summary>在教室电脑上静默安装 ExamAware，可选同时放入考试插件；仅服务端考试页可以发起。</summary>
+    InstallExamAware = 39,
+    /// <summary>把一份考试档案经文件中转送到教室电脑，供 ExamAware 插件放映；仅服务端考试页可以发起。</summary>
+    DistributeExam = 40,
 }
 
 public enum PowerActionKind
@@ -346,7 +352,8 @@ public static class CommandPermissions
         command is CommandKind.ApplyExtensionSettings or CommandKind.ApplyProfile or CommandKind.ReadProfile or
             CommandKind.CaptureScreen or CommandKind.InstallPluginPackages or CommandKind.StopAppGuard or CommandKind.UninstallAppGuard or
             CommandKind.UpdateAppGuard or CommandKind.SetClassPolicy or
-            CommandKind.ReadClassIslandSettings or CommandKind.SetClassIslandSettings;
+            CommandKind.ReadClassIslandSettings or CommandKind.SetClassIslandSettings or
+            CommandKind.InstallExamAware or CommandKind.DistributeExam;
 
     public static UserPermissions Required(CommandKind command) => command switch
     {
@@ -366,8 +373,10 @@ public static class CommandPermissions
         // 文件分发只写入固定的用户文件夹；内联文件（旧方式）另外仅限系统管理员，由通用命令通道与插件分别复核。
         CommandKind.SendFile => UserPermissions.SendFiles,
         CommandKind.CaptureScreen => UserPermissions.CaptureScreen,
-        CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory
+        CommandKind.UpgradePlugins or CommandKind.UpgradeClassIsland or CommandKind.RefreshSoftwareInventory or
+        CommandKind.InstallExamAware
             => UserPermissions.UpgradeSoftware,
+        CommandKind.DistributeExam => UserPermissions.SendFiles,
         CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled or
         CommandKind.InstallPluginPackages or CommandKind.SetPluginManagementPolicy
             => UserPermissions.ManagePlugins,
@@ -487,6 +496,10 @@ public static class RemoteCiCapabilities
     public const string HostSettingsRead = "host.settings.read";
     /// <summary>部分更新设备上的 ClassIsland 设置（只写入给出的项）。</summary>
     public const string HostSettingsWrite = "host.settings.write";
+    /// <summary>在教室电脑上安装 ExamAware，并可选同时安装考试插件。</summary>
+    public const string ExamInstall = "exam.install";
+    /// <summary>接收考试档案并放到 ExamAware 插件读取的目录。</summary>
+    public const string ExamDistribute = "exam.distribute";
 
     /// <summary>没有上报能力列表的旧 V3 端自动获得的基础能力。</summary>
     public static IReadOnlyList<string> Baseline { get; } =
@@ -511,7 +524,8 @@ public static class RemoteCiCapabilities
             ScheduleSubjectTeacher, TerminalExecute, FileDistribute, ExtensionsSettings, ProfileApply, HolidayCalendar,
             ProfileRead, ProfileTempLayer, Semester, FileTransfer, AppGuard, ScheduleChangePermanent, ScheduleAdjustments,
             ScreenCapture, AppGuardLaunch, AppGuardManage, MainWindowLayoutApply, MainWindowLayoutRead, PluginPackageInstall,
-            AppGuardUpdate, ScheduleSubjectLocation, ClassPolicy, HostSettingsRead, HostSettingsWrite];
+            AppGuardUpdate, ScheduleSubjectLocation, ClassPolicy, HostSettingsRead, HostSettingsWrite,
+            ExamInstall, ExamDistribute];
 
     /// <summary>面向管理员诊断界面的中文说明；未知标识仍保留原值并标注为未知能力。</summary>
     public static string ChineseName(string capability) => capability switch
@@ -562,6 +576,8 @@ public static class RemoteCiCapabilities
         ClassPolicy => "班级策略",
         HostSettingsRead => "读取 ClassIsland 设置",
         HostSettingsWrite => "修改 ClassIsland 设置",
+        ExamInstall => "安装 ExamAware",
+        ExamDistribute => "分发考试",
         _ => "未知能力",
     };
 
@@ -603,6 +619,8 @@ public static class RemoteCiCapabilities
         CommandKind.SetClassPolicy => ClassPolicy,
         CommandKind.ReadClassIslandSettings => HostSettingsRead,
         CommandKind.SetClassIslandSettings => HostSettingsWrite,
+        CommandKind.InstallExamAware => ExamInstall,
+        CommandKind.DistributeExam => ExamDistribute,
         _ => null,
     };
 }

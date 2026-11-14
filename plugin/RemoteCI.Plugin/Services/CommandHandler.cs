@@ -31,6 +31,7 @@ public sealed class CommandHandler
     private readonly VoiceMessagePlayer _voiceMessages;
     private readonly ScheduleOverlayService? _overlays;
     private readonly PluginPackageInstallService _pluginPackages;
+    private readonly ExamClassroomService _exams;
     private readonly AppGuardService? _appGuard;
 
     public CommandHandler(
@@ -54,7 +55,8 @@ public sealed class CommandHandler
         MainWindowLayoutService? mainWindowLayouts = null,
         PluginPackageInstallService? pluginPackages = null,
         AppGuardService? appGuard = null,
-        ClassIslandSettingsService? classIslandSettings = null)
+        ClassIslandSettingsService? classIslandSettings = null,
+        ExamClassroomService? exams = null)
     {
         _appGuard = appGuard;
         _overlays = overlays;
@@ -75,6 +77,7 @@ public sealed class CommandHandler
         _mainWindowLayouts = mainWindowLayouts ?? new MainWindowLayoutService(loggerFactory.CreateLogger<MainWindowLayoutService>());
         _pluginPackages = pluginPackages ?? new PluginPackageInstallService(
             _files, softwareInventory, pluginManagement, loggerFactory.CreateLogger<PluginPackageInstallService>());
+        _exams = exams ?? new ExamClassroomService(_files, loggerFactory.CreateLogger<ExamClassroomService>());
         _logger = loggerFactory.CreateLogger<CommandHandler>();
         _extensionRouter = new ExtensionCommandRouter(extensions, loggerFactory);
         _voiceMessages = voiceMessages ?? new VoiceMessagePlayer();
@@ -141,6 +144,8 @@ public sealed class CommandHandler
                 CommandKind.InstallPlugins or CommandKind.UninstallPlugins or CommandKind.SetPluginEnabled =>
                     await _pluginManagement.HandleAsync(command.Command, command.PluginManagement),
                 CommandKind.InstallPluginPackages => _pluginPackages.Start(command.PluginPackages),
+                CommandKind.InstallExamAware => _exams.StartInstall(command.ExamInstall),
+                CommandKind.DistributeExam => _exams.StartDistribute(command.ExamDistribute),
                 CommandKind.UpdateAppGuard => _appGuard?.UpdateNow()
                     ?? CommandResult.Failure(CommandResultCodes.InternalError, "应用守护服务未加载"),
                 CommandKind.SetPluginManagementPolicy => _pluginManagement.SetPolicy(command.PluginManagementPolicy),
